@@ -11,9 +11,24 @@ export default {
         sm: ".1875rem", /* 3px */
       },
       colors: {
+        primary: {
+          DEFAULT: "#FF9F1C", // Mango Orange
+          foreground: "#ffffff",
+          border: "#FF9F1C",
+        },
+        secondary: {
+          DEFAULT: "#2EC4B6", // Leaf Green
+          foreground: "#ffffff",
+          border: "#2EC4B6",
+        },
+        accent: {
+          DEFAULT: "#FFBF69", // Sun Yellow
+          foreground: "#000000",
+          border: "#FFBF69",
+        },
+        background: "#FDFFFC", // Off-white
+        foreground: "#011627", // Rich Black
         // Flat / base colors (regular buttons)
-        background: "hsl(var(--background) / <alpha-value>)",
-        foreground: "hsl(var(--foreground) / <alpha-value>)",
         border: "hsl(var(--border) / <alpha-value>)",
         input: "hsl(var(--input) / <alpha-value>)",
         card: {
@@ -83,7 +98,8 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["var(--font-sans)"],
+        sans: ["'Quicksand'", "sans-serif"],
+        display: ["'Fredoka'", "sans-serif"],
         serif: ["var(--font-serif)"],
         mono: ["var(--font-mono)"],
       },
