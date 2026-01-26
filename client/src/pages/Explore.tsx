@@ -2,13 +2,14 @@ import { useState } from "react";
 import { useCategories, useServices } from "@/hooks/use-mango-data";
 import { ServiceCard } from "@/components/ServiceCard";
 import { Input } from "@/components/ui/input";
-import { Search, Filter, Loader2 } from "lucide-react";
+import { Search, Filter, Loader2, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useLocation } from "wouter";
+import { Badge } from "@/components/ui/badge";
+import { motion } from "framer-motion";
+import * as Icons from "lucide-react";
 
 export default function Explore() {
   const [search, setSearch] = useState("");
-  const [location] = useLocation();
   const params = new URLSearchParams(window.location.search);
   const initialCategory = params.get("category") || undefined;
   
@@ -20,77 +21,152 @@ export default function Explore() {
     search: search 
   });
 
-  return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
-      <div className="flex flex-col md:flex-row gap-8">
-        
-        {/* SIDEBAR FILTERS */}
-        <aside className="w-full md:w-64 space-y-8 flex-shrink-0">
-          <div>
-            <h3 className="font-display font-bold text-lg mb-4 flex items-center gap-2">
-              <Filter className="h-5 w-5" /> Filters
-            </h3>
-            
-            <div className="space-y-2">
-              <h4 className="font-semibold text-sm text-muted-foreground mb-2">Categories</h4>
-              <button 
-                onClick={() => setSelectedCategory(undefined)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${!selectedCategory ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'}`}
-              >
-                All Categories
-              </button>
-              {categories?.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(String(cat.id))}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedCategory === String(cat.id) ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'}`}
-                >
-                  {cat.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        </aside>
+  const CategoryIcon = ({ name }: { name: string }) => {
+    const IconComponent = (Icons as any)[name] || Icons.HelpCircle;
+    return <IconComponent className="h-4 w-4" />;
+  };
 
-        {/* MAIN CONTENT */}
-        <div className="flex-1">
-          <div className="mb-8 space-y-4">
-            <h1 className="text-3xl font-display font-bold text-foreground">Explore Services</h1>
-            <div className="relative max-w-lg">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+  const selectedCategoryData = categories?.find(c => String(c.id) === selectedCategory);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
+      {/* Header */}
+      <div className="bg-white dark:bg-card border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-white/80 dark:bg-card/80">
+        <div className="container mx-auto px-4 py-6 max-w-7xl">
+          <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground flex items-center gap-3">
+                <Sparkles className="h-7 w-7 text-primary" />
+                Explorar Servicios
+              </h1>
+              <p className="text-muted-foreground mt-1">Encuentra el profesional perfecto para tu proyecto</p>
+            </div>
+            
+            {/* Search */}
+            <div className="relative w-full md:w-96">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
               <Input
-                placeholder="Search services (e.g., plumbing, design)..."
-                className="pl-10 h-12 rounded-xl border-border bg-white shadow-sm focus:ring-primary/20"
+                placeholder="Buscar servicios..."
+                className="pl-12 h-12 rounded-2xl border-border/50 bg-muted/50 shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-base"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              {search && (
+                <button 
+                  onClick={() => setSearch("")}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
           </div>
 
-          {isLoading ? (
-             <div className="flex items-center justify-center h-64">
-               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-             </div>
-          ) : services?.length === 0 ? (
-            <div className="text-center py-20 bg-muted/30 rounded-3xl border border-dashed border-border">
-              <h3 className="text-xl font-bold mb-2">No services found</h3>
-              <p className="text-muted-foreground">Try adjusting your filters or search terms.</p>
-              <Button 
-                variant="link" 
-                className="mt-4 text-primary"
-                onClick={() => { setSearch(""); setSelectedCategory(undefined); }}
+          {/* Category Pills */}
+          <div className="flex flex-wrap gap-2 mt-6">
+            <button 
+              onClick={() => setSelectedCategory(undefined)}
+              className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                !selectedCategory 
+                  ? 'bg-primary text-white shadow-lg shadow-primary/30' 
+                  : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Todos
+            </button>
+            {categories?.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(selectedCategory === String(cat.id) ? undefined : String(cat.id))}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                  selectedCategory === String(cat.id) 
+                    ? 'bg-primary text-white shadow-lg shadow-primary/30' 
+                    : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground'
+                }`}
               >
-                Clear all filters
-              </Button>
+                <CategoryIcon name={cat.icon} />
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
+        
+        {/* Active filters */}
+        {(selectedCategory || search) && (
+          <div className="mb-6 flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">Filtros activos:</span>
+            {selectedCategoryData && (
+              <Badge variant="secondary" className="gap-1 pr-1">
+                {selectedCategoryData.name}
+                <button onClick={() => setSelectedCategory(undefined)} className="ml-1 p-0.5 hover:bg-muted rounded-full">
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {search && (
+              <Badge variant="secondary" className="gap-1 pr-1">
+                "{search}"
+                <button onClick={() => setSearch("")} className="ml-1 p-0.5 hover:bg-muted rounded-full">
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            <Button 
+              variant="ghost" 
+              size="sm"
+              className="text-primary h-auto py-1"
+              onClick={() => { setSearch(""); setSelectedCategory(undefined); }}
+            >
+              Limpiar todo
+            </Button>
+          </div>
+        )}
+
+        {/* Results */}
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center h-64 gap-4">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            <p className="text-muted-foreground">Cargando servicios...</p>
+          </div>
+        ) : services?.length === 0 ? (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center py-20 bg-white dark:bg-card rounded-3xl border border-dashed border-border shadow-lg"
+          >
+            <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-muted flex items-center justify-center">
+              <Search className="h-10 w-10 text-muted-foreground" />
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {services?.map((service) => (
-                <ServiceCard key={service.id} service={service} />
+            <h3 className="text-2xl font-bold font-display mb-3">No se encontraron servicios</h3>
+            <p className="text-muted-foreground mb-6 max-w-md mx-auto">Intenta ajustar tus filtros o términos de búsqueda para encontrar lo que necesitas.</p>
+            <Button 
+              className="rounded-full px-8"
+              onClick={() => { setSearch(""); setSelectedCategory(undefined); }}
+            >
+              Mostrar todos los servicios
+            </Button>
+          </motion.div>
+        ) : (
+          <>
+            <p className="text-muted-foreground mb-6">{services?.length} servicios encontrados</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {services?.map((service, index) => (
+                <motion.div
+                  key={service.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                >
+                  <ServiceCard service={service} />
+                </motion.div>
               ))}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
