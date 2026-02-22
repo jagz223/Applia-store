@@ -96,6 +96,15 @@ export interface IStorage {
   syncWithMango(userId: string, mangoUserId: string): Promise<any>;
   getMangoSyncStatus(userId: string): Promise<any | undefined>;
   
+  // Reseñas y Ratings
+  getReviews(params: { targetId?: string; targetType?: string; limit?: number; offset?: number }): Promise<any[]>;
+  getReviewStats(targetId: string, targetType: string): Promise<any | undefined>;
+  createReview(review: any): Promise<any>;
+  replyToReview(reviewId: number, response: string, responderId: string, responderName: string): Promise<any>;
+  markReviewHelpful(reviewId: number): Promise<any>;
+  deleteReview(reviewId: number, userId: string): Promise<void>;
+  updateReviewStats(targetId: string, targetType: string): Promise<void>;
+  
   // Seed
   seedCategories(): Promise<void>;
 }
