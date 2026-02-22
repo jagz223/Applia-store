@@ -14,6 +14,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initializeSocket } from "./socket";
+import { initializeFirebase } from "./firebase-admin";
 
 const app = express();
 const httpServer = createServer(app);
@@ -74,6 +75,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize Firebase (if credentials are configured)
+  initializeFirebase();
+  
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
