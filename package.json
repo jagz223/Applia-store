@@ -13,6 +13,7 @@
     "prod": "npm run build && npm run start"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^8.3.0",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@paypal/checkout-server-sdk": "^1.0.3",
@@ -58,6 +59,7 @@
     "embla-carousel-react": "^8.6.0",
     "express": "^5.0.1",
     "express-session": "^1.19.0",
+    "firebase-admin": "^13.6.1",
     "framer-motion": "^11.18.2",
     "input-otp": "^1.4.2",
     "jsonwebtoken": "^9.0.3",
@@ -101,7 +103,7 @@
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.2",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "20.19.27",
+    "@types/node": "^20.19.27",
     "@types/passport": "^1.0.17",
     "@types/passport-local": "^1.0.38",
     "@types/pdfkit": "^0.17.5",
