@@ -55,7 +55,7 @@ function verifyToken(token: string): UserPayload | null {
 }
 
 // Middleware para verificar JWT
-function authenticateJWT(req: any, res: any, next: any) {
+export function authenticateJWT(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith("Bearer ")) {

@@ -6,6 +6,8 @@ import { z } from "zod";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerGenFebRoutes } from "./routes-genfeb";
 import { registerAuthRoutes as registerJwtAuthRoutes } from "./routes-auth";
+import { registerInvoiceRoutes } from "./routes-invoices";
+import { registerPayPalRoutes } from "./routes-paypal";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -23,6 +25,12 @@ export async function registerRoutes(
   
   // Registrar rutas de autenticación JWT
   await registerJwtAuthRoutes(httpServer, app);
+  
+  // Registrar rutas de facturas
+  await registerInvoiceRoutes(httpServer, app);
+  
+  // Registrar rutas de PayPal
+  await registerPayPalRoutes(httpServer, app);
 
   /** Middleware ligero para verificar sesión OIDC en rutas protegidas */
   const requireAuth = (req: any, res: any, next: any) => {

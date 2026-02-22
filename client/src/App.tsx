@@ -21,6 +21,7 @@ import Chat from "@/pages/Chat";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Admin from "@/pages/Admin";
+import ProfessionalDashboard from "@/pages/ProfessionalDashboard";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -40,6 +41,7 @@ function Router() {
       <Route path="/payments" component={Payments} />
       <Route path="/chat" component={Chat} />
       <Route path="/admin" component={Admin} />
+      <Route path="/professional-dashboard" component={ProfessionalDashboard} />
       <Route component={NotFound} />
     </Switch>
   );
