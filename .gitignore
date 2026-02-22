@@ -4,3 +4,6 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+# Firebase credentials (keep local only)
+firebase-creds.json
+*.log
