@@ -111,6 +111,17 @@ export function Navigation() {
               <span>Configuración</span>
             </Link>
           </DropdownMenuItem>
+          {user?.role === "admin" && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem>
+                <Link href="/admin" className="flex items-center gap-2 w-full">
+                  <Shield className="h-4 w-4" />
+                  <span>Admin Panel</span>
+                </Link>
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </>

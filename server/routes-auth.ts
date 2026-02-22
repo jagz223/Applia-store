@@ -18,7 +18,7 @@ const registerSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
   phone: z.string().optional(),
-  role: z.enum(["client", "professional"]).default("client"),
+  role: z.enum(["client", "professional", "admin"]).default("client"),
 });
 
 // Schema para login
@@ -303,6 +303,58 @@ export async function registerAuthRoutes(
   app.post("/api/auth/logout", authenticateJWT, async (req, res) => {
     // En una implementación robusta, blacklistearíamos el token
     res.json({ message: "Sesión cerrada correctamente" });
+  });
+  
+  // POST /api/auth/seed-admin - Crear usuario administrador (solo para desarrollo)
+  app.post("/api/auth/seed-admin", async (req, res) => {
+    try {
+      // Verificar secret key para protección
+      const secretKey = req.headers["x-admin-key"];
+      if (secretKey !== "genfeb-admin-secret-2024" && process.env.NODE_ENV === "production") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      // Verificar si ya existe
+      const existing = await genFebStorage.getUserByEmail("admin@genfeb.com");
+      if (existing) {
+        return res.json({ message: "Admin user already exists", user: { email: existing.email, role: existing.role } });
+      }
+      
+      // Crear admin
+      const hashedPassword = await bcrypt.hash("admin123456", 10);
+      const admin = await genFebStorage.createUser({
+        email: "admin@genfeb.com",
+        password: hashedPassword,
+        name: "Administrador",
+        lastName: "GenFeb",
+        phone: "+593999999999",
+        role: "admin",
+      });
+      
+      const token = generateToken({
+        id: admin.id,
+        email: admin.email,
+        name: admin.name,
+        lastName: admin.lastName,
+        role: admin.role,
+        phone: admin.phone,
+      });
+      
+      res.status(201).json({
+        message: "Admin user created successfully",
+        token,
+        user: {
+          id: admin.id,
+          email: admin.email,
+          name: admin.name,
+          lastName: admin.lastName,
+          role: admin.role,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating admin:", error);
+      res.status(500).json({ message: "Error creating admin user" });
+    }
   });
   
   console.log("✅ JWT Authentication routes registered");
