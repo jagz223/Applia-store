@@ -7,24 +7,32 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 
 // Pages
-import Home from "@/pages/Home";
+import HomePage from "@/pages/Home";
 import Explore from "@/pages/Explore";
 import ServiceDetails from "@/pages/ServiceDetails";
 import Dashboard from "@/pages/Dashboard";
 import BecomePro from "@/pages/BecomePro";
 import CreateService from "@/pages/CreateService";
+import Booking from "@/pages/Booking";
+import Vault from "@/pages/Vault";
+import Payments from "@/pages/Payments";
+import Chat from "@/pages/Chat";
 import NotFound from "@/pages/not-found";
 
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Home} />
+      <Route path="/" component={HomePage} />
       <Route path="/explore" component={Explore} />
-      <Route path="/categories" component={Explore} /> {/* Alias for now */}
+      <Route path="/categories" component={Explore} />
       <Route path="/service/:id" component={ServiceDetails} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/become-pro" component={BecomePro} />
       <Route path="/create-service" component={CreateService} />
+      <Route path="/booking" component={Booking} />
+      <Route path="/vault" component={Vault} />
+      <Route path="/payments" component={Payments} />
+      <Route path="/chat" component={Chat} />
       <Route component={NotFound} />
     </Switch>
   );

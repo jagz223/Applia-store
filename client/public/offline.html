@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sin Conexión - GenFeb S.A.S.</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0E1013 0%, #1A1D23 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #F5F6F7;
+    }
+    .container {
+      text-align: center;
+      padding: 2rem;
+      max-width: 400px;
+    }
+    .icon {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 2rem;
+      background: linear-gradient(135deg, #1A8ED1 0%, #0B3B59 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 40px rgba(26, 142, 209, 0.3);
+    }
+    .icon svg {
+      width: 60px;
+      height: 60px;
+      stroke: #F5F6F7;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      font-family: 'Orbitron', sans-serif;
+    }
+    p {
+      color: #767884;
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.875rem 2rem;
+      background: #1A8ED1;
+      color: white;
+      border: none;
+      border-radius: 9999px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-decoration: none;
+    }
+    .button:hover {
+      background: #1572A9;
+      transform: scale(1.05);
+    }
+    .features {
+      margin-top: 2rem;
+      padding-top: 2rem;
+      border-top: 1px solid #282A2F;
+    }
+    .features h2 {
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: #767884;
+    }
+    .features ul {
+      list-style: none;
+      text-align: left;
+    }
+    .features li {
+      padding: 0.5rem 0;
+      color: #AEB0B6;
+      font-size: 0.875rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .features li::before {
+      content: '✓';
+      color: #1CAF73;
+    }
+    .logo {
+      margin-bottom: 2rem;
+    }
+    .logo img {
+      height: 40px;
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <img src="/logo.png" alt="GenFeb Logo" onerror="this.style.display='none'">
+    </div>
+    <div class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+      </svg>
+    </div>
+    <h1>Sin Conexión</h1>
+    <p>No tienes conexión a internet en este momento. Algunos funciones pueden estar limitadas, pero puedes:</p>
+    <a href="/" class="button">
+      Reintentar Conexión
+    </a>
+    <div class="features">
+      <h2>Mientras tanto, puedes:</h2>
+      <ul>
+        <li>Ver tu agenda offline</li>
+        <li>Revisar reservas guardadas</li>
+        <li>Acceder a documentos descargados</li>
+        <li>Escribir mensajes (se enviarán después)</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

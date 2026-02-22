@@ -10,11 +10,11 @@ export function Footer() {
           {/* Brand */}
           <div className="space-y-4">
             <Link href="/" className="flex items-center gap-2">
-              <img src="/logo.png" alt="MANGO" className="h-8 w-auto" />
-              <span className="text-xl font-bold font-display text-primary">MANGO</span>
+              <img src="/logo GenFeb.jpg" alt="GENFEB" className="h-8 w-auto" />
+              <span className="text-xl font-bold font-display text-primary">GENFEB</span>
             </Link>
             <p className="text-muted-foreground text-sm leading-relaxed max-w-xs">
-              Connecting you with the best professionals and technical services in town. Simple, fast, and reliable.
+              Conectándote con los mejores profesionales y servicios técnicos de la ciudad. Simple, rápido y confiable.
             </p>
             <div className="flex gap-4">
               <a href="#" className="text-muted-foreground hover:text-primary transition-colors"><Facebook className="h-5 w-5" /></a>

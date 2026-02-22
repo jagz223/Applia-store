@@ -1,291 +1,322 @@
-@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Quicksand:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Orbitron:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  /* Mango Theme Palette */
-  --primary: 35 100% 55%;
-  --primary-foreground: 0 0% 100%;
-  
-  --secondary: 174 63% 47%;
-  --secondary-foreground: 0 0% 100%;
-  
-  --accent: 34 100% 71%;
-  --accent-foreground: 30 40% 20%;
-  
-  --background: 140 14% 99%;
-  --foreground: 220 25% 15%;
-  
-  --muted: 210 20% 96%;
-  --muted-foreground: 220 10% 45%;
-  
-  --card: 0 0% 100%;
-  --card-foreground: 220 25% 15%;
-  --card-border: 220 15% 92%;
-  
-  --popover: 0 0% 100%;
-  --popover-foreground: 220 25% 15%;
-  --popover-border: 220 15% 92%;
-  
-  --border: 220 15% 90%;
-  --input: 220 15% 90%;
-  --ring: 35 100% 55%;
+@layer base {
+  :root {
+    /* Mango Brand Palette - Light Mode */
+    /* Primary: Naranja mango intenso */
+    --primary: 35 100% 55%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 35 100% 65%;
+    --primary-dark: 35 100% 45%;
+    
+    /* Secondary: Verde aqua/leaf */
+    --secondary: 174 63% 47%;
+    --secondary-foreground: 0 0% 100%;
+    --secondary-light: 174 63% 57%;
+    --secondary-dark: 174 63% 37%;
+    
+    /* Accent: Amarillo-naranja suave */
+    --accent: 34 100% 71%;
+    --accent-foreground: 30 40% 20%;
+    --accent-light: 34 100% 81%;
+    --accent-dark: 34 100% 61%;
+    
+    /* Background: Casi blanco cálido */
+    --background: 140 14% 99%;
+    /* Foreground: Azul grisáceo muy oscuro */
+    --foreground: 220 25% 15%;
+    
+    /* Muted */
+    --muted: 140 10% 94%;
+    --muted-foreground: 220 10% 45%;
+    
+    /* Card */
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 15%;
+    --card-border: 140 10% 90%;
+    
+    /* Popover */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 15%;
+    --popover-border: 140 10% 90%;
+    
+    /* Border & Input */
+    --border: 140 10% 88%;
+    --input: 140 10% 88%;
+    --ring: 35 100% 55%;
+    
+    /* Sidebar */
+    --sidebar: 140 14% 96%;
+    --sidebar-foreground: 220 25% 15%;
+    --sidebar-border: 140 10% 88%;
+    --sidebar-primary: 35 100% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 35 100% 92%;
+    --sidebar-accent-foreground: 35 80% 25%;
+    --sidebar-ring: 35 100% 55%;
+    
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* Success */
+    --success: 174 63% 47%;
+    --success-foreground: 0 0% 100%;
+    
+    /* Warning */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+    
+    --radius: 0.5rem;
+    
+    /* Charts */
+    --chart-1: 35 100% 55%;
+    --chart-2: 174 63% 47%;
+    --chart-3: 34 100% 71%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 84% 60%;
+  }
 
-  --sidebar: 140 14% 97%;
-  --sidebar-foreground: 220 25% 15%;
-  --sidebar-border: 220 15% 90%;
-  --sidebar-primary: 35 100% 55%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 35 100% 90%;
-  --sidebar-accent-foreground: 35 80% 25%;
-  --sidebar-ring: 35 100% 55%;
-
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 100%;
-  
-  --chart-1: 35 100% 55%;
-  --chart-2: 174 63% 47%;
-  --chart-3: 34 100% 71%;
-  --chart-4: 220 70% 50%;
-  --chart-5: 280 65% 60%;
-  
-  --radius: 1rem;
-  
-  --font-display: 'Fredoka', sans-serif;
-  --font-body: 'Quicksand', sans-serif;
-  --font-sans: 'Quicksand', sans-serif;
-
-  --button-outline: rgba(0,0,0, .10);
-  --badge-outline: rgba(0,0,0, .05);
-  --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(0,0,0, .03);
-  --elevate-2: rgba(0,0,0, .08);
-}
-
-.dark {
-  --primary: 35 100% 55%;
-  --primary-foreground: 0 0% 100%;
-  
-  --secondary: 174 63% 50%;
-  --secondary-foreground: 0 0% 100%;
-  
-  --accent: 34 100% 65%;
-  --accent-foreground: 30 80% 10%;
-  
-  --background: 220 20% 10%;
-  --foreground: 220 10% 95%;
-  
-  --muted: 220 15% 18%;
-  --muted-foreground: 220 10% 60%;
-  
-  --card: 220 15% 14%;
-  --card-foreground: 220 10% 95%;
-  --card-border: 220 15% 22%;
-  
-  --popover: 220 15% 12%;
-  --popover-foreground: 220 10% 95%;
-  --popover-border: 220 15% 22%;
-  
-  --border: 220 15% 25%;
-  --input: 220 15% 25%;
-  --ring: 35 100% 55%;
-
-  --sidebar: 220 20% 12%;
-  --sidebar-foreground: 220 10% 95%;
-  --sidebar-border: 220 15% 22%;
-  --sidebar-primary: 35 100% 55%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 35 100% 20%;
-  --sidebar-accent-foreground: 35 100% 80%;
-  --sidebar-ring: 35 100% 55%;
-
-  --destructive: 0 70% 50%;
-  --destructive-foreground: 0 0% 100%;
-  
-  --chart-1: 35 100% 55%;
-  --chart-2: 174 63% 50%;
-  --chart-3: 34 100% 65%;
-  --chart-4: 220 70% 60%;
-  --chart-5: 280 65% 65%;
-
-  --button-outline: rgba(255,255,255, .10);
-  --badge-outline: rgba(255,255,255, .05);
-  --opaque-button-border-intensity: 9;
-  --elevate-1: rgba(255,255,255, .04);
-  --elevate-2: rgba(255,255,255, .09);
+  .dark {
+    /* Mango Brand Palette - Dark Mode */
+    /* Primary: Mantiene el mismo naranja mango */
+    --primary: 35 100% 55%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 35 100% 65%;
+    --primary-dark: 35 100% 45%;
+    
+    /* Secondary: Verde ajustado para modo oscuro */
+    --secondary: 174 55% 40%;
+    --secondary-foreground: 0 0% 100%;
+    --secondary-light: 174 55% 50%;
+    --secondary-dark: 174 55% 30%;
+    
+    /* Accent: Mantiene los mismos tonos */
+    --accent: 34 80% 60%;
+    --accent-foreground: 0 0% 0%;
+    --accent-light: 34 80% 70%;
+    --accent-dark: 34 80% 50%;
+    
+    /* Background: Azul-gris muy oscuro */
+    --background: 220 20% 10%;
+    /* Foreground: Claro */
+    --foreground: 220 10% 95%;
+    
+    /* Muted */
+    --muted: 220 15% 18%;
+    --muted-foreground: 220 8% 60%;
+    
+    /* Card */
+    --card: 220 18% 14%;
+    --card-foreground: 220 10% 95%;
+    --card-border: 220 15% 22%;
+    
+    /* Popover */
+    --popover: 220 18% 14%;
+    --popover-foreground: 220 10% 95%;
+    --popover-border: 220 15% 22%;
+    
+    /* Border & Input */
+    --border: 220 15% 22%;
+    --input: 220 15% 22%;
+    --ring: 35 100% 55%;
+    
+    /* Sidebar */
+    --sidebar: 220 20% 8%;
+    --sidebar-foreground: 220 10% 95%;
+    --sidebar-border: 220 15% 18%;
+    --sidebar-primary: 35 100% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 15% 15%;
+    --sidebar-accent-foreground: 220 10% 95%;
+    --sidebar-ring: 35 100% 55%;
+    
+    /* Destructive */
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* Success */
+    --success: 174 55% 40%;
+    --success-foreground: 0 0% 100%;
+    
+    /* Warning */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+    
+    /* Charts */
+    --chart-1: 35 100% 55%;
+    --chart-2: 174 55% 40%;
+    --chart-3: 34 80% 60%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 62% 50%;
+  }
 }
 
 @layer base {
   * {
     @apply border-border;
   }
-
   body {
-    @apply bg-background text-foreground antialiased selection:bg-primary/20 selection:text-foreground;
-    font-family: var(--font-body);
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
   }
   
-  h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-display);
-    @apply font-semibold tracking-tight;
-  }
-}
-
-@layer utilities {
-  .text-shadow {
-    text-shadow: 2px 2px 0px rgba(0,0,0,0.1);
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
   }
   
-  .glass-card {
-    @apply bg-white/80 dark:bg-card/80 backdrop-blur-xl border border-white/50 dark:border-border/50 shadow-xl shadow-black/5;
-  }
-
-  .mango-gradient {
-    background: linear-gradient(135deg, hsl(35 100% 55%), hsl(34 100% 71%));
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
   }
   
-  .leaf-gradient {
-    background: linear-gradient(135deg, hsl(174 63% 47%), hsl(174 70% 35%));
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--secondary) / 0.5);
+    border-radius: 4px;
   }
-
-  .gradient-text {
-    @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(135deg, hsl(35 100% 55%), hsl(174 63% 47%));
-  }
-
-  .card-hover {
-    @apply transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1 hover:border-primary/30;
-  }
-
-  .btn-glow {
-    box-shadow: 0 0 30px -5px hsl(35 100% 55% / 0.4);
-  }
-
-  .pattern-dots {
-    background-image: radial-gradient(circle, hsl(var(--primary) / 0.1) 1px, transparent 1px);
-    background-size: 20px 20px;
-  }
-
-  .pattern-grid {
-    background-image: 
-      linear-gradient(to right, hsl(var(--border) / 0.3) 1px, transparent 1px),
-      linear-gradient(to bottom, hsl(var(--border) / 0.3) 1px, transparent 1px);
-    background-size: 40px 40px;
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--secondary));
   }
 }
 
 @layer components {
-  .hover-elevate:not(.no-default-hover-elevate),
-  .active-elevate:not(.no-default-active-elevate),
-  .hover-elevate-2:not(.no-default-hover-elevate),
-  .active-elevate-2:not(.no-default-active-elevate) {
+  /* Card with brand gradient */
+  .card-mango {
+    @apply bg-card border border-border rounded-lg p-6 shadow-lg;
+    background: linear-gradient(145deg, hsl(var(--card)), hsl(var(--card)) / 0.9);
+  }
+  
+  .card-mango:hover {
+    @apply border-primary/50;
+    box-shadow: 0 4px 30px rgba(255, 159, 28, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  
+  /* Glassmorphism effect */
+  .glass-mango {
+    @apply bg-card/80 backdrop-blur-xl border border-white/10;
+  }
+  
+  /* Glow effects with mango colors */
+  .glow-primary {
+    box-shadow: 0 0 20px rgba(255, 159, 28, 0.4), 0 0 40px rgba(255, 159, 28, 0.2);
+  }
+  
+  .glow-secondary {
+    box-shadow: 0 0 20px rgba(46, 196, 182, 0.4), 0 0 40px rgba(46, 196, 182, 0.2);
+  }
+  
+  .glow-accent {
+    box-shadow: 0 0 20px rgba(255, 191, 105, 0.4), 0 0 40px rgba(255, 191, 105, 0.2);
+  }
+  
+  /* Grid background pattern */
+  .grid-pattern {
+    background-image: 
+      linear-gradient(rgba(255, 159, 28, 0.1) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 159, 28, 0.1) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  
+  /* Button shine effect */
+  .btn-shine {
     position: relative;
-    z-index: 0;
+    overflow: hidden;
   }
-
-  .hover-elevate:not(.no-default-hover-elevate)::after,
-  .active-elevate:not(.no-default-active-elevate)::after,
-  .hover-elevate-2:not(.no-default-hover-elevate)::after,
-  .active-elevate-2:not(.no-default-active-elevate)::after {
-    content: "";
-    pointer-events: none;
+  
+  .btn-shine::after {
+    content: '';
     position: absolute;
-    inset: 0px;
-    border-radius: inherit;
-    z-index: 999;
+    top: -50%;
+    left: -100%;
+    width: 50%;
+    height: 200%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.2),
+      transparent
+    );
+    transform: skewX(-25deg);
+    transition: left 0.5s;
   }
-
-  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
-  .active-elevate:active:not(.no-default-active-elevate)::after {
-    background-color: var(--elevate-1);
+  
+  .btn-shine:hover::after {
+    left: 150%;
+    transition: left 0.7s;
   }
-
-  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
-  .active-elevate-2:active:not(.no-default-active-elevate)::after {
-    background-color: var(--elevate-2);
+  
+  /* Input styles */
+  .input-mango {
+    @apply bg-input border-border text-foreground placeholder:text-muted-foreground;
+    @apply focus:ring-2 focus:ring-primary/50 focus:border-primary;
+    @apply transition-all duration-200;
+  }
+  
+  /* Status badges */
+  .badge-success {
+    @apply bg-secondary/20 text-secondary border-secondary/30;
+  }
+  
+  .badge-warning {
+    @apply bg-amber-500/20 text-amber-500 border-amber-500/30;
+  }
+  
+  .badge-danger {
+    @apply bg-red-500/20 text-red-500 border-red-500/30;
+  }
+  
+  .badge-info {
+    @apply bg-primary/20 text-primary border-primary/30;
   }
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  @apply bg-muted/50;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-primary/30 rounded-full hover:bg-primary/50 transition-colors;
-}
-
-/* Smooth page transitions */
-.page-enter {
-  opacity: 0;
-  transform: translateY(10px);
-}
-.page-enter-active {
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 300ms, transform 300ms;
-}
-
-/* Animated gradient background */
-.animated-gradient {
-  background: linear-gradient(-45deg, hsl(35 100% 55%), hsl(34 100% 71%), hsl(174 63% 47%), hsl(35 100% 55%));
-  background-size: 400% 400%;
-  animation: gradient 15s ease infinite;
-}
-
-@keyframes gradient {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-/* Floating animation */
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
-}
-
-.animate-float {
-  animation: float 3s ease-in-out infinite;
-}
-
-/* Pulse glow effect */
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px 0 hsl(35 100% 55% / 0.3); }
-  50% { box-shadow: 0 0 40px 10px hsl(35 100% 55% / 0.5); }
-}
-
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-/* Shine effect on buttons */
-.btn-shine {
-  position: relative;
-  overflow: hidden;
-}
-
-.btn-shine::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    120deg,
-    transparent,
-    rgba(255, 255, 255, 0.3),
-    transparent
-  );
-  transition: 0.5s;
-}
-
-.btn-shine:hover::before {
-  left: 100%;
+@layer utilities {
+  .text-gradient-primary {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(var(--primary-light)), hsl(var(--primary)));
+  }
+  
+  .text-gradient-secondary {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(var(--secondary-light)), hsl(var(--secondary)));
+  }
+  
+  .text-gradient-accent {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(var(--accent-light)), hsl(var(--accent)));
+  }
+  
+  .text-gradient-brand {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+  }
+  
+  .bg-grid {
+    background-image: 
+      linear-gradient(rgba(255, 159, 28, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 159, 28, 0.05) 1px, transparent 1px);
+    background-size: 30px 30px;
+  }
+  
+  .animate-shimmer {
+    animation: shimmer 2s linear infinite;
+    background: linear-gradient(
+      90deg,
+      hsl(var(--card)) 0%,
+      hsl(var(--muted)) 50%,
+      hsl(var(--card)) 100%
+    );
+    background-size: 200% 100%;
+  }
+  
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 }

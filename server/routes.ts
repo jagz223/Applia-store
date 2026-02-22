@@ -4,16 +4,23 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { registerGenFebRoutes } from "./routes-genfeb";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Auth setup
+  /**
+   * Registro de middleware y rutas de autenticación.
+   * Si REPL_ID no está definido, las rutas de login/callback responden 501.
+   */
   await setupAuth(app);
   registerAuthRoutes(app);
+  
+  // Registrar rutas de GenFeb S.A.S.
+  await registerGenFebRoutes(httpServer, app);
 
-  // Helper to ensure auth
+  /** Middleware ligero para verificar sesión OIDC en rutas protegidas */
   const requireAuth = (req: any, res: any, next: any) => {
     if (req.isAuthenticated()) {
       return next();
@@ -21,13 +28,19 @@ export async function registerRoutes(
     res.status(401).json({ message: "Unauthorized" });
   };
 
-  // Categories
+  /** Categorías: listado público */
   app.get(api.categories.list.path, async (req, res) => {
     const categories = await storage.getCategories();
     res.json(categories);
   });
 
-  // Providers
+  /**
+   * Proveedores:
+   * - GET /api/providers?profession=... → filtro opcional por profesión
+   * - GET /api/providers/:id → detalle por id
+   * - POST /api/providers → creación (requiere sesión)
+   * - GET /api/me/provider → perfil de proveedor del usuario autenticado
+   */
   app.get(api.providers.list.path, async (req, res) => {
     const profession = req.query.profession as string | undefined;
     const providers = await storage.getAllProviders(profession);
@@ -45,7 +58,7 @@ export async function registerRoutes(
       const input = api.providers.create.input.parse(req.body);
       const userId = (req.user as any).claims.sub;
       
-      // Check if already provider
+      /** Evita duplicar perfil de proveedor por usuario */
       const existing = await storage.getProviderByUserId(userId);
       if (existing) {
         return res.status(400).json({ message: "You are already a provider" });
@@ -70,7 +83,12 @@ export async function registerRoutes(
     res.json(provider || null);
   });
 
-  // Services
+  /**
+   * Servicios:
+   * - GET /api/services?categoryId&search → listado con filtros
+   * - GET /api/services/:id → detalle con proveedor y categoría
+   * - POST /api/services → creación (requiere ser provider)
+   */
   app.get(api.services.list.path, async (req, res) => {
     const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
     const search = req.query.search as string | undefined;
@@ -104,7 +122,12 @@ export async function registerRoutes(
     }
   });
 
-  // Bookings
+  /**
+   * Reservas:
+   * - GET /api/bookings?asProvider=true → vista de reservas como proveedor o como usuario
+   * - POST /api/bookings → crea reserva para un servicio
+   * - PATCH /api/bookings/:id/status → actualiza estado (provider)
+   */
   app.get(api.bookings.list.path, requireAuth, async (req, res) => {
     const userId = (req.user as any).claims.sub;
     
@@ -115,8 +138,7 @@ export async function registerRoutes(
     // Providers check a different endpoint or filter?
     // Let's stick to user bookings here.
     
-    // Actually, for dashboard, we might want both.
-    // Let's check query param 'asProvider=true'
+    /** Permite alternar modo proveedor con ?asProvider=true */
     
     const asProvider = req.query.asProvider === 'true';
     
@@ -164,7 +186,7 @@ export async function registerRoutes(
     res.json(booking);
   });
 
-  // Seed data
+  /** Semillas iniciales de categorías (idempotente) */
   await storage.seedCategories();
 
   return httpServer;

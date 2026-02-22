@@ -1,3 +1,14 @@
+/**
+ * Arranque del servidor Express.
+ * - Carga variables de entorno con dotenv.
+ * - Configura parsing JSON y URL-encoded, capturando rawBody para verificaciones.
+ * - Registra rutas de la API y manejo de errores.
+ * - En producción sirve el cliente desde dist/public; en desarrollo integra Vite.
+ * Variables:
+ * - PORT: puerto de escucha (default 5000)
+ * - NODE_ENV: 'production' | 'development'
+ */
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -23,6 +34,7 @@ app.use(
 app.use(express.urlencoded({ extended: false }));
 
 export function log(message: string, source = "express") {
+  /** Formatea línea de log con hora y origen */
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
@@ -34,6 +46,7 @@ export function log(message: string, source = "express") {
 }
 
 app.use((req, res, next) => {
+  /** Middleware de logging de respuestas JSON bajo /api con duración */
   const start = Date.now();
   const path = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
@@ -90,14 +103,7 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  httpServer.listen(port, () => {
+    log(`serving on port ${port}`);
+  });
 })();
