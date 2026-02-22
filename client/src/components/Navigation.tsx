@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useState } from "react";
+import { NotificationBell } from "@/components/NotificationBell";
 
 export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth();
@@ -149,25 +150,12 @@ export function Navigation() {
         <div className="flex items-center gap-3">
           
           {/* Language Selector */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="hidden sm:flex items-center gap-2 text-muted-foreground hover:text-primary">
+          <Button variant="ghost" size="sm" className="hidden sm:flex items-center gap-2 text-muted-foreground hover:text-primary">
                 <Globe className="h-4 w-4" />
                 <span>ES</span>
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="bg-card border-border">
-              <DropdownMenuItem className="flex items-center gap-2">
-                <span>🇪🇸</span> <span>Español (Ecuador)</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center gap-2">
-                <span>🇺🇸</span> <span>English</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center gap-2">
-                <span>🇵🇹</span> <span>Português</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          
+          {isAuthenticated && <NotificationBell />}
           
           {isAuthenticated ? (
             <>

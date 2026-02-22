@@ -13,6 +13,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { initializeSocket } from "./socket";
 
 const app = express();
 const httpServer = createServer(app);
@@ -105,5 +106,9 @@ app.use((req, res, next) => {
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(port, () => {
     log(`serving on port ${port}`);
+    
+    // Initialize Socket.IO for real-time notifications
+    initializeSocket(httpServer);
+    log("🔔 Socket.IO initialized for real-time notifications");
   });
 })();

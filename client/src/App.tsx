@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
+import { SocketProvider } from "@/hooks/use-socket";
 
 // Pages
 import HomePage from "@/pages/Home";
@@ -48,14 +49,16 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <div className="flex flex-col min-h-screen bg-background font-sans">
-          <Navigation />
-          <main className="flex-grow">
-            <Router />
-          </main>
-          <Footer />
-          <Toaster />
-        </div>
+        <SocketProvider>
+          <div className="flex flex-col min-h-screen bg-background font-sans">
+            <Navigation />
+            <main className="flex-grow">
+              <Router />
+            </main>
+            <Footer />
+            <Toaster />
+          </div>
+        </SocketProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
