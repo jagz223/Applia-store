@@ -5,6 +5,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerGenFebRoutes } from "./routes-genfeb";
+import { registerAuthRoutes as registerJwtAuthRoutes } from "./routes-auth";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -19,6 +20,9 @@ export async function registerRoutes(
   
   // Registrar rutas de GenFeb S.A.S.
   await registerGenFebRoutes(httpServer, app);
+  
+  // Registrar rutas de autenticación JWT
+  await registerJwtAuthRoutes(httpServer, app);
 
   /** Middleware ligero para verificar sesión OIDC en rutas protegidas */
   const requireAuth = (req: any, res: any, next: any) => {

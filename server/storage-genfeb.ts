@@ -33,6 +33,13 @@ const getDb = async () => (await import("./db")).db;
  * - Integración con ManGo
  */
 export interface IStorage {
+  // Usuarios (Auth JWT)
+  getUserById(id: string): Promise<any | undefined>;
+  getUserByEmail(email: string): Promise<any | undefined>;
+  createUser(user: any): Promise<any>;
+  updateUser(id: string, data: any): Promise<any | undefined>;
+  updateUserPassword(id: string, password: string): Promise<void>;
+  
   // Categorías
   getCategories(): Promise<Category[]>;
   
@@ -98,6 +105,55 @@ export interface IStorage {
 
 class InMemoryStorage implements IStorage {
   private bookings: any[] = [];
+  private users: any[] = [];
+  private userIdCounter = 1;
+  
+  // ==================== USUARIOS (AUTH JWT) ====================
+  
+  async getUserById(id: string): Promise<any | undefined> {
+    return this.users.find(u => u.id === id);
+  }
+  
+  async getUserByEmail(email: string): Promise<any | undefined> {
+    return this.users.find(u => u.email === email);
+  }
+  
+  async createUser(user: any): Promise<any> {
+    // Verificar si el email ya existe
+    const existingUser = this.users.find(u => u.email === user.email);
+    if (existingUser) {
+      throw new Error("El usuario con este email ya existe");
+    }
+    
+    const newUser = {
+      id: String(this.userIdCounter++),
+      ...user,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.users.push(newUser);
+    return newUser;
+  }
+  
+  async updateUser(id: string, data: any): Promise<any | undefined> {
+    const index = this.users.findIndex(u => u.id === id);
+    if (index === -1) return undefined;
+    
+    this.users[index] = {
+      ...this.users[index],
+      ...data,
+      updatedAt: new Date(),
+    };
+    return this.users[index];
+  }
+  
+  async updateUserPassword(id: string, password: string): Promise<void> {
+    const user = this.users.find(u => u.id === id);
+    if (user) {
+      user.password = password;
+      user.updatedAt = new Date();
+    }
+  }
   private payments: any[] = [];
   private documents: any[] = [];
   private conversations: any[] = [];
@@ -418,3 +474,6 @@ class InMemoryStorage implements IStorage {
  * Inicialización de almacenamiento
  */
 export const storage: IStorage = new InMemoryStorage();
+
+// Alias para compatibilidad
+export const genFebStorage = storage;
