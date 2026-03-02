@@ -12,6 +12,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import { useEffect } from "react";
+import { api } from "@shared/routes";
 
 export default function BecomePro() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -51,7 +52,7 @@ export default function BecomePro() {
       <div className="container max-w-md py-20 text-center">
         <h1 className="text-2xl font-bold mb-4">Sign in required</h1>
         <p className="mb-6 text-muted-foreground">You need an account to become a provider.</p>
-        <a href="/api/login">
+        <a href={api.auth.replit.login.path}>
           <Button className="w-full">Sign In / Sign Up</Button>
         </a>
       </div>

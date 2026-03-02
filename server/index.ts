@@ -14,7 +14,9 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initializeSocket } from "./socket";
-import { initializeFirebase } from "./firebase-admin";
+import { initializeFirebase, isFirebaseConfigured } from "./firebase-admin";
+import { setGenFebStorage } from "./storage-genfeb";
+import { getFirestoreStorage } from "./storage-firestore";
 
 const app = express();
 const httpServer = createServer(app);
@@ -77,7 +79,11 @@ app.use((req, res, next) => {
 (async () => {
   // Initialize Firebase (if credentials are configured)
   initializeFirebase();
-  
+  // Todo el almacenamiento en Firestore cuando Firebase está configurado (sin híbrido)
+  if (isFirebaseConfigured()) {
+    setGenFebStorage(getFirestoreStorage());
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -91,6 +97,14 @@ app.use((req, res, next) => {
     }
 
     return res.status(status).json({ message });
+  });
+
+  // Nunca pasar /api a Vite: si ninguna ruta respondió, devolver 404 JSON
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api")) return next();
+    if (res.headersSent) return;
+    log(`[API] No route matched, returning 404: ${req.method} ${req.path}`);
+    res.status(404).json({ message: "API route not found", path: req.path });
   });
 
   // importantly only setup vite in development and after

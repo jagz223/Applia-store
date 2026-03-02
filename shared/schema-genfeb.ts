@@ -1,10 +1,13 @@
 // GenFeb S.A.S. - Base de Datos Extendida
-// Incluye roles de usuario y integración con App ManGo
+// Incluye roles de usuario, integración con App ManGo y nuevas funcionalidades
 
 import { pgTable, text, serial, integer, boolean, timestamp, varchar, decimal, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
+
+// Import original schema types (to avoid duplicates)
+export { bookings, services, categories } from "./schema";
 
 // === ROLES DE USUARIO ===
 export type UserRole = "admin" | "professional" | "client";
@@ -135,6 +138,88 @@ export const financialReports = pgTable("financial_reports", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// =====================================================
+// NUEVAS FUNCIONALIDADES (Inspiradas en BookingDo SaaS)
+// =====================================================
+
+// === ESTADOS DE RESERVA PERSONALIZABLES ===
+export type BookingStatusType = 1 | 2 | 3 | 4; // 1=nuevo, 2=procesando, 3=completado, 4=cancelado
+
+export const bookingStatuses = pgTable("booking_statuses", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 50 }).notNull(),
+  description: text("description"),
+  type: integer("type").notNull().$type<BookingStatusType>(), // 1=nuevo, 2=procesando, 3=completado, 4=cancelado
+  color: varchar("color", { length: 7 }).default("#6B7280"), // Color hex para UI
+  icon: varchar("icon", { length: 50 }), // Icono para UI
+  isDefault: boolean("is_default").default(false),
+  isAvailable: boolean("is_available").default(true),
+  isSystem: boolean("is_system").default(false), // Si es un estado del sistema
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// === IMPUESTOS (TAXES) ===
+export const taxes = pgTable("taxes", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  rate: decimal("rate", { precision: 5, scale: 2 }).notNull(), // Porcentaje: 12.00 = 12%
+  type: varchar("type", { length: 20 }).default("percentage"), // percentage o fixed
+  isActive: boolean("is_active").default(true),
+  isDefault: boolean("is_default").default(false),
+  country: varchar("country", { length: 100 }).default("Ecuador"),
+  region: varchar("region", { length: 100 }), // Provincia/Estado
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// === CUPONES / DESCUENTOS ===
+export const coupons = pgTable("coupons", {
+  id: serial("id").primaryKey(),
+  code: varchar("code", { length: 50 }).notNull().unique(),
+  description: text("description"),
+  discountType: varchar("discount_type", { length: 20 }).notNull(), // percentage o fixed
+  discountValue: decimal("discount_value", { precision: 10, scale: 2 }).notNull(),
+  minAmount: decimal("min_amount", { precision: 10, scale: 2 }), // Monto mínimo para aplicar
+  maxDiscount: decimal("max_discount", { precision: 10, scale: 2 }), // Descuento máximo (para %)
+  maxUses: integer("max_uses"), // Usos máximos (null = ilimitado)
+  usedCount: integer("used_count").default(0),
+  usedByUsers: jsonb("used_by_users").$type<string[]>().default([]), // IDs de usuarios que usaron
+  validFrom: timestamp("valid_from"),
+  validUntil: timestamp("valid_until"),
+  isActive: boolean("is_active").default(true),
+  applicableServices: jsonb("applicable_services").$type<number[]>().default([]), // IDs de servicios (vacío = todos)
+  applicableCategories: jsonb("applicable_categories").$type<number[]>().default([]), // IDs de categorías
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// === SERVICIOS ADICIONALES (ADD-ONS) ===
+export const serviceAddons = pgTable("service_addons", {
+  id: serial("id").primaryKey(),
+  serviceId: integer("service_id").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  duration: integer("duration").default(0), // Duración extra en minutos
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// === RESERVA CON SERVICIOS ADICIONALES ===
+export const bookingAddons = pgTable("booking_addons", {
+  id: serial("id").primaryKey(),
+  bookingId: integer("booking_id").notNull(),
+  addonId: integer("addon_id").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  quantity: integer("quantity").default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // === SCHEMAS DE INSERCIÓN (ZOD) ===
 export const insertUserRoleSchema = createInsertSchema(userRoles);
 export const insertDocumentSchema = createInsertSchema(documents);
@@ -143,6 +228,13 @@ export const insertConversationSchema = createInsertSchema(conversations);
 export const insertMessageSchema = createInsertSchema(messages);
 export const insertNotificationSchema = createInsertSchema(notifications);
 export const insertFinancialReportSchema = createInsertSchema(financialReports);
+
+// Nuevos esquemas
+export const insertBookingStatusSchema = createInsertSchema(bookingStatuses);
+export const insertTaxSchema = createInsertSchema(taxes);
+export const insertCouponSchema = createInsertSchema(coupons);
+export const insertServiceAddonSchema = createInsertSchema(serviceAddons);
+export const insertBookingAddonSchema = createInsertSchema(bookingAddons);
 
 // === TIPOS TYPESCRIPT ===
 export type UserRoleRecord = typeof userRoles.$inferSelect;
@@ -155,3 +247,44 @@ export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type FinancialReport = typeof financialReports.$inferSelect;
+
+// Nuevos tipos
+export type BookingStatus = typeof bookingStatuses.$inferSelect;
+export type NewBookingStatus = typeof bookingStatuses.$inferInsert;
+export type Tax = typeof taxes.$inferSelect;
+export type NewTax = typeof taxes.$inferInsert;
+export type Coupon = typeof coupons.$inferSelect;
+export type NewCoupon = typeof coupons.$inferInsert;
+export type ServiceAddon = typeof serviceAddons.$inferSelect;
+export type NewServiceAddon = typeof serviceAddons.$inferInsert;
+export type BookingAddon = typeof bookingAddons.$inferSelect;
+export type NewBookingAddon = typeof bookingAddons.$inferInsert;
+
+// === RELACIONES ===
+// Note: Relations for bookings, services, categories are defined in schema.ts
+// Relations for GenFeb-specific tables:
+
+export const bookingAddonsRelations = relations(bookingAddons, ({ one }) => ({
+  addon: one(serviceAddons, {
+    fields: [bookingAddons.addonId],
+    references: [serviceAddons.id],
+  }),
+}));
+
+export const serviceAddonsRelations = relations(serviceAddons, ({ one, many }) => ({
+  bookings: many(bookingAddons),
+}));
+
+// === DATOS POR DEFECTO ===
+export const defaultBookingStatuses = [
+  { name: "Nueva", type: 1 as BookingStatusType, color: "#3B82F6", icon: "sparkles", isDefault: true, isSystem: true, sortOrder: 1 },
+  { name: "Confirmada", type: 1 as BookingStatusType, color: "#8B5CF6", icon: "check-circle", isSystem: true, sortOrder: 2 },
+  { name: "En Proceso", type: 2 as BookingStatusType, color: "#F59E0B", icon: "loader", isSystem: true, sortOrder: 3 },
+  { name: "Completada", type: 3 as BookingStatusType, color: "#10B981", icon: "check", isDefault: true, isSystem: true, sortOrder: 4 },
+  { name: "Cancelada", type: 4 as BookingStatusType, color: "#EF4444", icon: "x-circle", isDefault: true, isSystem: true, sortOrder: 5 },
+];
+
+export const defaultTaxes = [
+  { name: "IVA 12%", description: "Impuesto al Valor Agregado", rate: "12.00", type: "percentage", isDefault: true, country: "Ecuador", region: "Nacional" },
+  { name: "ICE", description: "Impuesto a los Consumos Especiales", rate: "0.00", type: "percentage", isDefault: false, country: "Ecuador" },
+];

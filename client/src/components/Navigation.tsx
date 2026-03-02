@@ -121,6 +121,12 @@ export function Navigation() {
                   <span>Admin Panel</span>
                 </Link>
               </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Link href="/admin/create-role" className="flex items-center gap-2 w-full">
+                  <Shield className="h-4 w-4" />
+                  <span>Crear rol</span>
+                </Link>
+              </DropdownMenuItem>
             </>
           )}
         </DropdownMenuContent>

@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { api } from "@shared/routes";
 
 const registerSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
@@ -51,15 +52,22 @@ export default function Register() {
   const onSubmit = async (data: RegisterForm) => {
     setIsLoading(true);
     try {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
+      const response = await fetch(api.auth.register.path, {
+        method: api.auth.register.method,
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(data),
       });
 
-      const result = await response.json();
+      const text = await response.text();
+      
+      let result;
+      try {
+        result = JSON.parse(text);
+      } catch {
+        throw new Error(`Error del servidor: ${text.substring(0, 100)}`);
+      }
 
       if (!response.ok) {
         throw new Error(result.message || "Error al registrar usuario");

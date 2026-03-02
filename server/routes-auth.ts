@@ -6,8 +6,20 @@ import { z } from "zod";
 import { genFebStorage } from "./storage-genfeb";
 
 // Environment variables
-const JWT_SECRET = process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024";
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+
+// Throw error if JWT_SECRET is not set in production
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("JWT_SECRET environment variable is required in production");
+  }
+  console.warn("⚠️ JWT_SECRET not set. Using development secret. DO NOT USE IN PRODUCTION!");
+}
+
+// Use a secure default only for development
+const devSecret = "genfeb-dev-secret-change-in-production";
+const effectiveSecret = JWT_SECRET || devSecret;
 
 // ============== ESQUEMAS DE VALIDACIÓN ==============
 
@@ -40,15 +52,15 @@ interface UserPayload {
 
 // ============== FUNCIONES AUXILIARES ==============
 
-// Generar token JWT
+// Generate JWT token
 function generateToken(user: UserPayload): string {
-  return jwt.sign(user, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN as any });
+  return jwt.sign(user, effectiveSecret, { expiresIn: JWT_EXPIRES_IN as any });
 }
 
-// Verificar token JWT
+// Verify JWT token
 function verifyToken(token: string): UserPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as UserPayload;
+    return jwt.verify(token, effectiveSecret) as UserPayload;
   } catch {
     return null;
   }

@@ -1,4 +1,4 @@
-import { useRoute, Link } from "wouter";
+import { useRoute, Link, useLocation } from "wouter";
 import { useService, useCreateBooking, useCurrentProvider } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft } from "lucide-react";
@@ -18,9 +18,11 @@ import { useState } from "react";
 import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { api } from "@shared/routes";
 
 export default function ServiceDetails() {
   const [, params] = useRoute("/service/:id");
+  const [, setLocation] = useLocation();
   const id = parseInt(params?.id || "0");
   const { data: service, isLoading } = useService(id);
   const { user, isAuthenticated } = useAuth();
@@ -34,9 +36,18 @@ export default function ServiceDetails() {
 
   const handleBooking = () => {
     if (!date) return;
+    if (!user?.id) {
+      toast({
+        variant: "destructive",
+        title: "Autenticación requerida",
+        description: "Debes iniciar sesión para realizar una reserva",
+      });
+      setLocation("/login");
+      return;
+    }
     
     createBooking.mutate({
-      userId: user?.id!,
+      userId: user.id,
       serviceId: id,
       date: date.toISOString(), // In real app, would handle time selection too
       notes: notes,
@@ -193,7 +204,7 @@ export default function ServiceDetails() {
                 </Dialog>
                )
             ) : (
-              <a href="/api/login">
+              <a href={api.auth.replit.login.path}>
                 <Button className="w-full h-12 text-lg" variant="outline">
                   Log in to Book
                 </Button>

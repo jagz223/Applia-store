@@ -1,0 +1,91 @@
+/**
+ * Almacenamiento híbrido: Firestore para entidades principales (usuarios, categorías,
+ * proveedores, servicios, reservas) y memoria para el resto cuando Firebase está configurado.
+ */
+
+import type { IStorage } from "./storage-genfeb";
+import type { FirestoreStorage } from "./storage-firestore";
+
+const FIRESTORE_METHODS = new Set([
+  "getUserById", "getUserByEmail", "createUser", "updateUser", "updateUserPassword",
+  "getUserRole", "updateUserRole",
+  "getCategories", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider",
+  "getAllServices", "getService", "createService",
+  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus",
+]);
+
+export class HybridStorage implements IStorage {
+  constructor(
+    private firestore: FirestoreStorage,
+    private memory: IStorage,
+  ) {}
+
+  private delegate(method: string, args: any[]): Promise<any> {
+    if (FIRESTORE_METHODS.has(method)) {
+      return (this.firestore as any)[method](...args);
+    }
+    return (this.memory as any)[method](...args);
+  }
+
+  getUserById(id: string) { return this.delegate("getUserById", [id]); }
+  getUserByEmail(email: string) { return this.delegate("getUserByEmail", [email]); }
+  createUser(user: any) { return this.delegate("createUser", [user]); }
+  updateUser(id: string, data: any) { return this.delegate("updateUser", [id, data]); }
+  updateUserPassword(id: string, password: string) { return this.delegate("updateUserPassword", [id, password]); }
+  getUserRole(userId: string) { return this.delegate("getUserRole", [userId]); }
+  updateUserRole(userId: string, data: any) { return this.delegate("updateUserRole", [userId, data]); }
+  getCategories() { return this.delegate("getCategories", []); }
+  getAllProviders(profession?: string) { return this.delegate("getAllProviders", [profession]); }
+  getProvider(id: number) { return this.delegate("getProvider", [id]); }
+  getProviderByUserId(userId: string) { return this.delegate("getProviderByUserId", [userId]); }
+  createProvider(provider: any) { return this.delegate("createProvider", [provider]); }
+  getAllServices(categoryId?: number, search?: string) { return this.delegate("getAllServices", [categoryId, search]); }
+  getService(id: number) { return this.delegate("getService", [id]); }
+  createService(service: any) { return this.delegate("createService", [service]); }
+  getBookingsByUser(userId: string, status?: string) { return this.delegate("getBookingsByUser", [userId, status]); }
+  getBookingsByProvider(providerId: number) { return this.delegate("getBookingsByProvider", [providerId]); }
+  getBooking(id: number) { return this.delegate("getBooking", [id]); }
+  createBooking(booking: any) { return this.delegate("createBooking", [booking]); }
+  updateBookingStatus(id: number, status: string) { return this.delegate("updateBookingStatus", [id, status]); }
+
+  getPaymentsByUser(userId: string) { return this.memory.getPaymentsByUser(userId); }
+  getEscrowPayments(userId: string) { return this.memory.getEscrowPayments(userId); }
+  createEscrowPayment(payment: any) { return this.memory.createEscrowPayment(payment); }
+  releaseEscrowPayment(paymentId: number, release: boolean, reason?: string) { return this.memory.releaseEscrowPayment(paymentId, release, reason); }
+  getUserBalance(userId: string) { return this.memory.getUserBalance(userId); }
+  getDocumentsByUser(userId: string, type?: string) { return this.memory.getDocumentsByUser(userId, type); }
+  createDocument(doc: any) { return this.memory.createDocument(doc); }
+  deleteDocument(id: number, userId: string) { return this.memory.deleteDocument(id, userId); }
+  getConversationsByUser(userId: string) { return this.memory.getConversationsByUser(userId); }
+  createConversation(conv: any) { return this.memory.createConversation(conv); }
+  getMessagesByConversation(conversationId: number) { return this.memory.getMessagesByConversation(conversationId); }
+  createMessage(msg: any) { return this.memory.createMessage(msg); }
+  markMessageAsRead(messageId: number) { return this.memory.markMessageAsRead(messageId); }
+  getFinancialReports(userId: string, period?: string) { return this.memory.getFinancialReports(userId, period); }
+  getKPIs(userId: string) { return this.memory.getKPIs(userId); }
+  getNotifications(userId: string, unreadOnly?: boolean) { return this.memory.getNotifications(userId, unreadOnly); }
+  markNotificationAsRead(notificationId: number) { return this.memory.markNotificationAsRead(notificationId); }
+  syncWithMango(userId: string, mangoUserId: string) { return this.memory.syncWithMango(userId, mangoUserId); }
+  getMangoSyncStatus(userId: string) { return this.memory.getMangoSyncStatus(userId); }
+  getReviews(params: any) { return this.memory.getReviews(params); }
+  getReviewStats(targetId: string, targetType: string) { return this.memory.getReviewStats(targetId, targetType); }
+  createReview(review: any) { return this.memory.createReview(review); }
+  replyToReview(reviewId: number, response: string, responderId: string, responderName: string) { return this.memory.replyToReview(reviewId, response, responderId, responderName); }
+  markReviewHelpful(reviewId: number) { return this.memory.markReviewHelpful(reviewId); }
+  deleteReview(reviewId: number, userId: string) { return this.memory.deleteReview(reviewId, userId); }
+  updateReviewStats(targetId: string, targetType: string) { return this.memory.updateReviewStats(targetId, targetType); }
+  seedCategories() { return this.memory.seedCategories(); }
+  getBookingStatuses() { return this.memory.getBookingStatuses(); }
+  createBookingStatus(status: any) { return this.memory.createBookingStatus(status); }
+  updateBookingStatusCustom(id: number, data: any) { return this.memory.updateBookingStatusCustom(id, data); }
+  deleteBookingStatus(id: number) { return this.memory.deleteBookingStatus(id); }
+  getTaxes() { return this.memory.getTaxes(); }
+  createTax(tax: any) { return this.memory.createTax(tax); }
+  updateTax(id: number, data: any) { return this.memory.updateTax(id, data); }
+  deleteTax(id: number) { return this.memory.deleteTax(id); }
+  calculateTaxes(amount: number, taxIds: number[]) { return this.memory.calculateTaxes(amount, taxIds); }
+  getCoupons(userId: string) { return this.memory.getCoupons(userId); }
+  createCoupon(coupon: any) { return this.memory.createCoupon(coupon); }
+  updateCoupon(id: number, data: any) { return this.memory.updateCoupon(id, data); }
+  deleteCoupon(id: number) { return this.memory.deleteCoupon(id); }
+}
