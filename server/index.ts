@@ -82,6 +82,10 @@ app.use((req, res, next) => {
   // Todo el almacenamiento en Firestore cuando Firebase está configurado (sin híbrido)
   if (isFirebaseConfigured()) {
     setGenFebStorage(getFirestoreStorage());
+    const projectId = process.env.FIREBASE_PROJECT_ID || "(no set)";
+    log(`Firestore en uso: proyecto "${projectId}" (cuenta: ${process.env.FIREBASE_CLIENT_EMAIL || "?"})`);
+  } else {
+    log("Firestore no configurado — almacenamiento en memoria (login/usuarios no persistidos)");
   }
 
   await registerRoutes(httpServer, app);
