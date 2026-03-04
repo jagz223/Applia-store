@@ -1002,19 +1002,5 @@ export class InMemoryStorage implements IStorage {
   }
 }
 
-// Almacenamiento activo: se asigna en memoria por defecto; si Firebase está configurado,
-// index.ts lo reemplaza por HybridStorage (Firestore para usuarios/categorías/proveedores/servicios/reservas).
-let _storage: IStorage = new InMemoryStorage();
-
-export function setGenFebStorage(s: IStorage): void {
-  _storage = s;
-}
-
-export const storage: IStorage = new Proxy({} as IStorage, {
-  get(_, prop: string) {
-    return (_storage as any)[prop];
-  },
-});
-
-// Alias para compatibilidad
-export const genFebStorage = storage;
+// Instancia activa y setter en storage-instance.ts para evitar errores del bundler en deploy.
+export { setGenFebStorage, genFebStorage, storage } from "./storage-instance";
