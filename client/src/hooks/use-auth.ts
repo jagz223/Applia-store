@@ -1,20 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  lastName: string;
-  role: string;
-  phone?: string;
-  avatar?: string;
-  createdAt?: Date;
-}
+import { api } from "@shared/routes";
+import { User } from "@shared/models/auth";
 
 async function fetchUser(): Promise<User | null> {
   const token = localStorage.getItem("token");
   
-  const response = await fetch("/api/auth/me", {
+  const response = await fetch(api.auth.me.path, {
+    method: api.auth.me.method,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 
@@ -31,8 +23,8 @@ async function fetchUser(): Promise<User | null> {
 }
 
 async function login(credentials: { email: string; password: string }): Promise<{ token: string; user: User }> {
-  const response = await fetch("/api/auth/login", {
-    method: "POST",
+  const response = await fetch(api.auth.login.path, {
+    method: api.auth.login.method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(credentials),
   });
@@ -48,8 +40,8 @@ async function login(credentials: { email: string; password: string }): Promise<
 async function logout(): Promise<void> {
   const token = localStorage.getItem("token");
   
-  await fetch("/api/auth/logout", {
-    method: "POST",
+  await fetch(api.auth.logout.path, {
+    method: api.auth.logout.method,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   

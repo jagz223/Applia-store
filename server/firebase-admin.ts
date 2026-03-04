@@ -9,7 +9,10 @@
  * 4. Configura las variables de entorno en .env
  */
 
-import * as admin from "firebase-admin";
+// IMPORTANTE:
+// Con firebase-admin v13+ y Node ESM, hay que usar import por defecto.
+// Si usamos `import * as admin from "firebase-admin"`, `admin.credential` puede venir undefined.
+import admin from "firebase-admin";
 
 // Configuración desde variables de entorno
 const projectId = process.env.FIREBASE_PROJECT_ID;
@@ -37,8 +40,8 @@ export function initializeFirebase(): boolean {
   }
 
   try {
-    // Verificar si ya está inicializado
-    if (admin.apps.length > 0) {
+    // Verificar si ya está inicializado (usar optional chaining)
+    if (admin.apps && admin.apps.length > 0) {
       firestoreDb = admin.firestore();
       firebaseAuth = admin.auth();
       console.log("✅ Firebase Admin SDK ya inicializado");
@@ -138,18 +141,31 @@ export async function getFirebaseUser(uid: string): Promise<admin.auth.UserRecor
 }
 
 /**
- * Colecciones de Firestore
+ * Colecciones de Firestore (alineadas con el modelo del sistema)
  */
 export const FIRESTORE_COLLECTIONS = {
   USERS: "users",
+  USER_ROLES: "user_roles",
+  CATEGORIES: "categories",
   PROVIDERS: "providers",
   SERVICES: "services",
+  SERVICE_ADDONS: "service_addons",
   BOOKINGS: "bookings",
-  REVIEWS: "reviews",
-  NOTIFICATIONS: "notifications",
-  PAYMENTS: "payments",
+  BOOKING_ADDONS: "booking_addons",
+  BOOKING_STATUSES: "booking_statuses",
+  TAXES: "taxes",
+  COUPONS: "coupons",
+  ESCROW_PAYMENTS: "escrow_payments",
+  DOCUMENTS: "documents",
   CONVERSATIONS: "conversations",
   MESSAGES: "messages",
+  NOTIFICATIONS: "notifications",
+  FINANCIAL_REPORTS: "financial_reports",
+  REVIEWS: "reviews",
+  REVIEW_STATS: "review_stats",
+  MANGO_SYNC: "mango_sync",
+  PAYMENTS: "payments",
   INVOICES: "invoices",
-  CATEGORIES: "categories",
+  _COUNTERS: "_counters",
+  ROLES: "roles",
 } as const;

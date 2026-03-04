@@ -15,7 +15,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initializeSocket } from "./socket";
 import { initializeFirebase, isFirebaseConfigured } from "./firebase-admin";
-import { setGenFebStorage } from "./storage-genfeb";
+import { setGenFebStorage } from "./storage-instance";
 import { getFirestoreStorage } from "./storage-firestore";
 
 const app = express();

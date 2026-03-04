@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { api } from "@shared/routes";
 
 const loginSchema = z.object({
   email: z.string().email("Email inválido"),
@@ -20,10 +21,9 @@ type LoginForm = z.infer<typeof loginSchema>;
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { login, setUser } = useAuth();
+  const { login, isLoggingIn } = useAuth();
 
   const form = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -33,42 +33,23 @@ export default function Login() {
     },
   });
 
-  const onSubmit = async (data: LoginForm) => {
-    setIsLoading(true);
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || "Error al iniciar sesión");
-      }
-
-      // Guardar token y usuario
-      localStorage.setItem("token", result.token);
-      setUser(result.user);
-
-      toast({
-        title: "Bienvenido",
-        description: `Hola ${result.user.name}, has iniciado sesión correctamente`,
-      });
-
-      setLocation("/dashboard");
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: error.message || "Credenciales inválidas",
-      });
-    } finally {
-      setIsLoading(false);
-    }
+  const onSubmit = (data: LoginForm) => {
+    login(data, {
+      onSuccess: (result) => {
+        toast({
+          title: "Bienvenido",
+          description: `Hola ${result.user.firstName}, has iniciado sesión correctamente`,
+        });
+        setLocation("/dashboard");
+      },
+      onError: (error: any) => {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: error.message || "Credenciales inválidas",
+        });
+      },
+    });
   };
 
   return (
@@ -136,8 +117,8 @@ export default function Login() {
               />
             </CardContent>
             <CardFooter className="flex flex-col space-y-4">
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? (
+              <Button type="submit" className="w-full" disabled={isLoggingIn}>
+                {isLoggingIn ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Iniciando sesión...

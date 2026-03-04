@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { insertProviderSchema, insertServiceSchema, insertBookingSchema, categories, providers, services, bookings } from './schema';
+import { User } from './models/auth';
 
 export const errorSchemas = {
   validation: z.object({
@@ -15,6 +16,71 @@ export const errorSchemas = {
 };
 
 export const api = {
+  auth: {
+    register: {
+      method: 'POST' as const,
+      path: '/api/auth/register',
+      input: z.object({
+        email: z.string().email(),
+        password: z.string().min(6),
+        name: z.string().optional(),
+      }),
+      responses: {
+        201: z.object({
+          user: z.custom<User>(),
+          token: z.string(),
+        }),
+        400: errorSchemas.validation,
+      },
+    },
+    login: {
+      method: 'POST' as const,
+      path: '/api/auth/login',
+      input: z.object({
+        email: z.string().email(),
+        password: z.string(),
+      }),
+      responses: {
+        200: z.object({
+          user: z.custom<User>(),
+          token: z.string(),
+        }),
+        401: z.object({ message: z.string() }),
+      },
+    },
+    me: {
+      method: 'GET' as const,
+      path: '/api/auth/me',
+      responses: {
+        200: z.custom<User>().nullable(),
+      },
+    },
+    logout: {
+      method: 'POST' as const,
+      path: '/api/auth/logout',
+      responses: {
+        200: z.object({ message: z.string() }),
+      },
+    },
+    replit: {
+      login: {
+        method: 'GET' as const,
+        path: '/api/login',
+      },
+      callback: {
+        method: 'GET' as const,
+        path: '/api/callback',
+      },
+      logout: {
+        method: 'POST' as const,
+        path: '/api/logout',
+      },
+      user: {
+        method: 'GET' as const,
+        path: '/api/user',
+      },
+    },
+  },
   categories: {
     list: {
       method: 'GET' as const,
@@ -117,6 +183,105 @@ export const api = {
       },
     }
   },
+  genfeb: {
+    bookings: {
+      list: {
+        method: 'GET' as const,
+        path: '/api/bookings',
+        responses: {
+          200: z.array(z.custom<typeof bookings.$inferSelect>()),
+        },
+      },
+      create: {
+        method: 'POST' as const,
+        path: '/api/bookings',
+        input: z.object({
+          serviceId: z.number(),
+          providerId: z.number(),
+          date: z.string().datetime(),
+          notes: z.string().optional(),
+          location: z.string().optional(),
+          latitude: z.number().optional(),
+          longitude: z.number().optional(),
+        }),
+        responses: {
+          201: z.custom<typeof bookings.$inferSelect>(),
+          400: errorSchemas.validation,
+        },
+      },
+      get: {
+        method: 'GET' as const,
+        path: '/api/bookings/:id',
+        responses: {
+          200: z.custom<typeof bookings.$inferSelect>(),
+          404: errorSchemas.notFound,
+        },
+      },
+      updateStatus: {
+        method: 'PATCH' as const,
+        path: '/api/bookings/:id/status',
+        input: z.object({
+          status: z.enum(["pending", "confirmed", "in_progress", "completed", "cancelled"]),
+        }),
+        responses: {
+          200: z.custom<typeof bookings.$inferSelect>(),
+          404: errorSchemas.notFound,
+        },
+      },
+    },
+    payments: {
+      list: {
+        method: 'GET' as const,
+        path: '/api/payments',
+        responses: {
+          200: z.array(z.any()),
+        },
+      },
+      escrowList: {
+        method: 'GET' as const,
+        path: '/api/payments/escrow',
+        responses: {
+          200: z.array(z.any()),
+        },
+      },
+      createEscrow: {
+        method: 'POST' as const,
+        path: '/api/payments/escrow',
+        input: z.object({
+          bookingId: z.number(),
+          amount: z.number().positive(),
+          currency: z.string().default("USD"),
+          paymentMethod: z.enum(["stripe", "paypal", "bank_transfer"]),
+        }),
+        responses: {
+          201: z.any(),
+        },
+      },
+      releaseEscrow: {
+        method: 'POST' as const,
+        path: '/api/payments/escrow/release',
+        input: z.object({
+          paymentId: z.number(),
+          release: z.boolean(),
+          reason: z.string().optional(),
+        }),
+        responses: {
+          200: z.any(),
+        },
+      },
+      getBalance: {
+        method: 'GET' as const,
+        path: '/api/payments/balance',
+        responses: {
+          200: z.object({
+            available: z.number(),
+            escrow: z.number(),
+            pending: z.number(),
+          }),
+        },
+      },
+    },
+  }
 };
 
 export function buildUrl(path: string, params?: Record<string, string | number>): string {

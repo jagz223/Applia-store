@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage as genFebStorage } from "./storage-genfeb";
+import { authenticateJWT } from "./routes-auth";
 import { z } from "zod";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
@@ -72,9 +73,9 @@ export async function registerGenFebRoutes(
   // ---------- RESERVAS (BOOKINGS) ----------
   
   // GET /api/bookings - Listar reservas del usuario
-  app.get("/api/bookings", async (req, res) => {
+  app.get("/api/bookings", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.headers["x-user-id"] as string;
+      const userId = req.user?.id;
       const status = req.query.status as string | undefined;
       
       if (!userId) {
@@ -90,9 +91,9 @@ export async function registerGenFebRoutes(
   });
   
   // POST /api/bookings - Crear nueva reserva
-  app.post("/api/bookings", async (req, res) => {
+  app.post("/api/bookings", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.headers["x-user-id"] as string;
+      const userId = req.user?.id;
       
       if (!userId) {
         return res.status(401).json({ message: "Unauthorized" });
@@ -139,7 +140,7 @@ export async function registerGenFebRoutes(
   });
   
   // PATCH /api/bookings/:id/status - Actualizar estado de reserva
-  app.patch("/api/bookings/:id/status", async (req, res) => {
+  app.patch("/api/bookings/:id/status", authenticateJWT, async (req, res) => {
     try {
       const data = updateBookingSchema.parse(req.body);
       const booking = await storage.updateBookingStatus(Number(req.params.id), data.status);
@@ -571,6 +572,389 @@ export async function registerGenFebRoutes(
   });
   
   console.log("✅ GenFeb S.A.S. routes registered");
+  
+  // =====================================================
+  // NUEVAS RUTAS (Inspiradas en BookingDo SaaS)
+  // =====================================================
+  
+  // ---------- ESTADOS DE RESERVA PERSONALIZABLES ----------
+  
+  // GET /api/booking-statuses - Listar estados de reserva
+  app.get("/api/booking-statuses", async (req, res) => {
+    try {
+      const statuses = await storage.getBookingStatuses();
+      res.json(statuses);
+    } catch (error) {
+      console.error("Error fetching booking statuses:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // POST /api/booking-statuses - Crear estado de reserva
+  app.post("/api/booking-statuses", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      const status = await storage.createBookingStatus(req.body);
+      res.status(201).json(status);
+    } catch (error) {
+      console.error("Error creating booking status:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // PATCH /api/booking-statuses/:id - Actualizar estado
+  app.patch("/api/booking-statuses/:id", async (req, res) => {
+    try {
+      const status = await storage.updateBookingStatusCustom(Number(req.params.id), req.body);
+      if (!status) {
+        return res.status(404).json({ message: "Status not found" });
+      }
+      res.json(status);
+    } catch (error) {
+      console.error("Error updating booking status:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // DELETE /api/booking-statuses/:id - Eliminar estado
+  app.delete("/api/booking-statuses/:id", async (req, res) => {
+    try {
+      await storage.deleteBookingStatus(Number(req.params.id));
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting booking status:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // ---------- IMPUESTOS (TAXES) ----------
+  
+  // GET /api/taxes - Listar impuestos
+  app.get("/api/taxes", async (req, res) => {
+    try {
+      const taxes = await storage.getTaxes();
+      res.json(taxes);
+    } catch (error) {
+      console.error("Error fetching taxes:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // POST /api/taxes - Crear impuesto
+  app.post("/api/taxes", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      const tax = await storage.createTax(req.body);
+      res.status(201).json(tax);
+    } catch (error) {
+      console.error("Error creating tax:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // PATCH /api/taxes/:id - Actualizar impuesto
+  app.patch("/api/taxes/:id", async (req, res) => {
+    try {
+      const tax = await storage.updateTax(Number(req.params.id), req.body);
+      if (!tax) {
+        return res.status(404).json({ message: "Tax not found" });
+      }
+      res.json(tax);
+    } catch (error) {
+      console.error("Error updating tax:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // DELETE /api/taxes/:id - Eliminar impuesto
+  app.delete("/api/taxes/:id", async (req, res) => {
+    try {
+      await storage.deleteTax(Number(req.params.id));
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting tax:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // POST /api/taxes/calculate - Calcular impuesto
+  app.post("/api/taxes/calculate", async (req, res) => {
+    try {
+      const { amount, taxIds } = req.body;
+      const calculated = await storage.calculateTaxes(amount, taxIds);
+      res.json(calculated);
+    } catch (error) {
+      console.error("Error calculating taxes:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // ---------- CUPONES / DESCUENTOS ----------
+  
+  // GET /api/coupons - Listar cupones
+  app.get("/api/coupons", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      const coupons = await storage.getCoupons(userId);
+      res.json(coupons);
+    } catch (error) {
+      console.error("Error fetching coupons:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // POST /api/coupons - Crear cupón
+  app.post("/api/coupons", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      const coupon = await storage.createCoupon(req.body);
+      res.status(201).json(coupon);
+    } catch (error) {
+      console.error("Error creating coupon:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // POST /api/coupons/validate - Validar cupón
+  app.post("/api/coupons/validate", async (req, res) => {
+    try {
+      const { code, serviceId, categoryId, amount, userId } = req.body;
+      const validation = await storage.validateCoupon(code, serviceId, categoryId, amount, userId);
+      res.json(validation);
+    } catch (error) {
+      console.error("Error validating coupon:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // PATCH /api/coupons/:id - Actualizar cupón
+  app.patch("/api/coupons/:id", async (req, res) => {
+    try {
+      const coupon = await storage.updateCoupon(Number(req.params.id), req.body);
+      if (!coupon) {
+        return res.status(404).json({ message: "Coupon not found" });
+      }
+      res.json(coupon);
+    } catch (error) {
+      console.error("Error updating coupon:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // DELETE /api/coupons/:id - Eliminar cupón
+  app.delete("/api/coupons/:id", async (req, res) => {
+    try {
+      await storage.deleteCoupon(Number(req.params.id));
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting coupon:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // ---------- SERVICIOS ADICIONALES (ADD-ONS) ----------
+  
+  // GET /api/services/:id/addons - Listar add-ons de un servicio
+  app.get("/api/services/:serviceId/addons", async (req, res) => {
+    try {
+      const addons = await storage.getServiceAddons(Number(req.params.serviceId));
+      res.json(addons);
+    } catch (error) {
+      console.error("Error fetching service addons:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // POST /api/services/:serviceId/addons - Crear add-on
+  app.post("/api/services/:serviceId/addons", async (req, res) => {
+    try {
+      const userId = req.headers["x-user-id"] as string;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      const addon = await storage.createServiceAddon({
+        ...req.body,
+        serviceId: Number(req.params.serviceId),
+      });
+      res.status(201).json(addon);
+    } catch (error) {
+      console.error("Error creating service addon:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // PATCH /api/addons/:id - Actualizar add-on
+  app.patch("/api/addons/:id", async (req, res) => {
+    try {
+      const addon = await storage.updateServiceAddon(Number(req.params.id), req.body);
+      if (!addon) {
+        return res.status(404).json({ message: "Addon not found" });
+      }
+      res.json(addon);
+    } catch (error) {
+      console.error("Error updating service addon:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // DELETE /api/addons/:id - Eliminar add-on
+  app.delete("/api/addons/:id", async (req, res) => {
+    try {
+      await storage.deleteServiceAddon(Number(req.params.id));
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting service addon:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // ---------- BOOKINGS MEJORADOS ----------
+  
+  // POST /api/bookings/calculate - Calcular total de reserva
+  app.post("/api/bookings/calculate", async (req, res) => {
+    try {
+      const { serviceId, addonIds, couponCode, userId } = req.body;
+      const calculation = await storage.calculateBookingTotal(serviceId, addonIds, couponCode, userId);
+      res.json(calculation);
+    } catch (error) {
+      console.error("Error calculating booking:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // GET /api/bookings/:id/addons - Obtener add-ons de una reserva
+  app.get("/api/bookings/:id/addons", async (req, res) => {
+    try {
+      const addons = await storage.getBookingAddons(Number(req.params.id));
+      res.json(addons);
+    } catch (error) {
+      console.error("Error fetching booking addons:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // POST /api/bookings/:id/addons - Agregar add-on a reserva
+  app.post("/api/bookings/:id/addons", async (req, res) => {
+    try {
+      const bookingAddon = await storage.addBookingAddon({
+        ...req.body,
+        bookingId: Number(req.params.id),
+      });
+      res.status(201).json(bookingAddon);
+    } catch (error) {
+      console.error("Error adding booking addon:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // ---------- CONFIGURACIÓN (BANCOS) ----------
+  
+  // Lista de bancos de Ecuador
+  const ECUADOR_BANKS = [
+    { id: "pichincha", name: "Banco Pichincha", account: "XXXX-XXXX-XXXX-1234" },
+    { id: "guayaquil", name: "Banco Guayaquil", account: "XXXX-XXXX-XXXX-5678" },
+    { id: "produbanco", name: "Produbanco", account: "XXXX-XXXX-XXXX-9012" },
+    { id: "bancoazuay", name: "Banco del Azuay", account: "XXXX-XXXX-XXXX-3456" },
+    { id: "bancomunicipal", name: "Banco Municipal", account: "XXXX-XXXX-XXXX-7890" },
+  ];
+  
+  // GET /api/config/banks - Obtener lista de bancos disponibles
+  app.get("/api/config/banks", async (req, res) => {
+    try {
+      res.json(ECUADOR_BANKS);
+    } catch (error) {
+      console.error("Error fetching banks:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // Schema de validación para voucher de pago
+  const createVoucherSchema = z.object({
+    bank: z.string().min(1, "Bank is required"),
+    voucherNumber: z.string().min(1, "Voucher number is required"),
+    date: z.string().min(1, "Date is required"),
+    time: z.string().min(1, "Time is required"),
+    amount: z.number().positive("Amount must be positive"),
+    serviceName: z.string().min(1, "Service name is required"),
+    notes: z.string().optional(),
+  });
+  
+  // POST /api/payments/voucher - Enviar voucher de pago
+  app.post("/api/payments/voucher", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      const data = createVoucherSchema.parse(req.body);
+      
+      // Validar que el banco existe
+      const bank = ECUADOR_BANKS.find(b => b.id === data.bank);
+      if (!bank) {
+        return res.status(400).json({ message: "Invalid bank" });
+      }
+      
+      // Crear el voucher en storage
+      const voucher = await storage.createPaymentVoucher({
+        userId,
+        bankId: data.bank,
+        bankName: bank.name,
+        bankAccount: bank.account,
+        voucherNumber: data.voucherNumber,
+        date: new Date(data.date),
+        time: data.time,
+        amount: data.amount,
+        serviceName: data.serviceName,
+        notes: data.notes,
+        status: "pending",
+      });
+      
+      res.status(201).json({ success: true, voucher });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Validation error", errors: error.errors });
+      }
+      console.error("Error submitting voucher:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  // GET /api/payments/vouchers - Listar vouchers del usuario
+  app.get("/api/payments/vouchers", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      const vouchers = await storage.getPaymentVouchersByUser(userId);
+      res.json(vouchers);
+    } catch (error) {
+      console.error("Error fetching vouchers:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  
+  console.log("✅ BookingDo-inspired routes registered");
   
   return httpServer;
 }

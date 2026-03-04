@@ -4,6 +4,17 @@ import { type InsertProvider, type InsertService, type InsertBooking } from "@sh
 import { useToast } from "@/hooks/use-toast";
 
 // ==========================================
+// HELPERS
+// ==========================================
+const getToken = () => {
+  try {
+    return localStorage.getItem("token");
+  } catch {
+    return null;
+  }
+};
+
+// ==========================================
 // CATEGORIES
 // ==========================================
 export function useCategories() {
@@ -49,7 +60,10 @@ export function useCurrentProvider() {
   return useQuery({
     queryKey: [api.providers.me.path],
     queryFn: async () => {
-      const res = await fetch(api.providers.me.path, { credentials: "include" });
+      const token = getToken();
+      const res = await fetch(api.providers.me.path, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       if (res.status === 401) return null;
       if (!res.ok) throw new Error("Failed to fetch current provider profile");
       return api.providers.me.responses[200].parse(await res.json());
@@ -64,11 +78,14 @@ export function useCreateProvider() {
   
   return useMutation({
     mutationFn: async (data: InsertProvider) => {
+      const token = getToken();
       const res = await fetch(api.providers.create.path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(data),
-        credentials: "include",
       });
       if (!res.ok) {
         const error = await res.json();
@@ -125,11 +142,14 @@ export function useCreateService() {
 
   return useMutation({
     mutationFn: async (data: InsertService) => {
+      const token = getToken();
       const res = await fetch(api.services.create.path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(data),
-        credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to create service");
       return api.services.create.responses[201].parse(await res.json());
@@ -151,7 +171,10 @@ export function useBookings() {
   return useQuery({
     queryKey: [api.bookings.list.path],
     queryFn: async () => {
-      const res = await fetch(api.bookings.list.path, { credentials: "include" });
+      const token = getToken();
+      const res = await fetch(api.bookings.list.path, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       if (!res.ok) throw new Error("Failed to fetch bookings");
       return api.bookings.list.responses[200].parse(await res.json());
     },
@@ -164,11 +187,14 @@ export function useCreateBooking() {
 
   return useMutation({
     mutationFn: async (data: InsertBooking) => {
+      const token = getToken();
       const res = await fetch(api.bookings.create.path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(data),
-        credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to create booking");
       return api.bookings.create.responses[201].parse(await res.json());
@@ -189,12 +215,15 @@ export function useUpdateBookingStatus() {
 
   return useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      const token = getToken();
       const url = buildUrl(api.bookings.updateStatus.path, { id });
       const res = await fetch(url, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ status }),
-        credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to update status");
       return api.bookings.updateStatus.responses[200].parse(await res.json());

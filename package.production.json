@@ -1,0 +1,37 @@
+{
+  "name": "genfeb",
+  "version": "1.0.0",
+  "description": "GenFeb S.A.S. - Plataforma de Servicios",
+  "main": "dist/index.cjs",
+  "scripts": {
+    "start": "NODE_ENV=production node dist/index.cjs",
+    "dev": "cross-env NODE_ENV=development npx tsx server/index.ts"
+  },
+  "keywords": ["genfeb", "services", "marketplace"],
+  "author": "GenFeb S.A.S.",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "express": "^4.21.0",
+    "firebase-admin": "^12.6.0",
+    "jsonwebtoken": "^9.0.2",
+    "pdfkit": "^0.15.1",
+    "socket.io": "^4.8.0",
+    "stripe": "^17.2.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.7.4",
+    "@types/pdfkit": "^0.13.4",
+    "cross-env": "^7.0.3",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { z } from "zod";
+import jwt from "jsonwebtoken";
 import { genFebStorage } from "./storage-genfeb";
 
 // ============== ESQUEMAS ==============
@@ -34,8 +35,7 @@ function authenticateJWT(req: any, res: any, next: any) {
   }
   const token = authHeader.substring(7);
   try {
-    const jwt = await import("jsonwebtoken");
-    const user = jwt.default.verify(token, process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024");
+    const user = jwt.verify(token, process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024");
     req.user = user;
     next();
   } catch {

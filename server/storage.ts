@@ -36,6 +36,7 @@ export interface IStorage {
   createService(service: InsertService): Promise<Service>;
   getBookingsByUser(userId: string): Promise<(Booking & { service: Service })[]>;
   getBookingsByProvider(providerId: number): Promise<(Booking & { service: Service, user: User })[]>;
+  getBooking(id: number): Promise<Booking | undefined>;
   createBooking(booking: InsertBooking): Promise<Booking>;
   updateBookingStatus(id: number, status: string): Promise<Booking | undefined>;
   seedCategories(): Promise<void>;
@@ -151,6 +152,12 @@ export class DatabaseStorage implements IStorage {
       },
       orderBy: desc(bookings.date)
     });
+  }
+
+  async getBooking(id: number): Promise<Booking | undefined> {
+    const db = await getDb();
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, id));
+    return booking;
   }
 
   /**
@@ -291,6 +298,10 @@ class MemoryStorage implements IStorage {
       });
   }
 
+  async getBooking(id: number): Promise<Booking | undefined> {
+    return this._bookings.find((b) => b.id === id);
+  }
+
   async createBooking(insertBooking: InsertBooking): Promise<Booking> {
     const booking: Booking = {
       id: this._bookingId++,
@@ -324,7 +335,9 @@ class MemoryStorage implements IStorage {
   }
 }
 
-export const storage =
-  process.env.DATABASE_URL && process.env.ENABLE_DATABASE === "true"
-    ? new DatabaseStorage()
-    : new MemoryStorage();
+// Select storage based on environment configuration
+// ENABLE_DATABASE=true uses DatabaseStorage (PostgreSQL/Drizzle)
+// Otherwise falls back to MemoryStorage for development
+const useDatabase = process.env.DATABASE_URL && process.env.ENABLE_DATABASE === "true";
+
+export const storage = useDatabase ? new DatabaseStorage() : new MemoryStorage();

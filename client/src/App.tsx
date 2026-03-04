@@ -21,7 +21,10 @@ import Chat from "@/pages/Chat";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Admin from "@/pages/Admin";
+import CreateRole from "@/pages/CreateRole";
+import EditUser from "@/pages/EditUser";
 import ProfessionalDashboard from "@/pages/ProfessionalDashboard";
+import PaymentVoucher from "@/pages/PaymentVoucher";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -41,7 +44,10 @@ function Router() {
       <Route path="/payments" component={Payments} />
       <Route path="/chat" component={Chat} />
       <Route path="/admin" component={Admin} />
+      <Route path="/admin/create-role" component={CreateRole} />
+      <Route path="/admin/users/:id/edit" component={EditUser} />
       <Route path="/professional-dashboard" component={ProfessionalDashboard} />
+      <Route path="/payment-voucher" component={PaymentVoucher} />
       <Route component={NotFound} />
     </Switch>
   );
