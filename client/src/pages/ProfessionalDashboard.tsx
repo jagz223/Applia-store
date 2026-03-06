@@ -3,15 +3,21 @@ import { useQuery } from "@tanstack/react-query";
 import { 
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText,
-  BarChart3, PieChart, Activity
+  BarChart3, PieChart, Activity, Loader2, MessageSquare
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
+import { useBookingsByProvider, useUpdateBookingStatus } from "@/hooks/use-mango-data";
+import { Link } from "wouter";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+import { toDate } from "@/lib/date-utils";
 
 // Mock data for professional dashboard
 const mockEarnings = {
@@ -56,6 +62,115 @@ const mockMonthlyData = [
   { month: "May", earnings: 3100 },
   { month: "Jun", earnings: 3250 },
 ];
+
+const STATUS_OPTIONS = [
+  { value: "pending", label: "Pendiente" },
+  { value: "confirmed", label: "Confirmada" },
+  { value: "in_progress", label: "En proceso" },
+  { value: "completed", label: "Completada" },
+  { value: "cancelled", label: "Cancelada" },
+];
+
+function ProviderBookingsTab() {
+  const { data: bookings, isLoading } = useBookingsByProvider();
+  const updateStatus = useUpdateBookingStatus();
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!bookings?.length) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Reservas recibidas</CardTitle>
+          <CardDescription>Cuando un cliente reserve tu servicio, aparecerá aquí. Podrás confirmar, marcar en proceso o completar.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-muted-foreground text-center py-8">No tienes reservas aún.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Reservas recibidas</CardTitle>
+        <CardDescription>Actualiza el estado de cada reserva según avance el trabajo.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          {(bookings as Array<{
+            id: number;
+            serviceId: number;
+            date: string | Date | { _seconds?: number };
+            status: string;
+            notes?: string | null;
+            user?: { firstName?: string; lastName?: string; name?: string };
+            service?: { title: string; price?: string };
+          }>).map((booking) => {
+            const date = toDate(booking.date);
+            const clientName = booking.user
+              ? [booking.user.firstName ?? booking.user.name, booking.user.lastName].filter(Boolean).join(" ") || "Cliente"
+              : "Cliente";
+            return (
+              <div key={booking.id} className="flex flex-wrap items-start justify-between gap-4 p-4 border rounded-lg">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{booking.service?.title ?? "Servicio"}</p>
+                  <p className="text-sm text-muted-foreground">Cliente: {clientName}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{format(date, "PPP", { locale: es })}</p>
+                  {booking.service?.price != null && (
+                    <p className="text-sm font-medium text-primary mt-1">${Number(booking.service.price).toFixed(0)}</p>
+                  )}
+                  {booking.notes && (
+                    <p className="text-sm text-muted-foreground mt-2 line-clamp-2">Notas: {booking.notes}</p>
+                  )}
+                  <div className="flex items-center gap-2 mt-2">
+                    <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                      <Link href="/chat">
+                        <MessageSquare className="h-4 w-4" />
+                        Chat
+                      </Link>
+                    </Button>
+                    <Button variant="link" className="h-auto p-0 text-primary" asChild>
+                      <Link href={`/service/${booking.serviceId}`}>Ver servicio</Link>
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <Badge variant={booking.status === "completed" ? "default" : booking.status === "cancelled" ? "destructive" : "secondary"}>
+                    {STATUS_OPTIONS.find((o) => o.value === booking.status)?.label ?? booking.status}
+                  </Badge>
+                  <Select
+                    value={booking.status}
+                    onValueChange={(value) => updateStatus.mutate({ id: booking.id, status: value })}
+                    disabled={updateStatus.isPending}
+                  >
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATUS_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function ProfessionalDashboard() {
   const { user } = useAuth();
@@ -155,6 +270,7 @@ export default function ProfessionalDashboard() {
         <Tabs defaultValue="overview" className="space-y-4">
           <TabsList>
             <TabsTrigger value="overview">Resumen</TabsTrigger>
+            <TabsTrigger value="bookings">Reservas</TabsTrigger>
             <TabsTrigger value="transactions">Transacciones</TabsTrigger>
             <TabsTrigger value="analytics">Análisis</TabsTrigger>
             <TabsTrigger value="invoices">Facturas</TabsTrigger>
@@ -281,6 +397,10 @@ export default function ProfessionalDashboard() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="bookings">
+            <ProviderBookingsTab />
           </TabsContent>
 
           <TabsContent value="transactions">

@@ -283,6 +283,27 @@ class FirestoreStorageImpl implements IStorage {
     } as Provider;
   }
 
+  /** Enriquece un proveedor con los datos del usuario (para ServiceWithProvider). */
+  private async enrichProviderWithUser(provider: Provider): Promise<ProviderWithUser> {
+    const raw = await this.getUserById(provider.userId);
+    const user = raw
+      ? {
+          ...raw,
+          firstName: (raw as { firstName?: string }).firstName ?? (raw as { name?: string }).name ?? "Usuario",
+          lastName: (raw as { lastName?: string }).lastName ?? "",
+        }
+      : {
+          id: provider.userId,
+          firstName: "Usuario",
+          lastName: "",
+          email: null,
+          profileImageUrl: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+    return { ...provider, user } as ProviderWithUser;
+  }
+
   async getProviderByUserId(userId: string): Promise<Provider | undefined> {
     if (!this.db) return undefined;
     
@@ -364,14 +385,18 @@ class FirestoreStorageImpl implements IStorage {
     const providerIdValid = (id: unknown): id is number =>
       id != null && typeof id === "number" && !Number.isNaN(id);
 
+    const allCategories = await this.getCategories();
     let servicesWithProviders: ServiceWithProvider[] = [];
     for (const service of services) {
       const provider = providerIdValid(service.providerId)
         ? await this.getProvider(service.providerId)
         : undefined;
+      const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
+      const category = allCategories.find((c) => c.id === service.categoryId);
       servicesWithProviders.push({
         ...service,
-        provider: provider ?? undefined,
+        provider: providerWithUser ?? undefined,
+        category: category ?? (allCategories[0] as Category),
       } as ServiceWithProvider);
     }
 
@@ -399,7 +424,7 @@ class FirestoreStorageImpl implements IStorage {
 
     const doc = await this.db.collection(FIRESTORE_COLLECTIONS.SERVICES).doc(String(safeId)).get();
     if (!doc.exists) return undefined;
-    
+
     const service = {
       id: parseInt(doc.id, 10),
       ...doc.data(),
@@ -410,11 +435,15 @@ class FirestoreStorageImpl implements IStorage {
     const provider = providerIdValid(service.providerId)
       ? await this.getProvider(service.providerId)
       : undefined;
+    const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
+    const allCategories = await this.getCategories();
+    const category = allCategories.find((c) => c.id === service.categoryId) ?? (allCategories[0] as Category | undefined);
 
     return {
       ...service,
-      provider: provider ?? undefined,
-    };
+      provider: providerWithUser ?? undefined,
+      category: category ?? ({} as Category),
+    } as ServiceWithProvider;
   }
 
   async createService(service: InsertService): Promise<Service> {
@@ -505,12 +534,20 @@ class FirestoreStorageImpl implements IStorage {
       } as Booking;
       
       const service = await this.getService(booking.serviceId);
-      const user = await this.getUserById(booking.userId);
+      if (!service) continue;
+      const rawUser = await this.getUserById(booking.userId);
+      const user = rawUser
+        ? {
+            ...rawUser,
+            firstName: (rawUser as { firstName?: string }).firstName ?? (rawUser as { name?: string }).name ?? "Cliente",
+            lastName: (rawUser as { lastName?: string }).lastName ?? "",
+          }
+        : { id: booking.userId, firstName: "Cliente", lastName: "", email: null, profileImageUrl: null, createdAt: new Date(), updatedAt: new Date() } as User;
       
       bookings.push({
         ...booking,
-        service: service!,
-        user: user!,
+        service,
+        user,
       });
     }
     

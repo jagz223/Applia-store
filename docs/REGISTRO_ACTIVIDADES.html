@@ -290,6 +290,23 @@
       <li><strong>Rutas</strong> (<code>server/routes.ts</code>): validación del cuerpo con Zod (esquemas <code>createServiceBodySchema</code> y <code>updateServiceBodySchema</code>), comprobación de JWT, obtención del proveedor del usuario para autorización y para fijar <code>providerId</code> y <code>categoryId</code> en la creación. Las rutas permanecen «finas»: validan, autorizan y delegan en <code>catalogService</code>.</li>
     </ul>
     <p class="gloss"><em>Para no programadores:</em> Los profesionales pueden desde la aplicación crear nuevos servicios, editarlos y eliminarlos. Solo el dueño del servicio (o un administrador) puede modificarlo o borrarlo. La categoría del servicio se asocia correctamente al perfil del profesional.</p>
+
+    <h3>Reservas (bookings)</h3>
+    <p>Las reservas se almacenan en Firestore (colección <code>bookings</code>) con: <code>id</code>, <code>userId</code>, <code>serviceId</code>, <code>date</code>, <code>status</code>, <code>notes</code>, <code>createdAt</code>. Opcionalmente el documento puede incluir <code>providerId</code> (derivado del servicio) para consultas.</p>
+    <ul>
+      <li><strong>GET /api/bookings</strong> — Lista las reservas del usuario autenticado (JWT). Query opcional: <code>status</code>.</li>
+      <li><strong>GET /api/bookings/:id</strong> — Obtiene una reserva por ID.</li>
+      <li><strong>POST /api/bookings</strong> — Crea una reserva. Cuerpo: <code>serviceId</code> (número), <code>date</code> (cadena ISO), <code>notes</code> (opcional). El <code>userId</code> se toma del JWT; el <code>providerId</code> se obtiene del servicio en el backend (no se envía desde el cliente). Requiere JWT. Si el servicio no existe, responde 404.</li>
+      <li><strong>PATCH /api/bookings/:id/status</strong> — Actualiza el estado de la reserva. Cuerpo: <code>{ "status": "pending" | "confirmed" | "in_progress" | "completed" | "cancelled" }</strong>. Solo el proveedor del servicio puede actualizar (autorización en backend).</li>
+    </ul>
+    <p class="gloss"><em>Para no programadores:</em> El usuario puede reservar un servicio desde la ficha del servicio. Solo debe indicar servicio, fecha y notas; el sistema asocia automáticamente su cuenta y al proveedor. Las reservas se listan en «Mis reservas» y el profesional puede cambiar su estado.</p>
+    <h3>Pantallas y flujo de reservas</h3>
+    <ul>
+      <li><strong>Crear reserva:</strong> En la ficha del servicio (<code>/service/:id</code>), botón «Book Now» abre un diálogo para elegir fecha y notas; al confirmar se llama a POST /api/bookings.</li>
+      <li><strong>Mis Reservas (cliente):</strong> Ruta <code>/bookings</code>. Lista todas las reservas del usuario autenticado (GET /api/bookings). Muestra servicio, profesional, fecha y estado. Enlace a la ficha del servicio. Si no hay sesión, se invita a iniciar sesión.</li>
+      <li><strong>Reservas del profesional:</strong> En <code>/professional-dashboard</code>, pestaña «Reservas». Lista las reservas recibidas (GET /api/bookings/provider). El profesional puede cambiar el estado con un desplegable (Pendiente → Confirmada → En proceso → Completada / Cancelada). Solo el proveedor del servicio puede actualizar el estado (PATCH /api/bookings/:id/status, autorizado en backend).</li>
+    </ul>
+    <p>APIs añadidas: <strong>GET /api/bookings/provider</strong> (JWT, devuelve reservas del profesional; si el usuario no es proveedor, devuelve array vacío).</p>
   </section>
 
   <!-- ========== RESUMEN DE ARCHIVOS MODIFICADOS O CREADOS ========== -->
@@ -307,6 +324,7 @@
       <li><code>server/storage-genfeb.ts</code> — Firmas de <code>updateService</code> y <code>deleteService</code> (retornos vacíos en memoria).</li>
       <li><code>server/services/catalog.service.ts</code> — <code>updateService</code>, <code>deleteService</code>; <code>getProviderCategoryAvailability()</code> basado en <code>getCategories()</code> y <code>categoryId</code>/slug; <code>getAllServices(..., providerCategoryId?)</code>.</li>
       <li><code>server/routes.ts</code> — GET <code>/api/me/provider</code> (JWT, <code>catalogService.getProviderByUserId</code>); POST/PATCH/DELETE de proveedores con <code>categoryId</code>; POST /api/services (crear), PATCH /api/services/:id (editar), DELETE /api/services/:id (eliminar), con validación Zod y autorización por dueño o admin.</li>
+      <li><code>server/routes-genfeb.ts</code> — POST /api/bookings: validación con <code>createBookingBodySchema</code> (solo <code>serviceId</code>, <code>date</code>, <code>notes</code>); <code>userId</code> desde JWT; comprobación de que el servicio existe antes de crear; corrección de uso de <code>updateBookingStatusSchema</code> en PATCH estado. GET /api/bookings/provider: listado de reservas del profesional (JWT, <code>getProviderByUserId</code> + <code>getBookingsByProvider</code>).</li>
     </ul>
     <h3>Frontend</h3>
     <ul>
@@ -317,6 +335,10 @@
       <li><code>client/src/pages/Explore.tsx</code> — Cartas de categoría desde <code>useCategories()</code> filtradas por <code>DEFAULT_CATEGORIES</code>; disponibilidad por id de categoría; clic en carta → lista de servicios con <code>providerCategoryId</code>; botón «Volver a categorías».</li>
       <li><code>client/src/components/Navigation.tsx</code> — Enlace «Crear servicio» en menú Servicios (y menú móvil), visible solo si <code>providerProfile</code> existe; <code>useShowBecomePro()</code> y <code>hasAdminRole</code>.</li>
       <li><code>client/src/pages/Home.tsx</code>, <code>Footer.tsx</code> — Uso de <code>useShowBecomePro()</code>.</li>
+      <li><code>client/src/pages/Bookings.tsx</code> — Página «Mis Reservas» (<code>/bookings</code>): lista de reservas del usuario con <code>useBookings()</code>, servicio, profesional, fecha y estado; enlace a la ficha del servicio; mensaje de inicio de sesión si no está autenticado.</li>
+      <li><code>client/src/pages/ProfessionalDashboard.tsx</code> — Pestaña «Reservas» con <code>ProviderBookingsTab</code>: listado real con <code>useBookingsByProvider()</code> y actualización de estado con <code>useUpdateBookingStatus()</code> (desplegable por reserva).</li>
+      <li><code>client/src/hooks/use-mango-data.ts</code> — Hook <code>useBookingsByProvider(params?)</code> para GET /api/bookings/provider; en <code>useUpdateBookingStatus</code> se invalida también la query de reservas del profesional.</li>
+      <li><code>client/src/App.tsx</code> — Ruta <code>/bookings</code> con componente <code>Bookings</code>.</li>
     </ul>
   </section>
 

@@ -212,6 +212,14 @@ export function Navigation() {
                       Panel de Control
                     </Link>
                   </DropdownMenuItem>
+                  {providerProfile && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/professional-dashboard" className="flex items-center">
+                        <Briefcase className="mr-2 h-4 w-4" />
+                        Panel profesional
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem asChild>
                     <Link href="/bookings" className="flex items-center">
                       <Calendar className="mr-2 h-4 w-4" />
@@ -274,9 +282,14 @@ export function Navigation() {
                   Reservas
                 </Link>
                 {providerProfile && (
-                  <Link href="/create-service" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                    Crear servicio
-                  </Link>
+                  <>
+                    <Link href="/professional-dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                      Panel profesional
+                    </Link>
+                    <Link href="/create-service" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                      Crear servicio
+                    </Link>
+                  </>
                 )}
                 <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Bóveda Segura

@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
-import { useCategories, useServices, useProviderCategoryAvailability } from "@/hooks/use-mango-data";
+import { useLocation } from "wouter";
+import { useCategories, useServices } from "@/hooks/use-mango-data";
 import { DEFAULT_CATEGORIES } from "@shared/default-categories";
 import { ServiceCard } from "@/components/ServiceCard";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, Sparkles, X, ArrowLeft } from "lucide-react";
 import * as Icons from "lucide-react";
@@ -18,6 +18,7 @@ function CategoryIcon({ name }: { name: string }) {
 }
 
 export default function Explore() {
+  const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const params = new URLSearchParams(window.location.search);
   const initialProviderCategoryId = params.get("providerCategoryId");
@@ -25,29 +26,28 @@ export default function Explore() {
   const [selectedProviderCategoryId, setSelectedProviderCategoryId] = useState<number | undefined>(
     !Number.isNaN(parsedId) ? parsedId : undefined
   );
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | undefined>(
-    params.get("categoryId") || undefined
-  );
 
   const { data: categories = [] } = useCategories();
-  const { data: availability } = useProviderCategoryAvailability();
   const providerCategories = useMemo(
-    () => categories.filter((c) => (c as { slug?: string }).slug && providerSlugs.has((c as { slug: string }).slug)),
+    () =>
+      categories.filter(
+        (c) => (c as { slug?: string }).slug && providerSlugs.has((c as { slug: string }).slug)
+      ),
     [categories]
   );
-
   const { data: services, isLoading } = useServices({
-    categoryId: selectedCategoryId,
     search: search || undefined,
     providerCategoryId: selectedProviderCategoryId,
   });
 
-  const selectedCategoryData = categories?.find((c) => String(c.id) === selectedCategoryId);
   const selectedProviderCategoryData = providerCategories.find(
     (c) => c.id === selectedProviderCategoryId
   );
 
-  const showCategoryCards = selectedProviderCategoryId == null;
+  const setProviderCategory = (id: number | undefined) => {
+    setSelectedProviderCategoryId(id);
+    setLocation(id != null ? `/explore?providerCategoryId=${id}` : "/explore");
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
@@ -80,25 +80,25 @@ export default function Explore() {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 mt-6">
+          {/* Pills: tipo de servicio (categoría de proveedor, la que se elige en /categories) */}
+          <div className="flex flex-wrap items-center gap-2 mt-4">
+            <span className="text-sm font-medium text-muted-foreground mr-1">Tipo de servicio:</span>
             <button
-              onClick={() => setSelectedCategoryId(undefined)}
+              onClick={() => setProviderCategory(undefined)}
               className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                !selectedCategoryId
+                selectedProviderCategoryId == null
                   ? "bg-primary text-white shadow-lg shadow-primary/30"
                   : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
               }`}
             >
               Todos
             </button>
-            {categories?.map((cat) => (
+            {providerCategories.map((cat) => (
               <button
                 key={cat.id}
-                onClick={() =>
-                  setSelectedCategoryId(selectedCategoryId === String(cat.id) ? undefined : String(cat.id))
-                }
+                onClick={() => cat.id != null && setProviderCategory(cat.id as number)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                  selectedCategoryId === String(cat.id)
+                  selectedProviderCategoryId === cat.id
                     ? "bg-primary text-white shadow-lg shadow-primary/30"
                     : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
                 }`}
@@ -111,63 +111,12 @@ export default function Explore() {
         </div>
       </div>
 
-      {showCategoryCards && (
-        <section className="container mx-auto px-4 py-10 max-w-7xl">
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-display font-bold text-foreground mb-2">Servicios por categoría</h2>
-            <p className="text-muted-foreground text-sm">
-              Haz clic en una categoría para ver los servicios de sus profesionales
-            </p>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-4 md:gap-6">
-            {providerCategories.map((cat, index) => {
-              const available = availability?.[String(cat.id)] === true;
-              const iconName = (cat as { icon?: string }).icon ?? "HelpCircle";
-              const Icon = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[iconName] ?? Icons.HelpCircle;
-              return (
-                <motion.div
-                  key={cat.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                >
-                  <Card
-                    className={
-                      available
-                        ? "card-industrial cursor-pointer group hover:border-primary/50 transition-all duration-300"
-                        : "card-industrial opacity-50 pointer-events-none transition-all duration-300"
-                    }
-                    onClick={() => available && setSelectedProviderCategoryId(cat.id as number)}
-                  >
-                    <CardContent className="p-6 text-center">
-                      <div
-                        className={
-                          available
-                            ? "p-4 rounded-xl text-primary bg-primary/10 w-fit mx-auto mb-4 group-hover:scale-110 transition-transform"
-                            : "p-4 rounded-xl text-muted-foreground bg-muted w-fit mx-auto mb-4"
-                        }
-                      >
-                        <Icon className="w-8 h-8" />
-                      </div>
-                      <h3 className="text-lg font-bold mb-1">{cat.name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {available ? "Disponible" : "Sin profesionales"}
-                      </p>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
       {selectedProviderCategoryId != null && (
         <div className="container mx-auto px-4 py-4 max-w-7xl">
           <Button
             variant="ghost"
             className="mb-4 gap-2"
-            onClick={() => setSelectedProviderCategoryId(undefined)}
+            onClick={() => setLocation("/categories")}
           >
             <ArrowLeft className="h-4 w-4" />
             Volver a categorías
@@ -181,25 +130,14 @@ export default function Explore() {
       )}
 
       <div className="container mx-auto px-4 py-8 max-w-7xl">
-        {(selectedCategoryId || search || selectedProviderCategoryId != null) && (
+        {(search || selectedProviderCategoryId != null) && (
           <div className="mb-6 flex items-center gap-3 flex-wrap">
             <span className="text-sm text-muted-foreground">Filtros:</span>
             {selectedProviderCategoryData && (
               <Badge variant="secondary" className="gap-1 pr-1">
                 {selectedProviderCategoryData.name}
                 <button
-                  onClick={() => setSelectedProviderCategoryId(undefined)}
-                  className="ml-1 p-0.5 hover:bg-muted rounded-full"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {selectedCategoryData && (
-              <Badge variant="secondary" className="gap-1 pr-1">
-                {selectedCategoryData.name}
-                <button
-                  onClick={() => setSelectedCategoryId(undefined)}
+                  onClick={() => setProviderCategory(undefined)}
                   className="ml-1 p-0.5 hover:bg-muted rounded-full"
                 >
                   <X className="h-3 w-3" />
@@ -220,8 +158,7 @@ export default function Explore() {
               className="text-primary h-auto py-1"
               onClick={() => {
                 setSearch("");
-                setSelectedCategoryId(undefined);
-                setSelectedProviderCategoryId(undefined);
+                setProviderCategory(undefined);
               }}
             >
               Limpiar todo
@@ -251,8 +188,7 @@ export default function Explore() {
               className="rounded-full px-8"
               onClick={() => {
                 setSearch("");
-                setSelectedCategoryId(undefined);
-                setSelectedProviderCategoryId(undefined);
+                setProviderCategory(undefined);
               }}
             >
               Mostrar todos

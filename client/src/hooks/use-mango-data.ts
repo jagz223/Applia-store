@@ -217,6 +217,33 @@ export function useBookings() {
   });
 }
 
+/** Reservas del profesional (como proveedor). Requiere JWT. */
+export function useBookingsByProvider(params?: { status?: string }) {
+  const queryKey = ["/api/bookings/provider", params?.status].filter(Boolean);
+  return useQuery({
+    queryKey,
+    queryFn: async () => {
+      const token = getToken();
+      const url = params?.status ? `/api/bookings/provider?status=${encodeURIComponent(params.status)}` : "/api/bookings/provider";
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Failed to fetch provider bookings");
+      return res.json();
+    },
+  });
+}
+
+/** Mensajes de feedback al crear una reserva (centralizados para consistencia y mantenibilidad). */
+const BOOKING_SUCCESS_TOAST = {
+  title: "Reserva realizada con éxito",
+  description: "El profesional ha sido notificado. Puedes ver el estado de tu reserva en Mi Cuenta → Mis Reservas.",
+} as const;
+
+const BOOKING_ERROR_TOAST = {
+  title: "Error al crear la reserva",
+} as const;
+
 export function useCreateBooking() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -237,11 +264,18 @@ export function useCreateBooking() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
-      toast({ title: "Booking Confirmed!", description: "The provider has been notified." });
+      toast({
+        title: BOOKING_SUCCESS_TOAST.title,
+        description: BOOKING_SUCCESS_TOAST.description,
+      });
     },
     onError: (err: Error) => {
-      toast({ title: "Booking Failed", description: err.message, variant: "destructive" });
-    }
+      toast({
+        title: BOOKING_ERROR_TOAST.title,
+        description: err.message || "Intenta de nuevo más tarde.",
+        variant: "destructive",
+      });
+    },
   });
 }
 
@@ -266,7 +300,8 @@ export function useUpdateBookingStatus() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
-      toast({ title: "Status Updated", description: "Booking status has been changed." });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
     },
   });
 }
