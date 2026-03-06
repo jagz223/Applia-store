@@ -145,13 +145,15 @@ export default function Booking() {
                               <SelectValue placeholder="Selecciona una categoría" />
                             </SelectTrigger>
                             <SelectContent>
-                              {categories?.map((cat) => (
-                                <SelectItem key={cat.id} value={cat.id.toString()}>
-                                  <div className="flex items-center gap-2">
-                                    <span>{cat.name}</span>
-                                  </div>
-                                </SelectItem>
-                              ))}
+                              {categories
+                                ?.filter((cat): cat is typeof cat & { id: NonNullable<typeof cat.id> } => cat.id != null)
+                                ?.map((cat) => (
+                                  <SelectItem key={String(cat.id)} value={String(cat.id)}>
+                                    <div className="flex items-center gap-2">
+                                      <span>{cat.name}</span>
+                                    </div>
+                                  </SelectItem>
+                                ))}
                             </SelectContent>
                           </Select>
                         </div>

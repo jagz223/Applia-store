@@ -11,6 +11,8 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "seed:firestore": "tsx script/seed-firestore.ts",
+    "seed:categories": "tsx script/seed-categories.ts",
+    "migrate:provider-categories": "tsx script/migrate-provider-categories.ts",
     "seed:roles": "tsx script/seed-roles.ts",
     "seed:users": "tsx script/seed-users.ts",
     "prod": "npm run build && npm run start"

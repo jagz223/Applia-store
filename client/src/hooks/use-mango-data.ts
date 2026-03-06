@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
-import { type InsertProvider, type InsertService, type InsertBooking } from "@shared/schema";
+import { type InsertProvider, type InsertService, type InsertBooking, type ServiceWithProvider } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
 // ==========================================
@@ -31,11 +31,41 @@ export function useCategories() {
 // ==========================================
 // PROVIDERS
 // ==========================================
-export function useProviders(profession?: string) {
+
+/** Lista de categorías de proveedor permitidas (desde API) */
+export function useProviderCategories() {
   return useQuery({
-    queryKey: [api.providers.list.path, profession],
+    queryKey: ["/api/provider-categories"],
     queryFn: async () => {
-      const url = buildUrl(api.providers.list.path) + (profession ? `?profession=${encodeURIComponent(profession)}` : "");
+      const res = await fetch("/api/provider-categories");
+      if (!res.ok) throw new Error("Failed to fetch provider categories");
+      return res.json() as Promise<Array<{ code: string; label: string; professionLabel?: string }>>;
+    },
+  });
+}
+
+/** Disponibilidad por categoría de proveedor (al menos un profesional). Para Explore: cartas encendidas/apagadas. */
+export function useProviderCategoryAvailability() {
+  return useQuery({
+    queryKey: ["/api/provider-categories/availability"],
+    queryFn: async () => {
+      const res = await fetch("/api/provider-categories/availability");
+      if (!res.ok) throw new Error("Failed to fetch provider category availability");
+      return res.json() as Promise<Record<string, boolean>>;
+    },
+  });
+}
+
+export function useProviders(params?: { profession?: string; category?: string }) {
+  const profession = params?.profession;
+  const category = params?.category;
+  return useQuery({
+    queryKey: [api.providers.list.path, profession, category],
+    queryFn: async () => {
+      const search = new URLSearchParams();
+      if (profession) search.set("profession", profession);
+      if (category) search.set("category", category);
+      const url = `${api.providers.list.path}${search.toString() ? `?${search.toString()}` : ""}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch providers");
       return api.providers.list.responses[200].parse(await res.json());
@@ -107,18 +137,24 @@ export function useCreateProvider() {
 // ==========================================
 // SERVICES
 // ==========================================
-export function useServices(params?: { categoryId?: string; search?: string }) {
+export function useServices(params?: {
+  categoryId?: string;
+  search?: string;
+  providerCategoryId?: number;
+}) {
   return useQuery({
     queryKey: [api.services.list.path, params],
     queryFn: async () => {
       const queryParams = new URLSearchParams();
       if (params?.categoryId) queryParams.append("categoryId", params.categoryId);
       if (params?.search) queryParams.append("search", params.search);
-      
+      if (params?.providerCategoryId != null)
+        queryParams.append("providerCategoryId", String(params.providerCategoryId));
       const url = `${api.services.list.path}?${queryParams.toString()}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch services");
-      return api.services.list.responses[200].parse(await res.json());
+      const parsed = api.services.list.responses[200].parse(await res.json());
+      return parsed as ServiceWithProvider[];
     },
   });
 }

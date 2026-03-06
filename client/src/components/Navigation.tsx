@@ -1,5 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { useShowBecomePro } from "@/hooks/use-show-become-pro";
+import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import { useCurrentProvider } from "@/hooks/use-mango-data";
 import { 
@@ -9,6 +11,7 @@ import {
   LayoutDashboard, 
   LogOut, 
   Menu, 
+  PlusCircle,
   Search, 
   User,
   Shield,
@@ -33,6 +36,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 
 export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth();
+  const showBecomePro = useShowBecomePro();
   const { data: providerProfile } = useCurrentProvider();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -66,6 +70,14 @@ export function Navigation() {
               <span>Reservas</span>
             </Link>
           </DropdownMenuItem>
+          {providerProfile && (
+            <DropdownMenuItem>
+              <Link href="/create-service" className="flex items-center gap-2 w-full">
+                <PlusCircle className="h-4 w-4" />
+                <span>Crear servicio</span>
+              </Link>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem>
             <Link href="/categories" className="flex items-center gap-2 w-full">
@@ -112,7 +124,7 @@ export function Navigation() {
               <span>Configuración</span>
             </Link>
           </DropdownMenuItem>
-          {user?.role === "admin" && (
+          {hasAdminRole(user) && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem>
@@ -172,11 +184,11 @@ export function Navigation() {
                      <span>Dashboard</span>
                    </Link>
                  </Button>
-              ) : (
+              ) : showBecomePro ? (
                 <Button variant="outline" className="hidden sm:flex border-primary text-primary hover:bg-primary/10" asChild>
                   <Link href="/become-pro">Convertirse en Profesional</Link>
                 </Button>
-              )}
+              ) : null}
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -261,6 +273,11 @@ export function Navigation() {
                 <Link href="/booking" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Reservas
                 </Link>
+                {providerProfile && (
+                  <Link href="/create-service" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                    Crear servicio
+                  </Link>
+                )}
                 <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Bóveda Segura
                 </Link>

@@ -1,8 +1,9 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { insertProviderSchema } from "@shared/schema";
 import { type InsertProvider } from "@shared/schema";
-import { useCreateProvider, useCurrentProvider } from "@/hooks/use-mango-data";
+import { useCreateProvider, useCurrentProvider, useCategories } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -10,9 +11,16 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { useEffect } from "react";
 import { api } from "@shared/routes";
+
+const becomeProFormSchema = insertProviderSchema.extend({
+  categoryId: z.number().int().positive().optional(),
+  category: z.string().optional(),
+});
+type BecomeProForm = z.infer<typeof becomeProFormSchema>;
 
 export default function BecomePro() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -20,10 +28,13 @@ export default function BecomePro() {
   const createProvider = useCreateProvider();
   const [, setLocation] = useLocation();
 
-  const form = useForm<InsertProvider>({
-    resolver: zodResolver(insertProviderSchema),
+  const { data: categories = [] } = useCategories();
+  const form = useForm<BecomeProForm>({
+    resolver: zodResolver(becomeProFormSchema),
     defaultValues: {
-      userId: "", // Will be set in useEffect
+      userId: "",
+      categoryId: undefined,
+      category: undefined,
       profession: "",
       bio: "",
       yearsExperience: 0,
@@ -59,10 +70,16 @@ export default function BecomePro() {
     );
   }
 
-  function onSubmit(data: InsertProvider) {
-    createProvider.mutate(data, {
-      onSuccess: () => setLocation("/dashboard"),
-    });
+  function onSubmit(data: BecomeProForm) {
+    const slug = data.categoryId != null ? categories?.find((c) => c.id === data.categoryId)?.slug : undefined;
+    createProvider.mutate(
+      {
+        ...data,
+        categoryId: data.categoryId,
+        category: slug ?? data.category ?? undefined,
+      } as InsertProvider,
+      { onSuccess: () => setLocation("/dashboard") }
+    );
   }
 
   return (
@@ -80,7 +97,35 @@ export default function BecomePro() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              
+              <FormField
+                control={form.control}
+                name="categoryId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Categoría de proveedor</FormLabel>
+                    <Select
+                      onValueChange={(v) => field.onChange(v ? Number(v) : undefined)}
+                      value={field.value != null ? String(field.value) : ""}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona una categoría" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {categories
+                          ?.filter((cat) => cat.id != null)
+                          .map((cat) => (
+                            <SelectItem key={String(cat.id)} value={String(cat.id)}>
+                              {cat.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="profession"

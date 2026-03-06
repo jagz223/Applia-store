@@ -44,16 +44,30 @@ export interface IRoleStorage {
   seedRoles(): Promise<void>;
 }
 
+/** Datos parciales para actualizar un proveedor (solo campos editables). */
+export type ProviderUpdate = Partial<
+  Pick<Provider, "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate">
+>;
+
+/** Datos parciales para actualizar un servicio (solo campos editables). */
+export type ServiceUpdate = Partial<
+  Pick<Service, "title" | "description" | "price" | "imageUrl" | "isActive" | "categoryId">
+>;
+
 /** Contrato para catálogo: categorías, proveedores, servicios. */
 export interface ICatalogStorage {
   getCategories(): Promise<Category[]>;
-  getAllProviders(profession?: string): Promise<Provider[]>;
-  getProvider(id: number): Promise<Provider | undefined>;
+  getAllProviders(profession?: string, category?: string, categoryId?: number): Promise<Provider[]>;
+  getProvider(id: number | null | undefined): Promise<Provider | undefined>;
   getProviderByUserId(userId: string): Promise<Provider | undefined>;
   createProvider(provider: InsertProvider): Promise<Provider>;
-  getAllServices(categoryId?: number, search?: string): Promise<ServiceWithProvider[]>;
+  updateProvider(id: number, data: ProviderUpdate): Promise<Provider | undefined>;
+  deleteProvider(id: number): Promise<boolean>;
+  getAllServices(categoryId?: number, search?: string, providerCategoryId?: number): Promise<ServiceWithProvider[]>;
   getService(id: number): Promise<ServiceWithProvider | undefined>;
   createService(service: InsertService): Promise<Service>;
+  updateService(id: number, data: ServiceUpdate): Promise<Service | undefined>;
+  deleteService(id: number): Promise<boolean>;
   seedCategories(): Promise<void>;
 }
 

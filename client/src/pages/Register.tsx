@@ -13,6 +13,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { api } from "@shared/routes";
+import { isGuest } from "@/lib/auth-utils";
+import { AlreadyAuthenticatedView } from "@/components/AlreadyAuthenticatedView";
 
 const registerSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
@@ -34,7 +36,22 @@ export default function Register() {
   const [isLoading, setIsLoading] = useState(false);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { setUser } = useAuth();
+  const { user, isLoading: authLoading, setUser } = useAuth();
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-mango-orange/20 via-background to-mango-green/20 p-4">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <p className="text-sm">Cargando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isGuest(user)) {
+    return <AlreadyAuthenticatedView />;
+  }
 
   const form = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),

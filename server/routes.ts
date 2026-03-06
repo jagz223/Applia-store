@@ -1,7 +1,11 @@
 import type { Express } from "express";
 import type { Server } from "http";
+import { z } from "zod";
 import { api } from "@shared/routes";
+import { insertProviderSchema, insertServiceSchema } from "@shared/schema";
+import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService } from "./services";
+import { genFebStorage } from "./storage-genfeb";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerGenFebRoutes } from "./routes-genfeb";
 import { registerAuthRoutes as registerJwtAuthRoutes, authenticateJWT } from "./routes-auth";
@@ -19,14 +23,127 @@ export async function registerRoutes(
   registerAdminRoutes(app);
   registerRoleRoutes(app);
 
-  /**
-   * Registro de middleware y rutas de autenticación.
-   * Si REPL_ID no está definido, las rutas de login/callback responden 501.
-   */
+  // GET /api/me/provider — perfil de proveedor del usuario autenticado (Create Service, Dashboard). Ruta explícita y temprana.
+  app.get("/api/me/provider", authenticateJWT, async (req: any, res) => {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const provider = await catalogService.getProviderByUserId(userId);
+    res.json(provider ?? null);
+  });
+
+  // Catálogo público: registrar ANTES de GenFeb para que /api/provider-categories/availability y /api/services coincidan
+  app.get(api.categories.list.path, async (_req, res) => {
+    const categories = await catalogService.getCategories();
+    res.json(categories);
+  });
+  app.get("/api/provider-categories", (_req, res) => res.json(PROVIDER_CATEGORIES));
+  app.get("/api/provider-categories/availability", async (_req, res) => {
+    res.json(await catalogService.getProviderCategoryAvailability());
+  });
+  app.get(api.providers.list.path, async (req, res) => {
+    const profession = (req.query.profession as string)?.trim() || undefined;
+    const category = (req.query.category as string)?.trim() || undefined;
+    res.json(await catalogService.getAllProviders(profession, category));
+  });
+  app.get(api.providers.get.path, async (req, res) => {
+    const provider = await catalogService.getProvider(Number(req.params.id));
+    if (!provider) return res.status(404).json({ message: "Provider not found" });
+    res.json(provider);
+  });
+  app.get(api.services.list.path, async (req, res) => {
+    const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
+    const search = (req.query.search as string) || undefined;
+    const providerCategoryId = req.query.providerCategoryId ? Number(req.query.providerCategoryId) : undefined;
+    res.json(await catalogService.getAllServices(categoryId, search, providerCategoryId));
+  });
+  app.get(api.services.get.path, async (req, res) => {
+    const service = await catalogService.getService(Number(req.params.id));
+    if (!service) return res.status(404).json({ message: "Service not found" });
+    res.json(service);
+  });
+
+  const createServiceBodySchema = insertServiceSchema;
+  const updateServiceBodySchema = z.object({
+    title: z.string().min(1).max(500).optional(),
+    description: z.string().max(5000).optional(),
+    price: z.string().optional(),
+    imageUrl: z.string().url().optional().or(z.literal("")),
+    isActive: z.boolean().optional(),
+    categoryId: z.number().int().positive().optional(),
+  });
+
+  app.post(api.services.create.path, authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "Solo proveedores pueden crear servicios" });
+      const data = createServiceBodySchema.parse(req.body);
+      const resolvedCategoryId = data.categoryId ?? (provider as { categoryId?: number }).categoryId;
+      if (resolvedCategoryId == null || Number.isNaN(Number(resolvedCategoryId)) || Number(resolvedCategoryId) < 1) {
+        return res.status(400).json({ message: "categoryId es requerido (categoría del perfil de proveedor)" });
+      }
+      const service = await catalogService.createService({
+        ...data,
+        providerId: provider.id,
+        categoryId: Number(resolvedCategoryId),
+        title: data.title,
+        description: data.description ?? "",
+        price: data.price ?? "0",
+        imageUrl: data.imageUrl ?? "",
+        isActive: data.isActive ?? true,
+      } as any);
+      return res.status(201).json(service);
+    } catch (e: any) {
+      if (e.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      throw e;
+    }
+  });
+
+  app.patch("/api/services/:id", authenticateJWT, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID inválido" });
+      const service = await catalogService.getService(id);
+      if (!service) return res.status(404).json({ message: "Service not found" });
+      const userId = req.user?.id;
+      const isAdmin = req.user?.role === "admin";
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      const isOwner = provider && service.providerId === provider.id;
+      if (!isOwner && !isAdmin) return res.status(403).json({ message: "Solo el dueño del servicio o un admin puede editarlo" });
+      const data = updateServiceBodySchema.parse(req.body);
+      const updated = await catalogService.updateService(id, data as any);
+      if (!updated) return res.status(404).json({ message: "Service not found" });
+      return res.json(updated);
+    } catch (e: any) {
+      if (e.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      throw e;
+    }
+  });
+
+  app.delete("/api/services/:id", authenticateJWT, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID inválido" });
+      const service = await catalogService.getService(id);
+      if (!service) return res.status(404).json({ message: "Service not found" });
+      const userId = req.user?.id;
+      const isAdmin = req.user?.role === "admin";
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      const isOwner = provider && service.providerId === provider.id;
+      if (!isOwner && !isAdmin) return res.status(403).json({ message: "Solo el dueño del servicio o un admin puede eliminarlo" });
+      const ok = await catalogService.deleteService(id);
+      if (!ok) return res.status(404).json({ message: "Service not found" });
+      return res.status(204).send();
+    } catch (e: any) {
+      throw e;
+    }
+  });
+
   await setupAuth(app);
   registerAuthRoutes(app);
-  
-  // Registrar rutas de GenFeb S.A.S.
   await registerGenFebRoutes(httpServer, app);
   
   // Registrar rutas de autenticación JWT
@@ -38,45 +155,82 @@ export async function registerRoutes(
   // Registrar rutas de PayPal
   await registerPayPalRoutes(httpServer, app);
 
-  /** Categorías: listado público (unificado con genFebStorage vía CatalogService) */
-  app.get(api.categories.list.path, async (_req, res) => {
-    const categories = await catalogService.getCategories();
-    res.json(categories);
+  const createProviderBodySchema = insertProviderSchema.extend({
+    category: providerCategorySchema.optional(),
+    categoryId: z.number().int().positive().optional(),
+  });
+  const updateProviderBodySchema = z.object({
+    category: providerCategorySchema.optional(),
+    categoryId: z.number().int().positive().optional(),
+    profession: z.string().min(1).max(200).optional(),
+    bio: z.string().max(2000).optional(),
+    yearsExperience: z.number().int().min(0).optional(),
+    hourlyRate: z.string().optional(),
   });
 
-  /**
-   * Proveedores:
-   * - GET /api/providers?profession=... → filtro opcional por profesión
-   * - GET /api/providers/:id → detalle por id
-   */
-  app.get(api.providers.list.path, async (req, res) => {
-    const profession = req.query.profession as string | undefined;
-    const providers = await catalogService.getAllProviders(profession);
-    res.json(providers);
+  app.post(api.providers.create.path, authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const data = createProviderBodySchema.parse(req.body);
+      const existing = await catalogService.getProviderByUserId(userId);
+      if (existing) {
+        await genFebStorage.updateUser(userId, { role: "professional" } as any);
+        return res.status(409).json({ message: "Ya tienes un perfil de proveedor" });
+      }
+      const provider = await catalogService.createProvider({
+        userId,
+        categoryId: data.categoryId ?? undefined,
+        category: data.category ?? null,
+        profession: data.profession,
+        bio: data.bio ?? "",
+        yearsExperience: data.yearsExperience ?? 0,
+        hourlyRate: data.hourlyRate ?? null,
+      } as any);
+      await genFebStorage.updateUser(userId, { role: "professional" } as any);
+      return res.status(201).json(provider);
+    } catch (e: any) {
+      if (e.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      throw e;
+    }
   });
 
-  app.get(api.providers.get.path, async (req, res) => {
-    const provider = await catalogService.getProvider(Number(req.params.id));
-    if (!provider) return res.status(404).json({ message: "Provider not found" });
-    res.json(provider);
+  app.patch("/api/providers/:id", authenticateJWT, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID inválido" });
+      const provider = await catalogService.getProvider(id);
+      if (!provider) return res.status(404).json({ message: "Provider not found" });
+      const userId = req.user?.id;
+      const isAdmin = req.user?.role === "admin";
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      if ((provider as any).userId !== userId && !isAdmin) return res.status(403).json({ message: "Solo el dueño o un admin puede editar este proveedor" });
+      const data = updateProviderBodySchema.parse(req.body);
+      const updated = await catalogService.updateProvider(id, data as any);
+      if (!updated) return res.status(404).json({ message: "Provider not found" });
+      return res.json(updated);
+    } catch (e: any) {
+      if (e.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      throw e;
+    }
   });
 
-  /**
-   * Servicios:
-   * - GET /api/services?categoryId&search → listado con filtros
-   * - GET /api/services/:id → detalle con proveedor y categoría
-   */
-  app.get(api.services.list.path, async (req, res) => {
-    const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
-    const search = req.query.search as string | undefined;
-    const services = await catalogService.getAllServices(categoryId, search);
-    res.json(services);
-  });
-
-  app.get(api.services.get.path, async (req, res) => {
-    const service = await catalogService.getService(Number(req.params.id));
-    if (!service) return res.status(404).json({ message: "Service not found" });
-    res.json(service);
+  app.delete("/api/providers/:id", authenticateJWT, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "ID inválido" });
+      const provider = await catalogService.getProvider(id);
+      if (!provider) return res.status(404).json({ message: "Provider not found" });
+      const userId = req.user?.id;
+      const isAdmin = req.user?.role === "admin";
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      if ((provider as any).userId !== userId && !isAdmin) return res.status(403).json({ message: "Solo el dueño o un admin puede eliminar este proveedor" });
+      const ok = await catalogService.deleteProvider(id);
+      if (!ok) return res.status(404).json({ message: "Provider not found" });
+      return res.status(204).send();
+    } catch (e: any) {
+      throw e;
+    }
   });
 
   /**
