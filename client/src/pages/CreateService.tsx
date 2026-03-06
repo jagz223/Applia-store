@@ -8,10 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
+import { Loader2, Tag } from "lucide-react";
+import { useEffect, useMemo } from "react";
 
 export default function CreateService() {
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
@@ -32,11 +31,28 @@ export default function CreateService() {
     },
   });
 
+  const providerCategoryId = (provider as { categoryId?: number })?.categoryId ?? null;
+  const providerCategorySlug = (provider as { category?: string })?.category ?? null;
+  const providerCategory = useMemo(() => {
+    if (providerCategoryId != null && !Number.isNaN(providerCategoryId)) {
+      return categories?.find((c) => c.id === providerCategoryId) ?? null;
+    }
+    if (providerCategorySlug && categories?.length) {
+      return categories.find((c) => (c as { slug?: string }).slug === providerCategorySlug) ?? null;
+    }
+    return null;
+  }, [categories, providerCategoryId, providerCategorySlug]);
+
+  const resolvedCategoryId = providerCategory?.id ?? providerCategoryId;
+
   useEffect(() => {
     if (provider) {
       form.setValue("providerId", provider.id);
+      if (resolvedCategoryId != null && !Number.isNaN(Number(resolvedCategoryId))) {
+        form.setValue("categoryId", Number(resolvedCategoryId));
+      }
     }
-  }, [provider, form]);
+  }, [provider, resolvedCategoryId, form]);
 
   if (providerLoading) {
     return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin" /></div>;
@@ -82,35 +98,26 @@ export default function CreateService() {
                 )}
               />
 
-              <div className="grid grid-cols-2 gap-4">
-                 <FormField
-                  control={form.control}
-                  name="categoryId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Category</FormLabel>
-                      <Select 
-                        onValueChange={(val) => field.onChange(parseInt(val))}
-                        defaultValue={field.value?.toString()}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select Category" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {categories?.map((cat) => (
-                            <SelectItem key={cat.id} value={cat.id.toString()}>
-                              {cat.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+              <FormField
+                control={form.control}
+                name="categoryId"
+                render={() => (
+                  <FormItem>
+                    <FormLabel>Categoría</FormLabel>
+                    <FormControl>
+                      <div className="flex h-10 w-full items-center gap-2 rounded-md border border-input bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                        <Tag className="h-4 w-4 shrink-0" />
+                        <span>
+                          {providerCategory ? providerCategory.name : "Categoría de tu perfil de proveedor"}
+                        </span>
+                      </div>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
+              <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
                   name="price"

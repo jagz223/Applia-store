@@ -1,7 +1,10 @@
 import { Link } from "wouter";
 import { Facebook, Twitter, Instagram, Linkedin, Heart } from "lucide-react";
+import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 
 export function Footer() {
+  const showBecomePro = useShowBecomePro();
+
   return (
     <footer className="bg-white border-t border-border/50 mt-auto">
       <div className="container mx-auto px-4 py-12 md:py-16 max-w-7xl">
@@ -30,7 +33,7 @@ export function Footer() {
             <ul className="space-y-3 text-sm text-muted-foreground">
               <li><Link href="/explore" className="hover:text-primary transition-colors">Explorar Servicios</Link></li>
               <li><Link href="/categories" className="hover:text-primary transition-colors">Categorías</Link></li>
-              <li><Link href="/become-pro" className="hover:text-primary transition-colors">Conviértete en Profesional</Link></li>
+              {showBecomePro && <li><Link href="/become-pro" className="hover:text-primary transition-colors">Conviértete en Profesional</Link></li>}
               <li><a href="#" className="hover:text-primary transition-colors">Cómo Funciona</a></li>
             </ul>
           </div>

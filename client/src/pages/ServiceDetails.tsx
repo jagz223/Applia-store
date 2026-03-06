@@ -1,7 +1,7 @@
 import { useRoute, Link, useLocation } from "wouter";
-import { useService, useCreateBooking, useCurrentProvider } from "@/hooks/use-mango-data";
+import { useService, useCreateBooking, useCurrentProvider, useBookings } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
-import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft } from "lucide-react";
+import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,6 +27,7 @@ export default function ServiceDetails() {
   const { data: service, isLoading } = useService(id);
   const { user, isAuthenticated } = useAuth();
   const { data: myProviderProfile } = useCurrentProvider();
+  const { data: myBookings } = useBookings();
   
   const createBooking = useCreateBooking();
   const [date, setDate] = useState<Date | undefined>(new Date());
@@ -79,6 +80,8 @@ export default function ServiceDetails() {
 
   // Prevent booking own service
   const isOwnService = myProviderProfile?.id === service.providerId;
+  const hasBookingForThisService = (myBookings as { serviceId: number }[] | undefined)?.some((b) => b.serviceId === id) ?? false;
+  const showChatButton = isAuthenticated && (isOwnService || hasBookingForThisService);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -119,10 +122,10 @@ export default function ServiceDetails() {
             <h3 className="text-xl font-bold font-display mb-6">About the Provider</h3>
             <div className="flex items-start gap-4">
               <div className="h-16 w-16 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-2xl">
-                {service.provider.user.firstName?.[0] || "P"}
+                {service.provider?.user?.firstName?.[0] ?? service.provider?.user?.lastName?.[0] ?? "P"}
               </div>
               <div>
-                <h4 className="font-bold text-lg">{service.provider.user.firstName} {service.provider.user.lastName}</h4>
+                <h4 className="font-bold text-lg">{service.provider?.user?.firstName ?? ""} {service.provider?.user?.lastName ?? ""}</h4>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
                   <span>{service.provider.profession}</span>
                   <span>•</span>
@@ -159,6 +162,14 @@ export default function ServiceDetails() {
               </div>
             </div>
 
+            {showChatButton && (
+              <Button className="w-full" variant="outline" asChild>
+                <Link href="/chat" className="gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  Chat
+                </Link>
+              </Button>
+            )}
             {isAuthenticated ? (
                isOwnService ? (
                  <Button className="w-full" variant="secondary" disabled>Cannot Book Own Service</Button>
@@ -173,7 +184,7 @@ export default function ServiceDetails() {
                     <DialogHeader>
                       <DialogTitle>Book Service</DialogTitle>
                       <DialogDescription>
-                        Select a date to request this service from {service.provider.user.firstName}.
+                        Select a date to request this service from {service.provider?.user?.firstName ?? "el profesional"}.
                       </DialogDescription>
                     </DialogHeader>
                     <div className="py-4 space-y-4">

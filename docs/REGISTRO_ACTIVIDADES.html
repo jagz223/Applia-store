@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Registro de actividades - GenFeb</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    h1, h2, h3 { color: var(--text); margin-top: 1.5em; }
+    h1 { font-size: 1.75rem; border-bottom: 1px solid var(--surface); padding-bottom: 0.5rem; }
+    h2 { font-size: 1.25rem; }
+    h3 { font-size: 1.05rem; color: var(--muted); }
+    p { margin: 0.5em 0; }
+    ul, ol { margin: 0.5em 0; padding-left: 1.5rem; }
+    .meta {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 2rem;
+    }
+    .meta strong { color: var(--accent); }
+    section {
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    code, pre {
+      background: rgba(0,0,0,0.3);
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 0.9em;
+    }
+    code { padding: 0.15em 0.4em; }
+    pre { padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
+    .badge {
+      display: inline-block;
+      padding: 0.2em 0.5em;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+    .badge-success { background: var(--success); color: var(--bg); }
+    .badge-warning { background: var(--warning); color: var(--bg); }
+    .badge-info { background: var(--accent); color: var(--bg); }
+    hr { border: none; border-top: 1px solid var(--surface); margin: 1.5rem 0; }
+    .gloss { color: var(--muted); font-size: 0.9em; margin-top: 0.25em; }
+  </style>
+</head>
+<body>
+  <h1>Registro de actividades — GenFeb</h1>
+  <p class="meta">
+    <strong>Última actualización:</strong> <span id="last-updated">marzo 2025</span> — API /api/me/provider, menú Crear servicio, categoría fija al crear servicio, APIs completas de servicios (POST, PATCH, DELETE).<br />
+    Documento vivo: se actualiza con cada avance reportado.
+  </p>
+
+  <hr />
+
+  <!-- ========== RESUMEN EJECUTIVO ========== -->
+  <section>
+    <h2>1. Resumen ejecutivo de los cambios documentados</h2>
+    <p>Este documento describe el trabajo realizado a partir de la <strong>creación de las categorías de profesión para proveedores</strong> y todo lo implementado después en GenFeb: relación usuario–proveedor en Firestore, cambio automático de rol al convertirse en profesional, corrección de rol en conflicto 409, visibilidad del CTA «Convertirse en Profesional», un solo sistema de categorías (seeder, migración, Explore por categoría), la API GET /api/me/provider para que la pantalla de crear servicio funcione, el enlace «Crear servicio» en el menú, la categoría fija (no seleccionable) al crear servicio y las APIs completas de servicios (crear, editar, eliminar). En todo ello se aplicaron buenas prácticas (SOLID, código limpio) y una estructura en capas (contratos de almacenamiento, servicio de dominio, rutas finas).</p>
+    <p class="gloss"><em>En términos no técnicos:</em> Se definieron tipos fijos de proveedor, se aseguró que al registrarse como proveedor el usuario pase a «profesional», se corrigió el rol de quienes ya tenían perfil, se ocultó «Convertirse en Profesional» para quienes ya son profesionales o administradores, se unificaron las categorías en una sola lista en la base de datos, se permitió acceder a «Crear servicio» desde el menú y que la categoría del servicio sea la del perfil del profesional, y se completaron las APIs para que los profesionales puedan crear, editar y eliminar sus servicios.</p>
+  </section>
+
+  <!-- ========== CATEGORÍAS DE PROVEEDOR ========== -->
+  <section>
+    <h2>2. Categorías de proveedor (lista fija y uso en el sistema)</h2>
+    <h3>Qué se hizo</h3>
+    <p>Se definió una lista única y controlada de <strong>categorías</strong> que puede tener un proveedor en la plataforma. Así se evita que se ingresen categorías arbitrarias y se mantiene coherencia en filtros y reportes.</p>
+    <h3>Dónde está definido</h3>
+    <ul>
+      <li><strong>Archivo:</strong> <code>shared/provider-categories.ts</code>.</li>
+      <li>Se definen códigos (por ejemplo <code>technical_services</code>, <code>legal</code>, <code>financial</code>, <code>maintenance</code>, <code>delivery</code>, <code>marketplace</code>, <code>transport_taxi</code>), etiquetas para mostrar al usuario (p. ej. «Servicios Técnicos», «Legales», «Financiero») y las profesiones asociadas a cada categoría (ingeniero civil, abogado/a, asesor financiero, etc.).</li>
+    </ul>
+    <h3>Base de datos</h3>
+    <p>En el modelo de <strong>proveedores</strong> se añadió un campo opcional <code>category</code> (texto). En Firestore no hace falta «subir» un esquema: el campo aparece cuando se guarda el primer proveedor con categoría. Los proveedores antiguos pueden no tener el campo; el sistema lo trata como opcional.</p>
+    <p class="gloss"><em>Para no programadores:</em> Cada proveedor puede tener ahora una «etiqueta» de categoría (técnico, legal, delivery, etc.) elegida de una lista fija. La base de datos guarda ese dato en cada ficha de proveedor.</p>
+    <h3>APIs creadas o modificadas</h3>
+    <ul>
+      <li><strong>GET /api/provider-categories</strong> — Devuelve la lista de categorías permitidas (código y nombre). La usa el frontend para mostrar el desplegable al crear o editar un proveedor.</li>
+      <li><strong>GET /api/providers</strong> — Ahora acepta un parámetro opcional <code>category</code> para filtrar proveedores por categoría.</li>
+      <li><strong>POST /api/providers</strong> — Crear proveedor; el cuerpo puede incluir <code>category</code> (validada contra la lista permitida). Requiere estar logueado (JWT).</li>
+      <li><strong>PATCH /api/providers/:id</strong> — Actualizar proveedor (incluida la categoría). Solo el dueño del perfil o un administrador.</li>
+      <li><strong>DELETE /api/providers/:id</strong> — Eliminar proveedor. Solo el dueño o un administrador.</li>
+    </ul>
+    <h3>Interfaz de usuario</h3>
+    <p>En la página <strong>«Convertirse en Profesional»</strong> (<code>/become-pro</code>) se agregó un selector de categoría que se rellena con las opciones devueltas por <code>GET /api/provider-categories</code>. El usuario debe elegir una categoría de la lista al crear su perfil de proveedor.</p>
+  </section>
+
+  <!-- ========== RELACIÓN USUARIO–PROVEEDOR EN FIRESTORE ========== -->
+  <section>
+    <h2>3. Relación entre usuario y proveedor en Firestore</h2>
+    <p>Firestore es una base de datos <strong>no relacional</strong> (NoSQL): no tiene «claves foráneas» como en una base SQL. La relación entre usuario y proveedor se hace por <strong>referencia</strong> en el código.</p>
+    <h3>Cómo se relacionan</h3>
+    <ul>
+      <li><strong>Colección <code>users</code>:</strong> cada documento es un usuario (identificado por su <code>id</code>).</li>
+      <li><strong>Colección <code>providers</code>:</strong> cada documento es un proveedor y tiene un campo <code>userId</code> donde se guarda el <code>id</code> del usuario al que pertenece ese perfil.</li>
+    </ul>
+    <p><strong>Usuario → Proveedor:</strong> para saber si un usuario tiene perfil de proveedor, se busca en <code>providers</code> el documento cuyo <code>userId</code> sea el id de ese usuario (función <code>getProviderByUserId(userId)</code>).</p>
+    <p><strong>Proveedor → Usuario:</strong> para mostrar datos del usuario (nombre, email, etc.) a partir de un proveedor, se usa el <code>userId</code> del proveedor y se lee el documento correspondiente en la colección <code>users</code>.</p>
+    <p class="gloss"><em>Para no programadores:</em> No hay «tablas unidas» como en Excel. En su lugar, cada ficha de proveedor guarda el «número de usuario» al que pertenece. El programa usa ese número para ir a buscar los datos del usuario cuando hace falta. La relación la mantiene la aplicación al escribir y leer datos.</p>
+  </section>
+
+  <!-- ========== ROL PROFESIONAL AL CREAR PROVEEDOR ========== -->
+  <section>
+    <h2>4. Cambio de rol a «profesional» al crear un proveedor</h2>
+    <h3>Regla de negocio</h3>
+    <p>Cuando un usuario completa el formulario «Convertirse en Profesional» y se crea correctamente su perfil de proveedor, su <strong>rol en el sistema debe pasar a «professional»</strong>. Así el sistema refleja que esa persona ya no es solo un cliente sino también un proveedor de servicios.</p>
+    <h3>Implementación</h3>
+    <ul>
+      <li>En la ruta <strong>POST /api/providers</strong> (<code>server/routes.ts</code>), después de crear el proveedor con <code>catalogService.createProvider(...)</code>, se llama a <code>genFebStorage.updateUser(userId, { role: "professional" })</code>.</li>
+      <li>El rol se guarda en el documento del usuario en la colección <code>users</code> de Firestore (o en memoria en desarrollo si no hay Firebase configurado).</li>
+    </ul>
+    <p class="gloss"><em>Para no programadores:</em> En el momento en que el sistema guarda tu perfil de proveedor, te marca automáticamente como «profesional» en la plataforma. No hace falta que un administrador cambie el rol a mano.</p>
+  </section>
+
+  <!-- ========== CORRECCIÓN DE ROL EN CONFLICTO 409 ========== -->
+  <section>
+    <h2>5. Ajuste cuando el usuario ya tiene proveedor (error «Ya tienes un perfil de proveedor»)</h2>
+    <h3>Problema que se resolvió</h3>
+    <p>Algunos usuarios tenían ya un perfil de proveedor creado <strong>antes</strong> de que se implementara el cambio automático de rol a «professional». Esos usuarios seguían con rol «client» y podían volver a intentar crear otro proveedor; el sistema respondía con error 409 «Ya tienes un perfil de proveedor» pero no les actualizaba el rol.</p>
+    <h3>Solución aplicada</h3>
+    <p>En la misma ruta <strong>POST /api/providers</strong>, cuando se detecta que el usuario ya tiene un proveedor (y por tanto se devolverá el error 409), <strong>antes de responder</strong> se actualiza igualmente su rol a «professional». Así, aunque la respuesta siga siendo «ya tienes un perfil», el sistema corrige el rol en segundo plano.</p>
+    <ul>
+      <li>Se mantiene el mensaje y el código 409 para que el frontend no cambie de comportamiento.</li>
+      <li>Una sola vez que el usuario (o un script) llame a «crear proveedor» con ese usuario, su rol quedará actualizado y en futuras visitas ya no verá el CTA «Convertirse en Profesional» si la interfaz lo oculta por rol.</li>
+    </ul>
+    <p class="gloss"><em>Para no programadores:</em> Si alguien ya tenía perfil de proveedor pero el sistema no lo había marcado como profesional, la primera vez que intente «crear» de nuevo (y reciba el aviso de que ya tiene uno), el sistema le actualizará el rol a profesional. A partir de ahí todo queda coherente.</p>
+  </section>
+
+  <!-- ========== VISIBILIDAD DEL CTA CONVERTIRSE EN PROFESIONAL ========== -->
+  <section>
+    <h2>6. Ocultar «Convertirse en Profesional» para profesionales y administradores</h2>
+    <h3>Regla de negocio</h3>
+    <p>El botón o enlace «Convertirse en Profesional» solo debe mostrarse a usuarios que <strong>no</strong> sean ya <strong>professional</strong> ni <strong>admin</strong>. Es decir: se muestra a usuarios no logueados (para invitarles a registrarse y luego convertirse) y a usuarios con rol <strong>client</strong>.</p>
+    <h3>Dónde aparece el CTA</h3>
+    <ul>
+      <li><strong>Navegación (header):</strong> botón «Convertirse en Profesional» cuando el usuario está logueado y no tiene perfil de proveedor; si tiene perfil, se muestra «Dashboard» en su lugar.</li>
+      <li><strong>Página de inicio (Home):</strong> botón en la zona de llamada a la acción (CTA).</li>
+      <li><strong>Footer:</strong> enlace «Conviértete en Profesional» en la columna de enlaces de la plataforma.</li>
+    </ul>
+    <p>En los tres lugares se aplica la misma regla: no mostrar el CTA si el usuario tiene rol <strong>professional</strong> o <strong>admin</strong>.</p>
+    <p class="gloss"><em>Para no programadores:</em> Si ya eres profesional o administrador, no verás en ningún sitio el mensaje de «Convertirse en Profesional», porque ya no aplica a tu cuenta.</p>
+  </section>
+
+  <!-- ========== ESTRUCTURA DE CÓDIGO: UNA SOLA REGLA, REUTILIZACIÓN ========== -->
+  <section>
+    <h2>7. Código limpio y SOLID: una sola regla, hook y helpers reutilizables</h2>
+    <p>Para no duplicar la lógica «quién ve el CTA» y mantener una única fuente de verdad, se centralizó la regla en funciones y un hook que usan todos los componentes.</p>
+    <h3>7.1. Constantes y funciones en <code>client/src/lib/auth-utils.ts</code></h3>
+    <ul>
+      <li><strong>ROLES_HIDING_BECOME_PRO_CTA</strong> — Lista de roles que <strong>no</strong> deben ver el CTA: <code>"professional"</code> y <code>"admin"</code>.</li>
+      <li><strong>shouldShowBecomeProCTA(user)</strong> — Función pura que recibe el usuario (o null si no está logueado) y devuelve <code>true</code> si debe mostrarse el CTA. Devuelve <code>false</code> solo cuando el usuario está logueado y su rol es professional o admin.</li>
+      <li><strong>hasAdminRole(user)</strong> — Indica si el usuario tiene rol admin. Se usa en la navegación para mostrar u ocultar el menú de administración (Admin Panel, Crear rol), sin depender del tipo exacto del usuario en el frontend.</li>
+    </ul>
+    <h3>7.2. Hook <code>useShowBecomePro()</code></h3>
+    <ul>
+      <li><strong>Archivo:</strong> <code>client/src/hooks/use-show-become-pro.ts</code>.</li>
+      <li>El hook usa <code>useAuth()</code> para obtener el usuario actual y llama a <code>shouldShowBecomeProCTA(user)</code>. Devuelve un booleano.</li>
+      <li><strong>Uso:</strong> en <code>Navigation.tsx</code>, <code>Home.tsx</code> y <code>Footer.tsx</code> se llama <code>const showBecomePro = useShowBecomePro()</code> y se muestra el botón o enlace solo cuando <code>showBecomePro</code> es verdadero.</li>
+    </ul>
+    <p>Así, si en el futuro se cambia la regla (por ejemplo, añadir otro rol que no deba ver el CTA), solo se modifica <code>ROLES_HIDING_BECOME_PRO_CTA</code> o <code>shouldShowBecomeProCTA</code>; los componentes no tocan la lógica.</p>
+    <h3>7.3. Tipado del usuario con rol (<code>AuthUser</code>)</h3>
+    <ul>
+      <li>La API de autenticación devuelve el usuario con un campo <code>role</code>. En el frontend, el tipo base <code>User</code> (compartido con el backend) no incluía <code>role</code>.</li>
+      <li>Se definió <strong>AuthUser</strong> en <code>client/src/hooks/use-auth.ts</code> como extensión de <code>User</code> con <code>role?: string</code>. Las funciones que obtienen el usuario logueado (fetchUser, login) y el retorno de <code>useAuth()</code> usan este tipo.</li>
+      <li>Para no acceder directamente a <code>user.role</code> en la navegación (y evitar problemas de tipado), el menú de administración usa <code>hasAdminRole(user)</code> en lugar de <code>user?.role === "admin"</code>. La condición de visibilidad del CTA usa siempre <code>useShowBecomePro()</code>.</li>
+    </ul>
+    <p><strong>Resumen de beneficios:</strong> una sola regla de negocio para «mostrar CTA» y «es admin», reutilización en navegación, home y footer, y tipado claro del usuario autenticado sin duplicar condiciones en los componentes (principios SOLID: responsabilidad única y abierto/cerrado).</p>
+  </section>
+
+  <!-- ========== UN SOLO SISTEMA DE CATEGORÍAS ========== -->
+  <section>
+    <h2>8. Un solo sistema de categorías (servicios y proveedores)</h2>
+    <p>Se unificó el sistema de categorías: las mismas categorías que se usan para clasificar servicios se usan para clasificar proveedores. Así hay una única fuente de verdad en la base de datos (colección <code>categories</code> en Firestore) y el formulario de «Convertirse en Profesional» usa la API de categorías en lugar de una lista hardcodeada.</p>
+    <h3>8.1. Seeder de categorías</h3>
+    <ul>
+      <li><strong>Archivo:</strong> <code>script/seed-categories.ts</code>. Comando: <code>npm run seed:categories</code>.</li>
+      <li>Lee las categorías por defecto desde <code>shared/default-categories.ts</code> (technical, legal, financial, maintenance, delivery, marketplace, transport) y las inserta en la colección <code>categories</code> de Firestore si no existen (por <code>slug</code>). Idempotente.</li>
+      <li><strong>shared/default-categories.ts</strong> — Lista única con <code>slug</code>, <code>name</code>, <code>type</code>, <code>icon</code> para seed y para filtrar en Explore.</li>
+    </ul>
+    <h3>8.2. API de categorías para el formulario de proveedor</h3>
+    <p>El formulario «Convertirse en Profesional» ya no usa <code>GET /api/provider-categories</code> (lista hardcodeada). Usa <strong>GET /api/categories</strong>, que devuelve las categorías guardadas en Firestore. Al crear un proveedor se envía <code>categoryId</code> (id numérico de la categoría) y opcionalmente <code>category</code> (slug) para compatibilidad.</p>
+    <h3>8.3. Schema y almacenamiento</h3>
+    <ul>
+      <li>En <code>shared/schema.ts</code> se añadió <strong>categoryId</strong> (integer, opcional, referencia a <code>categories.id</code>) en la tabla <code>providers</code>. El campo <code>category</code> (texto) se mantiene para compatibilidad.</li>
+      <li>Storage (Firestore y memoria): <code>createProvider</code> y <code>updateProvider</code> aceptan <code>categoryId</code>. <code>getAllProviders</code> acepta filtro por <code>categoryId</code>. <code>getProviderCategoryAvailability()</code> usa las categorías de <code>getCategories()</code> y comprueba por <code>categoryId</code> (y por <code>category</code> slug si no hay categoryId) qué categorías tienen al menos un profesional.</li>
+    </ul>
+    <h3>8.4. Comando de migración</h3>
+    <ul>
+      <li><strong>Archivo:</strong> <code>script/migrate-provider-categories.ts</code>. Comando: <code>npm run migrate:provider-categories</code>.</li>
+      <li>Para cada proveedor que tenga el campo <code>category</code> (string, p. ej. "technical"), busca en la colección <code>categories</code> un documento con ese <code>slug</code> y asigna su <code>id</code> al campo <code>categoryId</code> del proveedor. Así los proveedores existentes quedan alineados con el sistema unificado.</li>
+    </ul>
+    <h3>8.5. Vista Explore y servicios por categoría de proveedor</h3>
+    <ul>
+      <li><strong>Explore</strong> (<code>/explore</code>): Las cartas de «Servicios por categoría» se construyen con las categorías devueltas por <code>GET /api/categories</code>, filtradas por los <code>slug</code> definidos en <code>DEFAULT_CATEGORIES</code>. La disponibilidad (encendida/apagada) viene de <code>GET /api/provider-categories/availability</code>, que ahora devuelve claves por <strong>id de categoría</strong> (no por código).</li>
+      <li>Al hacer <strong>clic en una carta</strong> de categoría disponible, se ocultan las cartas y se muestra la lista de servicios filtrada por esa categoría de proveedor. Se usa el parámetro <code>providerCategoryId</code> en la API de servicios.</li>
+      <li><strong>GET /api/services</strong> acepta el query <code>providerCategoryId</code> (número). Devuelve solo servicios cuyo proveedor tiene <code>categoryId</code> igual a ese valor.</li>
+    </ul>
+    <p class="gloss"><em>Para no programadores:</em> Las categorías (técnico, legal, delivery, etc.) están guardadas una sola vez en la base de datos. Al crear un proveedor se elige una de esas categorías desde la misma lista que usa el resto del sistema. En «Explorar», al hacer clic en una categoría con profesionales disponibles, se muestran los servicios ofrecidos por esos profesionales.</p>
+  </section>
+
+  <!-- ========== API PERFIL DE PROVEEDOR DEL USUARIO (GET /api/me/provider) ========== -->
+  <section>
+    <h2>9. API para obtener el perfil de proveedor del usuario logueado (GET /api/me/provider)</h2>
+    <h3>Problema que se resolvió</h3>
+    <p>La pantalla <strong>«Crear servicio»</strong> (<code>/create-service</code>) necesita saber si el usuario que está logueado tiene un perfil de proveedor. Si lo tiene, muestra el formulario para dar de alta un nuevo servicio; si no, muestra el mensaje «You must be a provider to create services». Para eso el frontend llama a una API que devuelve el proveedor asociado al usuario actual. Esa API <strong>no existía</strong> en el servidor: la ruta no estaba registrada, por lo que la petición devolvía 404 («API route not found») y la pantalla asumía que el usuario no era proveedor aunque en Firestore sí tuviera perfil y rol «professional».</p>
+    <h3>Solución aplicada</h3>
+    <p>Se registró en el backend la ruta <strong>GET /api/me/provider</strong>:</p>
+    <ul>
+      <li>Protegida con <strong>JWT</strong>: solo responde si el usuario envía un token válido en la cabecera <code>Authorization: Bearer &lt;token&gt;</code>.</li>
+      <li>Obtiene el <code>userId</code> del usuario autenticado (a partir del token) y llama a <code>catalogService.getProviderByUserId(userId)</code>, que en Firestore busca en la colección <code>providers</code> el documento cuyo campo <code>userId</code> coincide con ese id.</li>
+      <li>Responde con el objeto del proveedor si existe, o con <code>null</code> si el usuario no tiene perfil de proveedor. El frontend usa ese resultado para decidir si mostrar el formulario de crear servicio o el mensaje de «debes ser proveedor».</li>
+    </ul>
+    <p><strong>Detalle para programadores:</strong> La ruta se registra al inicio de <code>registerRoutes</code> (en <code>server/routes.ts</code>), justo después de admin y roles, usando la ruta literal <code>"/api/me/provider"</code> para evitar conflictos con otras rutas y asegurar que Express la empareje antes que middlewares o rutas genéricas. No se duplica lógica: la responsabilidad de «buscar proveedor por userId» sigue en el servicio de catálogo (principio de responsabilidad única).</p>
+    <p class="gloss"><em>Para no programadores:</em> El sistema ahora puede saber con certeza si tu cuenta tiene un «perfil de profesional» asociado. Si lo tienes, la pantalla de crear servicio se abre correctamente; si no, te indica que primero debes darte de alta como proveedor.</p>
+  </section>
+
+  <!-- ========== ACCESO A CREAR SERVICIO DESDE EL MENÚ ========== -->
+  <section>
+    <h2>10. Acceso a «Crear servicio» desde el menú de navegación</h2>
+    <h3>Qué se hizo</h3>
+    <p>La pantalla para crear un nuevo servicio (<code>/create-service</code>) existía y estaba definida en el enrutador de la aplicación, pero <strong>no había ningún enlace ni botón en la interfaz</strong> que llevara a ella. La única forma de llegar era escribir la URL a mano en el navegador.</p>
+    <h3>Solución aplicada</h3>
+    <ul>
+      <li>En el menú desplegable <strong>«Servicios»</strong> del header (escritorio) se añadió la opción <strong>«Crear servicio»</strong>, con icono, visible solo cuando el usuario tiene perfil de proveedor (<code>providerProfile</code>). Así, los profesionales ven la opción junto a «Todos los Servicios» y «Reservas».</li>
+      <li>En el <strong>menú móvil</strong> (menú hamburguesa) se añadió el mismo enlace «Crear servicio», también condicionado a que el usuario tenga perfil de proveedor, para mantener la misma experiencia en móvil.</li>
+    </ul>
+    <p><strong>Detalle para programadores:</strong> Se usa el mismo dato que ya proporciona <code>useCurrentProvider()</code> en la navegación (que a su vez llama a GET /api/me/provider). La condición <code>providerProfile && (...)</code> evita mostrar el enlace a usuarios que no son proveedores. No se añade lógica nueva de negocio; solo se reutiliza el estado «tengo perfil de proveedor» ya disponible en el componente (principio DRY).</p>
+    <p class="gloss"><em>Para no programadores:</em> Si eres profesional, en el menú «Servicios» verás la opción «Crear servicio» para publicar un nuevo servicio sin tener que recordar la dirección de la página.</p>
+  </section>
+
+  <!-- ========== CATEGORÍA FIJA AL CREAR SERVICIO ========== -->
+  <section>
+    <h2>11. Categoría del servicio tomada del perfil del proveedor (no seleccionable)</h2>
+    <h3>Regla de negocio</h3>
+    <p>Al crear un servicio, la <strong>categoría</strong> del servicio debe ser la misma que la categoría del perfil del proveedor que lo ofrece. Así se mantiene coherencia: un profesional de «Servicios Técnicos» solo ofrece servicios dentro de esa categoría. El usuario no debe poder elegir otra categoría en el formulario.</p>
+    <h3>Implementación</h3>
+    <ul>
+      <li>En la página <strong>Crear servicio</strong> (<code>client/src/pages/CreateService.tsx</code>) se eliminó el desplegable (Select) de categoría. En su lugar se muestra un bloque de <strong>solo lectura</strong> con el nombre de la categoría del proveedor (obtenida a partir de <code>provider.categoryId</code> o, si no existe, de <code>provider.category</code> slug, buscando en la lista de categorías de la API).</li>
+      <li>El valor de <code>categoryId</code> del formulario se rellena en un <code>useEffect</code> con la categoría resuelta del perfil del proveedor. Al enviar el formulario, ese <code>categoryId</code> se envía al backend; el usuario no puede cambiarlo desde la interfaz.</li>
+    </ul>
+    <p><strong>Detalle para programadores:</strong> Se usa <code>useMemo</code> para resolver la categoría a partir de <code>providerCategoryId</code> o <code>providerCategorySlug</code> y la lista <code>categories</code> de <code>useCategories()</code>, de modo que se soporta tanto el modelo actual (proveedor con <code>categoryId</code>) como el legado (solo <code>category</code> como slug). El campo del formulario sigue siendo <code>categoryId</code> para cumplir el esquema de la API, pero el control se renderiza como un <code>div</code> de solo lectura con estilos de campo deshabilitado, sin opción de edición.</p>
+    <p class="gloss"><em>Para no programadores:</em> Cuando creas un servicio, la categoría que aparece (por ejemplo «Servicios Técnicos») es la de tu perfil de profesional y no se puede cambiar en esa pantalla. Así todos tus servicios quedan clasificados en la misma categoría que tu perfil.</p>
+  </section>
+
+  <!-- ========== APIs COMPLETAS DE SERVICIOS ========== -->
+  <section>
+    <h2>12. APIs completas de servicios: crear, editar y eliminar</h2>
+    <h3>Contexto</h3>
+    <p>El frontend ya tenía la pantalla de crear servicio y llamaba a <strong>POST /api/services</strong>, pero esa ruta no estaba implementada en el servidor, por lo que devolvía 404. Tampoco existían rutas para editar (PATCH) ni eliminar (DELETE) un servicio, necesarias para que los profesionales puedan gestionar su oferta y para que los administradores puedan dar soporte.</p>
+    <h3>APIs implementadas (sin duplicar las ya existentes)</h3>
+    <p><strong>Servicios — lo que ya existía:</strong></p>
+    <ul>
+      <li><strong>GET /api/services</strong> — Listar servicios (con filtros opcionales: <code>categoryId</code>, <code>search</code>, <code>providerCategoryId</code>). Público.</li>
+      <li><strong>GET /api/services/:id</strong> — Ver un servicio por id. Público.</li>
+    </ul>
+    <p><strong>Servicios — lo que se añadió:</strong></p>
+    <ul>
+      <li><strong>POST /api/services</strong> — Crear servicio. Requiere JWT. Solo usuarios que tengan perfil de proveedor. El <code>providerId</code> y la <code>categoryId</code> se fijan en el backend a partir del perfil del usuario (no se confía del cuerpo de la petición). El cuerpo incluye <code>title</code>, <code>description</code>, <code>price</code>, <code>imageUrl</code>, y opcionalmente <code>categoryId</code> (si no se envía, se usa la del perfil del proveedor). Si el perfil no tiene categoría válida, se responde 400.</li>
+      <li><strong>PATCH /api/services/:id</strong> — Actualizar un servicio (campos opcionales: <code>title</code>, <code>description</code>, <code>price</code>, <code>imageUrl</code>, <code>isActive</code>, <code>categoryId</code>). Requiere JWT. Solo el dueño del servicio (el proveedor cuyo id coincide con <code>service.providerId</code>) o un usuario con rol <code>admin</code>.</li>
+      <li><strong>DELETE /api/services/:id</strong> — Eliminar un servicio. Requiere JWT. Misma regla de autorización: solo dueño o admin. Responde 204 sin cuerpo.</li>
+    </ul>
+    <h3>Proveedores / profesionales (ya existían, no se duplicaron)</h3>
+    <p>Para referencia, las APIs de proveedores que ya estaban y se mantienen son: GET /api/providers, GET /api/providers/:id, GET /api/me/provider, POST /api/providers, PATCH /api/providers/:id, DELETE /api/providers/:id (estas dos últimas solo dueño o admin).</p>
+    <h3>Implementación en capas (SOLID / clean code)</h3>
+    <ul>
+      <li><strong>Contrato de almacenamiento</strong> (<code>server/storage-contracts.ts</code>): se definió el tipo <code>ServiceUpdate</code> (campos editables del servicio) y se añadieron al contrato <code>ICatalogStorage</code> los métodos <code>updateService(id, data)</code> y <code>deleteService(id)</code>. Así la capa de rutas y el servicio de dominio no dependen de la implementación concreta (Firestore o memoria).</li>
+      <li><strong>Storage Firestore</strong> (<code>server/storage-firestore.ts</code>): implementación de <code>updateService</code> (lectura del documento, aplicación de campos enviados, <code>update</code> en el documento) y <code>deleteService</code> (borrado del documento). Se evita sobrescribir el documento entero; solo se actualizan los campos recibidos.</li>
+      <li><strong>Storage memoria</strong> (<code>server/storage-genfeb.ts</code>): se implementaron las mismas firmas para cumplir el contrato; en memoria los servicios no se persisten en este flujo, por lo que devuelven <code>undefined</code> / <code>false</code> según corresponda.</li>
+      <li><strong>Servicio de dominio</strong> (<code>server/services/catalog.service.ts</code>): <code>updateService</code> y <code>deleteService</code> delegan en el storage; no contienen lógica de negocio adicional, solo orquestación.</li>
+      <li><strong>Rutas</strong> (<code>server/routes.ts</code>): validación del cuerpo con Zod (esquemas <code>createServiceBodySchema</code> y <code>updateServiceBodySchema</code>), comprobación de JWT, obtención del proveedor del usuario para autorización y para fijar <code>providerId</code> y <code>categoryId</code> en la creación. Las rutas permanecen «finas»: validan, autorizan y delegan en <code>catalogService</code>.</li>
+    </ul>
+    <p class="gloss"><em>Para no programadores:</em> Los profesionales pueden desde la aplicación crear nuevos servicios, editarlos y eliminarlos. Solo el dueño del servicio (o un administrador) puede modificarlo o borrarlo. La categoría del servicio se asocia correctamente al perfil del profesional.</p>
+
+    <h3>Reservas (bookings)</h3>
+    <p>Las reservas se almacenan en Firestore (colección <code>bookings</code>) con: <code>id</code>, <code>userId</code>, <code>serviceId</code>, <code>date</code>, <code>status</code>, <code>notes</code>, <code>createdAt</code>. Opcionalmente el documento puede incluir <code>providerId</code> (derivado del servicio) para consultas.</p>
+    <ul>
+      <li><strong>GET /api/bookings</strong> — Lista las reservas del usuario autenticado (JWT). Query opcional: <code>status</code>.</li>
+      <li><strong>GET /api/bookings/:id</strong> — Obtiene una reserva por ID.</li>
+      <li><strong>POST /api/bookings</strong> — Crea una reserva. Cuerpo: <code>serviceId</code> (número), <code>date</code> (cadena ISO), <code>notes</code> (opcional). El <code>userId</code> se toma del JWT; el <code>providerId</code> se obtiene del servicio en el backend (no se envía desde el cliente). Requiere JWT. Si el servicio no existe, responde 404.</li>
+      <li><strong>PATCH /api/bookings/:id/status</strong> — Actualiza el estado de la reserva. Cuerpo: <code>{ "status": "pending" | "confirmed" | "in_progress" | "completed" | "cancelled" }</strong>. Solo el proveedor del servicio puede actualizar (autorización en backend).</li>
+    </ul>
+    <p class="gloss"><em>Para no programadores:</em> El usuario puede reservar un servicio desde la ficha del servicio. Solo debe indicar servicio, fecha y notas; el sistema asocia automáticamente su cuenta y al proveedor. Las reservas se listan en «Mis reservas» y el profesional puede cambiar su estado.</p>
+    <h3>Pantallas y flujo de reservas</h3>
+    <ul>
+      <li><strong>Crear reserva:</strong> En la ficha del servicio (<code>/service/:id</code>), botón «Book Now» abre un diálogo para elegir fecha y notas; al confirmar se llama a POST /api/bookings.</li>
+      <li><strong>Mis Reservas (cliente):</strong> Ruta <code>/bookings</code>. Lista todas las reservas del usuario autenticado (GET /api/bookings). Muestra servicio, profesional, fecha y estado. Enlace a la ficha del servicio. Si no hay sesión, se invita a iniciar sesión.</li>
+      <li><strong>Reservas del profesional:</strong> En <code>/professional-dashboard</code>, pestaña «Reservas». Lista las reservas recibidas (GET /api/bookings/provider). El profesional puede cambiar el estado con un desplegable (Pendiente → Confirmada → En proceso → Completada / Cancelada). Solo el proveedor del servicio puede actualizar el estado (PATCH /api/bookings/:id/status, autorizado en backend).</li>
+    </ul>
+    <p>APIs añadidas: <strong>GET /api/bookings/provider</strong> (JWT, devuelve reservas del profesional; si el usuario no es proveedor, devuelve array vacío).</p>
+  </section>
+
+  <!-- ========== RESUMEN DE ARCHIVOS MODIFICADOS O CREADOS ========== -->
+  <section>
+    <h2>13. Resumen de archivos tocados en estos cambios</h2>
+    <h3>Backend</h3>
+    <ul>
+      <li><code>shared/default-categories.ts</code> — Categorías por defecto (slug, name, type, icon) para seed y filtrado en Explore.</li>
+      <li><code>shared/schema.ts</code> — Campo <code>categoryId</code> en proveedores (referencia a categories), relación provider–category.</li>
+      <li><code>shared/routes.ts</code> — Respuesta de lista de servicios tipada como <code>ServiceWithProvider[]</code>; input con <code>providerCategoryId</code> opcional.</li>
+      <li><code>script/seed-categories.ts</code> — Seeder que inserta las categorías por defecto en Firestore (idempotente por slug).</li>
+      <li><code>script/migrate-provider-categories.ts</code> — Asigna <code>categoryId</code> a cada proveedor según su <code>category</code> (slug).</li>
+      <li><code>server/storage-contracts.ts</code> — <code>ServiceUpdate</code>, <code>updateService(id, data)</code>, <code>deleteService(id)</code> en <code>ICatalogStorage</code>; <code>getAllProviders(..., categoryId?)</code>, <code>getAllServices(..., providerCategoryId?)</code>, <code>ProviderUpdate</code> con <code>categoryId</code>.</li>
+      <li><code>server/storage-firestore.ts</code> — <code>updateService</code> y <code>deleteService</code>; filtros por <code>categoryId</code>; <code>seedCategories()</code> con <code>DEFAULT_CATEGORIES</code>; <code>getAllServices</code> con filtro por <code>providerCategoryId</code>.</li>
+      <li><code>server/storage-genfeb.ts</code> — Firmas de <code>updateService</code> y <code>deleteService</code> (retornos vacíos en memoria).</li>
+      <li><code>server/services/catalog.service.ts</code> — <code>updateService</code>, <code>deleteService</code>; <code>getProviderCategoryAvailability()</code> basado en <code>getCategories()</code> y <code>categoryId</code>/slug; <code>getAllServices(..., providerCategoryId?)</code>.</li>
+      <li><code>server/routes.ts</code> — GET <code>/api/me/provider</code> (JWT, <code>catalogService.getProviderByUserId</code>); POST/PATCH/DELETE de proveedores con <code>categoryId</code>; POST /api/services (crear), PATCH /api/services/:id (editar), DELETE /api/services/:id (eliminar), con validación Zod y autorización por dueño o admin.</li>
+      <li><code>server/routes-genfeb.ts</code> — POST /api/bookings: validación con <code>createBookingBodySchema</code> (solo <code>serviceId</code>, <code>date</code>, <code>notes</code>); <code>userId</code> desde JWT; comprobación de que el servicio existe antes de crear; corrección de uso de <code>updateBookingStatusSchema</code> en PATCH estado. GET /api/bookings/provider: listado de reservas del profesional (JWT, <code>getProviderByUserId</code> + <code>getBookingsByProvider</code>).</li>
+    </ul>
+    <h3>Frontend</h3>
+    <ul>
+      <li><code>client/src/lib/auth-utils.ts</code> — Helpers de visibilidad CTA y rol admin.</li>
+      <li><code>client/src/hooks/use-mango-data.ts</code> — <code>useCategories()</code>, <code>useCurrentProvider()</code> (GET /api/me/provider); <code>useServices({ providerCategoryId })</code>; tipo <code>ServiceWithProvider[]</code> en respuesta de servicios.</li>
+      <li><code>client/src/pages/BecomePro.tsx</code> — Selector de categoría desde <code>useCategories()</code>; envía <code>categoryId</code> y <code>category</code> (slug) al crear proveedor.</li>
+      <li><code>client/src/pages/CreateService.tsx</code> — Categoría en solo lectura (resuelta desde <code>provider.categoryId</code> o <code>provider.category</code> slug); <code>categoryId</code> del formulario fijado por perfil del proveedor.</li>
+      <li><code>client/src/pages/Explore.tsx</code> — Cartas de categoría desde <code>useCategories()</code> filtradas por <code>DEFAULT_CATEGORIES</code>; disponibilidad por id de categoría; clic en carta → lista de servicios con <code>providerCategoryId</code>; botón «Volver a categorías».</li>
+      <li><code>client/src/components/Navigation.tsx</code> — Enlace «Crear servicio» en menú Servicios (y menú móvil), visible solo si <code>providerProfile</code> existe; <code>useShowBecomePro()</code> y <code>hasAdminRole</code>.</li>
+      <li><code>client/src/pages/Home.tsx</code>, <code>Footer.tsx</code> — Uso de <code>useShowBecomePro()</code>.</li>
+      <li><code>client/src/pages/Bookings.tsx</code> — Página «Mis Reservas» (<code>/bookings</code>): lista de reservas del usuario con <code>useBookings()</code>, servicio, profesional, fecha y estado; enlace a la ficha del servicio; mensaje de inicio de sesión si no está autenticado.</li>
+      <li><code>client/src/pages/ProfessionalDashboard.tsx</code> — Pestaña «Reservas» con <code>ProviderBookingsTab</code>: listado real con <code>useBookingsByProvider()</code> y actualización de estado con <code>useUpdateBookingStatus()</code> (desplegable por reserva).</li>
+      <li><code>client/src/hooks/use-mango-data.ts</code> — Hook <code>useBookingsByProvider(params?)</code> para GET /api/bookings/provider; en <code>useUpdateBookingStatus</code> se invalida también la query de reservas del profesional.</li>
+      <li><code>client/src/App.tsx</code> — Ruta <code>/bookings</code> con componente <code>Bookings</code>.</li>
+    </ul>
+  </section>
+
+  <hr />
+  <p class="meta">
+    GenFeb S.A.S. — Registro de actividades para reporte a superiores. Incluye: categorías de proveedor, un solo sistema de categorías (seeder, migración, API), Explore por categoría y servicios filtrados, API /api/me/provider, acceso a Crear servicio desde el menú, categoría fija al crear servicio, APIs completas de servicios (crear, editar, eliminar) y estructura de código (SOLID / clean code). Actualizar este HTML al añadir nuevos avances.
+  </p>
+</body>
+</html>

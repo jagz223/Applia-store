@@ -20,6 +20,10 @@ export const categories = pgTable("categories", {
 export const providers = pgTable("providers", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull().references(() => users.id),
+  /** Id de la categoría (tabla categories). Un solo sistema de categorías para servicios y proveedores. */
+  categoryId: integer("category_id").references(() => categories.id),
+  /** Slug/código de categoría; se mantiene en migración para compatibilidad. Preferir categoryId. */
+  category: text("category"),
   profession: text("profession").notNull(),
   bio: text("bio").notNull(),
   yearsExperience: integer("years_experience").notNull(),
@@ -56,6 +60,10 @@ export const providersRelations = relations(providers, ({ one, many }) => ({
   user: one(users, {
     fields: [providers.userId],
     references: [users.id],
+  }),
+  category: one(categories, {
+    fields: [providers.categoryId],
+    references: [categories.id],
   }),
   services: many(services),
 }));

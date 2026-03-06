@@ -10,6 +10,7 @@ import { SocketProvider } from "@/hooks/use-socket";
 // Pages
 import HomePage from "@/pages/Home";
 import Explore from "@/pages/Explore";
+import Categories from "@/pages/Categories";
 import ServiceDetails from "@/pages/ServiceDetails";
 import Dashboard from "@/pages/Dashboard";
 import BecomePro from "@/pages/BecomePro";
@@ -25,6 +26,7 @@ import CreateRole from "@/pages/CreateRole";
 import EditUser from "@/pages/EditUser";
 import ProfessionalDashboard from "@/pages/ProfessionalDashboard";
 import PaymentVoucher from "@/pages/PaymentVoucher";
+import Bookings from "@/pages/Bookings";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -32,7 +34,7 @@ function Router() {
     <Switch>
       <Route path="/" component={HomePage} />
       <Route path="/explore" component={Explore} />
-      <Route path="/categories" component={Explore} />
+      <Route path="/categories" component={Categories} />
       <Route path="/service/:id" component={ServiceDetails} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
@@ -48,6 +50,7 @@ function Router() {
       <Route path="/admin/users/:id/edit" component={EditUser} />
       <Route path="/professional-dashboard" component={ProfessionalDashboard} />
       <Route path="/payment-voucher" component={PaymentVoucher} />
+      <Route path="/bookings" component={Bookings} />
       <Route component={NotFound} />
     </Switch>
   );

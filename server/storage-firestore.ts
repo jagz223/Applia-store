@@ -138,7 +138,7 @@ class FirestoreStorageImpl implements IStorage {
     const users = list.slice(start, start + limit).map(({ password: _p, ...u }) => u as User);
     return { users, total };
   }
-  
+
   async createUser(user: Partial<User>): Promise<User> {
     if (!this.db) throw new Error("Firestore no configurado");
     
@@ -244,32 +244,64 @@ class FirestoreStorageImpl implements IStorage {
 
   // ============ PROVEEDORES ============
 
-  async getAllProviders(profession?: string): Promise<Provider[]> {
+  async getAllProviders(profession?: string, category?: string, categoryId?: number): Promise<Provider[]> {
     if (!this.db) return [];
-    
-    let query = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS);
-    
-    if (profession) {
-      query = query.where("profession", "==", profession) as any;
+    const coll = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS);
+    let query: import("firebase-admin").firestore.Query = coll;
+    if (profession && !category && categoryId == null) {
+      query = coll.where("profession", "==", profession);
+    } else if (category && !profession && categoryId == null) {
+      query = coll.where("category", "==", category);
+    } else if (categoryId != null && !Number.isNaN(Number(categoryId))) {
+      query = coll.where("categoryId", "==", Number(categoryId));
     }
-    
     const snapshot = await query.get();
-    return snapshot.docs.map(doc => ({
-      id: parseInt(doc.id),
-      ...doc.data(),
-    } as Provider));
+    let list = snapshot.docs.map(doc => ({ id: parseInt(doc.id), ...doc.data() } as Provider));
+    if (profession && (category || categoryId != null)) {
+      list = list.filter(
+        (p) =>
+          p.profession === profession &&
+          (categoryId != null
+            ? (p as { categoryId?: number }).categoryId === categoryId
+            : (p.category ?? null) === category)
+      );
+    }
+    return list;
   }
 
-  async getProvider(id: number): Promise<Provider | undefined> {
+  async getProvider(id: number | null | undefined): Promise<Provider | undefined> {
     if (!this.db) return undefined;
-    
-    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS).doc(id.toString()).get();
+    const safeId = id != null && !Number.isNaN(Number(id)) ? Number(id) : null;
+    if (safeId === null) return undefined;
+
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS).doc(String(safeId)).get();
     if (!doc.exists) return undefined;
-    
+
     return {
-      id: parseInt(doc.id),
+      id: parseInt(doc.id, 10),
       ...doc.data(),
     } as Provider;
+  }
+
+  /** Enriquece un proveedor con los datos del usuario (para ServiceWithProvider). */
+  private async enrichProviderWithUser(provider: Provider): Promise<ProviderWithUser> {
+    const raw = await this.getUserById(provider.userId);
+    const user = raw
+      ? {
+          ...raw,
+          firstName: (raw as { firstName?: string }).firstName ?? (raw as { name?: string }).name ?? "Usuario",
+          lastName: (raw as { lastName?: string }).lastName ?? "",
+        }
+      : {
+          id: provider.userId,
+          firstName: "Usuario",
+          lastName: "",
+          email: null,
+          profileImageUrl: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+    return { ...provider, user } as ProviderWithUser;
   }
 
   async getProviderByUserId(userId: string): Promise<Provider | undefined> {
@@ -296,6 +328,8 @@ class FirestoreStorageImpl implements IStorage {
     const newProvider = {
       id,
       ...provider,
+      categoryId: (provider as { categoryId?: number }).categoryId ?? null,
+      category: provider.category ?? null,
       isVerified: provider.isVerified ?? false,
       rating: provider.rating ?? "0",
       reviewCount: provider.reviewCount ?? 0,
@@ -304,64 +338,112 @@ class FirestoreStorageImpl implements IStorage {
     return newProvider as Provider;
   }
 
+  async updateProvider(id: number, data: import("./storage-contracts").ProviderUpdate): Promise<Provider | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+    const updates: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (v !== undefined) updates[k] = v;
+    }
+    if (Object.keys(updates).length === 0) {
+      return { id: parseInt(doc.id), ...doc.data() } as Provider;
+    }
+    await docRef.update(updates);
+    const updated = await docRef.get();
+    return { id: parseInt(updated.id), ...updated.data() } as Provider;
+  }
+
+  async deleteProvider(id: number): Promise<boolean> {
+    if (!this.db) return false;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return false;
+    await docRef.delete();
+    return true;
+  }
+
   // ============ SERVICIOS ============
 
-  async getAllServices(categoryId?: number, search?: string): Promise<ServiceWithProvider[]> {
+  async getAllServices(
+    categoryId?: number,
+    search?: string,
+    providerCategoryId?: number
+  ): Promise<ServiceWithProvider[]> {
     if (!this.db) return [];
-    
     let query = this.db.collection(FIRESTORE_COLLECTIONS.SERVICES);
-    
     if (categoryId) {
       query = query.where("categoryId", "==", categoryId) as any;
     }
-    
     const snapshot = await query.get();
-    
-    const services = snapshot.docs.map(doc => ({
-      id: parseInt(doc.id),
+    const services = snapshot.docs.map((doc) => ({
+      id: parseInt(doc.id, 10),
       ...doc.data(),
     } as Service));
-    
-    // Obtener proveedores para cada servicio
-    const servicesWithProviders: ServiceWithProvider[] = [];
-    
+
+    const providerIdValid = (id: unknown): id is number =>
+      id != null && typeof id === "number" && !Number.isNaN(id);
+
+    const allCategories = await this.getCategories();
+    let servicesWithProviders: ServiceWithProvider[] = [];
     for (const service of services) {
-      const provider = await this.getProvider(service.providerId);
+      const provider = providerIdValid(service.providerId)
+        ? await this.getProvider(service.providerId)
+        : undefined;
+      const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
+      const category = allCategories.find((c) => c.id === service.categoryId);
       servicesWithProviders.push({
         ...service,
-        provider: provider || undefined,
+        provider: providerWithUser ?? undefined,
+        category: category ?? (allCategories[0] as Category),
+      } as ServiceWithProvider);
+    }
+
+    if (providerCategoryId != null && !Number.isNaN(providerCategoryId)) {
+      servicesWithProviders = servicesWithProviders.filter((s) => {
+        const p = s.provider as { categoryId?: number } | undefined;
+        return p?.categoryId === providerCategoryId;
       });
     }
-    
-    // Filtrar por búsqueda si aplica
     if (search) {
       const searchLower = search.toLowerCase();
       return servicesWithProviders.filter(
-        s => s.title?.toLowerCase().includes(searchLower) || 
-             s.description?.toLowerCase().includes(searchLower)
+        (s) =>
+          s.title?.toLowerCase().includes(searchLower) ||
+          s.description?.toLowerCase().includes(searchLower)
       );
     }
-    
     return servicesWithProviders;
   }
 
   async getService(id: number): Promise<ServiceWithProvider | undefined> {
     if (!this.db) return undefined;
-    
-    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.SERVICES).doc(id.toString()).get();
+    const safeId = id != null && !Number.isNaN(Number(id)) ? Number(id) : null;
+    if (safeId === null) return undefined;
+
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.SERVICES).doc(String(safeId)).get();
     if (!doc.exists) return undefined;
-    
+
     const service = {
-      id: parseInt(doc.id),
+      id: parseInt(doc.id, 10),
       ...doc.data(),
     } as Service;
-    
-    const provider = await this.getProvider(service.providerId);
-    
+
+    const providerIdValid = (id: unknown): id is number =>
+      id != null && typeof id === "number" && !Number.isNaN(id);
+    const provider = providerIdValid(service.providerId)
+      ? await this.getProvider(service.providerId)
+      : undefined;
+    const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
+    const allCategories = await this.getCategories();
+    const category = allCategories.find((c) => c.id === service.categoryId) ?? (allCategories[0] as Category | undefined);
+
     return {
       ...service,
-      provider: provider || undefined,
-    };
+      provider: providerWithUser ?? undefined,
+      category: category ?? ({} as Category),
+    } as ServiceWithProvider;
   }
 
   async createService(service: InsertService): Promise<Service> {
@@ -375,6 +457,35 @@ class FirestoreStorageImpl implements IStorage {
     };
     await docRef.set(newService);
     return newService as Service & { createdAt?: Date };
+  }
+
+  async updateService(
+    id: number,
+    data: import("./storage-contracts").ServiceUpdate
+  ): Promise<Service | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.SERVICES).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+    const updates: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (v !== undefined) updates[k] = v;
+    }
+    if (Object.keys(updates).length === 0) {
+      return { id: parseInt(doc.id), ...doc.data() } as Service;
+    }
+    await docRef.update(updates);
+    const updated = await docRef.get();
+    return { id: parseInt(updated.id), ...updated.data() } as Service;
+  }
+
+  async deleteService(id: number): Promise<boolean> {
+    if (!this.db) return false;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.SERVICES).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return false;
+    await docRef.delete();
+    return true;
   }
 
   // ============ RESERVAS ============
@@ -423,12 +534,20 @@ class FirestoreStorageImpl implements IStorage {
       } as Booking;
       
       const service = await this.getService(booking.serviceId);
-      const user = await this.getUserById(booking.userId);
+      if (!service) continue;
+      const rawUser = await this.getUserById(booking.userId);
+      const user = rawUser
+        ? {
+            ...rawUser,
+            firstName: (rawUser as { firstName?: string }).firstName ?? (rawUser as { name?: string }).name ?? "Cliente",
+            lastName: (rawUser as { lastName?: string }).lastName ?? "",
+          }
+        : { id: booking.userId, firstName: "Cliente", lastName: "", email: null, profileImageUrl: null, createdAt: new Date(), updatedAt: new Date() } as User;
       
       bookings.push({
         ...booking,
-        service: service!,
-        user: user!,
+        service,
+        user,
       });
     }
     
@@ -682,19 +801,26 @@ class FirestoreStorageImpl implements IStorage {
   // ============ SEED ============
   async seedCategories(): Promise<void> {
     if (!this.db) return;
+    const { DEFAULT_CATEGORIES } = await import("@shared/default-categories");
     const coll = this.db.collection(FIRESTORE_COLLECTIONS.CATEGORIES);
-    const existing = await coll.limit(1).get();
-    if (!existing.empty) return;
-    const defaults = [
-      { name: "Plomería", slug: "plumbing", type: "technical", icon: "Wrench", imageUrl: "https://images.unsplash.com/photo-1585704032915-c3400ca199e7?auto=format&fit=crop&q=80" },
-      { name: "Electricidad", slug: "electrical", type: "technical", icon: "Zap", imageUrl: "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&q=80" },
-      { name: "Limpieza", slug: "cleaning", type: "technical", icon: "SprayCan", imageUrl: "https://images.unsplash.com/photo-1581578731117-104f2a41272c?auto=format&fit=crop&q=80" },
-      { name: "Tutorías", slug: "tutoring", type: "profession", icon: "BookOpen", imageUrl: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&q=80" },
-      { name: "Belleza", slug: "beauty", type: "profession", icon: "Scissors", imageUrl: "https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80" },
-      { name: "Mudanzas", slug: "moving", type: "technical", icon: "Truck", imageUrl: "https://images.unsplash.com/photo-1600518464441-9154a4dea21b?auto=format&fit=crop&q=80" },
-    ];
-    for (let i = 0; i < defaults.length; i++) {
-      await coll.doc(String(i + 1)).set({ id: i + 1, ...defaults[i] });
+    const snapshot = await coll.get();
+    const bySlug = new Set(snapshot.docs.map((d) => (d.data().slug as string) ?? ""));
+    let maxId = 0;
+    snapshot.docs.forEach((d) => {
+      const n = parseInt(d.id, 10);
+      if (!Number.isNaN(n)) maxId = Math.max(maxId, n);
+    });
+    for (const cat of DEFAULT_CATEGORIES) {
+      if (bySlug.has(cat.slug)) continue;
+      maxId += 1;
+      await coll.doc(String(maxId)).set({
+        id: maxId,
+        name: cat.name,
+        slug: cat.slug,
+        type: cat.type,
+        icon: cat.icon,
+        imageUrl: cat.imageUrl ?? null,
+      });
     }
   }
 

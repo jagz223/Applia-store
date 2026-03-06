@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertProviderSchema, insertServiceSchema, insertBookingSchema, categories, providers, services, bookings } from './schema';
+import { insertProviderSchema, insertServiceSchema, insertBookingSchema, categories, providers, services, bookings, type ServiceWithProvider } from './schema';
 import { User } from './models/auth';
 
 export const errorSchemas = {
@@ -131,11 +131,12 @@ export const api = {
       method: 'GET' as const,
       path: '/api/services',
       input: z.object({
-        categoryId: z.string().optional(), // Passed as query param, so string
+        categoryId: z.string().optional(),
         search: z.string().optional(),
+        providerCategoryId: z.string().optional(),
       }).optional(),
       responses: {
-        200: z.array(z.custom<typeof services.$inferSelect>()),
+        200: z.array(z.custom<ServiceWithProvider>()),
       },
     },
     get: {

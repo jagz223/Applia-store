@@ -9,15 +9,11 @@ const storage = genFebStorage;
 
 // ============== ESQUEMAS DE VALIDACIÓN ==============
 
-// Booking schemas
-const createBookingSchema = z.object({
-  serviceId: z.number(),
-  providerId: z.number(),
-  date: z.string().datetime(),
+/** Cuerpo para crear reserva: userId se toma del JWT, providerId se deriva del servicio en el storage. */
+const createBookingBodySchema = z.object({
+  serviceId: z.number({ required_error: "serviceId es requerido" }),
+  date: z.string().min(1, "date es requerido"),
   notes: z.string().optional(),
-  location: z.string().optional(),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
 });
 
 const updateBookingStatusSchema = z.object({
@@ -89,30 +85,52 @@ export async function registerGenFebRoutes(
       res.status(500).json({ message: "Internal server error" });
     }
   });
+
+  // GET /api/bookings/provider - Listar reservas del profesional (como proveedor)
+  app.get("/api/bookings/provider", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await storage.getProviderByUserId(userId);
+      if (!provider) {
+        return res.json([]);
+      }
+      const status = req.query.status as string | undefined;
+      const bookings = await storage.getBookingsByProvider(provider.id);
+      const filtered = status ? bookings.filter((b: { status: string }) => b.status === status) : bookings;
+      res.json(filtered);
+    } catch (error) {
+      console.error("Error fetching provider bookings:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
   
-  // POST /api/bookings - Crear nueva reserva
+  // POST /api/bookings - Crear nueva reserva (userId desde JWT; providerId se deriva del servicio en el storage)
   app.post("/api/bookings", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id;
-      
       if (!userId) {
         return res.status(401).json({ message: "Unauthorized" });
       }
-      
-      const data = createBookingSchema.parse(req.body);
-      // Cast to any since InMemoryStorage accepts flexible booking data
+
+      const data = createBookingBodySchema.parse(req.body);
+      const date = new Date(data.date);
+      if (Number.isNaN(date.getTime())) {
+        return res.status(400).json({ message: "Fecha inválida" });
+      }
+
+      const service = await storage.getService(data.serviceId);
+      if (!service) {
+        return res.status(404).json({ message: "Servicio no encontrado" });
+      }
+
       const booking = await storage.createBooking({
-        serviceId: data.serviceId,
-        providerId: data.providerId,
-        date: new Date(data.date),
-        notes: data.notes,
-        location: data.location,
-        latitude: data.latitude,
-        longitude: data.longitude,
         userId,
+        serviceId: data.serviceId,
+        date,
+        notes: data.notes ?? undefined,
         status: "pending",
-      } as any);
-      
+      });
       res.status(201).json(booking);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -142,7 +160,7 @@ export async function registerGenFebRoutes(
   // PATCH /api/bookings/:id/status - Actualizar estado de reserva
   app.patch("/api/bookings/:id/status", authenticateJWT, async (req, res) => {
     try {
-      const data = updateBookingSchema.parse(req.body);
+      const data = updateBookingStatusSchema.parse(req.body);
       const booking = await storage.updateBookingStatus(Number(req.params.id), data.status);
       
       if (!booking) {

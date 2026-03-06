@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { useCategories } from "@/hooks/use-mango-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,6 +28,7 @@ import {
 import { motion } from "framer-motion";
 
 export default function HomePage() {
+  const showBecomePro = useShowBecomePro();
   const { data: categories, isLoading } = useCategories();
 
   const features = [
@@ -418,12 +420,14 @@ export default function HomePage() {
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
               </Link>
-              <Link href="/become-pro">
-                <Button size="lg" variant="outline" className="h-14 px-8 rounded-full text-lg border-accent text-accent hover:bg-accent hover:text-white">
-                  <Briefcase className="mr-2 h-5 w-5" />
-                  Convertirse en Profesional
-                </Button>
-              </Link>
+              {showBecomePro && (
+                <Link href="/become-pro">
+                  <Button size="lg" variant="outline" className="h-14 px-8 rounded-full text-lg border-accent text-accent hover:bg-accent hover:text-white">
+                    <Briefcase className="mr-2 h-5 w-5" />
+                    Convertirse en Profesional
+                  </Button>
+                </Link>
+              )}
             </div>
           </motion.div>
         </div>

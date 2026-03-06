@@ -563,15 +563,22 @@ export class InMemoryStorage implements IStorage {
     ];
   }
 
-  async getAllProviders(profession?: string): Promise<Provider[]> {
+  async getAllProviders(profession?: string, category?: string, categoryId?: number): Promise<Provider[]> {
+    let list = this.providers;
     if (profession) {
-      return this.providers.filter(p => p.profession.toLowerCase().includes(profession.toLowerCase()));
+      list = list.filter((p) => p.profession.toLowerCase().includes(profession.toLowerCase()));
     }
-    return this.providers;
+    if (categoryId != null && !Number.isNaN(categoryId)) {
+      list = list.filter((p) => (p as any).categoryId === categoryId);
+    } else if (category) {
+      list = list.filter((p) => (p as any).category === category);
+    }
+    return list;
   }
 
-  async getProvider(id: number): Promise<Provider | undefined> {
-    return this.providers.find(p => p.id === id);
+  async getProvider(id: number | null | undefined): Promise<Provider | undefined> {
+    if (id == null || Number.isNaN(Number(id))) return undefined;
+    return this.providers.find(p => p.id === Number(id));
   }
 
   async getProviderByUserId(userId: string): Promise<Provider | undefined> {
@@ -582,6 +589,8 @@ export class InMemoryStorage implements IStorage {
     const newProvider = {
       id: this.providerIdCounter++,
       userId: insertProvider.userId,
+      categoryId: (insertProvider as any).categoryId ?? null,
+      category: insertProvider.category ?? null,
       profession: insertProvider.profession,
       bio: insertProvider.bio || "",
       yearsExperience: insertProvider.yearsExperience || 0,
@@ -595,10 +604,30 @@ export class InMemoryStorage implements IStorage {
     return newProvider as Provider;
   }
 
+  async updateProvider(id: number, data: import("./storage-contracts").ProviderUpdate): Promise<Provider | undefined> {
+    const idx = this.providers.findIndex(p => p.id === id);
+    if (idx === -1) return undefined;
+    const current = this.providers[idx] as any;
+    const updated = { ...current, ...data };
+    this.providers[idx] = updated;
+    return updated as Provider;
+  }
+
+  async deleteProvider(id: number): Promise<boolean> {
+    const idx = this.providers.findIndex(p => p.id === id);
+    if (idx === -1) return false;
+    this.providers.splice(idx, 1);
+    return true;
+  }
+
   private providers: any[] = [];
   private providerIdCounter = 1;
 
-  async getAllServices(categoryId?: number, search?: string): Promise<ServiceWithProvider[]> {
+  async getAllServices(
+    categoryId?: number,
+    search?: string,
+    _providerCategoryId?: number
+  ): Promise<ServiceWithProvider[]> {
     return [];
   }
 
@@ -608,6 +637,17 @@ export class InMemoryStorage implements IStorage {
 
   async createService(service: InsertService): Promise<Service> {
     return {} as Service;
+  }
+
+  async updateService(
+    _id: number,
+    _data: import("./storage-contracts").ServiceUpdate
+  ): Promise<Service | undefined> {
+    return undefined;
+  }
+
+  async deleteService(_id: number): Promise<boolean> {
+    return false;
   }
 
   async seedCategories(): Promise<void> {}

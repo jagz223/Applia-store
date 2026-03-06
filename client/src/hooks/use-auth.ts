@@ -1,8 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@shared/routes";
 import { User } from "@shared/models/auth";
+import { redirectToHomeAfterLogout } from "@/lib/auth-utils";
 
-async function fetchUser(): Promise<User | null> {
+/** Usuario tal como lo devuelve la API de auth (incluye role). */
+export type AuthUser = User & { role?: string };
+
+async function fetchUser(): Promise<AuthUser | null> {
   const token = localStorage.getItem("token");
   
   const response = await fetch(api.auth.me.path, {
@@ -22,7 +26,7 @@ async function fetchUser(): Promise<User | null> {
   return response.json();
 }
 
-async function login(credentials: { email: string; password: string }): Promise<{ token: string; user: User }> {
+async function login(credentials: { email: string; password: string }): Promise<{ token: string; user: AuthUser }> {
   const response = await fetch(api.auth.login.path, {
     method: api.auth.login.method,
     headers: { "Content-Type": "application/json" },
@@ -48,10 +52,22 @@ async function logout(): Promise<void> {
   localStorage.removeItem("token");
 }
 
-export function useAuth() {
+export interface UseAuthReturn {
+  user: AuthUser | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  login: (credentials: { email: string; password: string }) => void;
+  logout: () => void;
+  isLoggingIn: boolean;
+  isLoggingOut: boolean;
+  loginError: Error | null;
+  setUser: (user: AuthUser) => void;
+}
+
+export function useAuth(): UseAuthReturn {
   const queryClient = useQueryClient();
   
-  const { data: user, isLoading } = useQuery<User | null>({
+  const { data: user, isLoading } = useQuery<AuthUser | null>({
     queryKey: ["user"],
     queryFn: fetchUser,
     retry: false,
@@ -70,16 +86,17 @@ export function useAuth() {
     mutationFn: logout,
     onSuccess: () => {
       queryClient.setQueryData(["user"], null);
+      redirectToHomeAfterLogout();
     },
   });
 
   // Función para establecer el usuario manualmente (para uso inmediato tras registro/login)
-  const setUser = (user: User) => {
+  const setUser = (user: AuthUser) => {
     queryClient.setQueryData(["user"], user);
   };
 
   return {
-    user,
+    user: user ?? null,
     isLoading,
     isAuthenticated: !!user,
     login: loginMutation.mutate,
