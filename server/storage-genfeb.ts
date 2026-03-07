@@ -64,6 +64,7 @@ export interface IStorage
   getMessagesByConversation(conversationId: number): Promise<any[]>;
   createMessage(msg: any): Promise<any>;
   markMessageAsRead(messageId: number): Promise<void>;
+  markConversationAsRead(conversationId: number, userId: string): Promise<void>;
   
   // Roles de Usuario (perfil del usuario, no catálogo de roles)
   getUserRole(userId: string): Promise<any | undefined>;
@@ -384,6 +385,15 @@ export class InMemoryStorage implements IStorage {
       msg.status = 'read';
       msg.readAt = new Date();
     }
+  }
+
+  async markConversationAsRead(conversationId: number, userId: string): Promise<void> {
+    this.messages
+      .filter(m => m.conversationId === conversationId && m.senderId !== userId && m.status !== 'read')
+      .forEach(m => {
+        m.status = 'read';
+        (m as any).readAt = new Date();
+      });
   }
 
   // ============== ROLES ==============

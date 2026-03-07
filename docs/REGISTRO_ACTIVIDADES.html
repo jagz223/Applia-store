@@ -67,7 +67,7 @@
 <body>
   <h1>Registro de actividades — GenFeb</h1>
   <p class="meta">
-    <strong>Última actualización:</strong> <span id="last-updated">marzo 2025</span> — API /api/me/provider, menú Crear servicio, categoría fija al crear servicio, APIs completas de servicios (POST, PATCH, DELETE).<br />
+    <strong>Última actualización:</strong> <span id="last-updated">marzo 2026</span> — Chat funcional (persistencia, JWT, enriquecimiento conversaciones), componentes y hooks del chat, scroll correcto, compartir ubicación, revisión de notificaciones (punto 13).<br />
     Documento vivo: se actualiza con cada avance reportado.
   </p>
 
@@ -76,8 +76,8 @@
   <!-- ========== RESUMEN EJECUTIVO ========== -->
   <section>
     <h2>1. Resumen ejecutivo de los cambios documentados</h2>
-    <p>Este documento describe el trabajo realizado a partir de la <strong>creación de las categorías de profesión para proveedores</strong> y todo lo implementado después en GenFeb: relación usuario–proveedor en Firestore, cambio automático de rol al convertirse en profesional, corrección de rol en conflicto 409, visibilidad del CTA «Convertirse en Profesional», un solo sistema de categorías (seeder, migración, Explore por categoría), la API GET /api/me/provider para que la pantalla de crear servicio funcione, el enlace «Crear servicio» en el menú, la categoría fija (no seleccionable) al crear servicio y las APIs completas de servicios (crear, editar, eliminar). En todo ello se aplicaron buenas prácticas (SOLID, código limpio) y una estructura en capas (contratos de almacenamiento, servicio de dominio, rutas finas).</p>
-    <p class="gloss"><em>En términos no técnicos:</em> Se definieron tipos fijos de proveedor, se aseguró que al registrarse como proveedor el usuario pase a «profesional», se corrigió el rol de quienes ya tenían perfil, se ocultó «Convertirse en Profesional» para quienes ya son profesionales o administradores, se unificaron las categorías en una sola lista en la base de datos, se permitió acceder a «Crear servicio» desde el menú y que la categoría del servicio sea la del perfil del profesional, y se completaron las APIs para que los profesionales puedan crear, editar y eliminar sus servicios.</p>
+    <p>Este documento describe el trabajo realizado a partir de la <strong>creación de las categorías de profesión para proveedores</strong> y todo lo implementado después en GenFeb: relación usuario–proveedor en Firestore, cambio automático de rol al convertirse en profesional, corrección de rol en conflicto 409, visibilidad del CTA «Convertirse en Profesional», un solo sistema de categorías (seeder, migración, Explore por categoría), la API GET /api/me/provider para que la pantalla de crear servicio funcione, el enlace «Crear servicio» en el menú, la categoría fija (no seleccionable) al crear servicio, las APIs completas de servicios (crear, editar, eliminar) y reservas (bookings), y el <strong>chat funcional</strong> con persistencia, seguridad JWT, enlace directo a conversación desde reservas y ficha de servicio, scroll correcto en lista y mensajes, y compartir ubicación (punto 13). En todo ello se aplicaron buenas prácticas (SOLID, código limpio) y una estructura en capas (contratos de almacenamiento, servicio de dominio, rutas finas).</p>
+    <p class="gloss"><em>En términos no técnicos:</em> Se definieron tipos fijos de proveedor, se aseguró que al registrarse como proveedor el usuario pase a «profesional», se corrigió el rol de quienes ya tenían perfil, se ocultó «Convertirse en Profesional» para quienes ya son profesionales o administradores, se unificaron las categorías en una sola lista en la base de datos, se permitió acceder a «Crear servicio» desde el menú y que la categoría del servicio sea la del perfil del profesional, se completaron las APIs para que los profesionales puedan crear, editar y eliminar sus servicios, y se dejó el chat operativo: conversaciones y mensajes reales, abrir chat con un contacto desde una reserva o servicio, y compartir ubicación con un botón.</p>
   </section>
 
   <!-- ========== CATEGORÍAS DE PROVEEDOR ========== -->
@@ -307,11 +307,121 @@
       <li><strong>Reservas del profesional:</strong> En <code>/professional-dashboard</code>, pestaña «Reservas». Lista las reservas recibidas (GET /api/bookings/provider). El profesional puede cambiar el estado con un desplegable (Pendiente → Confirmada → En proceso → Completada / Cancelada). Solo el proveedor del servicio puede actualizar el estado (PATCH /api/bookings/:id/status, autorizado en backend).</li>
     </ul>
     <p>APIs añadidas: <strong>GET /api/bookings/provider</strong> (JWT, devuelve reservas del profesional; si el usuario no es proveedor, devuelve array vacío).</p>
+
+    <h3>Acceso al Panel profesional y datos de reservas</h3>
+    <ul>
+      <li><strong>Panel profesional en Mi Cuenta:</strong> En el menú del usuario (icono de usuario en navbar), si el usuario tiene perfil de proveedor se muestra la opción «Panel profesional» (escritorio y menú móvil), que enlaza a <code>/professional-dashboard</code>. Así el profesional puede acceder a la pestaña Reservas sin escribir la URL.</li>
+      <li><strong>Reservas del profesional (backend):</strong> En <code>getBookingsByProvider</code> (Firestore) se normaliza el usuario cliente (<code>firstName</code>/<code>lastName</code> o <code>name</code>) para la visualización. Si el servicio de la reserva ya no existe, la reserva no se incluye en la lista. Si el cliente no existe en BD, se muestra un objeto mínimo «Cliente».</li>
+      <li><strong>Vista Reservas del profesional (frontend):</strong> En la pestaña «Reservas» del Panel profesional se muestra por cada reserva: título del servicio, nombre del cliente, fecha, precio, notas del cliente, enlace «Ver servicio» y desplegable para cambiar estado.</li>
+    </ul>
+
+    <h3>Fechas de Firestore en la interfaz</h3>
+    <p>Las respuestas de la API pueden devolver fechas como objeto Firestore <code>{ _seconds, _nanoseconds }</code>. Para evitar errores de formateo («Invalid time value»), se creó la utilidad <code>toDate()</code> en <code>client/src/lib/date-utils.ts</code>, que normaliza string ISO, <code>Date</code> o objeto Firestore a <code>Date</code>. Se usa en la página Mis Reservas (<code>Bookings.tsx</code>) y en la pestaña Reservas del Panel profesional (<code>ProfessionalDashboard.tsx</code>) al mostrar la fecha de cada reserva.</p>
+
+    <h3>Botón Chat en contexto de servicio y reservas</h3>
+    <ul>
+      <li><strong>Ficha del servicio (<code>/service/:id</code>):</strong> Si el usuario está autenticado y (es el profesional que ofrece el servicio o tiene una reserva de ese servicio), se muestra un botón «Chat» con icono que redirige a <code>/chat</code>.</li>
+      <li><strong>Mis Reservas (cliente, <code>/bookings</code>):</strong> En cada reserva se añade un botón «Chat» con icono que redirige a <code>/chat</code>.</li>
+      <li><strong>Panel profesional → Reservas:</strong> En cada reserva recibida se añade un botón «Chat» con icono que redirige a <code>/chat</code>.</li>
+    </ul>
+    <p class="gloss"><em>Para no programadores:</em> Tanto el cliente como el profesional pueden abrir la pantalla de chat desde la ficha del servicio (cuando aplica), desde la lista de sus reservas o desde la lista de reservas recibidas (profesional). Los enlaces llevan a la pantalla de chat y, cuando el sistema puede identificar al otro usuario (proveedor o cliente de la reserva), se abre o se crea automáticamente la conversación con esa persona.</p>
+
+    <h3>Notificación al crear una reserva</h3>
+    <p>Tras crear una reserva con éxito desde el diálogo de la ficha del servicio, se muestra una notificación (toast) con mensaje en español:</p>
+    <ul>
+      <li><strong>Título:</strong> «Reserva realizada con éxito».</li>
+      <li><strong>Descripción:</strong> «El profesional ha sido notificado. Puedes ver el estado de tu reserva en Mi Cuenta → Mis Reservas.»</li>
+    </ul>
+    <p>Los textos están centralizados en constantes (<code>BOOKING_SUCCESS_TOAST</code>, <code>BOOKING_ERROR_TOAST</code>) en el hook <code>useCreateBooking</code> (<code>client/src/hooks/use-mango-data.ts</code>), para mantener un único lugar de definición (SOLID, mantenibilidad). En caso de error al crear la reserva, el toast muestra «Error al crear la reserva» y el mensaje del error o «Intenta de nuevo más tarde.»</p>
+  </section>
+
+  <!-- ========== CHAT FUNCIONAL Y MEJORAS ========== -->
+  <section>
+    <h2>13. Chat funcional, compartir ubicación y mejoras de UX</h2>
+    <p>La pantalla de chat (<code>/chat</code>) existía solo como maqueta: mostraba conversaciones y mensajes de ejemplo que no venían de la base de datos y no permitían enviar ni recibir mensajes reales. Se implementó el chat completo con persistencia en Firestore (o en memoria si no hay Firebase), seguridad con JWT, tiempo real opcional por Socket.IO, y la posibilidad de compartir ubicación desde el chat. También se corrigieron problemas de desplazamiento (scroll) y de formato de fechas devueltas por Firestore. Todo el código se organizó con buenas prácticas (SOLID, código limpio) y en capas (tipos, API cliente, hooks, componentes).</p>
+    <p class="gloss"><em>En términos no técnicos:</em> El chat pasó de ser una pantalla de demostración a un chat real: puedes ver tus conversaciones, abrir una con un profesional o cliente desde una reserva o desde la ficha del servicio, enviar y recibir mensajes guardados en el sistema, y compartir tu ubicación con un botón. Además se arregló que la lista de conversaciones y los mensajes se puedan desplazar correctamente dentro del área del chat sin mover toda la página, y que las fechas se muestren bien aunque el servidor las envíe en formato Firestore.</p>
+
+    <h3>13.1. Estado inicial y decisión técnica</h3>
+    <p>El backend ya tenía rutas de chat (<strong>GET/POST /api/conversations</strong>, <strong>GET /api/conversations/:id/messages</strong>, <strong>POST /api/messages</strong>) y almacenamiento en Firestore y en memoria para conversaciones y mensajes. Las rutas usaban el header <code>x-user-id</code> para identificar al usuario, lo que no es seguro porque el cliente puede falsificarlo. La pantalla de chat en el frontend solo mostraba datos fijos (arrays hardcodeados) y no llamaba a ninguna API. Se decidió mantener Firestore como persistencia en el servidor (sin SDK de Firebase en el navegador), proteger todas las rutas de chat con <strong>JWT</strong> y usar <code>req.user.id</code> en lugar de <code>x-user-id</code>, y conectar la interfaz al backend mediante una capa de API y hooks reutilizables.</p>
+
+    <h3>13.2. Seguridad y validación en el backend</h3>
+    <ul>
+      <li><strong>Autenticación:</strong> Todas las rutas de conversaciones y mensajes pasaron a usar el middleware <code>authenticateJWT</code>. El usuario se identifica con el token (cabecera <code>Authorization: Bearer &lt;token&gt;</code>); el servidor ya no lee <code>x-user-id</code>.</li>
+      <li><strong>Autorización:</strong> Antes de devolver mensajes de una conversación, crear un mensaje o marcar conversación como leída, el backend comprueba que el usuario autenticado sea participante de esa conversación (se consulta la lista de conversaciones del usuario y se verifica que el id coincida). Si no es participante, se responde 403 (Prohibido).</li>
+      <li><strong>Marcar como leída:</strong> Se añadió el método <code>markConversationAsRead(conversationId, userId)</code> en el contrato de almacenamiento y en las implementaciones (memoria, Firestore, híbrido). En Firestore se actualizan en lote todos los mensajes de esa conversación que no fueron enviados por el usuario y que aún no estaban marcados como leídos. Nueva ruta <strong>PATCH /api/conversations/:id/read</strong> para marcar toda la conversación como leída al abrirla.</li>
+    </ul>
+
+    <h3>13.3. Enriquecimiento de la lista de conversaciones</h3>
+    <p>La API <strong>GET /api/conversations</strong> no devolvía el nombre del otro participante ni el texto del último mensaje. Se enriqueció la respuesta en el servidor: para cada conversación se obtiene el otro usuario (<code>getUserById</code>), el último mensaje de la conversación y el número de mensajes no leídos para el usuario actual. La respuesta incluye <code>otherParticipant</code> (id y nombre), <code>lastMessageText</code> y <code>unreadCount</code>, de modo que el frontend puede mostrar la lista sin hacer peticiones adicionales por conversación.</p>
+
+    <h3>13.4. Capa de tipos y API en el cliente</h3>
+    <ul>
+      <li><strong>Tipos</strong> (<code>client/src/types/chat.ts</code>): Se definieron interfaces para <code>ConversationEnriched</code>, <code>Message</code>, <code>SendMessageInput</code> (con tipo opcional <code>text | image | file | location</code>), <code>CreateConversationInput</code> y <code>ChatParticipant</code>. Una sola responsabilidad: contratos de datos del dominio de chat.</li>
+      <li><strong>API del chat</strong> (<code>client/src/lib/chat-api.ts</code>): Módulo que centraliza todas las llamadas HTTP del chat. Funciones <code>getConversations()</code>, <code>getMessages(conversationId)</code>, <code>createConversation(input)</code>, <code>sendMessage(input)</code> y <code>markConversationAsRead(conversationId)</code>. Todas usan el token guardado en <code>localStorage</code> en la cabecera <code>Authorization</code>. Así las pantallas y hooks no hacen <code>fetch</code> directo ni repiten la lógica de autenticación (inversión de dependencias).</li>
+      <li><strong>Formato de fechas</strong> (<code>client/src/lib/chat-format.ts</code>): Funciones <code>formatMessageTime</code> y <code>formatListTime</code> que aceptan fecha en formato Date, string ISO o objeto Firestore <code>{ _seconds, _nanoseconds }</code>, usando la utilidad <code>toDate()</code> de <code>date-utils.ts</code> para normalizar antes de formatear. Evita el error «d.getTime is not a function» cuando la API devuelve timestamps de Firestore.</li>
+    </ul>
+
+    <h3>13.5. Hooks del chat (React Query y Socket)</h3>
+    <p>En <code>client/src/hooks/use-chat.ts</code> se centralizó la lógica de datos del chat en hooks reutilizables:</p>
+    <ul>
+      <li><strong>useConversations(enabled)</strong> — Lista de conversaciones del usuario (React Query, clave <code>["chat", "conversations"]</code>).</li>
+      <li><strong>useMessages(conversationId, enabled)</strong> — Mensajes de una conversación (solo se pide cuando hay conversación seleccionada).</li>
+      <li><strong>useSendMessage(conversationId, recipientId)</strong> — Mutación para enviar mensaje (texto o ubicación). Acepta un string (mensaje de texto) o un objeto <code>{ content, type: "text" | "location" }</code>. Tras enviar, invalida las queries de mensajes y conversaciones y emite por Socket el evento <code>message:send</code> para que el otro usuario reciba notificación en tiempo real.</li>
+      <li><strong>useMarkConversationAsRead(conversationId, enabled)</strong> — Mutación para marcar la conversación como leída (llamada al abrir una conversación).</li>
+      <li><strong>useGetOrCreateConversation()</strong> — Mutación que busca si ya existe una conversación con un usuario (<code>participantId</code>) y, si no, crea una con <code>POST /api/conversations</code>. Devuelve el id de la conversación (existente o nueva) para abrirla en la pantalla.</li>
+      <li><strong>useChatRealtime(conversationId, refetchMessages)</strong> — Se une a la sala de Socket de la conversación y escucha <code>notification:message</code>; cuando llega un mensaje nuevo para esa conversación, llama a <code>refetchMessages</code> para actualizar la lista sin recargar la página.</li>
+    </ul>
+
+    <h3>13.6. Componentes del chat (UI modular)</h3>
+    <p>La pantalla de chat se dividió en componentes con una sola responsabilidad, exportados desde <code>client/src/components/chat/</code>:</p>
+    <ul>
+      <li><strong>ConversationList</strong> — Búsqueda por nombre, lista de conversaciones (nombre del otro, último mensaje, hora, badge de no leídos), estados de carga y error con botón «Reintentar».</li>
+      <li><strong>ConversationListItem</strong> — Una fila de la lista (avatar, nombre, preview, hora, tipo de chat o servicio).</li>
+      <li><strong>ChatWindow</strong> — Cabecera con nombre del contacto, acciones rápidas (Agendar, Compartir contrato, Ubicación), lista de mensajes e input para escribir. Recibe la conversación seleccionada, los mensajes, el callback para enviar y el callback para compartir ubicación.</li>
+      <li><strong>MessageList</strong> — Área con scroll independiente que muestra los mensajes (burbujas) y un separador de fecha. Recibe los mensajes ya formateados para mostrar (texto, hora, si es propio, estado de lectura).</li>
+      <li><strong>MessageBubble</strong> — Una burbuja de mensaje (texto o enlace de ubicación). Si el mensaje es de tipo <code>location</code>, el contenido es un JSON con <code>lat</code> y <code>lng</code>; se muestra el enlace «Ver ubicación» que abre Google Maps con esas coordenadas en una nueva pestaña.</li>
+      <li><strong>MessageInput</strong> — Campo de texto y botón enviar; Enter envía el mensaje; se deshabilita mientras se envía.</li>
+      <li><strong>ChatEmptyState</strong> — Mensaje cuando no hay conversación seleccionada («Selecciona una conversación»).</li>
+      <li><strong>ChatUnauthenticated</strong> — Mensaje e enlace a «Iniciar sesión» cuando el usuario no está autenticado.</li>
+    </ul>
+
+    <h3>13.7. Página de chat y parámetros de URL</h3>
+    <p>En <code>client/src/pages/Chat.tsx</code> se eliminaron los datos mock y se conectó todo al backend y a los hooks. Comportamiento actual:</p>
+    <ul>
+      <li>Si el usuario no está logueado, se muestra <code>ChatUnauthenticated</code>.</li>
+      <li>Si está logueado, se cargan las conversaciones con <code>useConversations</code> y se muestran en <code>ConversationList</code>. Al elegir una conversación se cargan los mensajes con <code>useMessages</code>, se marca la conversación como leída y se muestra <code>ChatWindow</code> con <code>MessageList</code> y <code>MessageInput</code>.</li>
+      <li><strong>Parámetros de URL:</strong> Si el usuario entra a <code>/chat?with=userId</code> (y opcionalmente <code>&amp;serviceId=...</code>), la página busca si ya existe una conversación con ese usuario; si existe, la selecciona; si no, llama a <code>POST /api/conversations</code> con <code>participantId</code> y <code>serviceId</code> y luego selecciona la conversación creada. Tras resolver, la URL se reemplaza por <code>/chat</code> para no repetir la acción al recargar. Los enlaces «Chat» desde la ficha del servicio, Mis Reservas y Panel profesional se actualizaron para usar <code>/chat?with=...</code> cuando se conoce el id del otro participante (proveedor o cliente), de modo que al hacer clic se abra o cree esa conversación directamente.</li>
+      <li>Errores al enviar mensaje o al abrir conversación con <code>?with=</code> se muestran con toast (variant destructive). Los errores de carga de conversaciones se muestran en la lista con opción «Reintentar».</li>
+    </ul>
+
+    <h3>13.8. Scroll en el chat (solo dentro del área de mensajes y de la lista)</h3>
+    <p>Inicialmente la lista de conversaciones y el área de mensajes usaban el componente <code>ScrollArea</code> (Radix) con <code>flex-1</code>, pero en el layout flex no se acotaba la altura, por lo que el scroll no funcionaba bien o no aparecía. Además, al recibir mensajes nuevos se llamaba a <code>scrollIntoView()</code> sobre un elemento al final de los mensajes, lo que desplazaba <strong>toda la página</strong> en lugar de solo el contenedor del chat.</p>
+    <ul>
+      <li><strong>Contenedores con altura acotada:</strong> En la página de chat, cada columna del grid (lista de conversaciones y área de mensajes) se envolvió en un <code>div</code> con <code>min-h-0 overflow-hidden flex flex-col</code> para que el contenido flex pueda reducir su altura y se active el scroll interno.</li>
+      <li><strong>Lista de conversaciones:</strong> Se reemplazó el <code>ScrollArea</code> por un <code>div</code> con <code>flex-1 min-h-0 overflow-y-auto</code> que contiene la lista. Así el scroll es nativo del navegador y solo afecta a esa columna.</li>
+      <li><strong>Área de mensajes:</strong> Igual: el contenedor de mensajes es un <code>div</code> con <code>flex-1 min-h-0 overflow-y-auto</code>. El scroll al final (cuando llegan mensajes nuevos) se hace asignando <code>scrollTop = scrollHeight</code> al ref de ese contenedor, en lugar de <code>scrollIntoView()</code>, de modo que solo se desplaza el contenedor del chat y no la página completa.</li>
+      <li><strong>Cuándo hacer scroll al final:</strong> El efecto que hace scroll al final solo se ejecuta cuando realmente hay mensajes nuevos (primera carga de mensajes o aumento del número de mensajes), usando como dependencias <code>messages.length</code> y el id del último mensaje, no la referencia del array, para evitar desplazamientos innecesarios al escribir o al hacer clic.</li>
+    </ul>
+
+    <h3>13.9. Compartir ubicación en el chat</h3>
+    <p>Se implementó la acción del botón «Ubicación» en la barra de acciones rápidas del chat:</p>
+    <ul>
+      <li><strong>Backend:</strong> En el esquema de validación de <code>POST /api/messages</code> se añadió el tipo <code>location</code> al enum de <code>type</code> (además de text, image, file). El contenido del mensaje de tipo ubicación es un JSON en string con <code>lat</code> y <code>lng</code> (coordenadas).</li>
+      <li><strong>Cliente — envío:</strong> Al hacer clic en «Ubicación», se pide permiso de geolocalización con <code>navigator.geolocation.getCurrentPosition</code>. Si el usuario acepta, se envía un mensaje con <code>type: "location"</code> y <code>content: JSON.stringify({ lat, lng })</code>. Si el navegador no soporta geolocalización o el usuario la deniega, se muestra un toast de error.</li>
+      <li><strong>Cliente — visualización:</strong> En <code>MessageBubble</code>, si el mensaje tiene <code>type === "location"</code>, se parsea el <code>content</code> como JSON; si contiene <code>lat</code> y <code>lng</code>, se muestra un enlace «Ver ubicación» con icono de mapa que abre <code>https://www.google.com/maps?q=lat,lng</code> en una nueva pestaña. Los mensajes de texto se siguen mostrando como antes.</li>
+    </ul>
+    <p class="gloss"><em>Para no programadores:</em> En una conversación puedes pulsar el botón «Ubicación»; el navegador te pedirá permiso para usar tu ubicación. Si lo aceptas, se envía tu posición al chat. Tú y la otra persona verán un enlace «Ver ubicación» que abre Google Maps con ese punto.</p>
+
+    <h3>13.10. Resumen técnico para programadores</h3>
+    <p><strong>Archivos nuevos:</strong> <code>client/src/types/chat.ts</code>, <code>client/src/lib/chat-api.ts</code>, <code>client/src/lib/chat-format.ts</code>, <code>client/src/hooks/use-chat.ts</code>, <code>client/src/components/chat/</code> (ConversationList, ConversationListItem, ChatWindow, MessageList, MessageBubble, MessageInput, ChatEmptyState, ChatUnauthenticated, index).</p>
+    <p><strong>Archivos modificados (backend):</strong> <code>server/routes-genfeb.ts</code> (JWT en rutas de chat, enriquecimiento GET /api/conversations, validación de participante en GET messages / POST message / PATCH read, PATCH /api/conversations/:id/read, tipo <code>location</code> en sendMessageSchema); <code>server/storage-genfeb.ts</code> y <code>server/storage-firestore.ts</code> (método <code>markConversationAsRead</code>); <code>server/storage-hybrid.ts</code> (delegación de <code>markConversationAsRead</code>).</p>
+    <p><strong>Archivos modificados (frontend):</strong> <code>client/src/pages/Chat.tsx</code> (reescrita con hooks y componentes, manejo de <code>?with=</code> y <code>?serviceId=</code>, envío de mensaje y compartir ubicación); <code>client/src/pages/ServiceDetails.tsx</code>, <code>client/src/pages/Bookings.tsx</code>, <code>client/src/pages/ProfessionalDashboard.tsx</code> (enlaces a <code>/chat?with=userId</code> cuando se conoce el id del otro participante); <code>client/src/components/chat/MessageList.tsx</code> (uso de <code>toDate</code> para <code>firstMessageDate</code> y scroll solo en contenedor); <code>client/src/components/chat/MessageBubble.tsx</code> (soporte de tipo <code>location</code> y enlace a Google Maps).</p>
+    <p><strong>Notificaciones:</strong> Se revisó el sistema de notificaciones. Las notificaciones de <strong>mensajes</strong> (campana en el header) sí funcionan: cuando un usuario envía un mensaje por el chat, el cliente emite por Socket el evento <code>message:send</code> y el servidor reenvía <code>notification:message</code> al destinatario, que lo ve en la campana. Las notificaciones de <strong>reservas</strong> (nueva reserva o cambio de estado) no se disparan en la práctica porque el frontend no llama a <code>notifyNewBooking</code> ni a <code>notifyBookingUpdate</code> al crear o actualizar una reserva; el backend está preparado para reenviarlas por Socket si el cliente emitiera esos eventos. La API GET /api/notifications devuelve notificaciones persistidas en storage, pero actualmente ningún flujo escribe en la colección/tabla de notificaciones, por lo que esa lista está vacía; la campana solo muestra lo recibido en tiempo real por Socket.</p>
   </section>
 
   <!-- ========== RESUMEN DE ARCHIVOS MODIFICADOS O CREADOS ========== -->
   <section>
-    <h2>13. Resumen de archivos tocados en estos cambios</h2>
+    <h2>14. Resumen de archivos tocados en estos cambios</h2>
     <h3>Backend</h3>
     <ul>
       <li><code>shared/default-categories.ts</code> — Categorías por defecto (slug, name, type, icon) para seed y filtrado en Explore.</li>
@@ -325,6 +435,7 @@
       <li><code>server/services/catalog.service.ts</code> — <code>updateService</code>, <code>deleteService</code>; <code>getProviderCategoryAvailability()</code> basado en <code>getCategories()</code> y <code>categoryId</code>/slug; <code>getAllServices(..., providerCategoryId?)</code>.</li>
       <li><code>server/routes.ts</code> — GET <code>/api/me/provider</code> (JWT, <code>catalogService.getProviderByUserId</code>); POST/PATCH/DELETE de proveedores con <code>categoryId</code>; POST /api/services (crear), PATCH /api/services/:id (editar), DELETE /api/services/:id (eliminar), con validación Zod y autorización por dueño o admin.</li>
       <li><code>server/routes-genfeb.ts</code> — POST /api/bookings: validación con <code>createBookingBodySchema</code> (solo <code>serviceId</code>, <code>date</code>, <code>notes</code>); <code>userId</code> desde JWT; comprobación de que el servicio existe antes de crear; corrección de uso de <code>updateBookingStatusSchema</code> en PATCH estado. GET /api/bookings/provider: listado de reservas del profesional (JWT, <code>getProviderByUserId</code> + <code>getBookingsByProvider</code>).</li>
+      <li><code>server/storage-firestore.ts</code> — <code>enrichProviderWithUser</code> para incluir <code>provider.user</code> en <code>getService</code> y <code>getAllServices</code>; en <code>getBookingsByProvider</code> normalización de usuario (firstName/lastName), omisión de reservas cuyo servicio ya no existe.</li>
     </ul>
     <h3>Frontend</h3>
     <ul>
@@ -332,19 +443,21 @@
       <li><code>client/src/hooks/use-mango-data.ts</code> — <code>useCategories()</code>, <code>useCurrentProvider()</code> (GET /api/me/provider); <code>useServices({ providerCategoryId })</code>; tipo <code>ServiceWithProvider[]</code> en respuesta de servicios.</li>
       <li><code>client/src/pages/BecomePro.tsx</code> — Selector de categoría desde <code>useCategories()</code>; envía <code>categoryId</code> y <code>category</code> (slug) al crear proveedor.</li>
       <li><code>client/src/pages/CreateService.tsx</code> — Categoría en solo lectura (resuelta desde <code>provider.categoryId</code> o <code>provider.category</code> slug); <code>categoryId</code> del formulario fijado por perfil del proveedor.</li>
-      <li><code>client/src/pages/Explore.tsx</code> — Cartas de categoría desde <code>useCategories()</code> filtradas por <code>DEFAULT_CATEGORIES</code>; disponibilidad por id de categoría; clic en carta → lista de servicios con <code>providerCategoryId</code>; botón «Volver a categorías».</li>
-      <li><code>client/src/components/Navigation.tsx</code> — Enlace «Crear servicio» en menú Servicios (y menú móvil), visible solo si <code>providerProfile</code> existe; <code>useShowBecomePro()</code> y <code>hasAdminRole</code>.</li>
+      <li><code>client/src/pages/Explore.tsx</code> — Una sola fila de filtros «Tipo de servicio:» con opción «Todos» y pills de categorías de proveedor (desde <code>useCategories()</code> filtradas por <code>DEFAULT_CATEGORIES</code>); clic en categoría o pill filtra servicios por <code>providerCategoryId</code>; botón «Volver a categorías» a <code>/categories</code>.</li>
+      <li><code>client/src/components/Navigation.tsx</code> — Enlace «Crear servicio» en menú Servicios (y menú móvil), visible solo si <code>providerProfile</code> existe; en Mi Cuenta (dropdown y menú móvil) enlace «Panel profesional» a <code>/professional-dashboard</code> cuando el usuario tiene perfil de proveedor; <code>useShowBecomePro()</code> y <code>hasAdminRole</code>.</li>
       <li><code>client/src/pages/Home.tsx</code>, <code>Footer.tsx</code> — Uso de <code>useShowBecomePro()</code>.</li>
-      <li><code>client/src/pages/Bookings.tsx</code> — Página «Mis Reservas» (<code>/bookings</code>): lista de reservas del usuario con <code>useBookings()</code>, servicio, profesional, fecha y estado; enlace a la ficha del servicio; mensaje de inicio de sesión si no está autenticado.</li>
-      <li><code>client/src/pages/ProfessionalDashboard.tsx</code> — Pestaña «Reservas» con <code>ProviderBookingsTab</code>: listado real con <code>useBookingsByProvider()</code> y actualización de estado con <code>useUpdateBookingStatus()</code> (desplegable por reserva).</li>
-      <li><code>client/src/hooks/use-mango-data.ts</code> — Hook <code>useBookingsByProvider(params?)</code> para GET /api/bookings/provider; en <code>useUpdateBookingStatus</code> se invalida también la query de reservas del profesional.</li>
+      <li><code>client/src/lib/date-utils.ts</code> — Utilidad <code>toDate()</code> para normalizar fechas de la API (string ISO, Date, o objeto Firestore <code>{ _seconds }</code>) a <code>Date</code>, usada en Bookings y ProfessionalDashboard para evitar errores de formateo.</li>
+      <li><code>client/src/pages/ServiceDetails.tsx</code> — Uso de <code>useBookings()</code> para detectar si el usuario tiene reserva del servicio; botón «Chat» (icono MessageSquare) visible cuando el usuario es el profesional del servicio o tiene una reserva del mismo; enlace a <code>/chat</code>. Acceso defensivo a <code>provider.user</code> (optional chaining).</li>
+      <li><code>client/src/pages/Bookings.tsx</code> — Página «Mis Reservas» (<code>/bookings</code>): lista con <code>useBookings()</code>, <code>toDate()</code> para fechas; botón «Chat» por reserva; enlace a la ficha del servicio; mensaje de inicio de sesión si no está autenticado.</li>
+      <li><code>client/src/pages/ProfessionalDashboard.tsx</code> — Pestaña «Reservas» con <code>ProviderBookingsTab</code>: listado real con <code>useBookingsByProvider()</code>, <code>toDate(booking.date)</code>, muestra notas y precio, botón «Chat» y enlace «Ver servicio» por reserva; actualización de estado con <code>useUpdateBookingStatus()</code> (desplegable).</li>
+      <li><code>client/src/hooks/use-mango-data.ts</code> — Hook <code>useBookingsByProvider(params?)</code> para GET /api/bookings/provider; constantes <code>BOOKING_SUCCESS_TOAST</code> y <code>BOOKING_ERROR_TOAST</code> para notificaciones al crear reserva (mensaje de éxito en español e indicación «Mi Cuenta → Mis Reservas»); en <code>useUpdateBookingStatus</code> se invalida también la query de reservas del profesional.</li>
       <li><code>client/src/App.tsx</code> — Ruta <code>/bookings</code> con componente <code>Bookings</code>.</li>
     </ul>
   </section>
 
   <hr />
   <p class="meta">
-    GenFeb S.A.S. — Registro de actividades para reporte a superiores. Incluye: categorías de proveedor, un solo sistema de categorías (seeder, migración, API), Explore por categoría y servicios filtrados, API /api/me/provider, acceso a Crear servicio desde el menú, categoría fija al crear servicio, APIs completas de servicios (crear, editar, eliminar) y estructura de código (SOLID / clean code). Actualizar este HTML al añadir nuevos avances.
+    GenFeb S.A.S. — Registro de actividades para reporte a superiores. Incluye: categorías de proveedor, un solo sistema de categorías (seeder, migración, API), Explore por categoría y servicios filtrados, API /api/me/provider, acceso a Crear servicio y Panel profesional desde el menú, categoría fija al crear servicio, APIs completas de servicios y reservas (bookings), página Mis Reservas y pestaña Reservas del profesional, enriquecimiento de datos (provider.user, fechas Firestore con toDate), botón Chat en ficha de servicio y listas de reservas con enlace a conversación concreta (/chat?with=), chat funcional completo (tipos, API cliente, hooks, componentes, JWT, marcar como leída, scroll en lista y mensajes, compartir ubicación), y revisión del sistema de notificaciones (punto 13). Actualizar este HTML al añadir nuevos avances.
   </p>
 </body>
 </html>

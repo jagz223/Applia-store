@@ -98,7 +98,7 @@ export default function Bookings() {
               date: string | Date;
               status: string;
               notes?: string | null;
-              service?: { id: number; title: string; price?: string; provider?: { user?: { firstName?: string; lastName?: string } } };
+              service?: { id: number; title: string; price?: string; provider?: { userId?: string; user?: { firstName?: string; lastName?: string } } };
             }>).map((booking) => {
               const config = STATUS_CONFIG[booking.status] ?? STATUS_CONFIG.pending;
               const Icon = config.icon;
@@ -132,7 +132,14 @@ export default function Bookings() {
                       )}
                       <div className="flex items-center gap-2">
                         <Button variant="outline" size="sm" asChild>
-                          <Link href="/chat" className="gap-1.5">
+                          <Link
+                            href={
+                              (booking as { service?: { provider?: { userId?: string } } }).service?.provider?.userId
+                                ? `/chat?with=${(booking as { service?: { provider?: { userId?: string } } }).service?.provider?.userId}`
+                                : "/chat"
+                            }
+                            className="gap-1.5"
+                          >
                             <MessageSquare className="h-4 w-4" />
                             Chat
                           </Link>

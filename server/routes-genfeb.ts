@@ -46,7 +46,7 @@ const uploadDocumentSchema = z.object({
 const sendMessageSchema = z.object({
   conversationId: z.number(),
   content: z.string().min(1),
-  type: z.enum(["text", "image", "file"]).default("text"),
+  type: z.enum(["text", "image", "file", "location"]).default("text"), // location = compartir ubicación en el chat
 });
 
 // User role schemas
@@ -348,81 +348,103 @@ export async function registerGenFebRoutes(
   
   // ---------- MENSAJES (CHAT) ----------
   
-  // GET /api/conversations - Listar conversaciones
-  app.get("/api/conversations", async (req, res) => {
+  // GET /api/conversations - Listar conversaciones (enriquecidas con otro participante y último mensaje)
+  app.get("/api/conversations", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.headers["x-user-id"] as string;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-      
-      const conversations = await storage.getConversationsByUser(userId);
-      res.json(conversations);
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const raw = await storage.getConversationsByUser(userId);
+      const enriched = await Promise.all(
+        raw.map(async (c: any) => {
+          const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
+          const otherUser = await storage.getUserById(otherId);
+          const msgs = await storage.getMessagesByConversation(Number(c.id));
+          const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+          const unread = msgs.filter((m: any) => m.senderId !== userId && m.status !== "read").length;
+          return {
+            ...c,
+            otherParticipant: otherUser ? { id: otherUser.id, name: [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" } : { id: otherId, name: "Usuario" },
+            lastMessageText: lastMsg?.content ?? null,
+            unreadCount: unread,
+          };
+        })
+      );
+      res.json(enriched);
     } catch (error) {
       console.error("Error fetching conversations:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
-  
+
   // POST /api/conversations - Crear conversación
-  app.post("/api/conversations", async (req, res) => {
+  app.post("/api/conversations", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.headers["x-user-id"] as string;
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const participantId = req.body.participantId as string;
       const serviceId = req.body.serviceId as number | undefined;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-      
+
       const conversation = await storage.createConversation({
         participant1Id: userId,
         participant2Id: participantId,
         serviceId,
       });
-      
       res.status(201).json(conversation);
     } catch (error) {
       console.error("Error creating conversation:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
-  
-  // GET /api/conversations/:id/messages - Obtener mensajes
-  app.get("/api/conversations/:id/messages", async (req, res) => {
+
+  // GET /api/conversations/:id/messages - Obtener mensajes (solo si el usuario es participante)
+  app.get("/api/conversations/:id/messages", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.headers["x-user-id"] as string;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-      
-      const messages = await storage.getMessagesByConversation(Number(req.params.id));
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const conversationId = Number(req.params.id);
+      const convs = await storage.getConversationsByUser(userId);
+      const conv = convs.find((c: any) => Number(c.id) === conversationId);
+      if (!conv) return res.status(403).json({ message: "No tienes acceso a esta conversación" });
+      const messages = await storage.getMessagesByConversation(conversationId);
       res.json(messages);
     } catch (error) {
       console.error("Error fetching messages:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
-  
-  // POST /api/messages - Enviar mensaje
-  app.post("/api/messages", async (req, res) => {
+
+  // PATCH /api/conversations/:id/read - Marcar conversación como leída
+  app.patch("/api/conversations/:id/read", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.headers["x-user-id"] as string;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-      
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const conversationId = Number(req.params.id);
+      const convs = await storage.getConversationsByUser(userId);
+      const conv = convs.find((c: any) => Number(c.id) === conversationId);
+      if (!conv) return res.status(403).json({ message: "No tienes acceso a esta conversación" });
+      await storage.markConversationAsRead(conversationId, userId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error marking conversation as read:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/messages - Enviar mensaje (solo si el usuario es participante de la conversación)
+  app.post("/api/messages", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const data = sendMessageSchema.parse(req.body);
-      
+      const convs = await storage.getConversationsByUser(userId);
+      const conv = convs.find((c: any) => Number(c.id) === data.conversationId);
+      if (!conv) return res.status(403).json({ message: "No tienes acceso a esta conversación" });
       const message = await storage.createMessage({
         ...data,
         senderId: userId,
         status: "sent",
       });
-      
       res.status(201).json(message);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -432,9 +454,9 @@ export async function registerGenFebRoutes(
       res.status(500).json({ message: "Internal server error" });
     }
   });
-  
+
   // PATCH /api/messages/:id/read - Marcar mensaje como leído
-  app.patch("/api/messages/:id/read", async (req, res) => {
+  app.patch("/api/messages/:id/read", authenticateJWT, async (req, res) => {
     try {
       await storage.markMessageAsRead(Number(req.params.id));
       res.json({ success: true });

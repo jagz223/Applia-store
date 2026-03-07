@@ -164,7 +164,14 @@ export default function ServiceDetails() {
 
             {showChatButton && (
               <Button className="w-full" variant="outline" asChild>
-                <Link href="/chat" className="gap-2">
+                <Link
+                  href={
+                    (service as { provider?: { userId?: string } }).provider?.userId
+                      ? `/chat?with=${(service as { provider: { userId: string } }).provider.userId}&serviceId=${id}`
+                      : "/chat"
+                  }
+                  className="gap-2"
+                >
                   <MessageSquare className="h-4 w-4" />
                   Chat
                 </Link>

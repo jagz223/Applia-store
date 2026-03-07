@@ -61,6 +61,7 @@ export class HybridStorage implements IStorage {
   getMessagesByConversation(conversationId: number) { return this.memory.getMessagesByConversation(conversationId); }
   createMessage(msg: any) { return this.memory.createMessage(msg); }
   markMessageAsRead(messageId: number) { return this.memory.markMessageAsRead(messageId); }
+  markConversationAsRead(conversationId: number, userId: string) { return this.memory.markConversationAsRead(conversationId, userId); }
   getFinancialReports(userId: string, period?: string) { return this.memory.getFinancialReports(userId, period); }
   getKPIs(userId: string) { return this.memory.getKPIs(userId); }
   getNotifications(userId: string, unreadOnly?: boolean) { return this.memory.getNotifications(userId, unreadOnly); }

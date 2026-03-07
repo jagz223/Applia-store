@@ -701,6 +701,24 @@ class FirestoreStorageImpl implements IStorage {
     await this.db.collection(FIRESTORE_COLLECTIONS.MESSAGES).doc(messageId.toString()).update({ status: "read", readAt: new Date() });
   }
 
+  async markConversationAsRead(conversationId: number, userId: string): Promise<void> {
+    if (!this.db) return;
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.MESSAGES)
+      .where("conversationId", "==", conversationId)
+      .get();
+    const batch = this.db.batch();
+    const now = new Date();
+    let hasWrites = false;
+    snap.docs.forEach(doc => {
+      const d = doc.data() as { senderId?: string; status?: string };
+      if (d.senderId !== userId && d.status !== "read") {
+        batch.update(doc.ref, { status: "read", readAt: now });
+        hasWrites = true;
+      }
+    });
+    if (hasWrites) await batch.commit();
+  }
+
   // ============ REPORTES FINANCIEROS ============
   async getFinancialReports(userId: string, _period?: string): Promise<any[]> {
     if (!this.db) return [];

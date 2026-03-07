@@ -134,7 +134,7 @@ function ProviderBookingsTab() {
                   )}
                   <div className="flex items-center gap-2 mt-2">
                     <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                      <Link href="/chat">
+                      <Link href={(booking as { userId?: string }).userId ? `/chat?with=${(booking as { userId: string }).userId}` : "/chat"}>
                         <MessageSquare className="h-4 w-4" />
                         Chat
                       </Link>
