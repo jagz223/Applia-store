@@ -5,17 +5,12 @@ import { DEFAULT_CATEGORIES } from "@shared/default-categories";
 import { ServiceCard } from "@/components/ServiceCard";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, Sparkles, X, ArrowLeft } from "lucide-react";
-import * as Icons from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
 
 const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-
-function CategoryIcon({ name }: { name: string }) {
-  const IconComponent = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[name] ?? Icons.HelpCircle;
-  return <IconComponent className="h-4 w-4" />;
-}
 
 export default function Explore() {
   const [, setLocation] = useLocation();
@@ -103,7 +98,7 @@ export default function Explore() {
                     : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <CategoryIcon name={(cat as { icon?: string }).icon ?? "HelpCircle"} />
+                <CategoryIcon name={(cat as { icon?: string }).icon ?? "HelpCircle"} className="h-4 w-4" />
                 {cat.name}
               </button>
             ))}

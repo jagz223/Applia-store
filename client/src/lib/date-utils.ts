@@ -1,4 +1,16 @@
 /**
+ * Indica si una fecha es anterior al día actual (solo compara día, no hora).
+ * Útil para deshabilitar días pasados en calendarios de reserva.
+ */
+export function isBeforeToday(date: Date): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() < today.getTime();
+}
+
+/**
  * Convierte fecha devuelta por la API (string ISO, Date o Firestore Timestamp) a Date válido.
  * Firestore serializa timestamps como { _seconds, _nanoseconds }.
  */

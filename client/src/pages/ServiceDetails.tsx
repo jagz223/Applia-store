@@ -17,6 +17,7 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { useState } from "react";
 import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
+import { isBeforeToday } from "@/lib/date-utils";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@shared/routes";
 
@@ -201,7 +202,7 @@ export default function ServiceDetails() {
                           selected={date}
                           onSelect={setDate}
                           className="rounded-md"
-                          disabled={(date) => date < new Date()}
+                          disabled={isBeforeToday}
                         />
                       </div>
                       <div className="space-y-2">

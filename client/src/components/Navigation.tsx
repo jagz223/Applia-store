@@ -43,6 +43,9 @@ export function Navigation() {
 
   const isActive = (path: string) => location === path || location.startsWith(path + '/');
 
+  /** Mostrar opciones de profesional si tiene perfil de proveedor o rol professional (por si el perfil no carga). */
+  const isProfessional = !!providerProfile || (user as { role?: string } | null)?.role === "professional";
+
   const NavLinks = () => (
     <>
       <Link href="/" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/') ? 'text-primary' : 'text-muted-foreground'}`}>
@@ -70,7 +73,7 @@ export function Navigation() {
               <span>Reservas</span>
             </Link>
           </DropdownMenuItem>
-          {providerProfile && (
+          {isProfessional && (
             <DropdownMenuItem>
               <Link href="/create-service" className="flex items-center gap-2 w-full">
                 <PlusCircle className="h-4 w-4" />
@@ -177,18 +180,25 @@ export function Navigation() {
           
           {isAuthenticated ? (
             <>
-              {providerProfile ? (
+              {isProfessional ? (
                  <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
-                   <Link href="/dashboard">
-                     <LayoutDashboard className="h-4 w-4" />
-                     <span>Dashboard</span>
+                   <Link href="/professional-dashboard">
+                     <Briefcase className="h-4 w-4" />
+                     <span>Panel profesional</span>
                    </Link>
                  </Button>
               ) : showBecomePro ? (
                 <Button variant="outline" className="hidden sm:flex border-primary text-primary hover:bg-primary/10" asChild>
                   <Link href="/become-pro">Convertirse en Profesional</Link>
                 </Button>
-              ) : null}
+              ) : (
+                 <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
+                   <Link href="/dashboard">
+                     <LayoutDashboard className="h-4 w-4" />
+                     <span>Dashboard</span>
+                   </Link>
+                 </Button>
+              )}
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -206,13 +216,7 @@ export function Navigation() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href="/dashboard" className="flex items-center">
-                      <LayoutDashboard className="mr-2 h-4 w-4" />
-                      Panel de Control
-                    </Link>
-                  </DropdownMenuItem>
-                  {providerProfile && (
+                  {isProfessional && (
                     <DropdownMenuItem asChild>
                       <Link href="/professional-dashboard" className="flex items-center">
                         <Briefcase className="mr-2 h-4 w-4" />
@@ -220,6 +224,12 @@ export function Navigation() {
                       </Link>
                     </DropdownMenuItem>
                   )}
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard" className="flex items-center">
+                      <LayoutDashboard className="mr-2 h-4 w-4" />
+                      Panel de Control
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link href="/bookings" className="flex items-center">
                       <Calendar className="mr-2 h-4 w-4" />
@@ -281,7 +291,7 @@ export function Navigation() {
                 <Link href="/booking" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Reservas
                 </Link>
-                {providerProfile && (
+                {isProfessional && (
                   <>
                     <Link href="/professional-dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Panel profesional

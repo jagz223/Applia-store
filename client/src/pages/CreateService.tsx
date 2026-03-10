@@ -3,7 +3,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertServiceSchema } from "@shared/schema";
 import { type InsertService } from "@shared/schema";
 import { useCreateService, useCurrentProvider, useCategories } from "@/hooks/use-mango-data";
-import { useLocation } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,7 +14,10 @@ import { Loader2, Tag } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 export default function CreateService() {
-  const { data: provider, isLoading: providerLoading } = useCurrentProvider();
+  const { user, isLoading: authLoading } = useAuth();
+  const { data: providerFromApi, isLoading: providerApiLoading } = useCurrentProvider();
+  /** Proveedor: primero del usuario (auth/me); si no, de la API dedicada (por si auth/me no trajo provider en caché). */
+  const provider = user?.provider ?? providerFromApi ?? null;
   const { data: categories } = useCategories();
   const createService = useCreateService();
   const [, setLocation] = useLocation();
@@ -54,12 +58,35 @@ export default function CreateService() {
     }
   }, [provider, resolvedCategoryId, form]);
 
-  if (providerLoading) {
+  if (authLoading || (user?.role === "professional" && !user?.provider && providerApiLoading)) {
     return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin" /></div>;
   }
 
+  if (!user) {
+    return (
+      <div className="container max-w-md py-20 text-center">
+        <p className="text-muted-foreground mb-4">Inicia sesión para crear servicios.</p>
+        <Button asChild>
+          <Link href="/login">Iniciar sesión</Link>
+        </Button>
+      </div>
+    );
+  }
+
   if (!provider) {
-    return <div className="text-center py-20">You must be a provider to create services.</div>;
+    const isProfessional = user.role === "professional";
+    return (
+      <div className="container max-w-md py-20 text-center">
+        <p className="text-muted-foreground mb-4">
+          {isProfessional
+            ? "Completa tu perfil de proveedor para poder crear servicios."
+            : "Debes ser proveedor para crear servicios."}
+        </p>
+        <Button asChild>
+          <Link href="/become-pro">Convertirse en profesional</Link>
+        </Button>
+      </div>
+    );
   }
 
   function onSubmit(data: InsertService) {

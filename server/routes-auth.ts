@@ -181,7 +181,8 @@ export async function registerAuthRoutes(
         role: user.role,
         phone: user.phone,
       });
-      
+
+      const provider = await genFebStorage.getProviderByUserId(user.id);
       res.json({
         message: "Login exitoso",
         token,
@@ -192,6 +193,7 @@ export async function registerAuthRoutes(
           lastName: user.lastName,
           role: user.role,
           phone: user.phone,
+          provider: provider ?? null,
         },
       });
     } catch (error) {
@@ -207,15 +209,14 @@ export async function registerAuthRoutes(
     }
   });
   
-  // GET /api/auth/me - Obtener usuario actual
+  // GET /api/auth/me - Usuario logueado; incluye perfil de proveedor si existe (una sola llamada para saber si es proveedor).
   app.get("/api/auth/me", authenticateJWT, async (req: any, res) => {
     try {
       const user = await genFebStorage.getUserById(req.user.id);
-      
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
-      
+      const provider = await genFebStorage.getProviderByUserId(req.user.id);
       res.json({
         id: user.id,
         email: user.email,
@@ -225,6 +226,7 @@ export async function registerAuthRoutes(
         phone: user.phone,
         avatar: user.avatar,
         createdAt: user.createdAt,
+        provider: provider ?? null,
       });
     } catch (error) {
       console.error("Error obteniendo usuario:", error);

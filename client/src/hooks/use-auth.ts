@@ -3,8 +3,17 @@ import { api } from "@shared/routes";
 import { User } from "@shared/models/auth";
 import { redirectToHomeAfterLogout } from "@/lib/auth-utils";
 
-/** Usuario tal como lo devuelve la API de auth (incluye role). */
-export type AuthUser = User & { role?: string };
+/** Perfil de proveedor (incluido en /api/auth/me cuando el usuario es proveedor). */
+export interface AuthUserProvider {
+  id: number;
+  categoryId?: number | null;
+  category?: string | null;
+  profession?: string;
+  [key: string]: unknown;
+}
+
+/** Usuario tal como lo devuelve la API de auth (incluye role y provider si es proveedor). */
+export type AuthUser = User & { role?: string; provider?: AuthUserProvider | null };
 
 async function fetchUser(): Promise<AuthUser | null> {
   const token = localStorage.getItem("token");

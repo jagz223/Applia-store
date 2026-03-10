@@ -62,28 +62,26 @@ export class CatalogService {
   }
 
   /**
-   * Indica qué categorías (por id) tienen al menos un profesional.
-   * Usa el mismo sistema de categorías que los servicios (getCategories).
+   * Indica qué categorías (por id) tienen al menos un servicio ofertado (proveedor con al menos un servicio).
+   * Una categoría solo se considera "disponible" si existe al menos un servicio cuyo proveedor pertenece a esa categoría.
    */
   async getProviderCategoryAvailability(): Promise<Record<string, boolean>> {
-    const [categories, all] = await Promise.all([
+    const [categories, services] = await Promise.all([
       this.storage.getCategories(),
-      this.storage.getAllProviders(),
+      this.storage.getAllServices(),
     ]);
-    const providers = all.filter(
-      (p): p is typeof p & { id: number } =>
-        typeof p.id === "number" && !Number.isNaN(p.id)
-    );
     const availability: Record<string, boolean> = {};
     for (const cat of categories) {
       const id = cat.id as number;
-      if (Number.isNaN(id)) continue;
-      availability[String(id)] = providers.some((p) => {
-        const pid = (p as { categoryId?: unknown }).categoryId;
+      if (id == null || Number.isNaN(Number(id))) continue;
+      const slug = (cat as { slug?: string }).slug;
+      availability[String(id)] = services.some((s: { provider?: { categoryId?: unknown; category?: unknown } }) => {
+        const p = s?.provider;
+        if (!p) return false;
+        const pid = p.categoryId;
         if (pid != null && typeof pid === "number" && !Number.isNaN(pid)) return pid === id;
-        const slug = (p as { category?: unknown }).category;
-        const s = typeof slug === "string" ? slug.trim() : "";
-        return s === (cat as { slug?: string }).slug;
+        const slugVal = typeof p.category === "string" ? p.category.trim() : "";
+        return slug != null && slugVal === slug;
       });
     }
     return availability;

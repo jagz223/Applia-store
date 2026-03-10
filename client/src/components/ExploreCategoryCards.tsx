@@ -1,5 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
-import * as Icons from "lucide-react";
+import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
 
 export interface ExploreCategoryCardsProps {
@@ -24,7 +24,6 @@ export function ExploreCategoryCards({ categories, availability, onSelectCategor
         {categories.map((cat, index) => {
           const available = availability?.[String(cat.id)] === true;
           const iconName = (cat as { icon?: string }).icon ?? "HelpCircle";
-          const Icon = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[iconName] ?? Icons.HelpCircle;
           return (
             <motion.div
               key={cat.id}
@@ -48,7 +47,7 @@ export function ExploreCategoryCards({ categories, availability, onSelectCategor
                         : "p-4 rounded-xl text-muted-foreground bg-muted w-fit mx-auto mb-4"
                     }
                   >
-                    <Icon className="w-8 h-8" />
+                    <CategoryIcon name={iconName} className="w-8 h-8" />
                   </div>
                   <h3 className="text-lg font-bold mb-1">{cat.name}</h3>
                   <p className="text-sm text-muted-foreground">
