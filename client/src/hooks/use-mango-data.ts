@@ -126,6 +126,7 @@ export function useCreateProvider() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.providers.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+      queryClient.invalidateQueries({ queryKey: ["user"] });
       toast({ title: "Welcome Pro!", description: "Your provider profile is now live." });
     },
     onError: (err: Error) => {
@@ -137,11 +138,14 @@ export function useCreateProvider() {
 // ==========================================
 // SERVICES
 // ==========================================
-export function useServices(params?: {
-  categoryId?: string;
-  search?: string;
-  providerCategoryId?: number;
-}) {
+export function useServices(
+  params?: {
+    categoryId?: string;
+    search?: string;
+    providerCategoryId?: number;
+  },
+  options?: { enabled?: boolean }
+) {
   return useQuery({
     queryKey: [api.services.list.path, params],
     queryFn: async () => {
@@ -156,6 +160,7 @@ export function useServices(params?: {
       const parsed = api.services.list.responses[200].parse(await res.json());
       return parsed as ServiceWithProvider[];
     },
+    enabled: options?.enabled !== false,
   });
 }
 

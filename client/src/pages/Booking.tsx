@@ -6,7 +6,6 @@ import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { 
   Calendar as CalendarIcon, 
@@ -19,38 +18,176 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
-  Search,
   Phone,
-  Mail
+  Mail,
+  Loader2
 } from "lucide-react";
-import { useCategories, useServices } from "@/hooks/use-mango-data";
+import { useCategories, useServices, useProviderCategoryAvailability, useCreateBooking } from "@/hooks/use-mango-data";
+import { useAuth } from "@/hooks/use-auth";
+import { useMemo } from "react";
+import { useToast } from "@/hooks/use-toast";
+import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
+import { isBeforeToday } from "@/lib/date-utils";
+import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
 
 export default function Booking() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  /** Id del servicio a reservar (uno del proveedor elegido en la categoría). */
+  const [selectedBookingServiceId, setSelectedBookingServiceId] = useState<number | null>(null);
   const [step, setStep] = useState(1);
   const [location, setLocation] = useState("");
-  
-  const { data: categories } = useCategories();
-  const { data: services } = useServices();
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [notes, setNotes] = useState("");
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const createBooking = useCreateBooking();
 
-  // Mock available time slots
+  const { data: categories } = useCategories();
+  const { data: categoryAvailability } = useProviderCategoryAvailability();
+  const categoryIdNum = selectedService ? Number(selectedService) : undefined;
+  const { data: services = [], isLoading: isLoadingServices } = useServices(
+    { providerCategoryId: categoryIdNum },
+    { enabled: !!selectedService }
+  );
+
+  /** Proveedores únicos de la categoría seleccionada, con datos para la lista (nombre, profesión, rating, precio). */
+  const providersInCategory = useMemo(() => {
+    if (!services?.length) return [];
+    const byProvider = new Map<
+      number,
+      {
+        id: number;
+        name: string;
+        profession: string;
+        rating: number;
+        reviewCount: number;
+        price: number;
+        firstServiceId: number;
+        profileImageUrl?: string | null;
+      }
+    >();
+    for (const s of services as Array<{
+      id: number;
+      price: string | number;
+      provider?: {
+        id: number;
+        profession?: string;
+        rating?: string | number;
+        reviewCount?: number;
+        user?: { firstName?: string; lastName?: string; name?: string; profileImageUrl?: string | null };
+      };
+    }>) {
+      const p = s.provider;
+      if (!p?.id) continue;
+      const name = p.user
+        ? [p.user.firstName, p.user.lastName].filter(Boolean).join(" ").trim() || (p.user as { name?: string }).name || "Profesional"
+        : "Profesional";
+      const price = typeof s.price === "string" ? Number(s.price) : Number(s.price);
+      if (!byProvider.has(p.id)) {
+        byProvider.set(p.id, {
+          id: p.id,
+          name,
+          profession: p.profession ?? "",
+          rating: Number(p.rating ?? 0),
+          reviewCount: Number(p.reviewCount ?? 0),
+          price,
+          firstServiceId: s.id,
+          profileImageUrl: p.user?.profileImageUrl ?? null,
+        });
+      } else {
+        const existing = byProvider.get(p.id)!;
+        if (price < existing.price) {
+          existing.price = price;
+          existing.firstServiceId = s.id;
+        }
+      }
+    }
+    return Array.from(byProvider.values());
+  }, [services]);
+
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      toast({
+        variant: "destructive",
+        title: "No disponible",
+        description: "Tu navegador no soporta geolocalización",
+      });
+      return;
+    }
+    setLocationLoading(true);
+    toast({ title: "Obteniendo ubicación...", description: "Permite el acceso si el navegador lo pide." });
+    getCurrentLocation()
+      .then(async (position) => {
+        const { latitude, longitude } = position.coords;
+        const result = await reverseGeocode(latitude, longitude);
+        if (result?.address) {
+          setLocation(result.address);
+          toast({ title: "Ubicación obtenida", description: "Tu dirección se ha guardado para la reserva." });
+        } else {
+          setLocation(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+          toast({ title: "Coordenadas guardadas", description: "No se pudo obtener la dirección exacta; se usan coordenadas." });
+        }
+      })
+      .catch(() => {
+        toast({
+          variant: "destructive",
+          title: "Ubicación no disponible",
+          description: "No se pudo obtener tu ubicación. Revisa los permisos del navegador.",
+        });
+      })
+      .finally(() => setLocationLoading(false));
+  };
+
+  // Horarios disponibles (mock; en el futuro podría venir de disponibilidad del profesional)
   const timeSlots = [
     "08:00", "09:00", "10:00", "11:00", "12:00",
     "14:00", "15:00", "16:00", "17:00", "18:00"
   ];
 
-  // Mock providers
-  const providers = [
-    { id: "1", name: "Ing. Carlos Mendoza", profession: "Ingeniero Civil", rating: 4.9, reviews: 234, price: 45, image: null },
-    { id: "2", name: "Abg. María García", profession: "Abogada Corporativa", rating: 4.8, reviews: 189, price: 60, image: null },
-    { id: "3", name: "Eco. Roberto Sánchez", profession: "Asesor Financiero", rating: 5.0, reviews: 312, price: 55, image: null },
-  ];
+  const handleSelectProvider = (providerId: number, firstServiceId: number) => {
+    setSelectedProvider(String(providerId));
+    setSelectedBookingServiceId(firstServiceId);
+  };
+
+  /** Fecha a inicio de día en ISO para la API (hora vacía). */
+  const bookingDateISO = useMemo(() => {
+    if (!selectedDate) return null;
+    const d = new Date(selectedDate);
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }, [selectedDate]);
 
   const handleBooking = () => {
-    setStep(4); // Confirmation step
+    if (!user?.id) {
+      toast({
+        variant: "destructive",
+        title: "Inicia sesión",
+        description: "Debes iniciar sesión para confirmar la reserva.",
+      });
+      return;
+    }
+    if (selectedBookingServiceId == null || !bookingDateISO) {
+      toast({
+        variant: "destructive",
+        title: "Datos incompletos",
+        description: "Selecciona profesional y fecha.",
+      });
+      return;
+    }
+    createBooking.mutate(
+      {
+        userId: user.id,
+        serviceId: selectedBookingServiceId,
+        date: bookingDateISO,
+        notes: notes.trim() || undefined,
+      },
+      {
+        onSuccess: () => setStep(4),
+      }
+    );
   };
 
   const containerVariants = {
@@ -133,72 +270,78 @@ export default function Booking() {
                           Selecciona un Servicio
                         </CardTitle>
                         <CardDescription>
-                          Elige la categoría y tipo de servicio que necesitas
+                          Elige tu ubicación y el tipo de servicio que necesitas
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-6">
-                        {/* Category Selection */}
-                        <div className="space-y-3">
-                          <Label>Categoría</Label>
-                          <Select onValueChange={(value) => setSelectedService(value)}>
-                            <SelectTrigger className="input-industrial">
-                              <SelectValue placeholder="Selecciona una categoría" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {categories
-                                ?.filter((cat): cat is typeof cat & { id: NonNullable<typeof cat.id> } => cat.id != null)
-                                ?.map((cat) => (
-                                  <SelectItem key={String(cat.id)} value={String(cat.id)}>
-                                    <div className="flex items-center gap-2">
-                                      <span>{cat.name}</span>
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {/* Location */}
+                        {/* Location: solo se llena al presionar el botón (como en el chat) */}
                         <div className="space-y-3">
                           <Label>Ubicación</Label>
-                          <div className="relative">
-                            <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                            <Input 
-                              placeholder="Ingresa tu ubicación o permite el acceso a tu ubicación" 
-                              className="input-industrial pl-10"
-                              value={location}
-                              onChange={(e) => setLocation(e.target.value)}
-                            />
+                          <div className="flex gap-2">
+                            <div className="relative flex-1 min-w-0">
+                              <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground pointer-events-none" />
+                              <Input
+                                readOnly
+                                placeholder="Presiona el botón para usar tu ubicación actual"
+                                className="input-industrial pl-10 bg-muted/50"
+                                value={location}
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleUseMyLocation}
+                              disabled={locationLoading}
+                              className="shrink-0 border-border"
+                            >
+                              {locationLoading ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <MapPin className="h-4 w-4 mr-1.5" />
+                                  Usar mi ubicación
+                                </>
+                              )}
+                            </Button>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            🎯 La geolocalización nos permite mostrarte profesionales cercanos
+                            🎯 La ubicación nos permite mostrarte profesionales cercanos y fijar el punto del servicio
                           </p>
                         </div>
 
-                        {/* Service Type */}
+                        {/* Tipo de servicio: categorías con servicios seleccionables; sin servicios se ven apagadas */}
                         <div className="space-y-3">
                           <Label>Tipo de Servicio</Label>
                           <div className="grid sm:grid-cols-2 gap-3">
-                            {[
-                              { id: "technical", name: "Servicio Técnico", icon: "🔧" },
-                              { id: "legal", name: "Asesoría Legal", icon: "⚖️" },
-                              { id: "financial", name: "Consulta Financiera", icon: "💰" },
-                              { id: "maintenance", name: "Mantenimiento", icon: "🏠" },
-                            ].map((type) => (
-                              <button
-                                key={type.id}
-                                onClick={() => setSelectedService(type.id)}
-                                className={`
-                                  p-4 rounded-lg border text-left transition-all
-                                  ${selectedService === type.id 
-                                    ? 'border-primary bg-primary/10 text-primary' 
-                                    : 'border-border hover:border-primary/50 text-muted-foreground hover:text-foreground'}
-                                `}
-                              >
-                                <span className="text-2xl mr-2">{type.icon}</span>
-                                {type.name}
-                              </button>
-                            ))}
+                            {categories
+                              ?.filter((cat): cat is typeof cat & { id: number; icon?: string } => cat.id != null)
+                              ?.map((cat) => {
+                                const hasServices = categoryAvailability?.[String(cat.id)] === true;
+                                return (
+                                  <button
+                                    key={cat.id}
+                                    type="button"
+                                    disabled={!hasServices}
+                                    onClick={() => hasServices && setSelectedService(String(cat.id))}
+                                    className={`
+                                      p-4 rounded-lg border text-left transition-all flex items-center gap-3
+                                      ${!hasServices
+                                        ? "opacity-50 cursor-not-allowed border-border bg-muted/30 text-muted-foreground"
+                                        : selectedService === String(cat.id)
+                                          ? "border-primary bg-primary/10 text-primary"
+                                          : "border-border hover:border-primary/50 text-muted-foreground hover:text-foreground"}
+                                    `}
+                                  >
+                                    <span className={`flex shrink-0 p-2 rounded-lg ${hasServices ? "bg-muted/80" : "bg-muted"}`}>
+                                      <CategoryIcon name={cat.icon ?? "HelpCircle"} className="h-5 w-5" />
+                                    </span>
+                                    {cat.name}
+                                    {!hasServices && (
+                                      <span className="text-xs ml-auto shrink-0">Sin servicios</span>
+                                    )}
+                                  </button>
+                                );
+                              })}
                           </div>
                         </div>
 
@@ -224,41 +367,62 @@ export default function Booking() {
                           <User className="w-5 h-5 text-primary" />
                           Selecciona Profesional
                         </CardTitle>
+                        <CardDescription>
+                          Profesionales con servicios en la categoría elegida
+                        </CardDescription>
                       </CardHeader>
                       <CardContent>
-                        <div className="space-y-4">
-                          {providers.map((provider) => (
-                            <button
-                              key={provider.id}
-                              onClick={() => setSelectedProvider(provider.id)}
-                              className={`
-                                w-full p-4 rounded-lg border text-left transition-all flex items-center justify-between
-                                ${selectedProvider === provider.id 
-                                  ? 'border-primary bg-primary/10' 
-                                  : 'border-border hover:border-primary/50'}
-                              `}
-                            >
-                              <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
-                                  <User className="w-6 h-6 text-primary" />
-                                </div>
-                                <div>
-                                  <p className="font-medium">{provider.name}</p>
-                                  <p className="text-sm text-muted-foreground">{provider.profession}</p>
-                                  <div className="flex items-center gap-1 mt-1">
-                                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                                    <span className="text-sm">{provider.rating}</span>
-                                    <span className="text-xs text-muted-foreground">({provider.reviews} reseñas)</span>
+                        {isLoadingServices ? (
+                          <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+                            <Loader2 className="h-6 w-6 animate-spin" />
+                            <span>Cargando profesionales...</span>
+                          </div>
+                        ) : !providersInCategory.length ? (
+                          <p className="text-center py-8 text-muted-foreground">
+                            No hay profesionales con servicios en esta categoría. Prueba otra categoría.
+                          </p>
+                        ) : (
+                          <div className="space-y-4">
+                            {providersInCategory.map((provider) => (
+                              <button
+                                key={provider.id}
+                                type="button"
+                                onClick={() => handleSelectProvider(provider.id, provider.firstServiceId)}
+                                className={`
+                                  w-full p-4 rounded-lg border text-left transition-all flex items-center justify-between
+                                  ${selectedProvider === String(provider.id)
+                                    ? "border-primary bg-primary/10"
+                                    : "border-border hover:border-primary/50"}
+                                `}
+                              >
+                                <div className="flex items-center gap-4">
+                                  <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden shrink-0">
+                                    {provider.profileImageUrl ? (
+                                      <img src={provider.profileImageUrl} alt="" className="w-full h-full object-cover" />
+                                    ) : (
+                                      <User className="w-6 h-6 text-primary" />
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="font-medium">{provider.name}</p>
+                                    <p className="text-sm text-muted-foreground">{provider.profession}</p>
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                                      <span className="text-sm">{provider.rating > 0 ? provider.rating.toFixed(1) : "—"}</span>
+                                      <span className="text-xs text-muted-foreground">
+                                        ({provider.reviewCount} reseñas)
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-bold text-lg">${provider.price}</p>
-                                <p className="text-xs text-muted-foreground">/hora</p>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
+                                <div className="text-right shrink-0">
+                                  <p className="font-bold text-lg">${Number(provider.price).toFixed(0)}</p>
+                                  <p className="text-xs text-muted-foreground">desde</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
 
@@ -276,10 +440,12 @@ export default function Booking() {
                               mode="single"
                               selected={selectedDate}
                               onSelect={setSelectedDate}
+                              disabled={isBeforeToday}
                               className="rounded-lg border border-border"
                             />
                           </div>
-                          <div>
+                          {/* Horarios: ocultos por ahora; se pueden volver a mostrar cuando se use disponibilidad real */}
+                          <div className="hidden">
                             <Label className="mb-3 block">Horarios Disponibles</Label>
                             <div className="grid grid-cols-2 gap-2">
                               {timeSlots.map((time) => (
@@ -297,9 +463,13 @@ export default function Booking() {
                         </div>
 
                         <div className="flex gap-3 mt-6">
-                          <Button 
+                          <Button
                             variant="outline"
-                            onClick={() => setStep(1)}
+                            onClick={() => {
+                              setStep(1);
+                              setSelectedProvider(null);
+                              setSelectedBookingServiceId(null);
+                            }}
                           >
                             <ChevronLeft className="mr-2 h-4 w-4" />
                             Atrás
@@ -333,20 +503,25 @@ export default function Booking() {
                           <h3 className="font-semibold mb-3">Resumen de Reserva</h3>
                           <div className="space-y-2 text-sm">
                             <div className="flex justify-between">
-                              <span className="text-muted-foreground">Servicio:</span>
-                              <span>Consulta Técnica</span>
+                              <span className="text-muted-foreground">Categoría:</span>
+                              <span>
+                                {categories?.find((c) => c.id != null && String(c.id) === selectedService)?.name ?? "—"}
+                              </span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Profesional:</span>
-                              <span>Ing. Carlos Mendoza</span>
+                              <span>{providersInCategory.find((p) => String(p.id) === selectedProvider)?.name ?? "—"}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Fecha:</span>
-                              <span>{selectedDate?.toLocaleDateString('es-EC')}</span>
+                              <span>{selectedDate?.toLocaleDateString("es-EC")}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Hora:</span>
-                              <span>10:00</span>
+                            {/* Hora oculta; al crear la reserva se envía la fecha sin hora (o hora vacía) */}
+                            <div className="hidden">
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Hora:</span>
+                                <span>—</span>
+                              </div>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Ubicación:</span>
@@ -358,43 +533,58 @@ export default function Booking() {
                         {/* Notes */}
                         <div className="space-y-3">
                           <Label>Notas adicionales (opcional)</Label>
-                          <Textarea 
-                            placeholder="Describe detalles adicionales de tu requerimiento..." 
+                          <Textarea
+                            placeholder="Describe detalles adicionales de tu requerimiento..."
                             className="input-industrial"
+                            value={notes}
+                            onChange={(e) => setNotes(e.target.value)}
                           />
                         </div>
 
-                        {/* Contact Info */}
+                        {/* Contact Info: datos del usuario cliente que crea la reserva */}
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div className="space-y-2">
                             <Label>Teléfono de contacto</Label>
                             <div className="relative">
                               <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                              <Input placeholder="+593 99 123 4567" className="input-industrial pl-10" />
+                              <Input
+                                readOnly
+                                value={(user as { phone?: string } | null)?.phone ?? ""}
+                                placeholder="Tu teléfono (Mi Cuenta)"
+                                className="input-industrial pl-10 bg-muted/50"
+                              />
                             </div>
                           </div>
                           <div className="space-y-2">
                             <Label>Email de confirmación</Label>
                             <div className="relative">
                               <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                              <Input placeholder="tu@email.com" className="input-industrial pl-10" />
+                              <Input
+                                readOnly
+                                type="email"
+                                value={user?.email ?? ""}
+                                placeholder="Tu correo (Mi Cuenta)"
+                                className="input-industrial pl-10 bg-muted/50"
+                              />
                             </div>
                           </div>
                         </div>
 
                         <div className="flex gap-3">
-                          <Button 
+                          <Button
                             variant="outline"
                             onClick={() => setStep(2)}
+                            disabled={createBooking.isPending}
                           >
                             <ChevronLeft className="mr-2 h-4 w-4" />
                             Atrás
                           </Button>
-                          <Button 
+                          <Button
                             className="flex-1 bg-accent hover:bg-accent/90"
                             onClick={handleBooking}
+                            disabled={createBooking.isPending}
                           >
-                            Confirmar Reserva
+                            {createBooking.isPending ? "Confirmando…" : "Confirmar Reserva"}
                           </Button>
                         </div>
                       </CardContent>
@@ -410,19 +600,10 @@ export default function Booking() {
                         <div className="w-20 h-20 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-6 glow-emerald">
                           <CheckCircle className="w-10 h-10 text-accent" />
                         </div>
-                        <h2 className="text-2xl font-display font-bold mb-2">¡Reserva Confirmada!</h2>
-                        <p className="text-muted-foreground mb-6">
-                          Tu reserva ha sido creada exitosamente. Recibirás una confirmación por email.
-                        </p>
-                        <div className="p-4 rounded-lg bg-primary/5 border border-primary/20 mb-6 inline-block">
-                          <p className="text-sm">
-                            <span className="text-muted-foreground">Código de Reserva:</span>
-                            <span className="font-mono font-bold ml-2">GEN-2026-8472</span>
-                          </p>
-                        </div>
-                        <div className="flex gap-3 justify-center">
+                        <h2 className="text-2xl font-display font-bold mb-6">¡Reserva Confirmada!</h2>
+                        <div className="flex gap-3 justify-center flex-wrap">
                           <Button variant="outline" asChild>
-                            <Link href="/dashboard">Ver mis Reservas</Link>
+                            <Link href="/bookings">Ver mis Reservas</Link>
                           </Button>
                           <Button asChild>
                             <Link href="/">Volver al Inicio</Link>

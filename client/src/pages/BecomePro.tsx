@@ -3,9 +3,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { insertProviderSchema } from "@shared/schema";
 import { type InsertProvider } from "@shared/schema";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCreateProvider, useCurrentProvider, useCategories } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
+import { api } from "@shared/routes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,7 +16,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { useEffect } from "react";
-import { api } from "@shared/routes";
 
 const becomeProFormSchema = insertProviderSchema.extend({
   categoryId: z.number().int().positive().optional(),
@@ -26,6 +27,7 @@ export default function BecomePro() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { data: existingProfile, isLoading: profileLoading } = useCurrentProvider();
   const createProvider = useCreateProvider();
+  const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
 
   const { data: categories = [] } = useCategories();
@@ -78,7 +80,15 @@ export default function BecomePro() {
         categoryId: data.categoryId,
         category: slug ?? data.category ?? undefined,
       } as InsertProvider,
-      { onSuccess: () => setLocation("/dashboard") }
+      {
+        onSuccess: () => setLocation("/dashboard"),
+        onError: (err: Error) => {
+          if (err.message?.includes("Ya tienes") || err.message?.includes("perfil de proveedor")) {
+            queryClient.invalidateQueries({ queryKey: ["user"] });
+            setLocation("/create-service");
+          }
+        },
+      }
     );
   }
 

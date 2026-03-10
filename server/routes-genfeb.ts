@@ -124,12 +124,19 @@ export async function registerGenFebRoutes(
         return res.status(404).json({ message: "Servicio no encontrado" });
       }
 
+      const providerId = (service as { providerId?: number; provider?: { id: number } }).provider?.id
+        ?? (service as { providerId?: number }).providerId;
+      if (providerId == null) {
+        return res.status(400).json({ message: "El servicio no tiene proveedor asociado" });
+      }
+
       const booking = await storage.createBooking({
         userId,
         serviceId: data.serviceId,
         date,
         notes: data.notes ?? undefined,
         status: "pending",
+        providerId: Number(providerId),
       });
       res.status(201).json(booking);
     } catch (error) {
