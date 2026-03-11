@@ -143,7 +143,7 @@ export default function Dashboard() {
                 Bienvenido a tu centro de control financiero y gestión
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 justify-center md:justify-end flex-wrap">
               <Button variant="outline" className="border-primary/50 text-primary">
                 <Download className="w-4 h-4 mr-2" />
                 Exportar Reporte
@@ -199,21 +199,23 @@ export default function Dashboard() {
       <section className="py-6 pb-16">
         <div className="container px-4 mx-auto max-w-7xl">
           <Tabs defaultValue="overview" className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <TabsList className="bg-card border border-border">
-                <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  <BarChart3 className="w-4 h-4 mr-2" />
-                  Resumen
-                </TabsTrigger>
-                <TabsTrigger value="transactions" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  <Receipt className="w-4 h-4 mr-2" />
-                  Transacciones
-                </TabsTrigger>
-                <TabsTrigger value="invoices" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  <FileText className="w-4 h-4 mr-2" />
-                  Facturación
-                </TabsTrigger>
-              </TabsList>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 max-w-full overflow-hidden">
+              <div className="w-full max-w-full overflow-x-auto md:overflow-visible [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
+                <TabsList className="bg-card border border-border inline-flex w-max flex-nowrap h-10 p-1">
+                  <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
+                    <BarChart3 className="w-4 h-4 mr-2" />
+                    Resumen
+                  </TabsTrigger>
+                  <TabsTrigger value="transactions" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
+                    <Receipt className="w-4 h-4 mr-2" />
+                    Transacciones
+                  </TabsTrigger>
+                  <TabsTrigger value="invoices" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
+                    <FileText className="w-4 h-4 mr-2" />
+                    Facturación
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
               <div className="flex gap-2">
                 <Select value={timeRange} onValueChange={setTimeRange}>
@@ -321,43 +323,45 @@ export default function Dashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
               >
-                <Card className="card-industrial">
-                  <CardHeader className="flex flex-row items-center justify-between">
+                <Card className="card-industrial overflow-hidden">
+                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-center sm:text-left">
                     <div>
-                      <CardTitle className="flex items-center gap-2">
-                        <Receipt className="w-5 h-5 text-primary" />
+                      <CardTitle className="flex items-center justify-center sm:justify-start gap-2">
+                        <Receipt className="w-5 h-5 text-primary shrink-0" />
                         Transacciones Recientes
                       </CardTitle>
                       <CardDescription>
                         Últimas 5 transacciones del período seleccionado
                       </CardDescription>
                     </div>
-                    <Button variant="ghost" size="sm" asChild>
+                    <Button variant="ghost" size="sm" asChild className="shrink-0">
                       <Link href="/payments">Ver todas</Link>
                     </Button>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-4">
+                    <div className="space-y-5">
                       {recentTransactions.map((transaction) => (
                         <div 
                           key={transaction.id}
-                          className="flex items-center justify-between p-4 rounded-lg bg-background/50 border border-border hover:border-primary/30 transition-colors"
+                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 sm:p-5 rounded-lg bg-background/50 border border-border hover:border-primary/30 transition-colors min-w-0"
                         >
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                          <div className="flex items-start sm:items-center gap-4 min-w-0">
+                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
                               <Banknote className="w-5 h-5 text-primary" />
                             </div>
-                            <div>
-                              <p className="font-medium">{transaction.client}</p>
-                              <p className="text-sm text-muted-foreground">{transaction.service}</p>
+                            <div className="min-w-0 space-y-1.5">
+                              <p className="font-medium truncate text-foreground">{transaction.client}</p>
+                              <p className="text-sm text-muted-foreground truncate">{transaction.service}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4">
+                          <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-4 gap-y-2 shrink-0 border-t border-border/60 pt-3 sm:border-0 sm:pt-0 sm:gap-4">
                             <div className="text-right">
-                              <p className="font-bold">${transaction.amount}</p>
-                              <p className="text-xs text-muted-foreground">{transaction.date}</p>
+                              <p className="font-bold text-foreground">${transaction.amount}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{transaction.date}</p>
                             </div>
-                            {getStatusBadge(transaction.status)}
+                            <div className="w-full sm:w-auto flex justify-center sm:justify-end">
+                              {getStatusBadge(transaction.status)}
+                            </div>
                           </div>
                         </div>
                       ))}
