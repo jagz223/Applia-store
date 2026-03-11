@@ -7,6 +7,9 @@ import { z } from "zod";
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
 
+/** Mensajes por página en el chat (paginación). Balance entre UX y carga en servidor. */
+export const CHAT_MESSAGES_PAGE_SIZE = 25;
+
 // ============== ESQUEMAS DE VALIDACIÓN ==============
 
 /** Cuerpo para crear reserva: userId se toma del JWT, providerId se deriva del servicio en el storage. */
@@ -366,14 +369,26 @@ export async function registerGenFebRoutes(
         raw.map(async (c: any) => {
           const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
           const otherUser = await storage.getUserById(otherId);
-          const msgs = await storage.getMessagesByConversation(Number(c.id));
-          const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-          const unread = msgs.filter((m: any) => m.senderId !== userId && m.status !== "read").length;
+          let lastMessageText: string | null = null;
+          let unreadCount = 0;
+          const convId = Number(c.id);
+          if (convId != null && !Number.isNaN(convId)) {
+            try {
+              const [lastMsg, unread] = await Promise.all([
+                storage.getLastMessageByConversation(convId),
+                storage.getUnreadCountByConversation(convId, userId),
+              ]);
+              lastMessageText = lastMsg?.content ?? null;
+              unreadCount = unread;
+            } catch (err) {
+              console.error("Error enriching conversation", c.id, err);
+            }
+          }
           return {
             ...c,
             otherParticipant: otherUser ? { id: otherUser.id, name: [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" } : { id: otherId, name: "Usuario" },
-            lastMessageText: lastMsg?.content ?? null,
-            unreadCount: unread,
+            lastMessageText,
+            unreadCount,
           };
         })
       );
@@ -404,7 +419,7 @@ export async function registerGenFebRoutes(
     }
   });
 
-  // GET /api/conversations/:id/messages - Obtener mensajes (solo si el usuario es participante)
+  // GET /api/conversations/:id/messages - Mensajes paginados (más viejos arriba, más nuevos abajo)
   app.get("/api/conversations/:id/messages", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id;
@@ -413,8 +428,10 @@ export async function registerGenFebRoutes(
       const convs = await storage.getConversationsByUser(userId);
       const conv = convs.find((c: any) => Number(c.id) === conversationId);
       if (!conv) return res.status(403).json({ message: "No tienes acceso a esta conversación" });
-      const messages = await storage.getMessagesByConversation(conversationId);
-      res.json(messages);
+      const limit = Math.min(Math.max(Number(req.query.limit) || CHAT_MESSAGES_PAGE_SIZE, 1), 100);
+      const before = req.query.before != null ? Number(req.query.before) : undefined;
+      const { messages, hasMore } = await storage.getMessagesByConversation(conversationId, { limit, before: before && !Number.isNaN(before) ? before : undefined });
+      res.json({ messages, hasMore });
     } catch (error) {
       console.error("Error fetching messages:", error);
       res.status(500).json({ message: "Internal server error" });

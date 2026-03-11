@@ -16,6 +16,9 @@ interface ChatWindowProps {
   onShareLocation?: () => void;
   isSending: boolean;
   isLoadingMessages: boolean;
+  hasMoreMessages?: boolean;
+  onLoadMoreMessages?: () => void;
+  isLoadingMoreMessages?: boolean;
   onBack?: () => void;
 }
 
@@ -29,6 +32,9 @@ export function ChatWindow({
   onShareLocation,
   isSending,
   isLoadingMessages,
+  hasMoreMessages,
+  onLoadMoreMessages,
+  isLoadingMoreMessages,
   onBack,
 }: ChatWindowProps) {
   const displayMessages = messages.map((m) => ({
@@ -98,6 +104,9 @@ export function ChatWindow({
         messages={displayMessages}
         isLoading={isLoadingMessages}
         firstMessageDate={firstDate}
+        hasMore={hasMoreMessages}
+        onLoadMore={onLoadMoreMessages}
+        isLoadingMore={isLoadingMoreMessages}
       />
 
       <MessageInput

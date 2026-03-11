@@ -31,6 +31,12 @@ export interface Message {
   createdAt: string | Date;
 }
 
+/** Respuesta paginada de mensajes (más viejos primero en `messages`). */
+export interface MessagesPage {
+  messages: Message[];
+  hasMore: boolean;
+}
+
 export interface SendMessageInput {
   conversationId: number;
   content: string;

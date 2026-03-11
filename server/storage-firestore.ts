@@ -680,11 +680,62 @@ class FirestoreStorageImpl implements IStorage {
     await docRef.set(data);
     return data;
   }
-  async getMessagesByConversation(conversationId: number): Promise<any[]> {
-    if (!this.db) return [];
+  private messageCreatedAtMs(d: any): number {
+    const t = d?.createdAt;
+    if (t?.toMillis) return t.toMillis();
+    if (t instanceof Date) return t.getTime();
+    if (typeof t?.getTime === "function") return t.getTime();
+    if (typeof t === "number") return t;
+    return 0;
+  }
+
+  async getMessagesByConversation(conversationId: number, options: { limit: number; before?: number }): Promise<{ messages: any[]; hasMore: boolean }> {
+    if (!this.db) return { messages: [], hasMore: false };
+    const { limit, before } = options;
+    // Sin orderBy para no requerir índice compuesto; ordenamos y paginamos en memoria
     const snap = await this.db.collection(FIRESTORE_COLLECTIONS.MESSAGES)
-      .where("conversationId", "==", conversationId).get();
-    return snap.docs.map(d => ({ id: parseInt(d.id) || d.id, ...d.data() })).sort((a, b) => (a.createdAt?.getTime?.() ?? 0) - (b.createdAt?.getTime?.() ?? 0));
+      .where("conversationId", "==", conversationId)
+      .get();
+    const list = snap.docs.map(d => ({ id: parseInt(d.id) || d.id, ...d.data() }));
+    list.sort((a, b) => this.messageCreatedAtMs(b) - this.messageCreatedAtMs(a));
+    let slice = list;
+    if (before != null) {
+      slice = list.filter(m => this.messageCreatedAtMs(m) < before);
+    }
+    const hasMore = slice.length > limit;
+    const page = slice.slice(0, limit);
+    const messages = page.reverse();
+    return { messages, hasMore };
+  }
+
+  async getLastMessageByConversation(conversationId: number): Promise<any | null> {
+    if (!this.db) return null;
+    // Sin orderBy para no requerir índice compuesto; ordenamos en memoria
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.MESSAGES)
+      .where("conversationId", "==", conversationId)
+      .get();
+    if (snap.empty) return null;
+    let latestDoc: import("firebase-admin").firestore.QueryDocumentSnapshot | null = null;
+    for (const doc of snap.docs) {
+      const t = this.messageCreatedAtMs(doc.data());
+      if (latestDoc == null || t > this.messageCreatedAtMs(latestDoc.data())) {
+        latestDoc = doc;
+      }
+    }
+    if (!latestDoc) return null;
+    const d = latestDoc;
+    return { id: parseInt(d.id) || d.id, ...d.data() };
+  }
+
+  async getUnreadCountByConversation(conversationId: number, userId: string): Promise<number> {
+    if (!this.db) return 0;
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.MESSAGES)
+      .where("conversationId", "==", conversationId)
+      .get();
+    return snap.docs.filter(doc => {
+      const d = doc.data() as { senderId?: string; status?: string };
+      return d.senderId !== userId && d.status !== "read";
+    }).length;
   }
   async createMessage(msg: any): Promise<any> {
     if (!this.db) throw new Error("Firestore no configurado");

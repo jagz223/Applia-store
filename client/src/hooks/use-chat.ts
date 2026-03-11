@@ -3,17 +3,25 @@
  * Dependen de chatApi y de React Query.
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAuth } from "./use-auth";
 import { useSocket, useSocketChat } from "./use-socket";
 import { chatApi } from "@/lib/chat-api";
+import { toDate } from "@/lib/date-utils";
 import type { ConversationEnriched, Message } from "@/types/chat";
+
+/** Mensajes por página (alineado con backend). Balance UX / carga servidor. */
+export const CHAT_MESSAGES_PAGE_SIZE = 25;
 
 const QUERY_KEYS = {
   conversations: ["chat", "conversations"] as const,
   messages: (conversationId: number) => ["chat", "messages", conversationId] as const,
 };
+
+function messageCreatedAtMs(m: Message): number {
+  return toDate(m.createdAt as Parameters<typeof toDate>[0]).getTime();
+}
 
 export function useConversations(enabled: boolean) {
   return useQuery({
@@ -23,12 +31,34 @@ export function useConversations(enabled: boolean) {
   });
 }
 
+/** Mensajes paginados: lista plana ordenada de más viejo a más nuevo; cargar más con fetchNextPage. */
 export function useMessages(conversationId: number | null, enabled: boolean) {
-  return useQuery({
+  const infinite = useInfiniteQuery({
     queryKey: QUERY_KEYS.messages(conversationId ?? 0),
-    queryFn: () => chatApi.getMessages(conversationId!),
+    queryFn: ({ pageParam }: { pageParam?: number }) =>
+      chatApi.getMessages(conversationId!, {
+        limit: CHAT_MESSAGES_PAGE_SIZE,
+        before: pageParam,
+      }),
+    getNextPageParam: (lastPage) => {
+      if (!lastPage.hasMore || lastPage.messages.length === 0) return undefined;
+      return messageCreatedAtMs(lastPage.messages[0]);
+    },
+    initialPageParam: undefined as number | undefined,
     enabled: enabled && conversationId != null,
   });
+
+  const messages: Message[] =
+    infinite.data?.pages.flatMap((p) => p.messages) ?? [];
+
+  return {
+    ...infinite,
+    data: messages,
+    messages,
+    hasNextPage: infinite.hasNextPage,
+    fetchNextPage: infinite.fetchNextPage,
+    isFetchingNextPage: infinite.isFetchingNextPage,
+  };
 }
 
 export function useSendMessage(conversationId: number | null, recipientId: string | undefined) {
