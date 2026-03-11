@@ -187,31 +187,31 @@ export default function ProfessionalDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-6 py-4">
-        <div className="container mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <div className="bg-white border-b px-4 sm:px-6 py-4">
+        <div className="container mx-auto max-w-full flex flex-col sm:flex-row items-center justify-center sm:justify-between gap-4 text-center sm:text-left">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <div className="p-2 bg-mango-orange/10 rounded-lg">
               <BarChart3 className="h-6 w-6 text-mango-orange" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Panel Económico</h1>
-              <p className="text-gray-500">Gestiona tus ingresos y estadísticas</p>
+              <h1 className="text-xl sm:text-2xl font-bold">Panel Económico</h1>
+              <p className="text-gray-500 text-sm sm:text-base">Gestiona tus ingresos y estadísticas</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline">
-              <FileText className="h-4 w-4 mr-2" />
-              Generar Reporte
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full sm:w-auto">
+            <Button variant="outline" size="sm" className="flex-1 sm:flex-initial min-w-0">
+              <FileText className="h-4 w-4 mr-2 shrink-0" />
+              <span className="truncate">Generar Reporte</span>
             </Button>
-            <Button>
-              <CreditCard className="h-4 w-4 mr-2" />
-              Retirar Fondos
+            <Button size="sm" className="flex-1 sm:flex-initial min-w-0">
+              <CreditCard className="h-4 w-4 mr-2 shrink-0" />
+              <span className="truncate">Retirar Fondos</span>
             </Button>
           </div>
         </div>
       </div>
 
-      <div className="container mx-auto py-6 px-4">
+      <div className="container mx-auto max-w-full py-6 px-4 overflow-x-hidden">
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card>
@@ -268,12 +268,12 @@ export default function ProfessionalDashboard() {
 
         {/* Tabs */}
         <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="overview">Resumen</TabsTrigger>
-            <TabsTrigger value="bookings">Reservas</TabsTrigger>
-            <TabsTrigger value="transactions">Transacciones</TabsTrigger>
-            <TabsTrigger value="analytics">Análisis</TabsTrigger>
-            <TabsTrigger value="invoices">Facturas</TabsTrigger>
+          <TabsList className="w-full flex flex-nowrap justify-start sm:justify-center overflow-x-auto h-auto min-h-10 gap-1 p-2 sm:p-1 sm:flex-wrap sm:h-10 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
+            <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
+            <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>
+            <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Transacciones</TabsTrigger>
+            <TabsTrigger value="analytics" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Análisis</TabsTrigger>
+            <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Facturas</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview">
