@@ -61,7 +61,10 @@ export interface IStorage
   // Conversaciones y Mensajes
   getConversationsByUser(userId: string): Promise<any[]>;
   createConversation(conv: any): Promise<any>;
-  getMessagesByConversation(conversationId: number): Promise<any[]>;
+  /** before = createdAt en ms del mensaje más antiguo que ya tenemos (cursor para cargar más) */
+  getMessagesByConversation(conversationId: number, options: { limit: number; before?: number }): Promise<{ messages: any[]; hasMore: boolean }>;
+  getLastMessageByConversation(conversationId: number): Promise<any | null>;
+  getUnreadCountByConversation(conversationId: number, userId: string): Promise<number>;
   createMessage(msg: any): Promise<any>;
   markMessageAsRead(messageId: number): Promise<void>;
   markConversationAsRead(conversationId: number, userId: string): Promise<void>;
@@ -358,8 +361,39 @@ export class InMemoryStorage implements IStorage {
     return newConv;
   }
   
-  async getMessagesByConversation(conversationId: number): Promise<any[]> {
-    return this.messages.filter(m => m.conversationId === conversationId);
+  private messageCreatedAtTime(m: any): number {
+    const t = m?.createdAt;
+    if (t instanceof Date) return t.getTime();
+    if (typeof t?.toMillis === "function") return t.toMillis();
+    if (typeof t?.getTime === "function") return t.getTime();
+    if (typeof t === "number") return t;
+    return 0;
+  }
+
+  async getMessagesByConversation(conversationId: number, options: { limit: number; before?: number }): Promise<{ messages: any[]; hasMore: boolean }> {
+    const { limit, before } = options;
+    let list = this.messages
+      .filter((m) => m.conversationId === conversationId)
+      .sort((a, b) => this.messageCreatedAtTime(a) - this.messageCreatedAtTime(b));
+    if (before != null) {
+      list = list.filter((m) => this.messageCreatedAtTime(m) < before);
+    }
+    const hasMore = list.length > limit;
+    const messages = list.slice(-limit);
+    return { messages, hasMore };
+  }
+
+  async getLastMessageByConversation(conversationId: number): Promise<any | null> {
+    const list = this.messages
+      .filter((m) => m.conversationId === conversationId)
+      .sort((a, b) => this.messageCreatedAtTime(b) - this.messageCreatedAtTime(a));
+    return list.length > 0 ? list[0] : null;
+  }
+
+  async getUnreadCountByConversation(conversationId: number, userId: string): Promise<number> {
+    return this.messages.filter(
+      (m) => m.conversationId === conversationId && m.senderId !== userId && m.status !== "read"
+    ).length;
   }
   
   async createMessage(msg: any): Promise<any> {

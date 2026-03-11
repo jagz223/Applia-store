@@ -33,7 +33,7 @@ export default function Chat() {
   const conversationsQuery = useConversations(!!isAuthenticated);
   const conversations = conversationsQuery.data ?? [];
   const messagesQuery = useMessages(selectedConversationId, !!isAuthenticated && selectedConversationId != null);
-  const messages = messagesQuery.data ?? [];
+  const messages = messagesQuery.messages ?? messagesQuery.data ?? [];
   const sendMessage = useSendMessage(
     selectedConversationId,
     conversations.find((c) => c.id === selectedConversationId)?.otherParticipant?.id
@@ -41,7 +41,7 @@ export default function Chat() {
   const markAsRead = useMarkConversationAsRead(selectedConversationId, !!selectedConversationId);
   const getOrCreateConversation = useGetOrCreateConversation();
 
-  useChatRealtime(selectedConversationId, messagesQuery.refetch);
+  useChatRealtime(selectedConversationId, () => messagesQuery.refetch());
 
   // Marcar como leído al abrir una conversación
   useEffect(() => {
@@ -213,6 +213,9 @@ export default function Chat() {
                   onShareLocation={handleShareLocation}
                   isSending={sendMessage.isPending}
                   isLoadingMessages={messagesQuery.isLoading}
+                  hasMoreMessages={messagesQuery.hasNextPage ?? false}
+                  onLoadMoreMessages={messagesQuery.fetchNextPage}
+                  isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
                   onBack={() => setSelectedConversationId(null)}
                 />
               ) : (

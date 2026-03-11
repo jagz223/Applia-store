@@ -3,7 +3,7 @@
  * Centraliza todas las llamadas HTTP del chat y el uso del token.
  */
 
-import type { ConversationEnriched, Message, SendMessageInput, CreateConversationInput } from "@/types/chat";
+import type { ConversationEnriched, Message, MessagesPage, SendMessageInput, CreateConversationInput } from "@/types/chat";
 
 const BASE = "";
 
@@ -36,8 +36,13 @@ export const chatApi = {
     return fetchJson<ConversationEnriched[]>(`${BASE}/api/conversations`);
   },
 
-  getMessages(conversationId: number): Promise<Message[]> {
-    return fetchJson<Message[]>(`${BASE}/api/conversations/${conversationId}/messages`);
+  /** Obtiene mensajes paginados (orden: más viejos primero). before = createdAt en ms del mensaje más antiguo que ya tenemos. */
+  getMessages(conversationId: number, params?: { limit?: number; before?: number }): Promise<MessagesPage> {
+    const sp = new URLSearchParams();
+    if (params?.limit != null) sp.set("limit", String(params.limit));
+    if (params?.before != null) sp.set("before", String(params.before));
+    const qs = sp.toString();
+    return fetchJson<MessagesPage>(`${BASE}/api/conversations/${conversationId}/messages${qs ? `?${qs}` : ""}`);
   },
 
   createConversation(input: CreateConversationInput): Promise<{ id: number }> {

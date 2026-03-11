@@ -58,7 +58,9 @@ export class HybridStorage implements IStorage {
   deleteDocument(id: number, userId: string) { return this.memory.deleteDocument(id, userId); }
   getConversationsByUser(userId: string) { return this.memory.getConversationsByUser(userId); }
   createConversation(conv: any) { return this.memory.createConversation(conv); }
-  getMessagesByConversation(conversationId: number) { return this.memory.getMessagesByConversation(conversationId); }
+  getMessagesByConversation(conversationId: number, options: { limit: number; before?: number }) { return this.memory.getMessagesByConversation(conversationId, options); }
+  getLastMessageByConversation(conversationId: number) { return this.memory.getLastMessageByConversation(conversationId); }
+  getUnreadCountByConversation(conversationId: number, userId: string) { return this.memory.getUnreadCountByConversation(conversationId, userId); }
   createMessage(msg: any) { return this.memory.createMessage(msg); }
   markMessageAsRead(messageId: number) { return this.memory.markMessageAsRead(messageId); }
   markConversationAsRead(conversationId: number, userId: string) { return this.memory.markConversationAsRead(conversationId, userId); }
