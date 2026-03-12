@@ -20,6 +20,7 @@ import { MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSocket } from "@/hooks/use-socket";
 
 /** Altura del área de chat (viewport menos header aproximado). */
 const CHAT_AREA_HEIGHT = "calc(100vh - 280px)";
@@ -29,6 +30,7 @@ export default function Chat() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { setOpenChatConversationId } = useSocket();
 
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   const [messageInput, setMessageInput] = useState("");
@@ -41,14 +43,25 @@ export default function Chat() {
   const conversations = conversationsQuery.data ?? [];
   const messagesQuery = useMessages(selectedConversationId, !!isAuthenticated && selectedConversationId != null);
   const messages = messagesQuery.messages ?? messagesQuery.data ?? [];
-  const sendMessage = useSendMessage(
-    selectedConversationId,
-    conversations.find((c) => c.id === selectedConversationId)?.otherParticipant?.id
-  );
+  const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
+  const recipientId =
+    selectedConversation?.otherParticipant?.id ??
+    (selectedConversation && user?.id
+      ? selectedConversation.participant1Id === user.id
+        ? selectedConversation.participant2Id
+        : selectedConversation.participant1Id
+      : undefined);
+  const sendMessage = useSendMessage(selectedConversationId, recipientId);
   const markAsRead = useMarkConversationAsRead(selectedConversationId, !!selectedConversationId);
   const getOrCreateConversation = useGetOrCreateConversation();
 
-  useChatRealtime(selectedConversationId, () => messagesQuery.refetch());
+  useChatRealtime(selectedConversationId);
+
+  // Indicar conversación abierta para no mostrar notificación en la campana ni badge en la lista
+  useEffect(() => {
+    setOpenChatConversationId(selectedConversationId != null ? String(selectedConversationId) : null);
+    return () => setOpenChatConversationId(null);
+  }, [selectedConversationId, setOpenChatConversationId]);
 
   // Marcar como leído al abrir una conversación
   useEffect(() => {
@@ -56,6 +69,21 @@ export default function Chat() {
       markAsRead.mutate(undefined, { onError: () => {} });
     }
   }, [selectedConversationId]);
+
+  // Abrir conversación por ?conversation=id (ej. desde notificación)
+  useEffect(() => {
+    if (!conversationsQuery.isSuccess || conversations.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const conversationIdParam = params.get("conversation");
+    if (conversationIdParam == null) return;
+    const id = Number(conversationIdParam);
+    if (Number.isNaN(id)) return;
+    const exists = conversations.some((c) => c.id === id);
+    if (exists && selectedConversationId !== id) {
+      setSelectedConversationId(id);
+      setLocation("/chat", { replace: true });
+    }
+  }, [conversationsQuery.isSuccess, conversations, selectedConversationId, setLocation]);
 
   // Resolver ?with= y ?serviceId= al cargar (una sola vez por with)
   useEffect(() => {
@@ -162,8 +190,6 @@ export default function Chat() {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
-
-  const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
 
   if (authLoading) {
     return (

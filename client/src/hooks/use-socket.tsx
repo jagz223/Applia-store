@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, createContext, useContext } from "react";
+import { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
 import { io, Socket } from "socket.io-client";
 import { useAuth } from "./use-auth";
 
@@ -15,6 +15,9 @@ interface SocketContextType {
   isConnected: boolean;
   notifications: Notification[];
   clearNotifications: () => void;
+  markNotificationAsRead: (id: string) => void;
+  /** Indica en qué conversación está el usuario para no mostrar notificación de mensaje en la campana. */
+  setOpenChatConversationId: (id: string | null) => void;
 }
 
 const SocketContext = createContext<SocketContextType>({
@@ -22,6 +25,8 @@ const SocketContext = createContext<SocketContextType>({
   isConnected: false,
   notifications: [],
   clearNotifications: () => {},
+  markNotificationAsRead: () => {},
+  setOpenChatConversationId: () => {},
 });
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
@@ -29,6 +34,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const openConversationIdRef = useRef<string | null>(null);
+
+  const setOpenChatConversationId = useCallback((id: string | null) => {
+    openConversationIdRef.current = id;
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -77,6 +87,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on("notification:message", (notification: any) => {
+      const convId = notification?.conversationId != null ? String(notification.conversationId) : null;
+      if (convId !== null && openConversationIdRef.current === convId) {
+        return;
+      }
       console.log("🔔 New message notification:", notification);
       setNotifications((prev) => [
         {
@@ -133,11 +147,19 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     setNotifications([]);
   }, []);
 
+  const markNotificationAsRead = useCallback((id: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    );
+  }, []);
+
   const value = {
     socket,
     isConnected,
     notifications,
     clearNotifications,
+    markNotificationAsRead,
+    setOpenChatConversationId,
   };
 
   return (

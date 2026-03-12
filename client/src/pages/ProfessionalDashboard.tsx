@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { useBookingsByProvider, useUpdateBookingStatus } from "@/hooks/use-mango-data";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
@@ -74,6 +74,7 @@ const STATUS_OPTIONS = [
 function ProviderBookingsTab() {
   const { data: bookings, isLoading } = useBookingsByProvider();
   const updateStatus = useUpdateBookingStatus();
+  const { notifyBookingUpdate } = useSocketBookings();
 
   if (isLoading) {
     return (
@@ -150,7 +151,19 @@ function ProviderBookingsTab() {
                   </Badge>
                   <Select
                     value={booking.status}
-                    onValueChange={(value) => updateStatus.mutate({ id: booking.id, status: value })}
+                    onValueChange={(value) =>
+                      updateStatus.mutate(
+                        { id: booking.id, status: value },
+                        {
+                          onSuccess: (updated) => {
+                            const clientUserId = (booking as { userId?: string }).userId;
+                            if (clientUserId && notifyBookingUpdate) {
+                              notifyBookingUpdate(clientUserId, updated ?? { ...booking, status: value });
+                            }
+                          },
+                        }
+                      )
+                    }
                     disabled={updateStatus.isPending}
                   >
                     <SelectTrigger className="w-[160px]">
@@ -172,10 +185,20 @@ function ProviderBookingsTab() {
   );
 }
 
+const DASHBOARD_TABS = ["overview", "bookings", "transactions", "analytics", "invoices"] as const;
+
 export default function ProfessionalDashboard() {
   const { user } = useAuth();
   const { notifyBookingUpdate } = useSocketBookings();
+  const [location, setLocation] = useLocation();
   const [timeRange, setTimeRange] = useState("month");
+
+  const currentTab = (() => {
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    const tab = new URLSearchParams(search).get("tab");
+    return tab && DASHBOARD_TABS.includes(tab as (typeof DASHBOARD_TABS)[number]) ? tab : "overview";
+  })();
+  const setTab = (value: string) => setLocation(`/professional-dashboard?tab=${value}`);
 
   // Calculate percentage changes
   const earningsChange = ((mockEarnings.thisMonth - mockEarnings.lastMonth) / mockEarnings.lastMonth) * 100;
@@ -267,7 +290,7 @@ export default function ProfessionalDashboard() {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="overview" className="space-y-4">
+        <Tabs value={currentTab} onValueChange={setTab} className="space-y-4">
           <TabsList className="w-full flex flex-nowrap justify-start sm:justify-center overflow-x-auto h-auto min-h-10 gap-1 p-2 sm:p-1 sm:flex-wrap sm:h-10 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
             <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
             <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>

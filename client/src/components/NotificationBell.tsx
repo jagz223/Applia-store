@@ -1,13 +1,41 @@
 import { useState } from "react";
-import { Bell, X, MessageSquare, Calendar, Shield, Trash2 } from "lucide-react";
+import { Bell, MessageSquare, Calendar, Shield, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { useSocket } from "@/hooks/use-socket";
+import { useLocation } from "wouter";
+
+/** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificación. */
+function getNotificationPath(notification: { type: string; data?: any }): string {
+  const data = notification.data ?? {};
+  switch (notification.type) {
+    case "message":
+      const convId = data.conversationId;
+      return convId != null ? `/chat?conversation=${encodeURIComponent(convId)}` : "/chat";
+    case "booking":
+      if (data.type === "new_booking") {
+        return "/professional-dashboard?tab=bookings";
+      }
+      return "/bookings";
+    case "admin":
+      return "/dashboard";
+    default:
+      return "/dashboard";
+  }
+}
 
 export function NotificationBell() {
-  const { notifications, clearNotifications, isConnected } = useSocket();
+  const { notifications, clearNotifications, isConnected, markNotificationAsRead } = useSocket();
+  const [, setLocation] = useLocation();
   const [open, setOpen] = useState(false);
+
+  const handleNotificationClick = (notification: { id: string; type: string; data?: any }) => {
+    markNotificationAsRead(notification.id);
+    const path = getNotificationPath(notification);
+    setLocation(path);
+    setOpen(false);
+  };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -24,7 +52,8 @@ export function NotificationBell() {
     }
   };
 
-  const getTitle = (type: string) => {
+  const getTitle = (type: string, data?: { type?: string }) => {
+    if (type === "booking" && data?.type === "new_booking") return "Nueva reserva";
     switch (type) {
       case "message":
         return "Nuevo mensaje";
@@ -77,9 +106,11 @@ export function NotificationBell() {
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {notifications.slice(0, 10).map((notification) => (
-              <div
+              <button
                 key={notification.id}
-                className={`p-3 rounded-lg border ${
+                type="button"
+                onClick={() => handleNotificationClick(notification)}
+                className={`w-full text-left p-3 rounded-lg border transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-primary/20 ${
                   notification.read ? "bg-muted/50" : "bg-muted"
                 }`}
               >
@@ -87,7 +118,7 @@ export function NotificationBell() {
                   {getIcon(notification.type)}
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm">
-                      {getTitle(notification.type)}
+                      {getTitle(notification.type, notification.data)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       {notification.timestamp instanceof Date
@@ -99,7 +130,7 @@ export function NotificationBell() {
                     <Badge variant="default" className="h-2 w-2 p-0 rounded-full" />
                   )}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}

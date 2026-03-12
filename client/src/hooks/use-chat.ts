@@ -23,11 +23,21 @@ function messageCreatedAtMs(m: Message): number {
   return toDate(m.createdAt as Parameters<typeof toDate>[0]).getTime();
 }
 
+/** Ordena conversaciones por último mensaje (más reciente primero), estilo WhatsApp. */
+function sortConversationsByLastMessage(conversations: ConversationEnriched[]): ConversationEnriched[] {
+  return [...conversations].sort((a, b) => {
+    const aTime = a.lastMessageAt ? toDate(a.lastMessageAt as Parameters<typeof toDate>[0]).getTime() : (a.createdAt ? toDate(a.createdAt as Parameters<typeof toDate>[0]).getTime() : 0);
+    const bTime = b.lastMessageAt ? toDate(b.lastMessageAt as Parameters<typeof toDate>[0]).getTime() : (b.createdAt ? toDate(b.createdAt as Parameters<typeof toDate>[0]).getTime() : 0);
+    return bTime - aTime;
+  });
+}
+
 export function useConversations(enabled: boolean) {
   return useQuery({
     queryKey: QUERY_KEYS.conversations,
     queryFn: () => chatApi.getConversations(),
     enabled,
+    select: sortConversationsByLastMessage,
   });
 }
 
@@ -128,19 +138,27 @@ export function useGetOrCreateConversation() {
   });
 }
 
-/** Suscribe al socket de la conversación y refresca mensajes al recibir notificación. */
-export function useChatRealtime(conversationId: number | null, refetchMessages: () => void) {
+/** Suscribe al socket y mantiene chat en vivo: actualiza mensajes de la conversación abierta y reordena la lista (estilo WhatsApp). */
+export function useChatRealtime(conversationId: number | null) {
   useSocketChat(conversationId != null ? String(conversationId) : null);
   const { socket } = useSocket();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!socket || conversationId == null) return;
+    if (!socket) return;
     const handler = (data: { conversationId?: string }) => {
-      if (String(data?.conversationId) === String(conversationId)) refetchMessages();
+      const notifConvId = data?.conversationId != null ? String(data.conversationId) : null;
+      if (notifConvId != null) {
+        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });
+      }
+      if (conversationId != null && notifConvId === String(conversationId)) {
+        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.messages(conversationId) });
+        queryClient.refetchQueries({ queryKey: QUERY_KEYS.messages(conversationId) });
+      }
     };
     socket.on("notification:message", handler);
     return () => {
       socket.off("notification:message", handler);
     };
-  }, [socket, conversationId, refetchMessages]);
+  }, [socket, conversationId, queryClient]);
 }

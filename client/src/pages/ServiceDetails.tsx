@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { isBeforeToday } from "@/lib/date-utils";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@shared/routes";
+import { useSocketBookings } from "@/hooks/use-socket";
 
 export default function ServiceDetails() {
   const [, params] = useRoute("/service/:id");
@@ -31,6 +32,7 @@ export default function ServiceDetails() {
   const { data: myBookings } = useBookings();
   
   const createBooking = useCreateBooking();
+  const { notifyNewBooking } = useSocketBookings();
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [notes, setNotes] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -48,16 +50,23 @@ export default function ServiceDetails() {
       return;
     }
     
-    createBooking.mutate({
-      userId: user.id,
-      serviceId: id,
-      date: date.toISOString(), // In real app, would handle time selection too
-      notes: notes,
-    }, {
-      onSuccess: () => {
-        setDialogOpen(false);
+    createBooking.mutate(
+      {
+        userId: user.id,
+        serviceId: id,
+        date: date.toISOString(),
+        notes: notes,
+      },
+      {
+        onSuccess: (data) => {
+          const providerId = (service as { providerId?: number; provider?: { id: number } }).providerId ?? service?.provider?.id;
+          if (providerId != null && notifyNewBooking) {
+            notifyNewBooking(String(providerId), data);
+          }
+          setDialogOpen(false);
+        },
       }
-    });
+    );
   };
 
   if (isLoading) {
