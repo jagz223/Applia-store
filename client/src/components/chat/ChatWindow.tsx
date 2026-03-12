@@ -50,7 +50,7 @@ export function ChatWindow({
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
-      <header className="p-4 border-b border-border flex items-center justify-between shrink-0">
+      <header className="p-4 border-b border-border flex items-center justify-between shrink-0 min-w-0">
         <div className="flex items-center gap-3">
           {onBack && (
             <Button variant="ghost" size="icon" className="md:hidden" onClick={onBack}>
@@ -78,12 +78,12 @@ export function ChatWindow({
         </div>
       </header>
 
-      <div className="px-4 py-2 border-b border-border flex flex-wrap gap-2 shrink-0">
-        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border">
+      <div className="px-4 py-2 border-b border-border flex flex-wrap gap-2 shrink-0 min-w-0 overflow-hidden">
+        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border shrink-0">
           <Calendar className="w-3 h-3 mr-1" />
           Agendar
         </Button>
-        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border">
+        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border shrink-0">
           <FileText className="w-3 h-3 mr-1" />
           Compartir contrato
         </Button>
@@ -91,7 +91,7 @@ export function ChatWindow({
           type="button"
           variant="outline"
           size="sm"
-          className="text-xs h-7 border-border"
+          className="text-xs h-7 border-border shrink-0"
           onClick={onShareLocation}
           disabled={isSending}
         >

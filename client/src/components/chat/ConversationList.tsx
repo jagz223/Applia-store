@@ -31,7 +31,7 @@ export function ConversationList({
   );
 
   return (
-    <div className="border-r border-border flex flex-col h-full min-h-0">
+    <div className="border-r border-border flex flex-col h-full min-h-0 min-w-0 overflow-x-hidden">
       <div className="p-4 border-b border-border shrink-0">
         <div className="relative">
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
