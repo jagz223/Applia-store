@@ -4,7 +4,7 @@ import { useCategories, useServices } from "@/hooks/use-mango-data";
 import { DEFAULT_CATEGORIES } from "@shared/default-categories";
 import { ServiceCard } from "@/components/ServiceCard";
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, Sparkles, X, ArrowLeft } from "lucide-react";
+import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CategoryIcon } from "@/components/CategoryIcon";
@@ -21,6 +21,7 @@ export default function Explore() {
   const [selectedProviderCategoryId, setSelectedProviderCategoryId] = useState<number | undefined>(
     !Number.isNaN(parsedId) ? parsedId : undefined
   );
+  const [filtersExpanded, setFiltersExpanded] = useState(true);
 
   const { data: categories = [] } = useCategories();
   const providerCategories = useMemo(
@@ -75,33 +76,58 @@ export default function Explore() {
             </div>
           </div>
 
-          {/* Pills: tipo de servicio (categoría de proveedor, la que se elige en /categories) */}
-          <div className="flex flex-wrap items-center gap-2 mt-4">
-            <span className="text-sm font-medium text-muted-foreground mr-1">Tipo de servicio:</span>
+          {/* Filtros por tipo de servicio: en móvil se pueden plegar/desplegar */}
+          <div className="mt-4 flex flex-col gap-2">
             <button
-              onClick={() => setProviderCategory(undefined)}
-              className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                selectedProviderCategoryId == null
-                  ? "bg-primary text-white shadow-lg shadow-primary/30"
-                  : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
-              }`}
+              type="button"
+              onClick={() => setFiltersExpanded((v) => !v)}
+              className="md:hidden flex items-center justify-between w-full py-2 pr-2 rounded-lg hover:bg-muted/50 transition-colors text-left"
+              aria-expanded={filtersExpanded}
             >
-              Todos
+              <span className="text-sm font-medium text-muted-foreground">
+                Tipo de servicio{filtersExpanded ? "" : ": "}
+                {!filtersExpanded && selectedProviderCategoryId != null && selectedProviderCategoryData && (
+                  <span className="text-foreground font-semibold"> {selectedProviderCategoryData.name}</span>
+                )}
+                {!filtersExpanded && selectedProviderCategoryId == null && (
+                  <span className="text-foreground font-semibold"> Todos</span>
+                )}
+              </span>
+              <span className="shrink-0 text-muted-foreground">
+                {filtersExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+              </span>
             </button>
-            {providerCategories.map((cat) => (
+            <div
+              className={`flex flex-wrap items-center gap-2 overflow-hidden transition-[max-height,opacity] duration-300 ease-out md:!max-h-none md:!opacity-100 ${
+                filtersExpanded ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+              } md:flex`}
+            >
+              <span className="text-sm font-medium text-muted-foreground mr-1 hidden md:inline">Tipo de servicio:</span>
               <button
-                key={cat.id}
-                onClick={() => cat.id != null && setProviderCategory(cat.id as number)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                  selectedProviderCategoryId === cat.id
+                onClick={() => setProviderCategory(undefined)}
+                className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                  selectedProviderCategoryId == null
                     ? "bg-primary text-white shadow-lg shadow-primary/30"
                     : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <CategoryIcon name={(cat as { icon?: string }).icon ?? "HelpCircle"} className="h-4 w-4" />
-                {cat.name}
+                Todos
               </button>
-            ))}
+              {providerCategories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => cat.id != null && setProviderCategory(cat.id as number)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                    selectedProviderCategoryId === cat.id
+                      ? "bg-primary text-white shadow-lg shadow-primary/30"
+                      : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <CategoryIcon name={(cat as { icon?: string }).icon ?? "HelpCircle"} className="h-4 w-4" />
+                  {cat.name}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
