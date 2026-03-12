@@ -205,6 +205,92 @@ export function useCreateService() {
   });
 }
 
+export type ServiceUpdatePayload = {
+  title?: string;
+  description?: string;
+  price?: string;
+  imageUrl?: string;
+  isActive?: boolean;
+  categoryId?: number;
+};
+
+/** Servicios del proveedor actual (solo si está autenticado y es proveedor). */
+export function useMyServices(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["/api/me/services"],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/me/services", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 401) return [];
+      if (!res.ok) throw new Error("Failed to fetch my services");
+      return res.json() as Promise<ServiceWithProvider[]>;
+    },
+    retry: false,
+    enabled: options?.enabled !== false,
+  });
+}
+
+export function useDeleteService() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (serviceId: number) => {
+      const token = getToken();
+      const res = await fetch(`/api/services/${serviceId}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to delete service");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.services.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      toast({ title: "Servicio eliminado", description: "El servicio se ha eliminado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useUpdateService(serviceId: number) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (data: ServiceUpdatePayload) => {
+      const token = getToken();
+      const res = await fetch(`/api/services/${serviceId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to update service");
+      }
+      return res.json();
+    },
+    onSuccess: (_, __, context) => {
+      queryClient.invalidateQueries({ queryKey: [api.services.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.services.get.path, serviceId] });
+      toast({ title: "Servicio actualizado", description: "Los cambios se han guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
 // ==========================================
 // BOOKINGS
 // ==========================================

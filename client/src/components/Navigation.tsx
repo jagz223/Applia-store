@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
-import { useCurrentProvider } from "@/hooks/use-mango-data";
+import { useCurrentProvider, useMyServices, useDeleteService } from "@/hooks/use-mango-data";
 import { 
   Briefcase, 
   Calendar, 
@@ -20,7 +20,13 @@ import {
   MessageSquare,
   Globe,
   Settings,
-  ChevronDown
+  ChevronDown,
+  List,
+  Pencil,
+  Trash2,
+  Loader2,
+  Wrench,
+  PackageOpen,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -31,6 +37,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useState } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
 
@@ -38,8 +58,12 @@ export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth();
   const showBecomePro = useShowBecomePro();
   const { data: providerProfile } = useCurrentProvider();
+  const { data: myServices = [], isLoading: myServicesLoading } = useMyServices({ enabled: !!providerProfile || (user as { role?: string } | null)?.role === "professional" });
+  const deleteService = useDeleteService();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [myServicesOpen, setMyServicesOpen] = useState(false);
+  const [serviceToDelete, setServiceToDelete] = useState<number | null>(null);
 
   const isActive = (path: string) => location === path || location.startsWith(path + '/');
 
@@ -79,6 +103,21 @@ export function Navigation() {
                 <PlusCircle className="h-4 w-4" />
                 <span>Crear servicio</span>
               </Link>
+            </DropdownMenuItem>
+          )}
+          {isProfessional && (
+            <DropdownMenuItem
+              disabled={myServicesLoading || myServices.length === 0}
+              className={myServices.length === 0 ? "opacity-50 cursor-not-allowed" : ""}
+              onSelect={(e) => {
+                if (myServices.length > 0) {
+                  e.preventDefault();
+                  setMyServicesOpen(true);
+                }
+              }}
+            >
+              <List className="h-4 w-4" />
+              <span>Mis servicios</span>
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
@@ -150,6 +189,7 @@ export function Navigation() {
   );
 
   return (
+    <>
     <nav className="sticky top-0 z-50 w-full border-b border-primary/20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="container flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 mx-auto">
         
@@ -322,6 +362,22 @@ export function Navigation() {
                     <Link href="/create-service" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Crear servicio
                     </Link>
+                    {myServicesLoading || myServices.length === 0 ? (
+                      <span className="text-lg font-medium text-muted-foreground opacity-50 cursor-not-allowed">
+                        Mis servicios
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-lg font-medium text-left w-full hover:text-primary transition-colors"
+                        onClick={() => {
+                          setMobileOpen(false);
+                          setMyServicesOpen(true);
+                        }}
+                      >
+                        Mis servicios
+                      </button>
+                    )}
                   </>
                 )}
                 <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
@@ -353,5 +409,143 @@ export function Navigation() {
         </div>
       </div>
     </nav>
+
+    {/* Panel Mis servicios */}
+    <Sheet open={myServicesOpen} onOpenChange={setMyServicesOpen}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-md bg-white border-l border-border overflow-y-auto rounded-l-xl shadow-lg"
+      >
+        <div className="pb-4 border-b border-border/80">
+          <h2 className="text-xl font-bold text-foreground tracking-tight">Mis servicios</h2>
+          <p className="text-sm text-muted-foreground mt-1">Gestiona y edita tus publicaciones</p>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          {myServicesLoading ? (
+            <>
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="rounded-xl border border-border/60 bg-white shadow-sm overflow-hidden">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <Skeleton className="h-5 w-[75%]" />
+                        <Skeleton className="h-4 w-20" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </>
+          ) : myServices.filter((s) => s.isActive !== false).length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+              <div className="rounded-full bg-muted/60 p-6 mb-4">
+                <PackageOpen className="h-12 w-12 text-muted-foreground" />
+              </div>
+              <p className="text-base font-medium text-foreground mb-1">Aún no has creado servicios</p>
+              <p className="text-sm text-muted-foreground mb-6 max-w-[260px]">¡Empieza ahora y publica tu primer servicio para que los clientes puedan reservarlo!</p>
+              <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" asChild>
+                <Link href="/create-service" onClick={() => setMyServicesOpen(false)}>
+                  <PlusCircle className="h-4 w-4 mr-2" />
+                  Crear servicio
+                </Link>
+              </Button>
+            </div>
+          ) : (
+            <TooltipProvider delayDuration={300}>
+              <ul className="space-y-4">
+                {myServices
+                  .filter((s) => s.isActive !== false)
+                  .map((s) => (
+                    <Card
+                      key={s.id}
+                      className="rounded-xl border border-border/60 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden"
+                    >
+                      <CardContent className="p-4">
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
+                            <Wrench className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-bold text-base text-foreground truncate">{s.title}</h3>
+                            <Badge
+                              variant="outline"
+                              className="mt-2 bg-amber-500/15 text-amber-700 dark:text-amber-400 dark:bg-amber-500/20 border-amber-500/30 font-semibold"
+                            >
+                              {s.price ?? "—"}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                                  asChild
+                                >
+                                  <Link href={`/edit-service/${s.id}`} onClick={() => setMyServicesOpen(false)}>
+                                    <Pencil className="h-4 w-4" />
+                                  </Link>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Editar</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-transform hover:scale-110"
+                                  onClick={() => setServiceToDelete(s.id)}
+                                  disabled={deleteService.isPending}
+                                >
+                                  {deleteService.isPending && deleteService.variables === s.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Eliminar</TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+              </ul>
+            </TooltipProvider>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+
+    <AlertDialog open={serviceToDelete != null} onOpenChange={(open) => !open && setServiceToDelete(null)}>
+      <AlertDialogContent className="rounded-xl border border-border bg-card shadow-lg">
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Eliminar este servicio?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Esta acción no se puede deshacer. El servicio dejará de estar visible para los clientes.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="gap-2 sm:gap-0">
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => {
+              if (serviceToDelete != null) {
+                deleteService.mutate(serviceToDelete);
+                setServiceToDelete(null);
+              }
+            }}
+          >
+            Eliminar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

@@ -62,6 +62,16 @@ export async function registerRoutes(
     res.json(service);
   });
 
+  app.get("/api/me/services", authenticateJWT, async (req: any, res) => {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const provider = await catalogService.getProviderByUserId(userId);
+    if (!provider) return res.json([]);
+    const all = await catalogService.getAllServices();
+    const mine = all.filter((s: { providerId: number }) => s.providerId === provider.id);
+    res.json(mine);
+  });
+
   const createServiceBodySchema = insertServiceSchema;
   const updateServiceBodySchema = z.object({
     title: z.string().min(1).max(500).optional(),

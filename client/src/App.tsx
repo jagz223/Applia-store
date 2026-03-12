@@ -15,6 +15,7 @@ import ServiceDetails from "@/pages/ServiceDetails";
 import Dashboard from "@/pages/Dashboard";
 import BecomePro from "@/pages/BecomePro";
 import CreateService from "@/pages/CreateService";
+import EditService from "@/pages/EditService";
 import Booking from "@/pages/Booking";
 import Vault from "@/pages/Vault";
 import Payments from "@/pages/Payments";
@@ -41,6 +42,7 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/become-pro" component={BecomePro} />
       <Route path="/create-service" component={CreateService} />
+      <Route path="/edit-service/:id" component={EditService} />
       <Route path="/booking" component={Booking} />
       <Route path="/vault" component={Vault} />
       <Route path="/payments" component={Payments} />
