@@ -1,0 +1,188 @@
+import admin from "firebase-admin";
+import { getFirestore, FIRESTORE_COLLECTIONS } from "../firebase-admin";
+
+type PushPayload = {
+  title: string;
+  body: string;
+  data?: Record<string, string>;
+};
+
+class NotificationService {
+  private normalizeUserId(userId: string | number): string {
+    return String(userId);
+  }
+
+  async registerDeviceToken(userId: string | number, token: string): Promise<void> {
+    const uid = this.normalizeUserId(userId);
+    const db = getFirestore();
+    if (!db) {
+      console.warn("[push] Firestore no disponible: no se guardará el token para usuario", uid, "— Configura Firebase en .env.");
+      return;
+    }
+
+    const collection = db.collection(FIRESTORE_COLLECTIONS.USER_DEVICE_TOKENS);
+
+    const existing = await collection
+      .where("userId", "==", uid)
+      .where("token", "==", token)
+      .limit(1)
+      .get();
+
+    if (!existing.empty) {
+      console.log("[push] Token ya registrado para usuario:", uid);
+      return;
+    }
+
+    await collection.add({
+      userId: uid,
+      token,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      platform: "web",
+    });
+    console.log("[push] Token registrado correctamente para usuario:", uid);
+  }
+
+  private async getUserTokens(userId: string | number): Promise<string[]> {
+    const db = getFirestore();
+    if (!db) return [];
+
+    const uid = this.normalizeUserId(userId);
+    const snapshot = await db
+      .collection(FIRESTORE_COLLECTIONS.USER_DEVICE_TOKENS)
+      .where("userId", "==", uid)
+      .get();
+
+    const tokens: string[] = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data() as { token?: string | null };
+      if (data.token) tokens.push(data.token);
+    });
+    return tokens;
+  }
+
+  /**
+   * Elimina un token inválido de Firestore (p. ej. cuando FCM devuelve NotRegistered).
+   * Así no volvemos a intentar enviar a ese token.
+   */
+  async removeDeviceToken(userId: string | number, token: string): Promise<void> {
+    const db = getFirestore();
+    if (!db) return;
+
+    const uid = this.normalizeUserId(userId);
+    const snapshot = await db
+      .collection(FIRESTORE_COLLECTIONS.USER_DEVICE_TOKENS)
+      .where("userId", "==", uid)
+      .where("token", "==", token)
+      .get();
+
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    if (!snapshot.empty) {
+      await batch.commit();
+      console.log("[push] Token inválido eliminado para usuario:", uid);
+    }
+  }
+
+  private isTokenInvalidError(error: unknown): boolean {
+    if (error == null) return false;
+    if (typeof error === "string") {
+      return error.includes("NotRegistered") || error.includes("invalid") || error.includes("registration-token");
+    }
+    if (typeof error !== "object") return false;
+    const msg = String((error as { message?: string }).message ?? "");
+    const code = String((error as { code?: string }).code ?? "");
+    const full = JSON.stringify(error);
+    return (
+      code === "messaging/registration-token-not-registered" ||
+      code === "messaging/invalid-registration-token" ||
+      msg.includes("NotRegistered") ||
+      msg.includes("invalid") ||
+      full.includes("NotRegistered")
+    );
+  }
+
+  async sendPushToUser(userId: string | number, payload: PushPayload): Promise<void> {
+    const uid = this.normalizeUserId(userId);
+    const tokens = await this.getUserTokens(uid);
+    if (tokens.length === 0) {
+      console.warn("[push] No device tokens for user:", uid);
+      return;
+    }
+
+    const data = payload.data ?? {};
+    const message: admin.messaging.MulticastMessage = {
+      tokens,
+      notification: {
+        title: payload.title,
+        body: payload.body,
+      },
+      data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+      webpush: {
+        notification: {
+          title: payload.title,
+          body: payload.body,
+          icon: "/logo.png",
+        },
+        fcmOptions: data.url ? { link: data.url } : undefined,
+      },
+    };
+
+    const messaging = admin.messaging();
+    try {
+      const result = await messaging.sendEachForMulticast(message);
+      const success = result.successCount;
+      const failed = result.failureCount;
+      if (failed > 0) {
+        const removePromises: Promise<void>[] = [];
+        result.responses.forEach((r, i) => {
+          if (!r.success) {
+            console.warn("[push] FCM falló para token", i, r.error?.message ?? r.error);
+            if (r.error && this.isTokenInvalidError(r.error) && tokens[i]) {
+              removePromises.push(this.removeDeviceToken(uid, tokens[i]));
+            }
+          }
+        });
+        await Promise.all(removePromises);
+        console.warn("[push] FCM send partial failure:", { success, failed });
+      } else {
+        console.log("[push] Sent to user", uid, "successCount:", success);
+      }
+    } catch (error) {
+      console.error("[push] Error sending push notification:", error);
+      // Fallback: enviar uno por uno (evita problemas de HTTP/2 en algunos entornos)
+      try {
+        for (const token of tokens) {
+          await messaging.send({
+            token,
+            notification: { title: payload.title, body: payload.body },
+            data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+            webpush: message.webpush,
+          });
+        }
+        console.log("[push] Sent to user", uid, "via send() fallback, count:", tokens.length);
+      } catch (fallbackErr) {
+        console.error("[push] Fallback send also failed:", fallbackErr);
+      }
+    }
+  }
+
+  async sendNewMessageNotification(params: {
+    recipientId: string | number;
+    conversationId: number;
+    preview: string;
+  }): Promise<void> {
+    await this.sendPushToUser(this.normalizeUserId(params.recipientId), {
+      title: "Nuevo mensaje",
+      body: params.preview,
+      data: {
+        type: "chat_message",
+        conversationId: String(params.conversationId),
+        url: `/chat?conversation=${params.conversationId}`,
+      },
+    });
+  }
+}
+
+export const notificationService = new NotificationService();
+

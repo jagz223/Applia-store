@@ -71,10 +71,8 @@ export function useMessages(conversationId: number | null, enabled: boolean) {
   };
 }
 
-export function useSendMessage(conversationId: number | null, recipientId: string | undefined) {
+export function useSendMessage(conversationId: number | null, _recipientId?: string) {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
-  const { socket } = useSocket();
 
   const mutation = useMutation({
     mutationFn: (payload: string | { content: string; type?: "text" | "location" }) => {
@@ -86,20 +84,11 @@ export function useSendMessage(conversationId: number | null, recipientId: strin
         type,
       });
     },
-    onSuccess: (data, _payload) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.messages(conversationId ?? 0) });
-      if (socket && recipientId) {
-        socket.emit("message:send", {
-          conversationId: String(conversationId),
-          recipientId,
-          message: {
-            content: data.content,
-            senderId: user?.id,
-            timestamp: new Date(),
-          },
-        });
-      }
+      // No emitir message:send por socket: el backend ya notifica al destinatario al crear el mensaje (POST /api/messages).
+      // Emitir aquí duplicaba la notificación en la campanita del receptor.
     },
   });
 

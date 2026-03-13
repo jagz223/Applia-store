@@ -79,6 +79,7 @@ export interface IStorage
   
   // Notificaciones
   getNotifications(userId: string, unreadOnly?: boolean): Promise<any[]>;
+  createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any>;
   markNotificationAsRead(notificationId: number): Promise<void>;
   
   // Integración ManGo
@@ -558,7 +559,23 @@ export class InMemoryStorage implements IStorage {
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }
-  
+
+  private notificationIdCounter = 1;
+
+  async createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any> {
+    const id = this.notificationIdCounter++;
+    const created = {
+      id,
+      userId: notification.userId,
+      type: notification.type,
+      data: notification.data,
+      read: false,
+      createdAt: new Date(),
+    };
+    this.notifications.push(created);
+    return created;
+  }
+
   async markNotificationAsRead(notificationId: number): Promise<void> {
     const notif = this.notifications.find(n => n.id === notificationId);
     if (notif) {

@@ -12,6 +12,12 @@ interface ConnectedUser {
 // Store connected users
 const connectedUsers: Map<string, ConnectedUser> = new Map();
 
+let ioInstance: SocketIOServer | null = null;
+
+export function getIO(): SocketIOServer | null {
+  return ioInstance;
+}
+
 export function initializeSocket(httpServer: HttpServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     cors: {
@@ -99,6 +105,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     });
   });
 
+  ioInstance = io;
   return io;
 }
 

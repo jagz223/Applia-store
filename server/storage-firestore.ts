@@ -790,6 +790,21 @@ class FirestoreStorageImpl implements IStorage {
     const toMs = (x: any) => (x?.toMillis ? x.toMillis() : x ? new Date(x).getTime() : 0);
     return list.sort((a: any, b: any) => toMs(b.createdAt) - toMs(a.createdAt));
   }
+  async createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("notifications");
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.NOTIFICATIONS).doc(id.toString());
+    const created = {
+      id,
+      userId: notification.userId,
+      type: notification.type,
+      data: notification.data,
+      read: false,
+      createdAt: new Date(),
+    };
+    await docRef.set(created);
+    return created;
+  }
   async markNotificationAsRead(notificationId: number): Promise<void> {
     if (!this.db) return;
     await this.db.collection(FIRESTORE_COLLECTIONS.NOTIFICATIONS).doc(notificationId.toString()).update({ read: true, readAt: new Date() });

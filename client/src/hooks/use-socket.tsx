@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
 import { io, Socket } from "socket.io-client";
 import { useAuth } from "./use-auth";
+import { fetchNotificationsFromServer } from "@/lib/notifications-api";
 
 interface Notification {
   id: string;
@@ -35,10 +36,38 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const openConversationIdRef = useRef<string | null>(null);
+  const hasFetchedInitialNotifications = useRef(false);
 
   const setOpenChatConversationId = useCallback((id: string | null) => {
     openConversationIdRef.current = id;
   }, []);
+
+  // Al cerrar sesión: limpiar estado y resetear flag para que el próximo login vuelva a sincronizar.
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      hasFetchedInitialNotifications.current = false;
+      setNotifications([]);
+      return;
+    }
+  }, [isAuthenticated, user]);
+
+  // Sincronización al iniciar sesión: una sola consulta a Firestore como fuente de verdad.
+  // Socket.IO solo añadirá notificaciones en tiempo real una vez la sesión esté activa.
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    if (hasFetchedInitialNotifications.current) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    hasFetchedInitialNotifications.current = true;
+    fetchNotificationsFromServer(token)
+      .then((list) => {
+        setNotifications(list);
+      })
+      .catch(() => {
+        hasFetchedInitialNotifications.current = false;
+      });
+  }, [isAuthenticated, user?.id]);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -151,6 +180,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
+    const numId = Number(id);
+    if (Number.isInteger(numId) && numId > 0 && numId < 1000000) {
+      const token = localStorage.getItem("token");
+      if (token) {
+        fetch(`/api/notifications/${id}/read`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+    }
   }, []);
 
   const value = {

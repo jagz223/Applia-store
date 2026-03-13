@@ -3,6 +3,8 @@ import type { Server } from "http";
 import { storage as genFebStorage } from "./storage-genfeb";
 import { authenticateJWT } from "./routes-auth";
 import { z } from "zod";
+import { notificationService } from "./services/notification.service";
+import { getIO } from "./socket";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
@@ -368,7 +370,7 @@ export async function registerGenFebRoutes(
       const enriched = await Promise.all(
         raw.map(async (c: any) => {
           const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
-          const otherUser = await storage.getUserById(otherId);
+          const otherUser = await storage.getUserById(otherId) as { id: string; name?: string; lastName?: string } | undefined;
           let lastMessageText: string | null = null;
           let unreadCount = 0;
           const convId = Number(c.id);
@@ -384,9 +386,10 @@ export async function registerGenFebRoutes(
               console.error("Error enriching conversation", c.id, err);
             }
           }
+          const name = otherUser ? [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" : "Usuario";
           return {
             ...c,
-            otherParticipant: otherUser ? { id: otherUser.id, name: [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" } : { id: otherId, name: "Usuario" },
+            otherParticipant: { id: String(otherUser?.id ?? otherId), name },
             lastMessageText,
             unreadCount,
           };
@@ -469,12 +472,58 @@ export async function registerGenFebRoutes(
         senderId: userId,
         status: "sent",
       });
+      const recipientId =
+        conv.participant1Id === userId ? conv.participant2Id : conv.participant1Id;
+      const recipientIdStr = String(recipientId);
+
+      await storage.createNotification({
+        userId: recipientIdStr,
+        type: "message",
+        data: {
+          conversationId: message.conversationId,
+          preview: message.content.slice(0, 120),
+          messageId: message.id,
+        },
+      });
+
+      const io = getIO();
+      if (io) {
+        io.to(`user:${recipientIdStr}`).emit("notification:message", {
+          conversationId: message.conversationId,
+          preview: message.content.slice(0, 120),
+          messageId: message.id,
+        });
+      }
+
+      void notificationService.sendNewMessageNotification({
+        recipientId,
+        conversationId: message.conversationId,
+        preview: message.content.slice(0, 120),
+      });
       res.status(201).json(message);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation error", errors: error.errors });
       }
       console.error("Error sending message:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ---------- NOTIFICACIONES ----------
+
+  // POST /api/notifications/register-token - Registrar token FCM del usuario autenticado
+  app.post("/api/notifications/register-token", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const token = (req.body?.token as string | undefined)?.trim();
+      if (!token) return res.status(400).json({ message: "token es requerido" });
+      console.log("[push] Usuario aceptó notificaciones push — userId:", String(userId));
+      await notificationService.registerDeviceToken(userId, token);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error registering push token:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -569,17 +618,13 @@ export async function registerGenFebRoutes(
   
   // ---------- NOTIFICACIONES ----------
   
-  // GET /api/notifications - Listar notificaciones
-  app.get("/api/notifications", async (req, res) => {
+  // GET /api/notifications - Listar notificaciones (usuario autenticado por JWT)
+  app.get("/api/notifications", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.headers["x-user-id"] as string;
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const unreadOnly = req.query.unread === "true";
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-      
-      const notifications = await storage.getNotifications(userId, unreadOnly);
+      const notifications = await storage.getNotifications(String(userId), unreadOnly);
       res.json(notifications);
     } catch (error) {
       console.error("Error fetching notifications:", error);
@@ -588,7 +633,7 @@ export async function registerGenFebRoutes(
   });
   
   // PATCH /api/notifications/:id/read - Marcar notificación como leída
-  app.patch("/api/notifications/:id/read", async (req, res) => {
+  app.patch("/api/notifications/:id/read", authenticateJWT, async (req: any, res) => {
     try {
       await storage.markNotificationAsRead(Number(req.params.id));
       res.json({ success: true });

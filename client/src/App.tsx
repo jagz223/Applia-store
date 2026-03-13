@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
+import { PushForegroundHandler } from "@/components/PushForegroundHandler";
 import { SocketProvider } from "@/hooks/use-socket";
 
 // Pages
@@ -63,6 +64,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <SocketProvider>
+          <PushForegroundHandler />
           <div className="flex flex-col min-h-screen bg-background font-sans">
             <Navigation />
             <main className="flex-grow">
