@@ -291,7 +291,163 @@ export async function registerGenFebRoutes(
       res.status(500).json({ message: "Internal server error" });
     }
   });
-  
+
+  // ---------- WALLET ----------
+
+  // GET /api/wallet/platform-balance - Balance total de la plataforma (solo admin)
+  app.get("/api/wallet/platform-balance", authenticateJWT, async (req: any, res) => {
+    try {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Se requiere rol de administrador" });
+      }
+      const total = await storage.getTotalPlatformBalance();
+      res.json({ totalBalance: total });
+    } catch (error) {
+      console.error("Error fetching platform balance:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/users/me/wallet - Wallet y ganancias totales del usuario autenticado
+  app.get("/api/users/me/wallet", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await storage.getUserById(userId);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+      const u = user as { wallet?: number; totalEarnings?: number };
+      res.json({
+        wallet: typeof u.wallet === "number" ? u.wallet : 0,
+        totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
+      });
+    } catch (error) {
+      console.error("Error fetching user wallet:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/wallet/me - Alias para wallet del usuario autenticado
+  app.get("/api/wallet/me", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await storage.getUserById(userId);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+      const u = user as { wallet?: number; totalEarnings?: number };
+      res.json({
+        wallet: typeof u.wallet === "number" ? u.wallet : 0,
+        totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
+      });
+    } catch (error) {
+      console.error("Error fetching user wallet:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/wallet/transfers - Listar transferencias del usuario (paginado y filtros)
+  app.get("/api/wallet/transfers", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const page = Math.max(1, parseInt(String(req.query.page || 1), 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || 10), 10) || 10));
+      const transferType = req.query.transferType as "service_payment" | "recharge" | undefined;
+      const status = req.query.status as "pending_approval" | "completed" | "rejected" | undefined;
+      const description = req.query.description as string | undefined;
+      const dateFrom = req.query.dateFrom as string | undefined;
+      const dateTo = req.query.dateTo as string | undefined;
+      const amountMin = req.query.amountMin != null ? Number(req.query.amountMin) : undefined;
+      const amountMax = req.query.amountMax != null ? Number(req.query.amountMax) : undefined;
+      const result = await storage.getTransfersByUser(userId, {
+        page,
+        limit,
+        transferType,
+        status,
+        description: description?.trim() || undefined,
+        dateFrom: dateFrom?.trim() || undefined,
+        dateTo: dateTo?.trim() || undefined,
+        amountMin: Number.isFinite(amountMin) ? amountMin : undefined,
+        amountMax: Number.isFinite(amountMax) ? amountMax : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching wallet transfers:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/wallet/recharge-request - Usuario autenticado solicita recarga (crea transferencia en aprobación)
+  const rechargeRequestSchema = z.object({
+    amount: z.number().positive("amount debe ser positivo"),
+    transferDate: z.string().min(1, "transferDate es requerido"),
+    transferTime: z.string().optional(),
+    transferCode: z.string().optional(),
+  });
+  app.post("/api/wallet/recharge-request", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const parsed = rechargeRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+      const user = await storage.getUserById(userId);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+      const name = [user.name, (user as { lastName?: string }).lastName].filter(Boolean).join(" ").trim() || "Usuario";
+      const description = `Recarga al usuario ${name}`;
+      const { users: adminUsers } = await storage.getUsers({ role: "admin", page: 1, limit: 1, name: "", email: "", lastName: "" });
+      const fromUserId = adminUsers?.length ? (adminUsers[0] as { id?: string }).id ?? null : null;
+      const transfer = await storage.createTransfer({
+        userId,
+        fromUserId,
+        amount: parsed.data.amount,
+        transferType: "recharge",
+        status: "pending_approval",
+        description,
+        referenceId: parsed.data.transferCode,
+        currency: "USD",
+      });
+      res.status(201).json(transfer);
+    } catch (error: any) {
+      if (error?.message === "Usuario no encontrado") {
+        return res.status(404).json({ message: error.message });
+      }
+      console.error("Error creating recharge request:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/wallet/transfers - Crear transferencia (solo admin)
+  const createTransferSchema = z.object({
+    userId: z.string().min(1, "userId es requerido"),
+    fromUserId: z.string().nullable().optional(),
+    amount: z.number().positive("amount debe ser positivo"),
+    transferType: z.enum(["service_payment", "recharge"]),
+    status: z.enum(["pending_approval", "completed", "rejected"]).optional(),
+    description: z.string().optional(),
+    referenceId: z.string().optional(),
+    currency: z.string().optional(),
+  });
+  app.post("/api/wallet/transfers", authenticateJWT, async (req: any, res) => {
+    try {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Se requiere rol de administrador" });
+      }
+      const parsed = createTransferSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+      const transfer = await storage.createTransfer(parsed.data);
+      res.status(201).json(transfer);
+    } catch (error: any) {
+      if (error?.message === "Usuario no encontrado") {
+        return res.status(404).json({ message: error.message });
+      }
+      console.error("Error creating transfer:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ---------- DOCUMENTOS (BÓVEDA) ----------
   
   // GET /api/documents - Listar documentos del usuario

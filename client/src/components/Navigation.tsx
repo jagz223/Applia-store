@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
-import { useCurrentProvider, useMyServices, useDeleteService } from "@/hooks/use-mango-data";
+import { useCurrentProvider, useMyServices, useDeleteService, useWallet } from "@/hooks/use-mango-data";
 import { 
   Briefcase, 
   Calendar, 
@@ -27,6 +27,7 @@ import {
   Loader2,
   Wrench,
   PackageOpen,
+  Wallet,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -60,6 +61,10 @@ export function Navigation() {
   const { data: providerProfile } = useCurrentProvider();
   const { data: myServices = [], isLoading: myServicesLoading } = useMyServices({ enabled: !!providerProfile || (user as { role?: string } | null)?.role === "professional" });
   const deleteService = useDeleteService();
+  const { data: walletData } = useWallet({ enabled: isAuthenticated });
+  const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
+  const formatWallet = (n: number) =>
+    new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [myServicesOpen, setMyServicesOpen] = useState(false);
@@ -134,55 +139,23 @@ export function Navigation() {
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive('/payments') || isActive('/dashboard') ? 'text-primary' : 'text-muted-foreground'}`}>
-            Mi Cuenta <ChevronDown className="h-4 w-4" />
+          <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive('/recharge') || isActive('/movimientos') ? 'text-primary' : 'text-muted-foreground'}`}>
+            Movimientos <ChevronDown className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent className="bg-card border-border">
-          <DropdownMenuLabel className="text-muted-foreground">Gestión</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>
-            <Link href="/dashboard" className="flex items-center gap-2 w-full">
-              <LayoutDashboard className="h-4 w-4" />
-              <span>Panel de Control</span>
+          <DropdownMenuItem asChild>
+            <Link href="/recharge" className="flex items-center gap-2 w-full">
+              <Wallet className="h-4 w-4" />
+              <span>Recargar</span>
             </Link>
           </DropdownMenuItem>
-          <DropdownMenuItem>
-            <Link href="/payments" className="flex items-center gap-2 w-full">
+          <DropdownMenuItem asChild>
+            <Link href="/movimientos" className="flex items-center gap-2 w-full">
               <CreditCard className="h-4 w-4" />
-              <span>Pagos</span>
+              <span>Historial de movimientos</span>
             </Link>
           </DropdownMenuItem>
-          <DropdownMenuItem>
-            <Link href="/chat" className="flex items-center gap-2 w-full">
-              <MessageSquare className="h-4 w-4" />
-              <span>Mensajes</span>
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>
-            <Link href="/settings" className="flex items-center gap-2 w-full">
-              <Settings className="h-4 w-4" />
-              <span>Configuración</span>
-            </Link>
-          </DropdownMenuItem>
-          {hasAdminRole(user) && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <Link href="/admin" className="flex items-center gap-2 w-full">
-                  <Shield className="h-4 w-4" />
-                  <span>Admin Panel</span>
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Link href="/admin/create-role" className="flex items-center gap-2 w-full">
-                  <Shield className="h-4 w-4" />
-                  <span>Crear rol</span>
-                </Link>
-              </DropdownMenuItem>
-            </>
-          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </>
@@ -215,6 +188,19 @@ export function Navigation() {
                 <Globe className="h-4 w-4" />
                 <span>ES</span>
               </Button>
+
+          {/* Wallet balance - visible desktop y móvil (icono en header) */}
+          {isAuthenticated && (
+            <div
+              className="flex items-center gap-1.5 min-w-0 px-2.5 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary"
+              title="Saldo de tu wallet"
+            >
+              <Wallet className="h-4 w-4 sm:h-4 w-4 shrink-0" aria-hidden />
+              <span className="text-sm font-semibold tabular-nums truncate max-w-[80px] sm:max-w-[100px]">
+                {walletData === undefined ? "—" : formatWallet(walletBalance)}
+              </span>
+            </div>
+          )}
           
           {isAuthenticated && <NotificationBell />}
           
@@ -283,6 +269,12 @@ export function Navigation() {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
+                    <Link href="/recharge" className="flex items-center">
+                      <Wallet className="mr-2 h-4 w-4" />
+                      Recargar wallet
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
                     <Link href="/payments" className="flex items-center">
                       <CreditCard className="mr-2 h-4 w-4" />
                       Pagos
@@ -344,7 +336,16 @@ export function Navigation() {
               </Button>
             </SheetTrigger>
             <SheetContent side="right" className="w-[300px] bg-card border-l border-border">
-              <div className="flex flex-col gap-4 mt-8">
+              {/* Wallet en menú móvil */}
+              {isAuthenticated && (
+                <div className="flex items-center gap-2 mt-6 mb-2 px-1 py-3 rounded-xl bg-primary/10 border border-primary/20">
+                  <Wallet className="h-5 w-5 text-primary shrink-0" />
+                  <span className="text-base font-semibold text-primary tabular-nums">
+                    {walletData === undefined ? "—" : formatWallet(walletBalance)}
+                  </span>
+                </div>
+              )}
+              <div className="flex flex-col gap-4 mt-4">
                 <Link href="/" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Inicio
                 </Link>
@@ -382,6 +383,12 @@ export function Navigation() {
                 )}
                 <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Bóveda Segura
+                </Link>
+                <Link href="/recharge" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                  Recargar wallet
+                </Link>
+                <Link href="/movimientos" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                  Historial de movimientos
                 </Link>
                 <Link href="/dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mi Panel

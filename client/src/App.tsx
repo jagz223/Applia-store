@@ -29,6 +29,9 @@ import EditUser from "@/pages/EditUser";
 import ProfessionalDashboard from "@/pages/ProfessionalDashboard";
 import PaymentVoucher from "@/pages/PaymentVoucher";
 import Bookings from "@/pages/Bookings";
+import Recharge from "@/pages/Recharge";
+import RechargeConfirm from "@/pages/RechargeConfirm";
+import Movimientos from "@/pages/Movimientos";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -54,6 +57,9 @@ function Router() {
       <Route path="/professional-dashboard" component={ProfessionalDashboard} />
       <Route path="/payment-voucher" component={PaymentVoucher} />
       <Route path="/bookings" component={Bookings} />
+      <Route path="/recharge" component={Recharge} />
+      <Route path="/recharge/confirm" component={RechargeConfirm} />
+      <Route path="/movimientos" component={Movimientos} />
       <Route component={NotFound} />
     </Switch>
   );
