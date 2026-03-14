@@ -509,3 +509,56 @@ export function useRechargeRequest() {
     },
   });
 }
+
+// ==========================================
+// ADMIN WALLET (transferencias / recargas)
+// ==========================================
+
+const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
+
+/** Lista todas las transferencias de la plataforma (solo admin). */
+export function useAdminWalletTransfers(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [ADMIN_WALLET_TRANSFERS_KEY],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(ADMIN_WALLET_TRANSFERS_KEY, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al cargar transferencias");
+      }
+      return res.json() as Promise<{ transfers: any[]; total: number }>;
+    },
+    enabled: options?.enabled !== false,
+  });
+}
+
+/** Actualiza el estado de una transferencia (solo admin). Aprobar/rechazar recargas. */
+export function useUpdateTransferStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ transferId, status }: { transferId: string; status: "pending_approval" | "completed" | "rejected" }) => {
+      const token = getToken();
+      const url = `${ADMIN_WALLET_TRANSFERS_KEY}/${transferId}`;
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al actualizar el estado");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+    },
+  });
+}

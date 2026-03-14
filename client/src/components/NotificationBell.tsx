@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Bell, MessageSquare, Calendar, Shield, Trash2 } from "lucide-react";
+import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { useSocket } from "@/hooks/use-socket";
 import { useLocation } from "wouter";
+import { usePushNotifications } from "@/hooks/use-push-notifications";
 
 /** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificación. */
 function getNotificationPath(notification: { type: string; data?: any }): string {
@@ -19,7 +20,16 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       }
       return "/bookings";
     case "admin":
+      if (data.type === "recharge_pending") {
+        const transferId = data.data?.transferId ?? data.transferId;
+        const q = new URLSearchParams({ tab: "recargas" });
+        if (transferId != null) q.set("highlight", String(transferId));
+        return `/admin?${q.toString()}`;
+      }
       return "/dashboard";
+    case "recharge_completed":
+    case "recharge_rejected":
+      return "/movimientos";
     default:
       return "/dashboard";
   }
@@ -27,6 +37,7 @@ function getNotificationPath(notification: { type: string; data?: any }): string
 
 export function NotificationBell() {
   const { notifications, clearNotifications, isConnected, markNotificationAsRead } = useSocket();
+  const push = usePushNotifications();
   const [, setLocation] = useLocation();
   const [open, setOpen] = useState(false);
 
@@ -35,6 +46,14 @@ export function NotificationBell() {
     const path = getNotificationPath(notification);
     setLocation(path);
     setOpen(false);
+    // Si es recarga pendiente, notificar al panel Admin para que abra Recargas y resalte la fila
+    const data = notification.data ?? {};
+    if (data.type === "recharge_pending") {
+      const transferId = data.data?.transferId ?? data.transferId;
+      window.dispatchEvent(
+        new CustomEvent("admin-open-recargas", { detail: { transferId: transferId != null ? Number(transferId) : null } })
+      );
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -47,6 +66,10 @@ export function NotificationBell() {
         return <Calendar className="h-4 w-4 text-green-500" />;
       case "admin":
         return <Shield className="h-4 w-4 text-orange-500" />;
+      case "recharge_completed":
+        return <Bell className="h-4 w-4 text-green-500" />;
+      case "recharge_rejected":
+        return <Bell className="h-4 w-4 text-red-500" />;
       default:
         return <Bell className="h-4 w-4 text-gray-500" />;
     }
@@ -54,6 +77,9 @@ export function NotificationBell() {
 
   const getTitle = (type: string, data?: { type?: string }) => {
     if (type === "booking" && data?.type === "new_booking") return "Nueva reserva";
+    if (type === "admin" && data?.type === "recharge_pending") return "Nueva solicitud de recarga";
+    if (type === "recharge_completed") return "Recarga aprobada";
+    if (type === "recharge_rejected") return "Recarga rechazada";
     switch (type) {
       case "message":
         return "Nuevo mensaje";
@@ -140,6 +166,33 @@ export function NotificationBell() {
             +{notifications.length - 10} notificaciones más
           </p>
         )}
+
+        <div className="mt-4 pt-3 border-t border-border">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-muted-foreground hover:text-foreground font-normal"
+            onClick={() => push.register()}
+            disabled={
+              !push.isSupported ||
+              push.isRegistering ||
+              (push.permission === "granted" && push.token != null)
+            }
+          >
+            {push.isRegistering ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : push.permission === "granted" && push.token ? (
+              <Bell className="h-4 w-4 mr-2 text-green-500" />
+            ) : (
+              <BellRing className="h-4 w-4 mr-2" />
+            )}
+            {push.isRegistering
+              ? "Activando…"
+              : push.permission === "granted" && push.token
+                ? "Avisos en el navegador activos"
+                : "Recibir avisos en el navegador"}
+          </Button>
+        </div>
       </PopoverContent>
     </Popover>
   );

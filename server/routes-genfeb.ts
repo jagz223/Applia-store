@@ -4,7 +4,7 @@ import { storage as genFebStorage } from "./storage-genfeb";
 import { authenticateJWT } from "./routes-auth";
 import { z } from "zod";
 import { notificationService } from "./services/notification.service";
-import { getIO } from "./socket";
+import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
@@ -407,6 +407,53 @@ export async function registerGenFebRoutes(
         referenceId: parsed.data.transferCode,
         currency: "USD",
       });
+
+      // Notificación interna (Socket.io) a admins para alerta en tiempo real
+      const io = getIO();
+      if (io) {
+        const adminNotification = {
+          type: "recharge_pending",
+          data: {
+            message: "Nueva solicitud de recarga",
+            transferId: (transfer as { id?: number }).id,
+            userId,
+            amount: parsed.data.amount,
+            userName: name,
+          },
+          timestamp: new Date(),
+        };
+        sendNotificationToAdmins(io, adminNotification);
+        console.log("[recharge] Notificación interna emitida a admins, transferId:", (transfer as { id?: number }).id);
+      } else {
+        console.warn("[recharge] getIO() es null: no se pudo enviar notificación en tiempo real a admins");
+      }
+
+      // Notificar a todos los admins: nueva recarga pendiente de aprobación (FCM)
+      const { users: allAdmins } = await storage.getUsers({
+        role: "admin",
+        page: 1,
+        limit: 100,
+        name: "",
+        email: "",
+        lastName: "",
+      });
+      const amountStr = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(parsed.data.amount);
+      const tid = (transfer as { id?: number }).id;
+      const adminPushUrl = tid != null ? `/admin?tab=recargas&highlight=${tid}` : "/admin?tab=recargas";
+      void Promise.all(
+        (allAdmins ?? []).map((admin: { id?: string }) =>
+          notificationService.sendPushToUser(admin.id!, {
+            title: "Nueva solicitud de recarga",
+            body: `${name} ha solicitado una recarga de ${amountStr}. Revisa el panel de administración.`,
+            data: {
+              type: "recharge_pending",
+              url: adminPushUrl,
+              transferId: String(tid ?? ""),
+            },
+          })
+        )
+      ).catch((err) => console.error("[push] Error notificando a admins por recarga:", err));
+
       res.status(201).json(transfer);
     } catch (error: any) {
       if (error?.message === "Usuario no encontrado") {
@@ -444,6 +491,99 @@ export async function registerGenFebRoutes(
         return res.status(404).json({ message: error.message });
       }
       console.error("Error creating transfer:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/wallet/transfers - Listar todas las transferencias (solo admin)
+  app.get("/api/admin/wallet/transfers", authenticateJWT, async (req: any, res) => {
+    try {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Se requiere rol de administrador" });
+      }
+      const result = await storage.getAllTransfers();
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching all wallet transfers:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/admin/wallet/transfers/:id - Actualizar estado de una transferencia (solo admin)
+  const updateTransferStatusSchema = z.object({
+    status: z.enum(["pending_approval", "completed", "rejected"], {
+      errorMap: () => ({ message: "status debe ser pending_approval, completed o rejected" }),
+    }),
+  });
+  app.patch("/api/admin/wallet/transfers/:id", authenticateJWT, async (req: any, res) => {
+    try {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Se requiere rol de administrador" });
+      }
+      const transferId = req.params.id as string;
+      if (!transferId?.trim()) {
+        return res.status(400).json({ message: "ID de transferencia es requerido" });
+      }
+      const parsed = updateTransferStatusSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+      const transfer = await storage.updateTransferStatus(transferId, parsed.data.status);
+      const newStatus = parsed.data.status;
+
+      // Notificar al usuario cuando su recarga pasa a aprobada o rechazada (interna Socket.io + FCM push)
+      if (newStatus === "completed" || newStatus === "rejected") {
+        const uid = (transfer as { userId?: string; amount?: number }).userId;
+        const amount = (transfer as { amount?: number }).amount;
+        const amountFormatted =
+          typeof amount === "number"
+            ? new Intl.NumberFormat("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
+            : "0.00";
+        if (uid) {
+          const notifType = newStatus === "completed" ? "recharge_completed" : "recharge_rejected";
+          const payload = {
+            type: notifType,
+            data: { amount, amountFormatted },
+            timestamp: new Date(),
+          };
+
+          // Notificación interna (Socket.io): si tiene la app abierta ve la alerta al instante
+          const io = getIO();
+          if (io) {
+            sendNotificationToUser(io, uid, payload);
+            console.log("[recharge] Notificación interna emitida al usuario", uid, "estado:", newStatus);
+          }
+
+          // Push FCM para cuando no tiene la app abierta
+          if (newStatus === "completed") {
+            void notificationService
+              .sendPushToUser(uid, {
+                title: "¡Recarga Aprobada!",
+                body: `Se han acreditado $${amountFormatted} USD a tu saldo. Ya puedes usar tu dinero en la plataforma.`,
+                data: { type: "recharge_completed", url: "/movimientos" },
+              })
+              .catch((err) => console.error("[push] Error notificando recarga aprobada:", err));
+          } else {
+            void notificationService
+              .sendPushToUser(uid, {
+                title: "Solicitud de Recarga Rechazada",
+                body: `Tu solicitud por $${amountFormatted} USD no pudo ser procesada. Por favor, verifica los datos del comprobante o contacta a soporte.`,
+                data: { type: "recharge_rejected", url: "/movimientos" },
+              })
+              .catch((err) => console.error("[push] Error notificando recarga rechazada:", err));
+          }
+        }
+      }
+
+      res.json(transfer);
+    } catch (error: any) {
+      if (error?.message === "Transferencia no encontrada") {
+        return res.status(404).json({ message: error.message });
+      }
+      if (error?.message === "Usuario no encontrado") {
+        return res.status(404).json({ message: error.message });
+      }
+      console.error("Error updating transfer status:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });

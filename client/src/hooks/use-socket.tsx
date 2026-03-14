@@ -1,7 +1,11 @@
 import { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
 import { io, Socket } from "socket.io-client";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
+import { useToast } from "@/hooks/use-toast";
 import { fetchNotificationsFromServer } from "@/lib/notifications-api";
+
+const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
 
 interface Notification {
   id: string;
@@ -32,11 +36,15 @@ const SocketContext = createContext<SocketContextType>({
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const openConversationIdRef = useRef<string | null>(null);
   const hasFetchedInitialNotifications = useRef(false);
+  const userRef = useRef(user);
+  userRef.current = user;
 
   const setOpenChatConversationId = useCallback((id: string | null) => {
     openConversationIdRef.current = id;
@@ -113,6 +121,25 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         },
         ...prev,
       ]);
+      // Recarga aprobada o rechazada: actualizar wallet/movimientos y avisar al usuario
+      const type = notification?.type;
+      if (type === "recharge_completed" || type === "recharge_rejected") {
+        queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+        const amount = notification?.data?.amountFormatted ?? notification?.data?.amount ?? "";
+        if (type === "recharge_completed") {
+          toast({
+            title: "Recarga aprobada",
+            description: amount ? `Se han acreditado $${amount} USD a tu saldo.` : "Tu saldo ha sido actualizado.",
+          });
+        } else {
+          toast({
+            title: "Recarga rechazada",
+            description: amount ? `Tu solicitud por $${amount} USD no pudo ser procesada.` : "Revisa los detalles en movimientos.",
+            variant: "destructive",
+          });
+        }
+      }
     });
 
     newSocket.on("notification:message", (notification: any) => {
@@ -148,7 +175,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on("notification:admin", (notification: any) => {
-      console.log("🔔 Admin notification:", notification);
+      console.log("[recharge] Cliente recibió notification:admin:", notification);
       setNotifications((prev) => [
         {
           id: Date.now().toString(),
@@ -159,6 +186,17 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         },
         ...prev,
       ]);
+      // Si es solicitud de recarga y el usuario es admin: refrescar tabla e informar
+      const isRechargePending = notification?.type === "recharge_pending";
+      if (isRechargePending && userRef.current?.role === "admin") {
+        queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
+        toast({
+          title: "Nueva solicitud de recarga recibida",
+          description: notification?.data?.userName
+            ? `${notification.data.userName} ha solicitado una recarga. Revisa el panel de recargas.`
+            : "Revisa el panel de administración.",
+        });
+      }
     });
 
     newSocket.on("error", (error: any) => {

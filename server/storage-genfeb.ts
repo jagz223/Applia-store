@@ -170,6 +170,10 @@ export interface IStorage
       amountMax?: number;
     }
   ): Promise<{ transfers: any[]; total: number }>;
+  /** Listar todas las transferencias de la plataforma (solo admin). */
+  getAllTransfers(): Promise<{ transfers: any[]; total: number }>;
+  /** Actualizar estado de una transferencia; si es recarga y pasa a completed, acredita el saldo al usuario. */
+  updateTransferStatus(transferId: string, status: "pending_approval" | "completed" | "rejected"): Promise<any>;
   getTotalPlatformBalance(): Promise<number>;
 }
 
@@ -1151,6 +1155,34 @@ export class InMemoryStorage implements IStorage {
     const start = (page - 1) * limit;
     const transfers = list.slice(start, start + limit);
     return { transfers, total };
+  }
+
+  async getAllTransfers(): Promise<{ transfers: any[]; total: number }> {
+    const list = [...this.walletTransfers].sort(
+      (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    return { transfers: list, total: list.length };
+  }
+
+  async updateTransferStatus(
+    transferId: string,
+    status: "pending_approval" | "completed" | "rejected"
+  ): Promise<any> {
+    const id = parseInt(transferId, 10);
+    if (Number.isNaN(id)) throw new Error("Transferencia no encontrada");
+    const transfer = this.walletTransfers.find((t: any) => t.id === id);
+    if (!transfer) throw new Error("Transferencia no encontrada");
+    const currentStatus = transfer.status;
+    const isRechargeCompleted =
+      transfer.transferType === "recharge" && status === "completed" && currentStatus !== "completed";
+    if (isRechargeCompleted) {
+      const user = this.users.find((u: any) => u.id === transfer.userId);
+      if (!user) throw new Error("Usuario no encontrado");
+      user.wallet = (typeof user.wallet === "number" ? user.wallet : 0) + transfer.amount;
+      user.updatedAt = new Date();
+    }
+    transfer.status = status;
+    return transfer;
   }
 
   async getTotalPlatformBalance(): Promise<number> {

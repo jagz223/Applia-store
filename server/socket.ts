@@ -52,6 +52,12 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     // Join user's personal room
     socket.join(`user:${user.id}`);
 
+    // Admins join room "admin" to receive internal admin notifications (e.g. new recharge requests)
+    if (user.role === "admin") {
+      socket.join("admin");
+      console.log(`🔔 Admin joined room: ${user.email}`);
+    }
+
     // Handle joining chat rooms
     socket.on("join:chat", (conversationId: string) => {
       socket.join(`chat:${conversationId}`);
@@ -114,9 +120,9 @@ export function sendNotificationToUser(io: SocketIOServer, userId: string, notif
   io.to(`user:${userId}`).emit("notification", notification);
 }
 
-// Helper function to send notification to all admins
+// Helper function to send notification to all admins (only sockets in room "admin")
 export function sendNotificationToAdmins(io: SocketIOServer, notification: any) {
-  io.emit("notification:admin", notification);
+  io.to("admin").emit("notification:admin", notification);
 }
 
 // Helper function to broadcast to all connected users

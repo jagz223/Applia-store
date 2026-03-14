@@ -104,20 +104,27 @@ class NotificationService {
 
   async sendPushToUser(userId: string | number, payload: PushPayload): Promise<void> {
     const uid = this.normalizeUserId(userId);
-    const tokens = await this.getUserTokens(uid);
+    let tokens: string[] = [];
+    try {
+      tokens = await this.getUserTokens(uid);
+    } catch (err) {
+      console.error("[push] Error obteniendo tokens para usuario", uid, err);
+      return;
+    }
     if (tokens.length === 0) {
       console.warn("[push] No device tokens for user:", uid);
       return;
     }
 
     const data = payload.data ?? {};
+    const dataStr = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
     const message: admin.messaging.MulticastMessage = {
       tokens,
       notification: {
         title: payload.title,
         body: payload.body,
       },
-      data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+      data: dataStr,
       webpush: {
         notification: {
           title: payload.title,
@@ -128,7 +135,14 @@ class NotificationService {
       },
     };
 
-    const messaging = admin.messaging();
+    let messaging: admin.messaging.Messaging;
+    try {
+      messaging = admin.messaging();
+    } catch (err) {
+      console.error("[push] Firebase Messaging no inicializado:", err);
+      return;
+    }
+
     try {
       const result = await messaging.sendEachForMulticast(message);
       const success = result.successCount;
@@ -139,30 +153,46 @@ class NotificationService {
           if (!r.success) {
             console.warn("[push] FCM falló para token", i, r.error?.message ?? r.error);
             if (r.error && this.isTokenInvalidError(r.error) && tokens[i]) {
-              removePromises.push(this.removeDeviceToken(uid, tokens[i]));
+              removePromises.push(
+                this.removeDeviceToken(uid, tokens[i]).catch((e) =>
+                  console.warn("[push] Error eliminando token inválido:", e)
+                )
+              );
             }
           }
         });
         await Promise.all(removePromises);
-        console.warn("[push] FCM send partial failure:", { success, failed });
+        console.warn("[push] FCM send partial failure:", { success, failed, uid });
       } else {
         console.log("[push] Sent to user", uid, "successCount:", success);
       }
     } catch (error) {
       console.error("[push] Error sending push notification:", error);
-      // Fallback: enviar uno por uno (evita problemas de HTTP/2 en algunos entornos)
-      try {
-        for (const token of tokens) {
+      // Fallback: enviar uno por uno para no bloquear por un token expirado
+      let sent = 0;
+      for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        try {
           await messaging.send({
             token,
             notification: { title: payload.title, body: payload.body },
-            data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+            data: dataStr,
             webpush: message.webpush,
           });
+          sent++;
+        } catch (tokenErr) {
+          console.warn("[push] Fallback send failed for token", i, tokenErr);
+          if (this.isTokenInvalidError(tokenErr)) {
+            try {
+              await this.removeDeviceToken(uid, token);
+            } catch (removeErr) {
+              console.warn("[push] Error eliminando token inválido:", removeErr);
+            }
+          }
         }
-        console.log("[push] Sent to user", uid, "via send() fallback, count:", tokens.length);
-      } catch (fallbackErr) {
-        console.error("[push] Fallback send also failed:", fallbackErr);
+      }
+      if (sent > 0) {
+        console.log("[push] Sent to user", uid, "via fallback, count:", sent);
       }
     }
   }

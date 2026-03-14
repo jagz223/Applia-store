@@ -770,6 +770,68 @@ class FirestoreStorageImpl implements IStorage {
     return { transfers, total };
   }
 
+  async getAllTransfers(): Promise<{ transfers: WalletTransfer[]; total: number }> {
+    if (!this.db) return { transfers: [], total: 0 };
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS).get();
+    const toMs = (x: unknown) =>
+      x instanceof Date ? x.getTime() : (x as { toMillis?: () => number })?.toMillis?.() ?? 0;
+    const list = snap.docs.map((d) => ({ id: parseInt(d.id, 10), ...d.data() } as WalletTransfer));
+    list.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+    return { transfers: list, total: list.length };
+  }
+
+  async updateTransferStatus(transferId: string, status: WalletTransferStatus): Promise<WalletTransfer> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const coll = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
+    const transferRef = coll.doc(transferId);
+    const now = new Date();
+
+    return this.db.runTransaction(async (t) => {
+      const transferSnap = await t.get(transferRef);
+      if (!transferSnap.exists) {
+        throw new Error("Transferencia no encontrada");
+      }
+      const data = transferSnap.data() as Record<string, unknown>;
+      const currentStatus = data.status as WalletTransferStatus;
+      const transferType = data.transferType as WalletTransferType;
+      const userId = data.userId as string;
+      const amount = typeof data.amount === "number" ? data.amount : Number(data.amount);
+
+      const isRechargeCompleted =
+        transferType === "recharge" && status === "completed" && currentStatus !== "completed";
+
+      if (isRechargeCompleted) {
+        const userRef = this.db!.collection(FIRESTORE_COLLECTIONS.USERS).doc(userId);
+        const userSnap = await t.get(userRef);
+        if (!userSnap.exists) {
+          throw new Error("Usuario no encontrado");
+        }
+        const userData = userSnap.data() as User;
+        const currentWallet = typeof userData.wallet === "number" ? userData.wallet : 0;
+        t.update(userRef, {
+          wallet: currentWallet + amount,
+          updatedAt: now,
+        });
+      }
+
+      t.update(transferRef, { status });
+      const id = typeof data.id === "number" ? data.id : parseInt(transferId, 10);
+      const createdAt = data.createdAt instanceof Date ? data.createdAt : (data.createdAt as { toDate?: () => Date })?.toDate?.() ?? now;
+      return {
+        id,
+        userId: data.userId as string,
+        fromUserId: data.fromUserId as string | null | undefined,
+        amount: typeof data.amount === "number" ? data.amount : Number(data.amount),
+        transferType: data.transferType as WalletTransferType,
+        status,
+        description: data.description as string | undefined,
+        referenceId: data.referenceId as string | undefined,
+        currency: data.currency as string | undefined,
+        createdAt,
+      } as WalletTransfer;
+    });
+  }
+
   async getTotalPlatformBalance(): Promise<number> {
     if (!this.db) return 0;
     const snap = await this.db.collection(FIRESTORE_COLLECTIONS.USERS).get();
