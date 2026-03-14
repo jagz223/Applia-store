@@ -21,6 +21,10 @@ import { getFirestoreStorage } from "./storage-firestore";
 const app = express();
 const httpServer = createServer(app);
 
+// Inicializar Socket.IO antes de registrar rutas para que getIO() esté disponible
+// cuando se llame desde cualquier handler (p. ej. notificación de recarga a admins)
+initializeSocket(httpServer);
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -128,9 +132,6 @@ app.use((req, res, next) => {
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(port, () => {
     log(`serving on port ${port}`);
-    
-    // Initialize Socket.IO for real-time notifications
-    initializeSocket(httpServer);
-    log("🔔 Socket.IO initialized for real-time notifications");
+    log("🔔 Socket.IO listo para notificaciones en tiempo real");
   });
 })();

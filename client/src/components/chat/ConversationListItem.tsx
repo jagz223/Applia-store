@@ -41,7 +41,7 @@ export function ConversationListItem({ conversation, isSelected, onSelect }: Con
           {conversation.serviceId ? `Servicio #${conversation.serviceId}` : "Chat"}
         </p>
       </div>
-      {unread > 0 && (
+      {unread > 0 && !isSelected && (
         <Badge className="bg-primary text-primary-foreground shrink-0">{unread}</Badge>
       )}
     </button>

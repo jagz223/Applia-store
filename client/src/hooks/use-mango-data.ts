@@ -205,6 +205,92 @@ export function useCreateService() {
   });
 }
 
+export type ServiceUpdatePayload = {
+  title?: string;
+  description?: string;
+  price?: string;
+  imageUrl?: string;
+  isActive?: boolean;
+  categoryId?: number;
+};
+
+/** Servicios del proveedor actual (solo si está autenticado y es proveedor). */
+export function useMyServices(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["/api/me/services"],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/me/services", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 401) return [];
+      if (!res.ok) throw new Error("Failed to fetch my services");
+      return res.json() as Promise<ServiceWithProvider[]>;
+    },
+    retry: false,
+    enabled: options?.enabled !== false,
+  });
+}
+
+export function useDeleteService() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (serviceId: number) => {
+      const token = getToken();
+      const res = await fetch(`/api/services/${serviceId}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to delete service");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.services.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      toast({ title: "Servicio eliminado", description: "El servicio se ha eliminado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useUpdateService(serviceId: number) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (data: ServiceUpdatePayload) => {
+      const token = getToken();
+      const res = await fetch(`/api/services/${serviceId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to update service");
+      }
+      return res.json();
+    },
+    onSuccess: (_, __, context) => {
+      queryClient.invalidateQueries({ queryKey: [api.services.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.services.get.path, serviceId] });
+      toast({ title: "Servicio actualizado", description: "Los cambios se han guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
 // ==========================================
 // BOOKINGS
 // ==========================================
@@ -307,6 +393,191 @@ export function useUpdateBookingStatus() {
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
+    },
+  });
+}
+
+// ==========================================
+// WALLET
+// ==========================================
+
+/** Wallet y totalEarnings del usuario autenticado. */
+export function useWallet(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [api.genfeb.wallet.me.path],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(api.genfeb.wallet.me.path, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Failed to fetch wallet");
+      return api.genfeb.wallet.me.responses[200].parse(await res.json());
+    },
+    enabled: options?.enabled !== false,
+  });
+}
+
+const PROFESSIONAL_STATS_KEY = "/api/professional/stats";
+
+/** Estadísticas del profesional: servicios completados, rechazados y ganancias totales. */
+export function useProfessionalStats(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [PROFESSIONAL_STATS_KEY],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(PROFESSIONAL_STATS_KEY, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Failed to fetch professional stats");
+      const data = await res.json();
+      return data as { completedCount: number; rejectedCount: number; totalEarnings: number };
+    },
+    enabled: options?.enabled !== false,
+  });
+}
+
+/** Parámetros de listado de transferencias (paginado y filtros). */
+export type WalletTransfersParams = {
+  page?: number;
+  limit?: number;
+  transferType?: "service_payment" | "recharge";
+  status?: "pending_approval" | "completed" | "rejected";
+  description?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  amountMin?: number;
+  amountMax?: number;
+  enabled?: boolean;
+};
+
+/** Lista de transferencias del usuario (wallet), paginado. */
+export function useWalletTransfers(params?: WalletTransfersParams) {
+  const page = params?.page ?? 1;
+  const limit = params?.limit ?? 10;
+  const transferType = params?.transferType;
+  const status = params?.status;
+  const description = params?.description;
+  const dateFrom = params?.dateFrom;
+  const dateTo = params?.dateTo;
+  const amountMin = params?.amountMin;
+  const amountMax = params?.amountMax;
+  return useQuery({
+    queryKey: [
+      "/api/wallet/transfers",
+      page,
+      limit,
+      transferType,
+      status,
+      description,
+      dateFrom,
+      dateTo,
+      amountMin,
+      amountMax,
+    ],
+    queryFn: async () => {
+      const token = getToken();
+      const q = new URLSearchParams();
+      q.set("page", String(page));
+      q.set("limit", String(limit));
+      if (transferType) q.set("transferType", transferType);
+      if (status) q.set("status", status);
+      if (description?.trim()) q.set("description", description.trim());
+      if (dateFrom) q.set("dateFrom", dateFrom);
+      if (dateTo) q.set("dateTo", dateTo);
+      if (amountMin != null && Number.isFinite(amountMin)) q.set("amountMin", String(amountMin));
+      if (amountMax != null && Number.isFinite(amountMax)) q.set("amountMax", String(amountMax));
+      const url = `/api/wallet/transfers?${q.toString()}`;
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Failed to fetch transfers");
+      return res.json() as Promise<{ transfers: any[]; total: number }>;
+    },
+    enabled: params?.enabled !== false,
+  });
+}
+
+/** Envía solicitud de recarga (crea transferencia en aprobación). */
+export function useRechargeRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      amount: number;
+      transferDate: string;
+      transferTime?: string;
+      transferCode?: string;
+    }) => {
+      const token = getToken();
+      const res = await fetch(api.genfeb.wallet.rechargeRequest.path, {
+        method: api.genfeb.wallet.rechargeRequest.method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Error al enviar la solicitud de recarga");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+    },
+  });
+}
+
+// ==========================================
+// ADMIN WALLET (transferencias / recargas)
+// ==========================================
+
+const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
+
+/** Lista todas las transferencias de la plataforma (solo admin). */
+export function useAdminWalletTransfers(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [ADMIN_WALLET_TRANSFERS_KEY],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(ADMIN_WALLET_TRANSFERS_KEY, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al cargar transferencias");
+      }
+      return res.json() as Promise<{ transfers: any[]; total: number }>;
+    },
+    enabled: options?.enabled !== false,
+  });
+}
+
+/** Actualiza el estado de una transferencia (solo admin). Aprobar/rechazar recargas. */
+export function useUpdateTransferStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ transferId, status }: { transferId: string; status: "pending_approval" | "completed" | "rejected" }) => {
+      const token = getToken();
+      const url = `${ADMIN_WALLET_TRANSFERS_KEY}/${transferId}`;
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al actualizar el estado");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
     },
   });
 }

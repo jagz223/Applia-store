@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { User, ArrowLeft, Phone, Video, MoreVertical, FileText, Calendar, MapPin } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { User, ArrowLeft, FileText, Calendar, MapPin, Bell, BellOff, Loader2 } from "lucide-react";
+import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { MessageList } from "./MessageList";
 import { MessageInput } from "./MessageInput";
 import { formatMessageTime } from "@/lib/chat-format";
@@ -37,6 +39,7 @@ export function ChatWindow({
   isLoadingMoreMessages,
   onBack,
 }: ChatWindowProps) {
+  const push = usePushNotifications();
   const displayMessages = messages.map((m) => ({
     id: m.id,
     text: m.content,
@@ -50,7 +53,7 @@ export function ChatWindow({
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
-      <header className="p-4 border-b border-border flex items-center justify-between shrink-0">
+      <header className="p-4 border-b border-border flex items-center justify-between shrink-0 min-w-0">
         <div className="flex items-center gap-3">
           {onBack && (
             <Button variant="ghost" size="icon" className="md:hidden" onClick={onBack}>
@@ -66,24 +69,51 @@ export function ChatWindow({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="ghost" size="icon" className="hidden sm:flex">
-            <Phone className="w-5 h-5" />
-          </Button>
-          <Button type="button" variant="ghost" size="icon" className="hidden sm:flex">
-            <Video className="w-5 h-5" />
-          </Button>
-          <Button type="button" variant="ghost" size="icon">
-            <MoreVertical className="w-5 h-5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => push.register()}
+                disabled={!push.isSupported || push.isRegistering || (push.permission === "granted" && push.token != null)}
+                aria-label="Notificaciones Push"
+              >
+                {push.isRegistering ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                ) : push.permission === "granted" && push.token ? (
+                  <Bell className="w-5 h-5 text-primary" />
+                ) : (
+                  <BellOff className="w-5 h-5 text-muted-foreground" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-[260px]">
+              {!push.isSupported ? (
+                <p className="text-xs text-muted-foreground">Notificaciones Push no disponibles en este navegador.</p>
+              ) : push.permission === "denied" ? (
+                <p className="text-xs">
+                  Notificaciones bloqueadas. Actívalas en Configuración del navegador → Privacidad y seguridad → Configuración de sitios → Notificaciones.
+                </p>
+              ) : push.permission === "granted" && push.token ? (
+                <p>Notificaciones Push activas</p>
+              ) : push.error ? (
+                <p className="text-xs text-destructive">{push.error}</p>
+              ) : (
+                <p>Notificaciones Push — clic para activar</p>
+              )}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </header>
 
-      <div className="px-4 py-2 border-b border-border flex flex-wrap gap-2 shrink-0">
-        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border">
+      <div className="px-4 py-2 border-b border-border flex flex-wrap gap-2 shrink-0 min-w-0 overflow-hidden">
+        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border shrink-0">
           <Calendar className="w-3 h-3 mr-1" />
           Agendar
         </Button>
-        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border">
+        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border shrink-0">
           <FileText className="w-3 h-3 mr-1" />
           Compartir contrato
         </Button>
@@ -91,7 +121,7 @@ export function ChatWindow({
           type="button"
           variant="outline"
           size="sm"
-          className="text-xs h-7 border-border"
+          className="text-xs h-7 border-border shrink-0"
           onClick={onShareLocation}
           disabled={isSending}
         >

@@ -282,6 +282,93 @@ export const api = {
         },
       },
     },
+    wallet: {
+      me: {
+        method: 'GET' as const,
+        path: '/api/wallet/me',
+        responses: {
+          200: z.object({
+            wallet: z.number(),
+            totalEarnings: z.number(),
+          }),
+        },
+      },
+      platformBalance: {
+        method: 'GET' as const,
+        path: '/api/wallet/platform-balance',
+        responses: {
+          200: z.object({ totalBalance: z.number() }),
+        },
+      },
+      rechargeRequest: {
+        method: 'POST' as const,
+        path: '/api/wallet/recharge-request',
+        input: z.object({
+          amount: z.number().positive(),
+          transferDate: z.string(),
+          transferTime: z.string().optional(),
+          transferCode: z.string().optional(),
+        }),
+        responses: {
+          201: z.object({
+            id: z.number(),
+            userId: z.string(),
+            amount: z.number(),
+            transferType: z.string(),
+            status: z.string(),
+            description: z.string().optional(),
+            referenceId: z.string().optional(),
+            createdAt: z.union([z.string(), z.date()]),
+          }),
+          400: errorSchemas.validation,
+        },
+      },
+      transfers: {
+        list: {
+          method: 'GET' as const,
+          path: '/api/wallet/transfers',
+          input: z.object({
+            limit: z.number().optional(),
+            transferType: z.enum(['service_payment', 'recharge']).optional(),
+          }).optional(),
+          responses: {
+            200: z.array(z.object({
+              id: z.number(),
+              userId: z.string(),
+              amount: z.number(),
+              transferType: z.enum(['service_payment', 'recharge']),
+              referenceId: z.string().optional(),
+              currency: z.string().optional(),
+              createdAt: z.union([z.string(), z.date()]),
+            })),
+          },
+        },
+        create: {
+          method: 'POST' as const,
+          path: '/api/wallet/transfers',
+          input: z.object({
+            userId: z.string(),
+            amount: z.number().positive(),
+            transferType: z.enum(['service_payment', 'recharge']),
+            referenceId: z.string().optional(),
+            currency: z.string().optional(),
+          }),
+          responses: {
+            201: z.object({
+              id: z.number(),
+              userId: z.string(),
+              amount: z.number(),
+              transferType: z.enum(['service_payment', 'recharge']),
+              referenceId: z.string().optional(),
+              currency: z.string().optional(),
+              createdAt: z.union([z.string(), z.date()]),
+            }),
+            400: errorSchemas.validation,
+            404: z.object({ message: z.string() }),
+          },
+        },
+      },
+    },
   }
 };
 

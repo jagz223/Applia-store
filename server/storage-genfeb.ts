@@ -79,6 +79,7 @@ export interface IStorage
   
   // Notificaciones
   getNotifications(userId: string, unreadOnly?: boolean): Promise<any[]>;
+  createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any>;
   markNotificationAsRead(notificationId: number): Promise<void>;
   
   // Integración ManGo
@@ -143,6 +144,37 @@ export interface IStorage
   }): Promise<any>;
   getPaymentVouchersByUser(userId: string): Promise<any[]>;
   updatePaymentVoucherStatus(id: number, status: string): Promise<any | null>;
+
+  // Wallet & transfers
+  createTransfer(transfer: {
+    userId: string;
+    fromUserId?: string | null;
+    amount: number;
+    transferType: "service_payment" | "recharge";
+    status?: "pending_approval" | "completed" | "rejected";
+    description?: string;
+    referenceId?: string;
+    currency?: string;
+  }): Promise<any>;
+  getTransfersByUser(
+    userId: string,
+    options?: {
+      page?: number;
+      limit?: number;
+      transferType?: "service_payment" | "recharge";
+      status?: "pending_approval" | "completed" | "rejected";
+      description?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      amountMin?: number;
+      amountMax?: number;
+    }
+  ): Promise<{ transfers: any[]; total: number }>;
+  /** Listar todas las transferencias de la plataforma (solo admin). */
+  getAllTransfers(): Promise<{ transfers: any[]; total: number }>;
+  /** Actualizar estado de una transferencia; si es recarga y pasa a completed, acredita el saldo al usuario. */
+  updateTransferStatus(transferId: string, status: "pending_approval" | "completed" | "rejected"): Promise<any>;
+  getTotalPlatformBalance(): Promise<number>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -195,6 +227,8 @@ export class InMemoryStorage implements IStorage {
     const newUser = {
       id: String(this.userIdCounter++),
       ...user,
+      wallet: user.wallet ?? 0,
+      totalEarnings: user.totalEarnings ?? 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -558,7 +592,23 @@ export class InMemoryStorage implements IStorage {
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }
-  
+
+  private notificationIdCounter = 1;
+
+  async createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any> {
+    const id = this.notificationIdCounter++;
+    const created = {
+      id,
+      userId: notification.userId,
+      type: notification.type,
+      data: notification.data,
+      read: false,
+      createdAt: new Date(),
+    };
+    this.notifications.push(created);
+    return created;
+  }
+
   async markNotificationAsRead(notificationId: number): Promise<void> {
     const notif = this.notifications.find(n => n.id === notificationId);
     if (notif) {
@@ -1022,6 +1072,121 @@ export class InMemoryStorage implements IStorage {
     if (!voucher) return null;
     voucher.status = status;
     return voucher;
+  }
+
+  // ==================== WALLET & TRANSFERS (in-memory stub) ====================
+
+  private walletTransfers: any[] = [];
+  private walletTransferIdCounter = 1;
+
+  async createTransfer(transfer: {
+    userId: string;
+    fromUserId?: string | null;
+    amount: number;
+    transferType: "service_payment" | "recharge";
+    status?: "pending_approval" | "completed" | "rejected";
+    description?: string;
+    referenceId?: string;
+    currency?: string;
+  }): Promise<any> {
+    const user = this.users.find((u: any) => u.id === transfer.userId);
+    if (!user) throw new Error("Usuario no encontrado");
+    const id = this.walletTransferIdCounter++;
+    const resolvedStatus = transfer.status ?? (transfer.transferType === "recharge" ? "pending_approval" : "completed");
+    const record = {
+      id,
+      userId: transfer.userId,
+      fromUserId: transfer.fromUserId ?? null,
+      amount: transfer.amount,
+      transferType: transfer.transferType,
+      status: resolvedStatus,
+      description: transfer.description,
+      referenceId: transfer.referenceId,
+      currency: transfer.currency ?? "USD",
+      createdAt: new Date(),
+    };
+    this.walletTransfers.push(record);
+    // Solo se acredita al beneficiario (userId). fromUserId (admin) nunca se descuenta.
+    const isServicePaymentCompleted = transfer.transferType === "service_payment" && resolvedStatus === "completed";
+    if (isServicePaymentCompleted) {
+      user.wallet = (typeof user.wallet === "number" ? user.wallet : 0) + transfer.amount;
+      user.totalEarnings = (typeof user.totalEarnings === "number" ? user.totalEarnings : 0) + transfer.amount;
+    }
+    user.updatedAt = new Date();
+    return record;
+  }
+
+  async getTransfersByUser(
+    userId: string,
+    options?: {
+      page?: number;
+      limit?: number;
+      transferType?: "service_payment" | "recharge";
+      status?: "pending_approval" | "completed" | "rejected";
+      description?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      amountMin?: number;
+      amountMax?: number;
+    }
+  ): Promise<{ transfers: any[]; total: number }> {
+    let list = this.walletTransfers.filter((t: any) => t.userId === userId);
+    if (options?.transferType) list = list.filter((t: any) => t.transferType === options.transferType);
+    if (options?.status) list = list.filter((t: any) => t.status === options.status);
+    if (options?.description?.trim()) {
+      const term = options.description.trim().toLowerCase();
+      list = list.filter((t: any) => (t.description ?? "").toLowerCase().includes(term));
+    }
+    if (options?.dateFrom) {
+      const from = new Date(options.dateFrom).getTime();
+      list = list.filter((t: any) => new Date(t.createdAt).getTime() >= from);
+    }
+    if (options?.dateTo) {
+      const to = new Date(options.dateTo);
+      to.setHours(23, 59, 59, 999);
+      list = list.filter((t: any) => new Date(t.createdAt).getTime() <= to.getTime());
+    }
+    if (options?.amountMin != null) list = list.filter((t: any) => t.amount >= options.amountMin);
+    if (options?.amountMax != null) list = list.filter((t: any) => t.amount <= options.amountMax);
+    list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const total = list.length;
+    const page = Math.max(1, options?.page ?? 1);
+    const limit = Math.min(100, Math.max(1, options?.limit ?? 10));
+    const start = (page - 1) * limit;
+    const transfers = list.slice(start, start + limit);
+    return { transfers, total };
+  }
+
+  async getAllTransfers(): Promise<{ transfers: any[]; total: number }> {
+    const list = [...this.walletTransfers].sort(
+      (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    return { transfers: list, total: list.length };
+  }
+
+  async updateTransferStatus(
+    transferId: string,
+    status: "pending_approval" | "completed" | "rejected"
+  ): Promise<any> {
+    const id = parseInt(transferId, 10);
+    if (Number.isNaN(id)) throw new Error("Transferencia no encontrada");
+    const transfer = this.walletTransfers.find((t: any) => t.id === id);
+    if (!transfer) throw new Error("Transferencia no encontrada");
+    const currentStatus = transfer.status;
+    const isRechargeCompleted =
+      transfer.transferType === "recharge" && status === "completed" && currentStatus !== "completed";
+    if (isRechargeCompleted) {
+      const user = this.users.find((u: any) => u.id === transfer.userId);
+      if (!user) throw new Error("Usuario no encontrado");
+      user.wallet = (typeof user.wallet === "number" ? user.wallet : 0) + transfer.amount;
+      user.updatedAt = new Date();
+    }
+    transfer.status = status;
+    return transfer;
+  }
+
+  async getTotalPlatformBalance(): Promise<number> {
+    return this.users.reduce((sum: number, u: any) => sum + (typeof u.wallet === "number" ? u.wallet : 0), 0);
   }
 
   // ==================== RESEÑAS (MOCK) ====================

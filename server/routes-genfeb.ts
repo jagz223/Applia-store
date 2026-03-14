@@ -3,6 +3,8 @@ import type { Server } from "http";
 import { storage as genFebStorage } from "./storage-genfeb";
 import { authenticateJWT } from "./routes-auth";
 import { z } from "zod";
+import { notificationService } from "./services/notification.service";
+import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
@@ -289,7 +291,329 @@ export async function registerGenFebRoutes(
       res.status(500).json({ message: "Internal server error" });
     }
   });
-  
+
+  // ---------- WALLET ----------
+
+  // GET /api/wallet/platform-balance - Balance total de la plataforma (solo admin)
+  app.get("/api/wallet/platform-balance", authenticateJWT, async (req: any, res) => {
+    try {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Se requiere rol de administrador" });
+      }
+      const total = await storage.getTotalPlatformBalance();
+      res.json({ totalBalance: total });
+    } catch (error) {
+      console.error("Error fetching platform balance:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/users/me/wallet - Wallet y ganancias totales del usuario autenticado
+  app.get("/api/users/me/wallet", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await storage.getUserById(userId);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+      const u = user as { wallet?: number; totalEarnings?: number };
+      res.json({
+        wallet: typeof u.wallet === "number" ? u.wallet : 0,
+        totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
+      });
+    } catch (error) {
+      console.error("Error fetching user wallet:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/wallet/me - Alias para wallet del usuario autenticado
+  app.get("/api/wallet/me", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await storage.getUserById(userId);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+      const u = user as { wallet?: number; totalEarnings?: number };
+      res.json({
+        wallet: typeof u.wallet === "number" ? u.wallet : 0,
+        totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
+      });
+    } catch (error) {
+      console.error("Error fetching user wallet:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/wallet/transfers - Listar transferencias del usuario (paginado y filtros)
+  app.get("/api/wallet/transfers", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const page = Math.max(1, parseInt(String(req.query.page || 1), 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || 10), 10) || 10));
+      const transferType = req.query.transferType as "service_payment" | "recharge" | undefined;
+      const status = req.query.status as "pending_approval" | "completed" | "rejected" | undefined;
+      const description = req.query.description as string | undefined;
+      const dateFrom = req.query.dateFrom as string | undefined;
+      const dateTo = req.query.dateTo as string | undefined;
+      const amountMin = req.query.amountMin != null ? Number(req.query.amountMin) : undefined;
+      const amountMax = req.query.amountMax != null ? Number(req.query.amountMax) : undefined;
+      const result = await storage.getTransfersByUser(userId, {
+        page,
+        limit,
+        transferType,
+        status,
+        description: description?.trim() || undefined,
+        dateFrom: dateFrom?.trim() || undefined,
+        dateTo: dateTo?.trim() || undefined,
+        amountMin: Number.isFinite(amountMin) ? amountMin : undefined,
+        amountMax: Number.isFinite(amountMax) ? amountMax : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching wallet transfers:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/professional/stats - Estadísticas del profesional (servicios completados/rechazados, ganancias)
+  app.get("/api/professional/stats", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      if (req.user?.role !== "professional") return res.status(403).json({ message: "Se requiere rol de profesional" });
+      const { transfers } = await storage.getTransfersByUser(userId, {
+        transferType: "service_payment",
+        page: 1,
+        limit: 10000,
+      });
+      const completed = transfers.filter((t: { status?: string }) => t.status === "completed");
+      const rejected = transfers.filter((t: { status?: string }) => t.status === "rejected");
+      const completedCount = completed.length;
+      const rejectedCount = rejected.length;
+      const totalEarnings = completed.reduce(
+        (sum: number, t: { amount?: number }) => sum + (typeof t.amount === "number" ? t.amount : 0),
+        0
+      );
+      res.json({ completedCount, rejectedCount, totalEarnings });
+    } catch (error) {
+      console.error("Error fetching professional stats:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/wallet/recharge-request - Usuario autenticado solicita recarga (crea transferencia en aprobación)
+  const rechargeRequestSchema = z.object({
+    amount: z.number().positive("amount debe ser positivo"),
+    transferDate: z.string().min(1, "transferDate es requerido"),
+    transferTime: z.string().optional(),
+    transferCode: z.string().optional(),
+  });
+  app.post("/api/wallet/recharge-request", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const parsed = rechargeRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+      const user = await storage.getUserById(userId);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+      const name = [user.name, (user as { lastName?: string }).lastName].filter(Boolean).join(" ").trim() || "Usuario";
+      const description = `Recarga al usuario ${name}`;
+      const { users: adminUsers } = await storage.getUsers({ role: "admin", page: 1, limit: 1, name: "", email: "", lastName: "" });
+      const fromUserId = adminUsers?.length ? (adminUsers[0] as { id?: string }).id ?? null : null;
+      const transfer = await storage.createTransfer({
+        userId,
+        fromUserId,
+        amount: parsed.data.amount,
+        transferType: "recharge",
+        status: "pending_approval",
+        description,
+        referenceId: parsed.data.transferCode,
+        currency: "USD",
+      });
+
+      // Notificación interna (Socket.io) a admins para alerta en tiempo real
+      const io = getIO();
+      if (io) {
+        const adminNotification = {
+          type: "recharge_pending",
+          data: {
+            message: "Nueva solicitud de recarga",
+            transferId: (transfer as { id?: number }).id,
+            userId,
+            amount: parsed.data.amount,
+            userName: name,
+          },
+          timestamp: new Date(),
+        };
+        sendNotificationToAdmins(io, adminNotification);
+        console.log("[recharge] Notificación interna emitida a admins, transferId:", (transfer as { id?: number }).id);
+      } else {
+        console.warn("[recharge] getIO() es null: no se pudo enviar notificación en tiempo real a admins");
+      }
+
+      // Notificar a todos los admins: nueva recarga pendiente de aprobación (FCM)
+      const { users: allAdmins } = await storage.getUsers({
+        role: "admin",
+        page: 1,
+        limit: 100,
+        name: "",
+        email: "",
+        lastName: "",
+      });
+      const amountStr = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(parsed.data.amount);
+      const tid = (transfer as { id?: number }).id;
+      const adminPushUrl = tid != null ? `/admin?tab=recargas&highlight=${tid}` : "/admin?tab=recargas";
+      void Promise.all(
+        (allAdmins ?? []).map((admin: { id?: string }) =>
+          notificationService.sendPushToUser(admin.id!, {
+            title: "Nueva solicitud de recarga",
+            body: `${name} ha solicitado una recarga de ${amountStr}. Revisa el panel de administración.`,
+            data: {
+              type: "recharge_pending",
+              url: adminPushUrl,
+              transferId: String(tid ?? ""),
+            },
+          })
+        )
+      ).catch((err) => console.error("[push] Error notificando a admins por recarga:", err));
+
+      res.status(201).json(transfer);
+    } catch (error: any) {
+      if (error?.message === "Usuario no encontrado") {
+        return res.status(404).json({ message: error.message });
+      }
+      console.error("Error creating recharge request:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/wallet/transfers - Crear transferencia (solo admin)
+  const createTransferSchema = z.object({
+    userId: z.string().min(1, "userId es requerido"),
+    fromUserId: z.string().nullable().optional(),
+    amount: z.number().positive("amount debe ser positivo"),
+    transferType: z.enum(["service_payment", "recharge"]),
+    status: z.enum(["pending_approval", "completed", "rejected"]).optional(),
+    description: z.string().optional(),
+    referenceId: z.string().optional(),
+    currency: z.string().optional(),
+  });
+  app.post("/api/wallet/transfers", authenticateJWT, async (req: any, res) => {
+    try {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Se requiere rol de administrador" });
+      }
+      const parsed = createTransferSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+      const transfer = await storage.createTransfer(parsed.data);
+      res.status(201).json(transfer);
+    } catch (error: any) {
+      if (error?.message === "Usuario no encontrado") {
+        return res.status(404).json({ message: error.message });
+      }
+      console.error("Error creating transfer:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/wallet/transfers - Listar todas las transferencias (solo admin)
+  app.get("/api/admin/wallet/transfers", authenticateJWT, async (req: any, res) => {
+    try {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Se requiere rol de administrador" });
+      }
+      const result = await storage.getAllTransfers();
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching all wallet transfers:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/admin/wallet/transfers/:id - Actualizar estado de una transferencia (solo admin)
+  const updateTransferStatusSchema = z.object({
+    status: z.enum(["pending_approval", "completed", "rejected"], {
+      errorMap: () => ({ message: "status debe ser pending_approval, completed o rejected" }),
+    }),
+  });
+  app.patch("/api/admin/wallet/transfers/:id", authenticateJWT, async (req: any, res) => {
+    try {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ message: "Se requiere rol de administrador" });
+      }
+      const transferId = req.params.id as string;
+      if (!transferId?.trim()) {
+        return res.status(400).json({ message: "ID de transferencia es requerido" });
+      }
+      const parsed = updateTransferStatusSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+      const transfer = await storage.updateTransferStatus(transferId, parsed.data.status);
+      const newStatus = parsed.data.status;
+
+      // Notificar al usuario cuando su recarga pasa a aprobada o rechazada (interna Socket.io + FCM push)
+      if (newStatus === "completed" || newStatus === "rejected") {
+        const uid = (transfer as { userId?: string; amount?: number }).userId;
+        const amount = (transfer as { amount?: number }).amount;
+        const amountFormatted =
+          typeof amount === "number"
+            ? new Intl.NumberFormat("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
+            : "0.00";
+        if (uid) {
+          const notifType = newStatus === "completed" ? "recharge_completed" : "recharge_rejected";
+          const payload = {
+            type: notifType,
+            data: { amount, amountFormatted },
+            timestamp: new Date(),
+          };
+
+          // Notificación interna (Socket.io): si tiene la app abierta ve la alerta al instante
+          const io = getIO();
+          if (io) {
+            sendNotificationToUser(io, uid, payload);
+            console.log("[recharge] Notificación interna emitida al usuario", uid, "estado:", newStatus);
+          }
+
+          // Push FCM para cuando no tiene la app abierta
+          if (newStatus === "completed") {
+            void notificationService
+              .sendPushToUser(uid, {
+                title: "¡Recarga Aprobada!",
+                body: `Se han acreditado $${amountFormatted} USD a tu saldo. Ya puedes usar tu dinero en la plataforma.`,
+                data: { type: "recharge_completed", url: "/movimientos" },
+              })
+              .catch((err) => console.error("[push] Error notificando recarga aprobada:", err));
+          } else {
+            void notificationService
+              .sendPushToUser(uid, {
+                title: "Solicitud de Recarga Rechazada",
+                body: `Tu solicitud por $${amountFormatted} USD no pudo ser procesada. Por favor, verifica los datos del comprobante o contacta a soporte.`,
+                data: { type: "recharge_rejected", url: "/movimientos" },
+              })
+              .catch((err) => console.error("[push] Error notificando recarga rechazada:", err));
+          }
+        }
+      }
+
+      res.json(transfer);
+    } catch (error: any) {
+      if (error?.message === "Transferencia no encontrada") {
+        return res.status(404).json({ message: error.message });
+      }
+      if (error?.message === "Usuario no encontrado") {
+        return res.status(404).json({ message: error.message });
+      }
+      console.error("Error updating transfer status:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ---------- DOCUMENTOS (BÓVEDA) ----------
   
   // GET /api/documents - Listar documentos del usuario
@@ -368,7 +692,7 @@ export async function registerGenFebRoutes(
       const enriched = await Promise.all(
         raw.map(async (c: any) => {
           const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
-          const otherUser = await storage.getUserById(otherId);
+          const otherUser = await storage.getUserById(otherId) as { id: string; name?: string; lastName?: string } | undefined;
           let lastMessageText: string | null = null;
           let unreadCount = 0;
           const convId = Number(c.id);
@@ -384,9 +708,10 @@ export async function registerGenFebRoutes(
               console.error("Error enriching conversation", c.id, err);
             }
           }
+          const name = otherUser ? [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" : "Usuario";
           return {
             ...c,
-            otherParticipant: otherUser ? { id: otherUser.id, name: [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" } : { id: otherId, name: "Usuario" },
+            otherParticipant: { id: String(otherUser?.id ?? otherId), name },
             lastMessageText,
             unreadCount,
           };
@@ -469,12 +794,58 @@ export async function registerGenFebRoutes(
         senderId: userId,
         status: "sent",
       });
+      const recipientId =
+        conv.participant1Id === userId ? conv.participant2Id : conv.participant1Id;
+      const recipientIdStr = String(recipientId);
+
+      await storage.createNotification({
+        userId: recipientIdStr,
+        type: "message",
+        data: {
+          conversationId: message.conversationId,
+          preview: message.content.slice(0, 120),
+          messageId: message.id,
+        },
+      });
+
+      const io = getIO();
+      if (io) {
+        io.to(`user:${recipientIdStr}`).emit("notification:message", {
+          conversationId: message.conversationId,
+          preview: message.content.slice(0, 120),
+          messageId: message.id,
+        });
+      }
+
+      void notificationService.sendNewMessageNotification({
+        recipientId,
+        conversationId: message.conversationId,
+        preview: message.content.slice(0, 120),
+      });
       res.status(201).json(message);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation error", errors: error.errors });
       }
       console.error("Error sending message:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ---------- NOTIFICACIONES ----------
+
+  // POST /api/notifications/register-token - Registrar token FCM del usuario autenticado
+  app.post("/api/notifications/register-token", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const token = (req.body?.token as string | undefined)?.trim();
+      if (!token) return res.status(400).json({ message: "token es requerido" });
+      console.log("[push] Usuario aceptó notificaciones push — userId:", String(userId));
+      await notificationService.registerDeviceToken(userId, token);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error registering push token:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -569,17 +940,13 @@ export async function registerGenFebRoutes(
   
   // ---------- NOTIFICACIONES ----------
   
-  // GET /api/notifications - Listar notificaciones
-  app.get("/api/notifications", async (req, res) => {
+  // GET /api/notifications - Listar notificaciones (usuario autenticado por JWT)
+  app.get("/api/notifications", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.headers["x-user-id"] as string;
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const unreadOnly = req.query.unread === "true";
-      
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-      
-      const notifications = await storage.getNotifications(userId, unreadOnly);
+      const notifications = await storage.getNotifications(String(userId), unreadOnly);
       res.json(notifications);
     } catch (error) {
       console.error("Error fetching notifications:", error);
@@ -588,7 +955,7 @@ export async function registerGenFebRoutes(
   });
   
   // PATCH /api/notifications/:id/read - Marcar notificación como leída
-  app.patch("/api/notifications/:id/read", async (req, res) => {
+  app.patch("/api/notifications/:id/read", authenticateJWT, async (req: any, res) => {
     try {
       await storage.markNotificationAsRead(Number(req.params.id));
       res.json({ success: true });

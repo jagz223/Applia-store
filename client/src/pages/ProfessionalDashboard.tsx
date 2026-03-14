@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { 
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText,
-  BarChart3, PieChart, Activity, Loader2, MessageSquare
+  BarChart3, PieChart, Activity, Loader2, MessageSquare,
+  CheckCircle2, XCircle, Banknote
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,8 +14,8 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
-import { useBookingsByProvider, useUpdateBookingStatus } from "@/hooks/use-mango-data";
-import { Link } from "wouter";
+import { useBookingsByProvider, useUpdateBookingStatus, useProfessionalStats } from "@/hooks/use-mango-data";
+import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
@@ -71,9 +72,114 @@ const STATUS_OPTIONS = [
   { value: "cancelled", label: "Cancelada" },
 ];
 
+function ResumenActividad() {
+  const { data: stats, isLoading } = useProfessionalStats();
+  const total = (stats?.completedCount ?? 0) + (stats?.rejectedCount ?? 0);
+  const completedPct = total > 0 ? Math.round(((stats?.completedCount ?? 0) / total) * 100) : 0;
+  const rejectedPct = total > 0 ? Math.round(((stats?.rejectedCount ?? 0) / total) * 100) : 0;
+
+  if (isLoading) {
+    return (
+      <Card className="mb-6 border-border bg-card">
+        <CardHeader>
+          <CardTitle>Resumen de Actividad</CardTitle>
+          <CardDescription>Estadísticas de servicios completados, rechazados y ganancias</CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="mb-6 border-border bg-card">
+      <CardHeader>
+        <CardTitle>Resumen de Actividad</CardTitle>
+        <CardDescription>Estadísticas de servicios completados, rechazados y ganancias</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {/* Ganancias Totales - resaltada */}
+          <Card className="border-2 border-green-500/30 bg-green-500/5 dark:bg-green-500/10">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-foreground">Ganancias Totales</CardTitle>
+              <Banknote className="h-5 w-5 text-green-600 dark:text-green-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-700 dark:text-green-400">
+                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(stats?.totalEarnings ?? 0)}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Suma de todos los servicios completados</p>
+            </CardContent>
+          </Card>
+
+          {/* Servicios Completados */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Servicios Completados</CardTitle>
+              <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.completedCount ?? 0}</div>
+              <p className="text-xs text-muted-foreground mt-1">Servicios con estado completado</p>
+            </CardContent>
+          </Card>
+
+          {/* Servicios Rechazados */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Servicios Rechazados</CardTitle>
+              <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.rejectedCount ?? 0}</div>
+              <p className="text-xs text-muted-foreground mt-1">Servicios con estado rechazado</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Gráfico circular: completados vs rechazados */}
+        {(total > 0) && (
+          <div className="flex flex-col sm:flex-row items-center gap-6 pt-4 border-t border-border">
+            <div className="flex-shrink-0">
+              <div className="relative w-32 h-32 mx-auto">
+                <div
+                  className="w-32 h-32 rounded-full"
+                  style={{
+                    background: `conic-gradient(
+                      hsl(var(--chart-1)) 0deg ${completedPct * 3.6}deg,
+                      hsl(var(--destructive)) ${completedPct * 3.6}deg 360deg
+                    )`,
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-full bg-card border-2 border-border" />
+                </div>
+              </div>
+              <div className="text-center text-sm text-muted-foreground mt-2">Completados vs Rechazados</div>
+            </div>
+            <div className="flex-1 w-full sm:w-auto space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-[hsl(var(--chart-1))]" />
+                <span className="text-sm">Completados: {stats?.completedCount ?? 0} ({completedPct}%)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-destructive" />
+                <span className="text-sm">Rechazados: {stats?.rejectedCount ?? 0} ({rejectedPct}%)</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ProviderBookingsTab() {
   const { data: bookings, isLoading } = useBookingsByProvider();
   const updateStatus = useUpdateBookingStatus();
+  const { notifyBookingUpdate } = useSocketBookings();
 
   if (isLoading) {
     return (
@@ -150,7 +256,19 @@ function ProviderBookingsTab() {
                   </Badge>
                   <Select
                     value={booking.status}
-                    onValueChange={(value) => updateStatus.mutate({ id: booking.id, status: value })}
+                    onValueChange={(value) =>
+                      updateStatus.mutate(
+                        { id: booking.id, status: value },
+                        {
+                          onSuccess: (updated) => {
+                            const clientUserId = (booking as { userId?: string }).userId;
+                            if (clientUserId && notifyBookingUpdate) {
+                              notifyBookingUpdate(clientUserId, updated ?? { ...booking, status: value });
+                            }
+                          },
+                        }
+                      )
+                    }
                     disabled={updateStatus.isPending}
                   >
                     <SelectTrigger className="w-[160px]">
@@ -172,10 +290,20 @@ function ProviderBookingsTab() {
   );
 }
 
+const DASHBOARD_TABS = ["overview", "bookings", "transactions", "analytics", "invoices"] as const;
+
 export default function ProfessionalDashboard() {
   const { user } = useAuth();
   const { notifyBookingUpdate } = useSocketBookings();
+  const [location, setLocation] = useLocation();
   const [timeRange, setTimeRange] = useState("month");
+
+  const currentTab = (() => {
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    const tab = new URLSearchParams(search).get("tab");
+    return tab && DASHBOARD_TABS.includes(tab as (typeof DASHBOARD_TABS)[number]) ? tab : "overview";
+  })();
+  const setTab = (value: string) => setLocation(`/professional-dashboard?tab=${value}`);
 
   // Calculate percentage changes
   const earningsChange = ((mockEarnings.thisMonth - mockEarnings.lastMonth) / mockEarnings.lastMonth) * 100;
@@ -187,31 +315,34 @@ export default function ProfessionalDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-6 py-4">
-        <div className="container mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <div className="bg-white border-b px-4 sm:px-6 py-4">
+        <div className="container mx-auto max-w-full flex flex-col sm:flex-row items-center justify-center sm:justify-between gap-4 text-center sm:text-left">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <div className="p-2 bg-mango-orange/10 rounded-lg">
               <BarChart3 className="h-6 w-6 text-mango-orange" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Panel Económico</h1>
-              <p className="text-gray-500">Gestiona tus ingresos y estadísticas</p>
+              <h1 className="text-xl sm:text-2xl font-bold">Panel Económico</h1>
+              <p className="text-gray-500 text-sm sm:text-base">Gestiona tus ingresos y estadísticas</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline">
-              <FileText className="h-4 w-4 mr-2" />
-              Generar Reporte
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full sm:w-auto">
+            <Button variant="outline" size="sm" className="flex-1 sm:flex-initial min-w-0">
+              <FileText className="h-4 w-4 mr-2 shrink-0" />
+              <span className="truncate">Generar Reporte</span>
             </Button>
-            <Button>
-              <CreditCard className="h-4 w-4 mr-2" />
-              Retirar Fondos
+            <Button size="sm" className="flex-1 sm:flex-initial min-w-0">
+              <CreditCard className="h-4 w-4 mr-2 shrink-0" />
+              <span className="truncate">Retirar Fondos</span>
             </Button>
           </div>
         </div>
       </div>
 
-      <div className="container mx-auto py-6 px-4">
+      <div className="container mx-auto max-w-full py-6 px-4 overflow-x-hidden">
+        {/* Resumen de Actividad (estadísticas de rendimiento) */}
+        <ResumenActividad />
+
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card>
@@ -267,13 +398,13 @@ export default function ProfessionalDashboard() {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="overview">Resumen</TabsTrigger>
-            <TabsTrigger value="bookings">Reservas</TabsTrigger>
-            <TabsTrigger value="transactions">Transacciones</TabsTrigger>
-            <TabsTrigger value="analytics">Análisis</TabsTrigger>
-            <TabsTrigger value="invoices">Facturas</TabsTrigger>
+        <Tabs value={currentTab} onValueChange={setTab} className="space-y-4">
+          <TabsList className="w-full flex flex-nowrap justify-start sm:justify-center overflow-x-auto h-auto min-h-10 gap-1 p-2 sm:p-1 sm:flex-wrap sm:h-10 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
+            <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
+            <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>
+            <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Transacciones</TabsTrigger>
+            <TabsTrigger value="analytics" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Análisis</TabsTrigger>
+            <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Facturas</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview">

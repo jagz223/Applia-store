@@ -76,6 +76,6 @@ export interface IBookingStorage {
   getBookingsByUser(userId: string, status?: string): Promise<(Booking & { service: ServiceWithProvider })[]>;
   getBookingsByProvider(providerId: number): Promise<(Booking & { service: ServiceWithProvider; user: unknown })[]>;
   getBooking(id: number): Promise<Booking | undefined>;
-  createBooking(booking: InsertBooking & { status: string }): Promise<Booking>;
+  createBooking(booking: InsertBooking & { status: string; providerId?: number }): Promise<Booking>;
   updateBookingStatus(id: number, status: string): Promise<Booking | undefined>;
 }

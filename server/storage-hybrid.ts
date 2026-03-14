@@ -67,6 +67,7 @@ export class HybridStorage implements IStorage {
   getFinancialReports(userId: string, period?: string) { return this.memory.getFinancialReports(userId, period); }
   getKPIs(userId: string) { return this.memory.getKPIs(userId); }
   getNotifications(userId: string, unreadOnly?: boolean) { return this.memory.getNotifications(userId, unreadOnly); }
+  createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }) { return this.memory.createNotification(notification); }
   markNotificationAsRead(notificationId: number) { return this.memory.markNotificationAsRead(notificationId); }
   syncWithMango(userId: string, mangoUserId: string) { return this.memory.syncWithMango(userId, mangoUserId); }
   getMangoSyncStatus(userId: string) { return this.memory.getMangoSyncStatus(userId); }

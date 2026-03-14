@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { 
   Users, DollarSign, FileText, Star, Settings, 
   BarChart3, Shield, Bell, Database, Layers,
   CheckCircle, XCircle, Clock, TrendingUp, UserPlus,
-  Search, ChevronLeft, ChevronRight, Loader2
+  Search, ChevronLeft, ChevronRight, Loader2, Wallet
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
+import { useAdminWalletTransfers, useUpdateTransferStatus } from "@/hooks/use-mango-data";
+import { usePushNotifications } from "@/hooks/use-push-notifications";
+import { useToast } from "@/hooks/use-toast";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+import { toDate, isValidDate } from "@/lib/date-utils";
 
 const USERS_PAGE_SIZE = 10;
 
@@ -49,11 +63,66 @@ const mockProviders = [
   { id: 3, name: "Laura Rodríguez", service: "Limpieza", rating: 4.9, bookings: 234, verified: false },
 ];
 
+type TransferStatusFilter = "" | "pending_approval" | "completed" | "rejected";
+
 export default function AdminPanel() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState("overview");
+  const { toast } = useToast();
+  const [location] = useLocation();
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("tab") === "recargas") return "recargas";
+    }
+    return "overview";
+  });
   const [userPage, setUserPage] = useState(1);
+
+  // Abrir pestaña Recargas y leer highlight desde la URL o desde evento (clic en notificación)
+  const [highlightedTransferId, setHighlightedTransferId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    const q = new URLSearchParams(search);
+    if (q.get("tab") === "recargas") setActiveTab("recargas");
+    const highlight = q.get("highlight");
+    if (highlight) {
+      const id = parseInt(highlight, 10);
+      if (!Number.isNaN(id)) {
+        setHighlightedTransferId(id);
+        q.delete("highlight");
+        const newSearch = q.toString();
+        const newPath = newSearch ? `/admin?${newSearch}` : "/admin";
+        window.history.replaceState(null, "", newPath);
+        const t = setTimeout(() => setHighlightedTransferId(null), 2800);
+        return () => clearTimeout(t);
+      }
+    }
+  }, [location]);
+
+  // Escuchar evento al hacer clic en notificación de recarga (incluso si ya estamos en /admin)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ transferId?: number | null }>).detail;
+      setActiveTab("recargas");
+      if (detail?.transferId != null && !Number.isNaN(detail.transferId)) {
+        setHighlightedTransferId(detail.transferId);
+        setTimeout(() => setHighlightedTransferId(null), 2800);
+      }
+    };
+    window.addEventListener("admin-open-recargas", handler);
+    return () => window.removeEventListener("admin-open-recargas", handler);
+  }, []);
   const [userFilters, setUserFilters] = useState({ role: "", name: "", email: "", lastName: "" });
+  const [transferStatusFilter, setTransferStatusFilter] = useState<TransferStatusFilter>("");
+  const [transferToReview, setTransferToReview] = useState<{
+    id: number;
+    referenceId?: string;
+    description?: string;
+    amount: number;
+    status?: string;
+  } | null>(null);
+  const [pendingRechargeAction, setPendingRechargeAction] = useState<"approve" | "reject" | null>(null);
 
   const { data: rolesData } = useQuery({
     queryKey: ["roles"],
@@ -79,6 +148,48 @@ export default function AdminPanel() {
   const usersList = usersData?.users ?? [];
   const usersTotal = usersData?.total ?? 0;
   const usersTotalPages = Math.max(1, Math.ceil(usersTotal / USERS_PAGE_SIZE));
+
+  const { data: adminTransfersData, isLoading: adminTransfersLoading } = useAdminWalletTransfers({
+    enabled: user?.role === "admin" && activeTab === "recargas",
+  });
+  const allTransfers = adminTransfersData?.transfers ?? [];
+  const filteredTransfers =
+    transferStatusFilter === ""
+      ? allTransfers
+      : allTransfers.filter((t: { status?: string }) => t.status === transferStatusFilter);
+
+  const updateTransferStatus = useUpdateTransferStatus();
+  const push = usePushNotifications();
+
+  const handleConfirmRechargeAction = (approve: boolean) => {
+    if (!transferToReview) return;
+    const status = approve ? "completed" : "rejected";
+    updateTransferStatus.mutate(
+      { transferId: String(transferToReview.id), status },
+      {
+        onSuccess: () => {
+          setTransferToReview(null);
+          setPendingRechargeAction(null);
+          toast({
+            title: approve ? "Recarga aprobada" : "Recarga rechazada",
+            description: approve ? "El saldo del usuario ha sido actualizado." : "La solicitud fue rechazada.",
+          });
+        },
+        onError: (err: Error) => {
+          toast({
+            title: "Error",
+            description: err.message || "No se pudo actualizar el estado.",
+            variant: "destructive",
+          });
+        },
+      }
+    );
+  };
+
+  const closeRechargeModal = () => {
+    setTransferToReview(null);
+    setPendingRechargeAction(null);
+  };
 
   // Check if user is admin
   if (user?.role !== "admin") {
@@ -175,6 +286,7 @@ export default function AdminPanel() {
             <TabsTrigger value="users">Usuarios</TabsTrigger>
             <TabsTrigger value="providers">Proveedores</TabsTrigger>
             <TabsTrigger value="bookings">Reservas</TabsTrigger>
+            <TabsTrigger value="recargas">Recargas</TabsTrigger>
             <TabsTrigger value="roles">Roles</TabsTrigger>
             <TabsTrigger value="settings">Configuración</TabsTrigger>
           </TabsList>
@@ -315,7 +427,9 @@ export default function AdminPanel() {
                               {u.role ?? "—"}
                             </Badge>
                             <p className="text-sm text-gray-500">
-                              {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
+                              {u.createdAt && isValidDate(u.createdAt)
+                                ? toDate(u.createdAt).toLocaleDateString()
+                                : "—"}
                             </p>
                             <Button size="sm" variant="outline" asChild>
                               <Link href={`/admin/users/${u.id}/edit`}>Editar</Link>
@@ -415,6 +529,226 @@ export default function AdminPanel() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="recargas">
+            {push.isSupported && push.permission === "default" && (
+              <Card className="mb-4 border-amber-500/50 bg-amber-500/5">
+                <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-6">
+                  <p className="text-sm text-muted-foreground">
+                    Para recibir avisos de nuevas solicitudes de recarga en este dispositivo, activa las notificaciones del navegador.
+                  </p>
+                  <Button
+                    size="sm"
+                    onClick={() => push.register()}
+                    disabled={push.isRegistering}
+                  >
+                    {push.isRegistering ? "Activando…" : "Activar notificaciones"}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+            {push.isSupported && push.permission === "denied" && (
+              <Card className="mb-4 border-muted">
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">
+                    Las notificaciones están bloqueadas. Para recibir avisos de recargas, permite las notificaciones en la configuración del navegador (candado o icono de sitio → Permisos).
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Wallet className="h-5 w-5" />
+                  Transferencias y recargas
+                </CardTitle>
+                <CardDescription>
+                  Listado de todas las transferencias. Aprobar o rechazar solicitudes de recarga en espera.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant={transferStatusFilter === "" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setTransferStatusFilter("")}
+                  >
+                    Todas
+                  </Button>
+                  <Button
+                    variant={transferStatusFilter === "pending_approval" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setTransferStatusFilter("pending_approval")}
+                  >
+                    En espera
+                  </Button>
+                  <Button
+                    variant={transferStatusFilter === "completed" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setTransferStatusFilter("completed")}
+                  >
+                    Aprobadas
+                  </Button>
+                  <Button
+                    variant={transferStatusFilter === "rejected" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setTransferStatusFilter("rejected")}
+                  >
+                    Rechazadas
+                  </Button>
+                </div>
+                {adminTransfersLoading ? (
+                  <div className="flex justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : filteredTransfers.length === 0 ? (
+                  <p className="text-center py-8 text-muted-foreground">
+                    No hay transferencias con el filtro seleccionado.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/50">
+                          <th className="text-left font-medium p-3">Nº Transferencia</th>
+                          <th className="text-left font-medium p-3">Descripción</th>
+                          <th className="text-left font-medium p-3">Fecha</th>
+                          <th className="text-right font-medium p-3">Monto</th>
+                          <th className="text-left font-medium p-3">Estado</th>
+                          <th className="text-left font-medium p-3">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredTransfers.map((t: {
+                          id: number;
+                          referenceId?: string;
+                          description?: string;
+                          createdAt: string | Date;
+                          amount: number;
+                          status?: string;
+                        }) => (
+                          <tr
+                            key={t.id}
+                            className={`border-b border-border/60 hover:bg-muted/30 ${highlightedTransferId === t.id ? "recharge-highlight-row" : ""}`}
+                          >
+                            <td className="p-3 text-foreground font-mono">
+                              {t.referenceId || "—"}
+                            </td>
+                            <td className="p-3 text-muted-foreground max-w-[220px] truncate" title={t.description}>
+                              {t.description || "—"}
+                            </td>
+                            <td className="p-3 text-muted-foreground">
+                              {t.createdAt && isValidDate(t.createdAt)
+                                ? format(toDate(t.createdAt), "dd MMM yyyy, HH:mm", { locale: es })
+                                : "—"}
+                            </td>
+                            <td className="p-3 text-right font-medium tabular-nums">
+                              {new Intl.NumberFormat("es-EC", {
+                                style: "currency",
+                                currency: "USD",
+                                minimumFractionDigits: 2,
+                              }).format(t.amount ?? 0)}
+                            </td>
+                            <td className="p-3">
+                              <span
+                                className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${
+                                  t.status === "completed"
+                                    ? "bg-green-500/15 text-green-700 dark:text-green-400"
+                                    : t.status === "rejected"
+                                      ? "bg-red-500/15 text-red-700 dark:text-red-400"
+                                      : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                                }`}
+                              >
+                                {t.status === "pending_approval"
+                                  ? "En espera"
+                                  : t.status === "completed"
+                                    ? "Aprobada"
+                                    : t.status === "rejected"
+                                      ? "Rechazada"
+                                      : t.status ?? "—"}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              {t.status === "pending_approval" && (
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="default"
+                                    className="text-green-700 hover:text-green-800 bg-green-500/15 hover:bg-green-500/25 border-green-500/30"
+                                    onClick={() => {
+                                      setTransferToReview({ id: t.id, referenceId: t.referenceId, description: t.description, amount: t.amount, status: t.status });
+                                      setPendingRechargeAction("approve");
+                                    }}
+                                  >
+                                    Aprobar
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-red-600 hover:text-red-700 border-red-500/50 hover:bg-red-500/10"
+                                    onClick={() => {
+                                      setTransferToReview({ id: t.id, referenceId: t.referenceId, description: t.description, amount: t.amount, status: t.status });
+                                      setPendingRechargeAction("reject");
+                                    }}
+                                  >
+                                    Rechazar
+                                  </Button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Dialog open={transferToReview != null} onOpenChange={(open) => !open && closeRechargeModal()}>
+              <DialogContent className="sm:max-w-md border-border bg-card">
+                <DialogHeader>
+                  <DialogTitle>
+                    {pendingRechargeAction === "approve"
+                      ? "¿Está seguro de aprobar esta recarga?"
+                      : pendingRechargeAction === "reject"
+                        ? "¿Está seguro de rechazar esta recarga?"
+                        : "Confirmar"}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {transferToReview && (
+                      <>
+                        Transferencia #{transferToReview.referenceId || transferToReview.id} ·{" "}
+                        {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(transferToReview.amount)}
+                      </>
+                    )}
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button
+                    variant="outline"
+                    onClick={closeRechargeModal}
+                    disabled={updateTransferStatus.isPending}
+                  >
+                    No
+                  </Button>
+                  <Button
+                    onClick={() => pendingRechargeAction != null && handleConfirmRechargeAction(pendingRechargeAction === "approve")}
+                    disabled={updateTransferStatus.isPending || pendingRechargeAction == null}
+                  >
+                    {updateTransferStatus.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Procesando…
+                      </>
+                    ) : (
+                      "Sí"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           <TabsContent value="roles">

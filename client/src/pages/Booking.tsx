@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useCategories, useServices, useProviderCategoryAvailability, useCreateBooking } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
+import { useSocketBookings } from "@/hooks/use-socket";
 import { useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
@@ -44,6 +45,7 @@ export default function Booking() {
   const { toast } = useToast();
   const { user } = useAuth();
   const createBooking = useCreateBooking();
+  const { notifyNewBooking } = useSocketBookings();
 
   const { data: categories } = useCategories();
   const { data: categoryAvailability } = useProviderCategoryAvailability();
@@ -185,7 +187,13 @@ export default function Booking() {
         notes: notes.trim() || undefined,
       },
       {
-        onSuccess: () => setStep(4),
+        onSuccess: (data) => {
+          const providerId = (data as { providerId?: number })?.providerId;
+          if (providerId != null && notifyNewBooking) {
+            notifyNewBooking(String(providerId), data);
+          }
+          setStep(4);
+        },
       }
     );
   };
@@ -570,9 +578,10 @@ export default function Booking() {
                           </div>
                         </div>
 
-                        <div className="flex gap-3">
+                        <div className="flex flex-col-reverse sm:flex-row gap-3">
                           <Button
                             variant="outline"
+                            className="w-full sm:w-auto"
                             onClick={() => setStep(2)}
                             disabled={createBooking.isPending}
                           >
@@ -580,11 +589,21 @@ export default function Booking() {
                             Atrás
                           </Button>
                           <Button
-                            className="flex-1 bg-accent hover:bg-accent/90"
+                            className="w-full sm:flex-1 min-h-12 py-4 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-base shadow-md active:scale-[0.98] transition-transform"
                             onClick={handleBooking}
                             disabled={createBooking.isPending}
                           >
-                            {createBooking.isPending ? "Confirmando…" : "Confirmar Reserva"}
+                            {createBooking.isPending ? (
+                              <>
+                                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                Confirmando…
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle className="mr-2 h-5 w-5" />
+                                Confirmar Reserva
+                              </>
+                            )}
                           </Button>
                         </div>
                       </CardContent>

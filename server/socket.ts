@@ -12,6 +12,12 @@ interface ConnectedUser {
 // Store connected users
 const connectedUsers: Map<string, ConnectedUser> = new Map();
 
+let ioInstance: SocketIOServer | null = null;
+
+export function getIO(): SocketIOServer | null {
+  return ioInstance;
+}
+
 export function initializeSocket(httpServer: HttpServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     cors: {
@@ -45,6 +51,12 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
 
     // Join user's personal room
     socket.join(`user:${user.id}`);
+
+    // Admins join room "admin" to receive internal admin notifications (e.g. new recharge requests)
+    if (user.role === "admin") {
+      socket.join("admin");
+      console.log(`🔔 Admin joined room: ${user.email}`);
+    }
 
     // Handle joining chat rooms
     socket.on("join:chat", (conversationId: string) => {
@@ -99,6 +111,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     });
   });
 
+  ioInstance = io;
   return io;
 }
 
@@ -107,9 +120,9 @@ export function sendNotificationToUser(io: SocketIOServer, userId: string, notif
   io.to(`user:${userId}`).emit("notification", notification);
 }
 
-// Helper function to send notification to all admins
+// Helper function to send notification to all admins (only sockets in room "admin")
 export function sendNotificationToAdmins(io: SocketIOServer, notification: any) {
-  io.emit("notification:admin", notification);
+  io.to("admin").emit("notification:admin", notification);
 }
 
 // Helper function to broadcast to all connected users

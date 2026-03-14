@@ -1,7 +1,7 @@
 import { useRoute, Link, useLocation } from "wouter";
 import { useService, useCreateBooking, useCurrentProvider, useBookings } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
-import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft, MessageSquare } from "lucide-react";
+import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft, MessageSquare, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { isBeforeToday } from "@/lib/date-utils";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@shared/routes";
+import { useSocketBookings } from "@/hooks/use-socket";
 
 export default function ServiceDetails() {
   const [, params] = useRoute("/service/:id");
@@ -31,6 +32,7 @@ export default function ServiceDetails() {
   const { data: myBookings } = useBookings();
   
   const createBooking = useCreateBooking();
+  const { notifyNewBooking } = useSocketBookings();
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [notes, setNotes] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -48,16 +50,23 @@ export default function ServiceDetails() {
       return;
     }
     
-    createBooking.mutate({
-      userId: user.id,
-      serviceId: id,
-      date: date.toISOString(), // In real app, would handle time selection too
-      notes: notes,
-    }, {
-      onSuccess: () => {
-        setDialogOpen(false);
+    createBooking.mutate(
+      {
+        userId: user.id,
+        serviceId: id,
+        date: date.toISOString(),
+        notes: notes,
+      },
+      {
+        onSuccess: (data) => {
+          const providerId = (service as { providerId?: number; provider?: { id: number } }).providerId ?? service?.provider?.id;
+          if (providerId != null && notifyNewBooking) {
+            notifyNewBooking(String(providerId), data);
+          }
+          setDialogOpen(false);
+        },
       }
-    });
+    );
   };
 
   if (isLoading) {
@@ -178,9 +187,17 @@ export default function ServiceDetails() {
                 </Link>
               </Button>
             )}
+            {isOwnService && (
+              <Button className="w-full" variant="outline" asChild>
+                <Link href={`/edit-service/${id}`} className="gap-2">
+                  <Pencil className="h-4 w-4" />
+                  Editar servicio
+                </Link>
+              </Button>
+            )}
             {isAuthenticated ? (
                isOwnService ? (
-                 <Button className="w-full" variant="secondary" disabled>Cannot Book Own Service</Button>
+                 <Button className="w-full" variant="secondary" disabled>No puedes reservar tu propio servicio</Button>
                ) : (
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                   <DialogTrigger asChild>

@@ -25,6 +25,27 @@ import type {
 } from "@shared/schema";
 import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
 
+/** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet. */
+export type WalletTransferType = "service_payment" | "recharge";
+
+/** Transfer status: only "completed" recharge adds to wallet; "pending_approval" waits for staff. */
+export type WalletTransferStatus = "pending_approval" | "completed" | "rejected";
+
+export interface WalletTransfer {
+  id: number;
+  /** Quien recibe el dinero (beneficiario). */
+  userId: string;
+  /** Quien realiza la transferencia (ej. admin en recargas). Nunca se le descuenta saldo. */
+  fromUserId?: string | null;
+  amount: number;
+  transferType: WalletTransferType;
+  status: WalletTransferStatus;
+  description?: string;
+  referenceId?: string;
+  currency?: string;
+  createdAt: Date;
+}
+
 interface User {
   id: string;
   email: string;
@@ -41,6 +62,10 @@ interface User {
   language?: string;
   isActive?: boolean;
   isVerified?: boolean;
+  /** Current wallet balance (default 0). */
+  wallet?: number;
+  /** Sum of all service_payment transfers for this user (denormalized for reads). */
+  totalEarnings?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -154,6 +179,8 @@ class FirestoreStorageImpl implements IStorage {
       phone: user.phone,
       role: user.role || "client",
       avatar: user.avatar,
+      wallet: user.wallet ?? 0,
+      totalEarnings: user.totalEarnings ?? 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -640,6 +667,182 @@ class FirestoreStorageImpl implements IStorage {
     };
   }
 
+  // ============ WALLET & TRANSFERS ============
+
+  async createTransfer(transfer: {
+    userId: string;
+    fromUserId?: string | null;
+    amount: number;
+    transferType: WalletTransferType;
+    status?: WalletTransferStatus;
+    description?: string;
+    referenceId?: string;
+    currency?: string;
+  }): Promise<WalletTransfer> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("wallet_transfers");
+    const coll = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
+    const userRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(transfer.userId);
+    const now = new Date();
+    const resolvedStatus: WalletTransferStatus =
+      transfer.status ??
+      (transfer.transferType === "recharge" ? "pending_approval" : "completed");
+    const record: Omit<WalletTransfer, "id"> & { id: number } = {
+      id,
+      userId: transfer.userId,
+      fromUserId: transfer.fromUserId ?? null,
+      amount: transfer.amount,
+      transferType: transfer.transferType,
+      status: resolvedStatus,
+      description: transfer.description,
+      referenceId: transfer.referenceId,
+      currency: transfer.currency ?? "USD",
+      createdAt: now,
+    };
+    // Solo se acredita al beneficiario (userId). fromUserId (ej. admin) nunca se descuenta.
+    const shouldUpdateWallet =
+      transfer.transferType === "service_payment" && resolvedStatus === "completed";
+    await this.db.runTransaction(async (t) => {
+      const userSnap = await t.get(userRef);
+      if (!userSnap.exists) throw new Error("Usuario no encontrado");
+      t.set(coll.doc(id.toString()), record);
+      if (shouldUpdateWallet) {
+        const data = userSnap.data() as User;
+        const currentWallet = typeof data.wallet === "number" ? data.wallet : 0;
+        const currentTotalEarnings = typeof data.totalEarnings === "number" ? data.totalEarnings : 0;
+        t.update(userRef, {
+          wallet: currentWallet + transfer.amount,
+          totalEarnings: currentTotalEarnings + transfer.amount,
+          updatedAt: now,
+        });
+      }
+    });
+    return { ...record };
+  }
+
+  async getTransfersByUser(
+    userId: string,
+    options?: {
+      page?: number;
+      limit?: number;
+      transferType?: WalletTransferType;
+      status?: WalletTransferStatus;
+      description?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      amountMin?: number;
+      amountMax?: number;
+    }
+  ): Promise<{ transfers: WalletTransfer[]; total: number }> {
+    if (!this.db) return { transfers: [], total: 0 };
+    const q = this.db
+      .collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS)
+      .where("userId", "==", userId);
+    const snap = await q.get();
+    const toMs = (x: unknown) =>
+      x instanceof Date ? x.getTime() : (x as { toMillis?: () => number })?.toMillis?.() ?? 0;
+    let list = snap.docs.map((d) => ({ id: parseInt(d.id, 10), ...d.data() } as WalletTransfer));
+    list.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+
+    if (options?.transferType) list = list.filter((t) => t.transferType === options.transferType);
+    if (options?.status) list = list.filter((t) => t.status === options.status);
+    if (options?.description?.trim()) {
+      const term = options.description.trim().toLowerCase();
+      list = list.filter((t) => (t.description ?? "").toLowerCase().includes(term));
+    }
+    if (options?.dateFrom) {
+      const from = new Date(options.dateFrom).getTime();
+      list = list.filter((t) => toMs(t.createdAt) >= from);
+    }
+    if (options?.dateTo) {
+      const to = new Date(options.dateTo);
+      to.setHours(23, 59, 59, 999);
+      list = list.filter((t) => toMs(t.createdAt) <= to.getTime());
+    }
+    if (options?.amountMin != null) list = list.filter((t) => t.amount >= options.amountMin!);
+    if (options?.amountMax != null) list = list.filter((t) => t.amount <= options.amountMax!);
+
+    const total = list.length;
+    const page = Math.max(1, options?.page ?? 1);
+    const limit = Math.min(100, Math.max(1, options?.limit ?? 10));
+    const start = (page - 1) * limit;
+    const transfers = list.slice(start, start + limit);
+    return { transfers, total };
+  }
+
+  async getAllTransfers(): Promise<{ transfers: WalletTransfer[]; total: number }> {
+    if (!this.db) return { transfers: [], total: 0 };
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS).get();
+    const toMs = (x: unknown) =>
+      x instanceof Date ? x.getTime() : (x as { toMillis?: () => number })?.toMillis?.() ?? 0;
+    const list = snap.docs.map((d) => ({ id: parseInt(d.id, 10), ...d.data() } as WalletTransfer));
+    list.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+    return { transfers: list, total: list.length };
+  }
+
+  async updateTransferStatus(transferId: string, status: WalletTransferStatus): Promise<WalletTransfer> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const coll = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
+    const transferRef = coll.doc(transferId);
+    const now = new Date();
+
+    return this.db.runTransaction(async (t) => {
+      const transferSnap = await t.get(transferRef);
+      if (!transferSnap.exists) {
+        throw new Error("Transferencia no encontrada");
+      }
+      const data = transferSnap.data() as Record<string, unknown>;
+      const currentStatus = data.status as WalletTransferStatus;
+      const transferType = data.transferType as WalletTransferType;
+      const userId = data.userId as string;
+      const amount = typeof data.amount === "number" ? data.amount : Number(data.amount);
+
+      const isRechargeCompleted =
+        transferType === "recharge" && status === "completed" && currentStatus !== "completed";
+
+      if (isRechargeCompleted) {
+        const userRef = this.db!.collection(FIRESTORE_COLLECTIONS.USERS).doc(userId);
+        const userSnap = await t.get(userRef);
+        if (!userSnap.exists) {
+          throw new Error("Usuario no encontrado");
+        }
+        const userData = userSnap.data() as User;
+        const currentWallet = typeof userData.wallet === "number" ? userData.wallet : 0;
+        t.update(userRef, {
+          wallet: currentWallet + amount,
+          updatedAt: now,
+        });
+      }
+
+      t.update(transferRef, { status });
+      const id = typeof data.id === "number" ? data.id : parseInt(transferId, 10);
+      const createdAt = data.createdAt instanceof Date ? data.createdAt : (data.createdAt as { toDate?: () => Date })?.toDate?.() ?? now;
+      return {
+        id,
+        userId: data.userId as string,
+        fromUserId: data.fromUserId as string | null | undefined,
+        amount: typeof data.amount === "number" ? data.amount : Number(data.amount),
+        transferType: data.transferType as WalletTransferType,
+        status,
+        description: data.description as string | undefined,
+        referenceId: data.referenceId as string | undefined,
+        currency: data.currency as string | undefined,
+        createdAt,
+      } as WalletTransfer;
+    });
+  }
+
+  async getTotalPlatformBalance(): Promise<number> {
+    if (!this.db) return 0;
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.USERS).get();
+    let total = 0;
+    snap.docs.forEach((doc) => {
+      const w = (doc.data() as User).wallet;
+      if (typeof w === "number") total += w;
+    });
+    return total;
+  }
+
   // ============ DOCUMENTOS (BÓVEDA) ============
   async getDocumentsByUser(userId: string, type?: string): Promise<any[]> {
     if (!this.db) return [];
@@ -789,6 +992,21 @@ class FirestoreStorageImpl implements IStorage {
     if (unreadOnly) list = list.filter((n: any) => !n.read);
     const toMs = (x: any) => (x?.toMillis ? x.toMillis() : x ? new Date(x).getTime() : 0);
     return list.sort((a: any, b: any) => toMs(b.createdAt) - toMs(a.createdAt));
+  }
+  async createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("notifications");
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.NOTIFICATIONS).doc(id.toString());
+    const created = {
+      id,
+      userId: notification.userId,
+      type: notification.type,
+      data: notification.data,
+      read: false,
+      createdAt: new Date(),
+    };
+    await docRef.set(created);
+    return created;
   }
   async markNotificationAsRead(notificationId: number): Promise<void> {
     if (!this.db) return;

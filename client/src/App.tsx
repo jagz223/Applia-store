@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
+import { PushForegroundHandler } from "@/components/PushForegroundHandler";
 import { SocketProvider } from "@/hooks/use-socket";
 
 // Pages
@@ -15,6 +16,7 @@ import ServiceDetails from "@/pages/ServiceDetails";
 import Dashboard from "@/pages/Dashboard";
 import BecomePro from "@/pages/BecomePro";
 import CreateService from "@/pages/CreateService";
+import EditService from "@/pages/EditService";
 import Booking from "@/pages/Booking";
 import Vault from "@/pages/Vault";
 import Payments from "@/pages/Payments";
@@ -27,6 +29,9 @@ import EditUser from "@/pages/EditUser";
 import ProfessionalDashboard from "@/pages/ProfessionalDashboard";
 import PaymentVoucher from "@/pages/PaymentVoucher";
 import Bookings from "@/pages/Bookings";
+import Recharge from "@/pages/Recharge";
+import RechargeConfirm from "@/pages/RechargeConfirm";
+import Movimientos from "@/pages/Movimientos";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -41,6 +46,7 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/become-pro" component={BecomePro} />
       <Route path="/create-service" component={CreateService} />
+      <Route path="/edit-service/:id" component={EditService} />
       <Route path="/booking" component={Booking} />
       <Route path="/vault" component={Vault} />
       <Route path="/payments" component={Payments} />
@@ -51,6 +57,9 @@ function Router() {
       <Route path="/professional-dashboard" component={ProfessionalDashboard} />
       <Route path="/payment-voucher" component={PaymentVoucher} />
       <Route path="/bookings" component={Bookings} />
+      <Route path="/recharge" component={Recharge} />
+      <Route path="/recharge/confirm" component={RechargeConfirm} />
+      <Route path="/movimientos" component={Movimientos} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -61,6 +70,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <SocketProvider>
+          <PushForegroundHandler />
           <div className="flex flex-col min-h-screen bg-background font-sans">
             <Navigation />
             <main className="flex-grow">
