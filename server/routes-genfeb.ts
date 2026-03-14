@@ -376,6 +376,32 @@ export async function registerGenFebRoutes(
     }
   });
 
+  // GET /api/professional/stats - Estadísticas del profesional (servicios completados/rechazados, ganancias)
+  app.get("/api/professional/stats", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      if (req.user?.role !== "professional") return res.status(403).json({ message: "Se requiere rol de profesional" });
+      const { transfers } = await storage.getTransfersByUser(userId, {
+        transferType: "service_payment",
+        page: 1,
+        limit: 10000,
+      });
+      const completed = transfers.filter((t: { status?: string }) => t.status === "completed");
+      const rejected = transfers.filter((t: { status?: string }) => t.status === "rejected");
+      const completedCount = completed.length;
+      const rejectedCount = rejected.length;
+      const totalEarnings = completed.reduce(
+        (sum: number, t: { amount?: number }) => sum + (typeof t.amount === "number" ? t.amount : 0),
+        0
+      );
+      res.json({ completedCount, rejectedCount, totalEarnings });
+    } catch (error) {
+      console.error("Error fetching professional stats:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // POST /api/wallet/recharge-request - Usuario autenticado solicita recarga (crea transferencia en aprobación)
   const rechargeRequestSchema = z.object({
     amount: z.number().positive("amount debe ser positivo"),

@@ -417,6 +417,25 @@ export function useWallet(options?: { enabled?: boolean }) {
   });
 }
 
+const PROFESSIONAL_STATS_KEY = "/api/professional/stats";
+
+/** Estadísticas del profesional: servicios completados, rechazados y ganancias totales. */
+export function useProfessionalStats(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [PROFESSIONAL_STATS_KEY],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(PROFESSIONAL_STATS_KEY, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Failed to fetch professional stats");
+      const data = await res.json();
+      return data as { completedCount: number; rejectedCount: number; totalEarnings: number };
+    },
+    enabled: options?.enabled !== false,
+  });
+}
+
 /** Parámetros de listado de transferencias (paginado y filtros). */
 export type WalletTransfersParams = {
   page?: number;

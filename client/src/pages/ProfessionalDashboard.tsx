@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { 
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText,
-  BarChart3, PieChart, Activity, Loader2, MessageSquare
+  BarChart3, PieChart, Activity, Loader2, MessageSquare,
+  CheckCircle2, XCircle, Banknote
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
-import { useBookingsByProvider, useUpdateBookingStatus } from "@/hooks/use-mango-data";
+import { useBookingsByProvider, useUpdateBookingStatus, useProfessionalStats } from "@/hooks/use-mango-data";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -70,6 +71,110 @@ const STATUS_OPTIONS = [
   { value: "completed", label: "Completada" },
   { value: "cancelled", label: "Cancelada" },
 ];
+
+function ResumenActividad() {
+  const { data: stats, isLoading } = useProfessionalStats();
+  const total = (stats?.completedCount ?? 0) + (stats?.rejectedCount ?? 0);
+  const completedPct = total > 0 ? Math.round(((stats?.completedCount ?? 0) / total) * 100) : 0;
+  const rejectedPct = total > 0 ? Math.round(((stats?.rejectedCount ?? 0) / total) * 100) : 0;
+
+  if (isLoading) {
+    return (
+      <Card className="mb-6 border-border bg-card">
+        <CardHeader>
+          <CardTitle>Resumen de Actividad</CardTitle>
+          <CardDescription>Estadísticas de servicios completados, rechazados y ganancias</CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="mb-6 border-border bg-card">
+      <CardHeader>
+        <CardTitle>Resumen de Actividad</CardTitle>
+        <CardDescription>Estadísticas de servicios completados, rechazados y ganancias</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {/* Ganancias Totales - resaltada */}
+          <Card className="border-2 border-green-500/30 bg-green-500/5 dark:bg-green-500/10">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-foreground">Ganancias Totales</CardTitle>
+              <Banknote className="h-5 w-5 text-green-600 dark:text-green-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-700 dark:text-green-400">
+                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(stats?.totalEarnings ?? 0)}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Suma de todos los servicios completados</p>
+            </CardContent>
+          </Card>
+
+          {/* Servicios Completados */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Servicios Completados</CardTitle>
+              <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.completedCount ?? 0}</div>
+              <p className="text-xs text-muted-foreground mt-1">Servicios con estado completado</p>
+            </CardContent>
+          </Card>
+
+          {/* Servicios Rechazados */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Servicios Rechazados</CardTitle>
+              <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.rejectedCount ?? 0}</div>
+              <p className="text-xs text-muted-foreground mt-1">Servicios con estado rechazado</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Gráfico circular: completados vs rechazados */}
+        {(total > 0) && (
+          <div className="flex flex-col sm:flex-row items-center gap-6 pt-4 border-t border-border">
+            <div className="flex-shrink-0">
+              <div className="relative w-32 h-32 mx-auto">
+                <div
+                  className="w-32 h-32 rounded-full"
+                  style={{
+                    background: `conic-gradient(
+                      hsl(var(--chart-1)) 0deg ${completedPct * 3.6}deg,
+                      hsl(var(--destructive)) ${completedPct * 3.6}deg 360deg
+                    )`,
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-full bg-card border-2 border-border" />
+                </div>
+              </div>
+              <div className="text-center text-sm text-muted-foreground mt-2">Completados vs Rechazados</div>
+            </div>
+            <div className="flex-1 w-full sm:w-auto space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-[hsl(var(--chart-1))]" />
+                <span className="text-sm">Completados: {stats?.completedCount ?? 0} ({completedPct}%)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-destructive" />
+                <span className="text-sm">Rechazados: {stats?.rejectedCount ?? 0} ({rejectedPct}%)</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function ProviderBookingsTab() {
   const { data: bookings, isLoading } = useBookingsByProvider();
@@ -235,6 +340,9 @@ export default function ProfessionalDashboard() {
       </div>
 
       <div className="container mx-auto max-w-full py-6 px-4 overflow-x-hidden">
+        {/* Resumen de Actividad (estadísticas de rendimiento) */}
+        <ResumenActividad />
+
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card>
