@@ -57,6 +57,7 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       return "/dashboard";
     case "recharge_completed":
     case "recharge_rejected":
+    case "balance_credited":
       return "/movimientos";
     default:
       return "/dashboard";
@@ -149,6 +150,12 @@ export function NotificationBell() {
       if (amount) return `Nuevo monto: $${amount} USD. Revisa tu reserva.`;
       return "Se ha actualizado el monto del servicio. Revisa tu reserva.";
     }
+    if (type === "balance_credited") {
+      const message = data?.data?.message ?? data?.message;
+      if (message) return message;
+      const amount = data?.data?.amountFormatted ?? data?.amountFormatted;
+      if (amount != null) return `Recibiste $${amount} USD`;
+    }
     return null;
   };
 
@@ -157,6 +164,7 @@ export function NotificationBell() {
     if (type === "admin" && data?.type === "recharge_pending") return "Nueva solicitud de recarga";
     if (type === "recharge_completed") return "Recarga aprobada";
     if (type === "recharge_rejected") return "Recarga rechazada";
+    if (type === "balance_credited") return "Saldo acreditado";
     if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el profesional";
     if (type === "booking_confirmed_by_client") return "Fondos agregados";
     if (type === "booking_cancelled") return "Reserva cancelada";

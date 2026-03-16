@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { 
@@ -22,6 +22,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { useAuth } from "@/hooks/use-auth";
 import { useAdminWalletTransfers, useUpdateTransferStatus, useAdminManualRecharge } from "@/hooks/use-mango-data";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
@@ -67,27 +69,21 @@ type TransferStatusFilter = "" | "pending_approval" | "completed" | "rejected";
 
 type UserOption = { id: string; name: string; email: string; role?: string };
 
-function SaldoSearchResults({
-  searchSaldo,
-  roleFilterSaldo,
-  selectedIds,
-  onAdd,
-}: {
-  searchSaldo: string;
-  roleFilterSaldo: string;
-  selectedIds: Set<string>;
-  onAdd: (u: UserOption) => void;
-}) {
-  const q = searchSaldo.trim();
-  const { data, isLoading } = useQuery({
-    queryKey: ["admin", "users", "saldo-search", q, roleFilterSaldo],
-    queryFn: async ({ queryKey }) => {
-      const searchTerm = (queryKey[3] as string) ?? "";
-      const role = (queryKey[4] as string) ?? "";
+const SALDO_DEBOUNCE_MS = 1000;
+const ROLE_LABELS: Record<string, string> = {
+  client: "Cliente",
+  professional: "Profesional",
+  admin: "Administrador",
+};
+
+/** Búsqueda de usuarios por nombre (debounced 1s). Solo parámetro name, sin filtro por rol. */
+function useSaldoUserSearch(debouncedName: string) {
+  return useQuery({
+    queryKey: ["admin", "users", "saldo-search-by-name", debouncedName],
+    queryFn: async () => {
       const token = localStorage.getItem("token");
       const params = new URLSearchParams({ page: "1", limit: "50" });
-      if (searchTerm) params.set("search", searchTerm);
-      if (role) params.set("role", role);
+      if (debouncedName) params.set("name", debouncedName);
       const url = `/api/admin/users?${params.toString()}`;
       const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -95,58 +91,9 @@ function SaldoSearchResults({
       if (!res.ok) throw new Error("Error al buscar usuarios");
       return res.json();
     },
-    enabled: q.length >= 2,
-    staleTime: 0,
+    enabled: debouncedName.trim().length >= 2,
+    staleTime: 30_000,
   });
-  const users = (data?.users ?? []) as any[];
-  const list = users.map((u: any) => ({
-    id: u.id,
-    name: u.name ?? u.firstName ?? "",
-    email: u.email ?? "",
-    role: u.role,
-  }));
-
-  if (q.length < 2) return null;
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Buscando…
-      </div>
-    );
-  }
-  if (list.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-2">No se encontraron usuarios con ese criterio.</p>
-    );
-  }
-  return (
-    <div className="rounded-lg border border-border overflow-hidden">
-      <p className="text-sm font-medium p-2 bg-muted/50 border-b border-border">Resultados de búsqueda</p>
-      <ul className="max-h-[220px] overflow-y-auto divide-y divide-border">
-        {list.map((u) => {
-          const added = selectedIds.has(u.id);
-          return (
-            <li key={u.id} className="flex items-center justify-between gap-2 p-2 hover:bg-muted/30">
-              <div className="min-w-0 flex-1">
-                <p className="font-medium truncate">{u.name || u.email || u.id}</p>
-                <p className="text-xs text-muted-foreground truncate">{u.email}</p>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant={added ? "secondary" : "default"}
-                disabled={added}
-                onClick={() => !added && onAdd(u)}
-              >
-                {added ? "Agregado" : "Agregar"}
-              </Button>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
 }
 
 export default function AdminPanel() {
@@ -204,12 +151,36 @@ export default function AdminPanel() {
   const [userFilters, setUserFilters] = useState({ role: "", name: "", email: "", lastName: "" });
   const [transferStatusFilter, setTransferStatusFilter] = useState<TransferStatusFilter>("");
 
-  // Gestión de Saldo: selector de usuarios y recarga manual
+  // Gestión de Saldo: selector de usuarios/roles y recarga manual
   const [selectedUsersSaldo, setSelectedUsersSaldo] = useState<UserOption[]>([]);
-  const [searchSaldo, setSearchSaldo] = useState("");
-  const [roleFilterSaldo, setRoleFilterSaldo] = useState("");
+  const [selectedRolesSaldo, setSelectedRolesSaldo] = useState<string[]>([]);
+  const [searchSaldoInput, setSearchSaldoInput] = useState("");
+  const [debouncedSearchSaldo, setDebouncedSearchSaldo] = useState("");
+  const [saldoComboboxOpen, setSaldoComboboxOpen] = useState(false);
+  const saldoDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [reasonSaldo, setReasonSaldo] = useState("");
   const [amountSaldo, setAmountSaldo] = useState("");
+
+  useEffect(() => {
+    if (saldoDebounceRef.current) clearTimeout(saldoDebounceRef.current);
+    saldoDebounceRef.current = setTimeout(() => {
+      setDebouncedSearchSaldo(searchSaldoInput.trim());
+      saldoDebounceRef.current = null;
+    }, SALDO_DEBOUNCE_MS);
+    return () => {
+      if (saldoDebounceRef.current) clearTimeout(saldoDebounceRef.current);
+    };
+  }, [searchSaldoInput]);
+
+  const { data: saldoSearchData, isLoading: saldoSearchLoading } = useSaldoUserSearch(debouncedSearchSaldo);
+  const saldoSearchUsers = (saldoSearchData?.users ?? []) as any[];
+  const saldoSearchList: UserOption[] = saldoSearchUsers.map((u: any) => ({
+    id: u.id,
+    name: String(u.name ?? u.firstName ?? ""),
+    email: String(u.email ?? ""),
+    role: u.role,
+  }));
+
   const manualRecharge = useAdminManualRecharge();
   const [transferToReview, setTransferToReview] = useState<{
     id: number;
@@ -869,104 +840,127 @@ export default function AdminPanel() {
                   Gestión de Saldo
                 </CardTitle>
                 <CardDescription>
-                  Recargas manuales o bonos: corrige errores de pago o asigna créditos. Selecciona uno o varios usuarios, indica el monto y la razón. La operación queda registrada en el historial.
+                  Recargas manuales o bonos: corrige errores de pago o asigna créditos. Busca usuarios por nombre o agrega un rol (se acredita a todos los usuarios con ese rol). Indica monto y razón. La operación queda registrada.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Seleccionar usuarios</label>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="relative flex-1 min-w-[200px] max-w-md">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Buscar por nombre o correo..."
-                        value={searchSaldo}
-                        onChange={(e) => setSearchSaldo(e.target.value)}
-                        className="pl-9"
-                      />
-                    </div>
-                    <Select value={roleFilterSaldo || "all"} onValueChange={(v) => setRoleFilterSaldo(v === "all" ? "" : v)}>
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Rol" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Todos los roles</SelectItem>
-                        <SelectItem value="client">Cliente</SelectItem>
-                        <SelectItem value="professional">Profesional</SelectItem>
-                        <SelectItem value="admin">Administrador</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={!roleFilterSaldo}
-                      onClick={async () => {
-                        if (!roleFilterSaldo) return;
-                        try {
-                          const token = localStorage.getItem("token");
-                          const res = await fetch(
-                            `/api/admin/users?role=${encodeURIComponent(roleFilterSaldo)}&page=1&limit=500`,
-                            { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-                          );
-                          if (!res.ok) throw new Error("Error al cargar usuarios");
-                          const data = await res.json();
-                          const list = (data.users ?? []).map((u: any) => ({
-                            id: u.id,
-                            name: u.name ?? u.firstName ?? "",
-                            email: u.email ?? "",
-                            role: u.role,
-                          }));
-                          setSelectedUsersSaldo((prev) => {
-                            const ids = new Set(prev.map((x) => x.id));
-                            const added = list.filter((x: UserOption) => !ids.has(x.id));
-                            const next = [...prev, ...added];
-                            queueMicrotask(() => {
-                              toast({
-                                title: "Usuarios agregados",
-                                description: added.length ? `Se agregaron ${added.length} usuario(s) con rol "${roleFilterSaldo}".` : "Ya estaban todos seleccionados.",
-                              });
-                            });
-                            return next;
-                          });
-                        } catch (e: any) {
-                          toast({ title: "Error", description: e?.message ?? "No se pudieron cargar los usuarios", variant: "destructive" });
-                        }
-                      }}
-                    >
-                      Agregar todos con este rol
-                    </Button>
-                  </div>
-                  {selectedUsersSaldo.length > 0 && (
-                    <div className="flex flex-wrap gap-2 p-3 rounded-lg bg-muted/50 border border-border">
-                      {selectedUsersSaldo.map((u) => (
-                        <Badge
-                          key={u.id}
-                          variant="secondary"
-                          className="pl-2 pr-1 py-1 gap-1 font-normal"
+                  <label className="text-sm font-medium">Agregar por usuario</label>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <Popover open={saldoComboboxOpen} onOpenChange={setSaldoComboboxOpen} modal={false}>
+                      <PopoverAnchor asChild>
+                        <div
+                          className="relative flex-1 min-w-[200px] max-w-md flex items-center rounded-md border border-input bg-background cursor-text"
+                          onClick={() => setSaldoComboboxOpen(true)}
                         >
-                          <span className="max-w-[140px] truncate">{u.name || u.email || u.id}</span>
-                          <button
-                            type="button"
-                            className="rounded-full hover:bg-muted p-0.5"
-                            onClick={() => setSelectedUsersSaldo((prev) => prev.filter((x) => x.id !== u.id))}
-                            aria-label="Quitar"
-                          >
-                            <XCircle className="h-3.5 w-3.5" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
+                          <Search className="absolute left-3 h-4 w-4 text-muted-foreground pointer-events-none" />
+                          <Input
+                            placeholder="Buscar por nombre (mín. 2 letras)..."
+                            value={searchSaldoInput}
+                            onChange={(e) => setSearchSaldoInput(e.target.value)}
+                            onFocus={() => setSaldoComboboxOpen(true)}
+                            className="pl-9 border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+                          />
+                        </div>
+                      </PopoverAnchor>
+                      <PopoverContent
+                        className="w-[var(--radix-popover-trigger-width)] p-0"
+                        align="start"
+                        onOpenAutoFocus={(e) => e.preventDefault()}
+                      >
+                        <Command shouldFilter={false}>
+                          <CommandList>
+                            <CommandEmpty>
+                              {debouncedSearchSaldo.length < 2
+                                ? "Escribe al menos 2 letras (búsqueda tras 1 s sin escribir)."
+                                : saldoSearchLoading
+                                  ? "Buscando…"
+                                  : "No se encontraron usuarios"}
+                            </CommandEmpty>
+                            {!saldoSearchLoading && saldoSearchList.length > 0 && (
+                              <CommandGroup>
+                                {saldoSearchList.map((u) => {
+                                  const alreadyAdded = selectedUsersSaldo.some((x) => x.id === u.id);
+                                  return (
+                                    <CommandItem
+                                      key={u.id}
+                                      value={u.id}
+                                      onSelect={() => {
+                                        if (alreadyAdded) return;
+                                        setSelectedUsersSaldo((prev) => [...prev, u]);
+                                        setSearchSaldoInput("");
+                                        setDebouncedSearchSaldo("");
+                                        setSaldoComboboxOpen(false);
+                                      }}
+                                      disabled={alreadyAdded}
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <p className="font-medium truncate">{u.name || u.email || u.id}</p>
+                                        <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                                      </div>
+                                      {alreadyAdded && <span className="text-xs text-muted-foreground">Ya agregado</span>}
+                                    </CommandItem>
+                                  );
+                                })}
+                              </CommandGroup>
+                            )}
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
 
-                {searchSaldo.trim().length >= 2 && (
-                  <SaldoSearchResults
-                    searchSaldo={searchSaldo}
-                    roleFilterSaldo={roleFilterSaldo}
-                    selectedIds={new Set(selectedUsersSaldo.map((u) => u.id))}
-                    onAdd={(u) => setSelectedUsersSaldo((prev) => (prev.some((x) => x.id === u.id) ? prev : [...prev, u]))}
-                  />
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Agregar por rol</label>
+                  <p className="text-xs text-muted-foreground">El saldo se acreditará a todos los usuarios con ese rol. Selecciona un rol para agregarlo.</p>
+                  <Select
+                    value=""
+                    onValueChange={(v) => {
+                      if (!v || selectedRolesSaldo.includes(v)) return;
+                      setSelectedRolesSaldo((prev) => [...prev, v]);
+                    }}
+                  >
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue placeholder="Seleccionar rol" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="client">{ROLE_LABELS.client}</SelectItem>
+                      <SelectItem value="professional">{ROLE_LABELS.professional}</SelectItem>
+                      <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {(selectedUsersSaldo.length > 0 || selectedRolesSaldo.length > 0) && (
+                  <div className="flex flex-wrap gap-2 p-3 rounded-lg bg-muted/50 border border-border">
+                    {selectedUsersSaldo.map((u) => (
+                      <Badge key={`u-${u.id}`} variant="secondary" className="pl-2 pr-1 py-1 gap-1 font-normal">
+                        <span className="max-w-[140px] truncate">{u.name || u.email || u.id}</span>
+                        <button
+                          type="button"
+                          className="rounded-full hover:bg-muted p-0.5"
+                          onClick={() => setSelectedUsersSaldo((prev) => prev.filter((x) => x.id !== u.id))}
+                          aria-label="Quitar"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </Badge>
+                    ))}
+                    {selectedRolesSaldo.map((roleCode) => (
+                      <Badge key={`r-${roleCode}`} variant="outline" className="pl-2 pr-1 py-1 gap-1 font-normal">
+                        <span>{ROLE_LABELS[roleCode] ?? roleCode}</span>
+                        <button
+                          type="button"
+                          className="rounded-full hover:bg-muted p-0.5"
+                          onClick={() => setSelectedRolesSaldo((prev) => prev.filter((r) => r !== roleCode))}
+                          aria-label="Quitar rol"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
                 )}
 
                 <div className="grid gap-4 sm:grid-cols-2 border-t pt-6">
@@ -993,7 +987,7 @@ export default function AdminPanel() {
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
                     disabled={
-                      selectedUsersSaldo.length === 0 ||
+                      (selectedUsersSaldo.length === 0 && selectedRolesSaldo.length === 0) ||
                       !reasonSaldo.trim() ||
                       !amountSaldo ||
                       Number(amountSaldo) <= 0 ||
@@ -1003,13 +997,36 @@ export default function AdminPanel() {
                     onClick={async () => {
                       const amount = Number(amountSaldo);
                       const reason = reasonSaldo.trim();
-                      if (!user?.id || selectedUsersSaldo.length === 0 || !(amount > 0)) return;
+                      if (!user?.id || !(amount > 0)) return;
+
+                      const userIdsToCredit = new Set<string>(selectedUsersSaldo.map((u) => u.id));
+                      if (selectedRolesSaldo.length > 0) {
+                        try {
+                          const token = localStorage.getItem("token");
+                          for (const roleCode of selectedRolesSaldo) {
+                            const res = await fetch(
+                              `/api/admin/users?role=${encodeURIComponent(roleCode)}&page=1&limit=500`,
+                              { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+                            );
+                            if (!res.ok) continue;
+                            const data = await res.json();
+                            const list = (data.users ?? []) as { id: string }[];
+                            list.forEach((u: { id: string }) => userIdsToCredit.add(u.id));
+                          }
+                        } catch {
+                          toast({ title: "Error", description: "No se pudieron cargar usuarios por rol.", variant: "destructive" });
+                          return;
+                        }
+                      }
+
+                      const finalList = Array.from(userIdsToCredit);
+                      if (finalList.length === 0) return;
                       let ok = 0;
                       let err = 0;
-                      for (const u of selectedUsersSaldo) {
+                      for (const userId of finalList) {
                         try {
                           await manualRecharge.mutateAsync({
-                            userId: u.id,
+                            userId,
                             amount,
                             reason,
                             fromUserId: user.id,
@@ -1027,6 +1044,7 @@ export default function AdminPanel() {
                         setReasonSaldo("");
                         setAmountSaldo("");
                         setSelectedUsersSaldo([]);
+                        setSelectedRolesSaldo([]);
                       }
                       if (err && ok === 0) {
                         toast({ title: "Error", description: "No se pudo procesar ninguna recarga.", variant: "destructive" });
@@ -1043,7 +1061,7 @@ export default function AdminPanel() {
                     )}
                   </Button>
                   <span className="text-sm text-muted-foreground">
-                    {selectedUsersSaldo.length} usuario(s) seleccionado(s)
+                    {selectedUsersSaldo.length} usuario(s) + {selectedRolesSaldo.length} rol(es) seleccionados
                   </span>
                 </div>
               </CardContent>

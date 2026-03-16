@@ -858,6 +858,40 @@ export async function registerGenFebRoutes(
         return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
       }
       const transfer = await storage.createTransfer(parsed.data);
+      const data = parsed.data;
+
+      if (data.status === "completed" && data.userId && data.amount != null) {
+        const amountFormatted = new Intl.NumberFormat("es-EC", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(data.amount);
+        const message = `Recibiste $${amountFormatted} USD`;
+        const payload = {
+          type: "balance_credited",
+          data: { amount: data.amount, amountFormatted, message },
+          timestamp: new Date(),
+        };
+
+        await storage.createNotification({
+          userId: data.userId,
+          type: "balance_credited",
+          data: { amount: data.amount, amountFormatted, message },
+        });
+
+        const io = getIO();
+        if (io) {
+          sendNotificationToUser(io, data.userId, payload);
+        }
+
+        void notificationService
+          .sendPushToUser(data.userId, {
+            title: "Saldo acreditado",
+            body: message,
+            data: { type: "balance_credited", url: "/movimientos" },
+          })
+          .catch((err) => console.error("[push] Error notificando saldo acreditado:", err));
+      }
+
       res.status(201).json(transfer);
     } catch (error: any) {
       if (error?.message === "Usuario no encontrado") {

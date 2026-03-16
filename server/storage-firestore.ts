@@ -159,7 +159,10 @@ class FirestoreStorageImpl implements IStorage {
     } else {
       if (name?.trim()) {
         const n = name.trim().toLowerCase();
-        list = list.filter(u => (u.name || "").toLowerCase().includes(n));
+        list = list.filter(u => {
+          const fullName = String((u as { name?: string }).name ?? (u as { firstName?: string }).firstName ?? "");
+          return fullName.toLowerCase().includes(n);
+        });
       }
       if (email?.trim()) {
         const e = email.trim().toLowerCase();

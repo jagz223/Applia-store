@@ -150,6 +150,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           });
         }
       }
+      if (type === "balance_credited") {
+        queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+        const message = notification?.data?.message;
+        const amount = notification?.data?.amountFormatted;
+        toast({
+          title: "Saldo acreditado",
+          description: message ?? (amount != null ? `Recibiste $${amount} USD` : "Se ha acreditado saldo a tu cuenta."),
+        });
+      }
       if (type === "booking_confirmed_by_provider") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
         toast({
