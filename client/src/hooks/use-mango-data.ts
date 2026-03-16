@@ -389,10 +389,107 @@ export function useUpdateBookingStatus() {
       if (!res.ok) throw new Error("Failed to update status");
       return api.bookings.updateStatus.responses[200].parse(await res.json());
     },
+    onSuccess: (_data, { status }) => {
+      queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      if (status === "completed") {
+        queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+        queryClient.invalidateQueries({ queryKey: ["/api/professional/stats"] });
+      }
+      toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
+    },
+  });
+}
+
+/** Actualizar costo de una reserva (solo permitido para el profesional y solo si la reserva está pendiente). */
+export function useUpdateBookingCost() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ id, cost }: { id: number; cost: number }) => {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${id}/cost`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ cost: Number(cost) }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "No se pudo actualizar el costo");
+      }
+      return res.json();
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
-      toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
+      toast({ title: "Costo actualizado", description: "El costo de la reserva se ha guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+/** Actualizar fecha/hora de una reserva (solo profesional, solo si estado es 'pending'). */
+export function useUpdateBookingSchedule() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ id, date }: { id: number; date: string }) => {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${id}/schedule`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ date }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "No se pudo actualizar la fecha");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      toast({ title: "Fecha actualizada", description: "La fecha del servicio se ha guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+/** Confirmación del cliente (handshake/escrow): debita wallet y retiene en pendingBalance del profesional. */
+export function useConfirmBookingByClient() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (bookingId: number) => {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${bookingId}/confirm-client`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || "No se pudo confirmar el pago");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      toast({ title: "Pago confirmado", description: "Los fondos se han retenido. El profesional podrá completar el trabajo." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
 }
@@ -430,7 +527,14 @@ export function useProfessionalStats(options?: { enabled?: boolean }) {
       });
       if (!res.ok) throw new Error("Failed to fetch professional stats");
       const data = await res.json();
-      return data as { completedCount: number; rejectedCount: number; totalEarnings: number };
+      return data as {
+        completedCount: number;
+        rejectedCount: number;
+        totalEarnings: number;
+        earningsThisMonth?: number;
+        earningsLastMonth?: number;
+        pendingOrActiveCount?: number;
+      };
     },
     enabled: options?.enabled !== false,
   });
@@ -578,6 +682,44 @@ export function useUpdateTransferStatus() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
       queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+    },
+  });
+}
+
+/** Recarga manual por admin: acredita saldo a un usuario y registra la transacción con motivo (solo admin). */
+export function useAdminManualRecharge() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (params: { userId: string; amount: number; reason: string; fromUserId: string }) => {
+      const token = getToken();
+      const res = await fetch("/api/wallet/transfers", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: params.userId,
+          fromUserId: params.fromUserId,
+          amount: params.amount,
+          transferType: "recharge",
+          status: "completed",
+          description: params.reason,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al procesar la recarga");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error en recarga manual", description: err.message, variant: "destructive" });
     },
   });
 }

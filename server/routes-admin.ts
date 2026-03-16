@@ -101,16 +101,18 @@ export function registerAdminRoutes(app: Express): void {
   adminUsersRouter.get("/", async (req, res) => {
     try {
       const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
-      const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
+      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
       const role = (req.query.role as string)?.trim() || undefined;
       const name = (req.query.name as string)?.trim() || undefined;
       const email = (req.query.email as string)?.trim() || undefined;
       const lastName = (req.query.lastName as string)?.trim() || undefined;
+      const search = (req.query.search as string)?.trim() || undefined;
       const result = await userService.getUsers({
         role,
         name,
         email,
         lastName,
+        search,
         page,
         limit,
       });

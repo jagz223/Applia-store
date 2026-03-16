@@ -98,6 +98,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     newSocket.on("connect", () => {
       console.log("🔌 Connected to GenFeb socket server");
       setIsConnected(true);
+      // Al reconectar, refrescar reservas del profesional y notificaciones para no perder actualizaciones
+      if (userRef.current?.role === "professional") {
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      }
+      const token = localStorage.getItem("token");
+      if (token) {
+        fetchNotificationsFromServer(token)
+          .then((list) => setNotifications(list))
+          .catch(() => {});
+      }
     });
 
     newSocket.on("disconnect", () => {
@@ -139,6 +149,47 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
             variant: "destructive",
           });
         }
+      }
+      if (type === "booking_confirmed_by_provider") {
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        toast({
+          title: "Reserva confirmada por el profesional",
+          description: "Confirma el pago en Mis Reservas para retener los fondos.",
+        });
+      }
+      if (type === "booking_confirmed_by_client") {
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+        const amount = notification?.data?.amountFormatted ?? notification?.data?.amount;
+        toast({
+          title: "Fondos agregados",
+          description: amount
+            ? `Se te han agregado $${amount} USD (retenidos). Ya puedes completar el servicio.`
+            : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+        });
+      }
+      if (type === "booking_cancelled") {
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+        toast({
+          title: "Reserva cancelada",
+          description: "Un cliente canceló una reserva. Revisa tu panel de reservas.",
+          variant: "destructive",
+        });
+      }
+      if (type === "booking_schedule_changed") {
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        const dateFormatted = notification?.data?.dateFormatted ?? notification?.data?.data?.dateFormatted;
+        toast({
+          title: "Se cambió la fecha del servicio",
+          description: dateFormatted ? `Nueva fecha y hora: ${dateFormatted}. Revisa tu reserva.` : "El profesional actualizó la fecha. Revisa Mis Reservas.",
+        });
+      }
+      if (type === "booking_cost_changed") {
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        const amount = notification?.data?.amountFormatted ?? notification?.data?.data?.amountFormatted ?? notification?.data?.amount;
+        toast({
+          title: "Se actualizó el monto del servicio",
+          description: amount != null ? `El nuevo monto es $${amount} USD. Revisa tu reserva.` : "El profesional actualizó el monto. Revisa Mis Reservas.",
+        });
       }
     });
 

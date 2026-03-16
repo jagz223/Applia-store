@@ -7,7 +7,7 @@ import { useSocket } from "@/hooks/use-socket";
 import { useLocation } from "wouter";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 
-/** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificación. */
+/** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificación (con highlight para resaltar el elemento). */
 function getNotificationPath(notification: { type: string; data?: any }): string {
   const data = notification.data ?? {};
   switch (notification.type) {
@@ -16,9 +16,37 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       return convId != null ? `/chat?conversation=${encodeURIComponent(convId)}` : "/chat";
     case "booking":
       if (data.type === "new_booking") {
-        return "/professional-dashboard?tab=bookings";
+        const q = new URLSearchParams({ tab: "bookings" });
+        const bookingId = data.booking?.id ?? data.bookingId;
+        if (bookingId != null) q.set("highlight", String(bookingId));
+        return `/professional-dashboard?${q.toString()}`;
       }
       return "/bookings";
+    case "booking_confirmed_by_provider": {
+      const q = new URLSearchParams();
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) q.set("highlight", String(bookingId));
+      return q.toString() ? `/bookings?${q.toString()}` : "/bookings";
+    }
+    case "booking_confirmed_by_client": {
+      const q = new URLSearchParams({ tab: "bookings" });
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) q.set("highlight", String(bookingId));
+      return `/professional-dashboard?${q.toString()}`;
+    }
+    case "booking_cancelled": {
+      const q = new URLSearchParams({ tab: "bookings" });
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) q.set("highlight", String(bookingId));
+      return `/professional-dashboard?${q.toString()}`;
+    }
+    case "booking_schedule_changed":
+    case "booking_cost_changed": {
+      const q = new URLSearchParams();
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) q.set("highlight", String(bookingId));
+      return q.toString() ? `/bookings?${q.toString()}` : "/bookings";
+    }
     case "admin":
       if (data.type === "recharge_pending") {
         const transferId = data.data?.transferId ?? data.transferId;
@@ -46,13 +74,36 @@ export function NotificationBell() {
     const path = getNotificationPath(notification);
     setLocation(path);
     setOpen(false);
-    // Si es recarga pendiente, notificar al panel Admin para que abra Recargas y resalte la fila
     const data = notification.data ?? {};
     if (data.type === "recharge_pending") {
       const transferId = data.data?.transferId ?? data.transferId;
       window.dispatchEvent(
         new CustomEvent("admin-open-recargas", { detail: { transferId: transferId != null ? Number(transferId) : null } })
       );
+    }
+    if (notification.type === "booking_confirmed_by_client" || (notification.type === "booking" && data.type === "new_booking")) {
+      const bookingId = data.bookingId ?? data.data?.bookingId ?? data.booking?.id;
+      if (bookingId != null) {
+        window.dispatchEvent(new CustomEvent("pro-open-bookings-highlight", { detail: { bookingId: Number(bookingId) } }));
+      }
+    }
+    if (notification.type === "booking_cancelled") {
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) {
+        window.dispatchEvent(new CustomEvent("pro-open-bookings-highlight", { detail: { bookingId: Number(bookingId) } }));
+      }
+    }
+    if (notification.type === "booking_confirmed_by_provider") {
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) {
+        window.dispatchEvent(new CustomEvent("bookings-page-highlight", { detail: { bookingId: Number(bookingId) } }));
+      }
+    }
+    if (notification.type === "booking_schedule_changed" || notification.type === "booking_cost_changed") {
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) {
+        window.dispatchEvent(new CustomEvent("bookings-page-highlight", { detail: { bookingId: Number(bookingId) } }));
+      }
     }
   };
 
@@ -66,8 +117,16 @@ export function NotificationBell() {
         return <Calendar className="h-4 w-4 text-green-500" />;
       case "admin":
         return <Shield className="h-4 w-4 text-orange-500" />;
+      case "booking_confirmed_by_provider":
       case "recharge_completed":
         return <Bell className="h-4 w-4 text-green-500" />;
+      case "booking_confirmed_by_client":
+        return <Calendar className="h-4 w-4 text-green-500" />;
+      case "booking_cancelled":
+        return <Calendar className="h-4 w-4 text-red-500" />;
+      case "booking_schedule_changed":
+      case "booking_cost_changed":
+        return <Calendar className="h-4 w-4 text-amber-500" />;
       case "recharge_rejected":
         return <Bell className="h-4 w-4 text-red-500" />;
       default:
@@ -75,11 +134,34 @@ export function NotificationBell() {
     }
   };
 
+  const getDescription = (type: string, data?: { amountFormatted?: string; dateFormatted?: string; message?: string; data?: { amountFormatted?: string; dateFormatted?: string } }) => {
+    if (type === "booking_confirmed_by_client") {
+      const amount = data?.amountFormatted ?? data?.data?.amountFormatted;
+      if (amount) return `Se te han agregado $${amount} USD. Completa el servicio para liberar los fondos.`;
+    }
+    if (type === "booking_schedule_changed") {
+      const dateFormatted = data?.dateFormatted ?? data?.data?.dateFormatted;
+      if (dateFormatted) return `Nueva fecha y hora: ${dateFormatted}.`;
+      return "Se ha cambiado la fecha del servicio. Revisa tu reserva.";
+    }
+    if (type === "booking_cost_changed") {
+      const amount = data?.amountFormatted ?? data?.data?.amountFormatted;
+      if (amount) return `Nuevo monto: $${amount} USD. Revisa tu reserva.`;
+      return "Se ha actualizado el monto del servicio. Revisa tu reserva.";
+    }
+    return null;
+  };
+
   const getTitle = (type: string, data?: { type?: string }) => {
     if (type === "booking" && data?.type === "new_booking") return "Nueva reserva";
     if (type === "admin" && data?.type === "recharge_pending") return "Nueva solicitud de recarga";
     if (type === "recharge_completed") return "Recarga aprobada";
     if (type === "recharge_rejected") return "Recarga rechazada";
+    if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el profesional";
+    if (type === "booking_confirmed_by_client") return "Fondos agregados";
+    if (type === "booking_cancelled") return "Reserva cancelada";
+    if (type === "booking_schedule_changed") return "Se cambió la fecha del servicio";
+    if (type === "booking_cost_changed") return "Se actualizó el monto del servicio";
     switch (type) {
       case "message":
         return "Nuevo mensaje";
@@ -146,6 +228,11 @@ export function NotificationBell() {
                     <p className="font-medium text-sm">
                       {getTitle(notification.type, notification.data)}
                     </p>
+                    {getDescription(notification.type, notification.data) && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {getDescription(notification.type, notification.data)}
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground mt-1">
                       {notification.timestamp instanceof Date
                         ? notification.timestamp.toLocaleString()

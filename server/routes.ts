@@ -270,6 +270,36 @@ export async function registerRoutes(
     res.json(updatedBooking);
   });
 
+  /**
+   * PATCH /api/bookings/:id/schedule → actualizar fecha/hora de la reserva (GenFeb, solo profesional y pending)
+   */
+  app.patch("/api/bookings/:id/schedule", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const bookingId = Number(req.params.id);
+      if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID de reserva inválido" });
+      const body = z.object({ date: z.string().min(1, "La fecha es requerida") }).parse(req.body);
+      const date = new Date(body.date);
+      if (Number.isNaN(date.getTime())) return res.status(400).json({ message: "Fecha u hora inválida" });
+      const booking = await genFebStorage.getBooking(bookingId);
+      if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "No eres proveedor de esta reserva" });
+      const bid = booking as { providerId?: number; status?: string };
+      if (bid.providerId !== (provider as { id: number }).id) return res.status(403).json({ message: "No puedes editar esta reserva" });
+      if ((bid.status || "pending") !== "pending") {
+        return res.status(403).json({ message: "Solo puedes cambiar la fecha cuando la reserva está pendiente" });
+      }
+      const updated = await genFebStorage.updateBookingSchedule(bookingId, date);
+      if (!updated) return res.status(500).json({ message: "Error al actualizar la fecha" });
+      return res.json(updated);
+    } catch (e: any) {
+      if (e.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      throw e;
+    }
+  });
+
   /** Semillas iniciales de categorías (idempotente) */
   await catalogService.seedCategories();
 

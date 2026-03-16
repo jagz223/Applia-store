@@ -11,7 +11,8 @@ const FIRESTORE_METHODS = new Set([
   "getUserRole", "updateUserRole",
   "getCategories", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider",
   "getAllServices", "getService", "createService",
-  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus",
+  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow",
+  "getNotifications", "createNotification", "markNotificationAsRead",
 ]);
 
 export class HybridStorage implements IStorage {
@@ -47,6 +48,10 @@ export class HybridStorage implements IStorage {
   getBooking(id: number) { return this.delegate("getBooking", [id]); }
   createBooking(booking: any) { return this.delegate("createBooking", [booking]); }
   updateBookingStatus(id: number, status: string) { return this.delegate("updateBookingStatus", [id, status]); }
+  updateBookingCost(id: number, cost: number) { return this.delegate("updateBookingCost", [id, cost]); }
+  updateBookingSchedule(id: number, date: Date) { return this.delegate("updateBookingSchedule", [id, date]); }
+  confirmBookingByClient(bookingId: number) { return this.delegate("confirmBookingByClient", [bookingId]); }
+  completeBookingAndReleaseEscrow(bookingId: number) { return this.delegate("completeBookingAndReleaseEscrow", [bookingId]); }
 
   getPaymentsByUser(userId: string) { return this.memory.getPaymentsByUser(userId); }
   getEscrowPayments(userId: string) { return this.memory.getEscrowPayments(userId); }
@@ -66,9 +71,9 @@ export class HybridStorage implements IStorage {
   markConversationAsRead(conversationId: number, userId: string) { return this.memory.markConversationAsRead(conversationId, userId); }
   getFinancialReports(userId: string, period?: string) { return this.memory.getFinancialReports(userId, period); }
   getKPIs(userId: string) { return this.memory.getKPIs(userId); }
-  getNotifications(userId: string, unreadOnly?: boolean) { return this.memory.getNotifications(userId, unreadOnly); }
-  createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }) { return this.memory.createNotification(notification); }
-  markNotificationAsRead(notificationId: number) { return this.memory.markNotificationAsRead(notificationId); }
+  getNotifications(userId: string, unreadOnly?: boolean) { return this.delegate("getNotifications", [userId, unreadOnly]); }
+  createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }) { return this.delegate("createNotification", [notification]); }
+  markNotificationAsRead(notificationId: number) { return this.delegate("markNotificationAsRead", [notificationId]); }
   syncWithMango(userId: string, mangoUserId: string) { return this.memory.syncWithMango(userId, mangoUserId); }
   getMangoSyncStatus(userId: string) { return this.memory.getMangoSyncStatus(userId); }
   getReviews(params: any) { return this.memory.getReviews(params); }

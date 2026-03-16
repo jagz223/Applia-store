@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
-import { useAdminWalletTransfers, useUpdateTransferStatus } from "@/hooks/use-mango-data";
+import { useAdminWalletTransfers, useUpdateTransferStatus, useAdminManualRecharge } from "@/hooks/use-mango-data";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -65,6 +65,90 @@ const mockProviders = [
 
 type TransferStatusFilter = "" | "pending_approval" | "completed" | "rejected";
 
+type UserOption = { id: string; name: string; email: string; role?: string };
+
+function SaldoSearchResults({
+  searchSaldo,
+  roleFilterSaldo,
+  selectedIds,
+  onAdd,
+}: {
+  searchSaldo: string;
+  roleFilterSaldo: string;
+  selectedIds: Set<string>;
+  onAdd: (u: UserOption) => void;
+}) {
+  const q = searchSaldo.trim();
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin", "users", "saldo-search", q, roleFilterSaldo],
+    queryFn: async ({ queryKey }) => {
+      const searchTerm = (queryKey[3] as string) ?? "";
+      const role = (queryKey[4] as string) ?? "";
+      const token = localStorage.getItem("token");
+      const params = new URLSearchParams({ page: "1", limit: "50" });
+      if (searchTerm) params.set("search", searchTerm);
+      if (role) params.set("role", role);
+      const url = `/api/admin/users?${params.toString()}`;
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Error al buscar usuarios");
+      return res.json();
+    },
+    enabled: q.length >= 2,
+    staleTime: 0,
+  });
+  const users = (data?.users ?? []) as any[];
+  const list = users.map((u: any) => ({
+    id: u.id,
+    name: u.name ?? u.firstName ?? "",
+    email: u.email ?? "",
+    role: u.role,
+  }));
+
+  if (q.length < 2) return null;
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Buscando…
+      </div>
+    );
+  }
+  if (list.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-2">No se encontraron usuarios con ese criterio.</p>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      <p className="text-sm font-medium p-2 bg-muted/50 border-b border-border">Resultados de búsqueda</p>
+      <ul className="max-h-[220px] overflow-y-auto divide-y divide-border">
+        {list.map((u) => {
+          const added = selectedIds.has(u.id);
+          return (
+            <li key={u.id} className="flex items-center justify-between gap-2 p-2 hover:bg-muted/30">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium truncate">{u.name || u.email || u.id}</p>
+                <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant={added ? "secondary" : "default"}
+                disabled={added}
+                onClick={() => !added && onAdd(u)}
+              >
+                {added ? "Agregado" : "Agregar"}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export default function AdminPanel() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -72,7 +156,9 @@ export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== "undefined") {
       const p = new URLSearchParams(window.location.search);
-      if (p.get("tab") === "recargas") return "recargas";
+      const tab = p.get("tab");
+      if (tab === "recargas") return "recargas";
+      if (tab === "saldo") return "saldo";
     }
     return "overview";
   });
@@ -84,7 +170,9 @@ export default function AdminPanel() {
   useEffect(() => {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const q = new URLSearchParams(search);
-    if (q.get("tab") === "recargas") setActiveTab("recargas");
+    const tab = q.get("tab");
+    if (tab === "recargas") setActiveTab("recargas");
+    if (tab === "saldo") setActiveTab("saldo");
     const highlight = q.get("highlight");
     if (highlight) {
       const id = parseInt(highlight, 10);
@@ -115,6 +203,14 @@ export default function AdminPanel() {
   }, []);
   const [userFilters, setUserFilters] = useState({ role: "", name: "", email: "", lastName: "" });
   const [transferStatusFilter, setTransferStatusFilter] = useState<TransferStatusFilter>("");
+
+  // Gestión de Saldo: selector de usuarios y recarga manual
+  const [selectedUsersSaldo, setSelectedUsersSaldo] = useState<UserOption[]>([]);
+  const [searchSaldo, setSearchSaldo] = useState("");
+  const [roleFilterSaldo, setRoleFilterSaldo] = useState("");
+  const [reasonSaldo, setReasonSaldo] = useState("");
+  const [amountSaldo, setAmountSaldo] = useState("");
+  const manualRecharge = useAdminManualRecharge();
   const [transferToReview, setTransferToReview] = useState<{
     id: number;
     referenceId?: string;
@@ -280,13 +376,27 @@ export default function AdminPanel() {
         </div>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => {
+            setActiveTab(v);
+            if (typeof window !== "undefined" && window.history.replaceState) {
+              const url = new URL(window.location.href);
+              url.searchParams.set("tab", v);
+              window.history.replaceState(null, "", url.pathname + url.search);
+            }
+          }}
+        >
+          <TabsList className="mb-4 flex flex-wrap gap-1">
             <TabsTrigger value="overview">Resumen</TabsTrigger>
             <TabsTrigger value="users">Usuarios</TabsTrigger>
             <TabsTrigger value="providers">Proveedores</TabsTrigger>
             <TabsTrigger value="bookings">Reservas</TabsTrigger>
             <TabsTrigger value="recargas">Recargas</TabsTrigger>
+            <TabsTrigger value="saldo" className="gap-1.5">
+              <Wallet className="h-4 w-4" />
+              Gestión de Saldo
+            </TabsTrigger>
             <TabsTrigger value="roles">Roles</TabsTrigger>
             <TabsTrigger value="settings">Configuración</TabsTrigger>
           </TabsList>
@@ -749,6 +859,195 @@ export default function AdminPanel() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+          </TabsContent>
+
+          <TabsContent value="saldo">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Wallet className="h-5 w-5" />
+                  Gestión de Saldo
+                </CardTitle>
+                <CardDescription>
+                  Recargas manuales o bonos: corrige errores de pago o asigna créditos. Selecciona uno o varios usuarios, indica el monto y la razón. La operación queda registrada en el historial.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Seleccionar usuarios</label>
+                  <div className="flex flex-wrap gap-2">
+                    <div className="relative flex-1 min-w-[200px] max-w-md">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Buscar por nombre o correo..."
+                        value={searchSaldo}
+                        onChange={(e) => setSearchSaldo(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                    <Select value={roleFilterSaldo || "all"} onValueChange={(v) => setRoleFilterSaldo(v === "all" ? "" : v)}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Rol" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos los roles</SelectItem>
+                        <SelectItem value="client">Cliente</SelectItem>
+                        <SelectItem value="professional">Profesional</SelectItem>
+                        <SelectItem value="admin">Administrador</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!roleFilterSaldo}
+                      onClick={async () => {
+                        if (!roleFilterSaldo) return;
+                        try {
+                          const token = localStorage.getItem("token");
+                          const res = await fetch(
+                            `/api/admin/users?role=${encodeURIComponent(roleFilterSaldo)}&page=1&limit=500`,
+                            { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+                          );
+                          if (!res.ok) throw new Error("Error al cargar usuarios");
+                          const data = await res.json();
+                          const list = (data.users ?? []).map((u: any) => ({
+                            id: u.id,
+                            name: u.name ?? u.firstName ?? "",
+                            email: u.email ?? "",
+                            role: u.role,
+                          }));
+                          setSelectedUsersSaldo((prev) => {
+                            const ids = new Set(prev.map((x) => x.id));
+                            const added = list.filter((x: UserOption) => !ids.has(x.id));
+                            const next = [...prev, ...added];
+                            queueMicrotask(() => {
+                              toast({
+                                title: "Usuarios agregados",
+                                description: added.length ? `Se agregaron ${added.length} usuario(s) con rol "${roleFilterSaldo}".` : "Ya estaban todos seleccionados.",
+                              });
+                            });
+                            return next;
+                          });
+                        } catch (e: any) {
+                          toast({ title: "Error", description: e?.message ?? "No se pudieron cargar los usuarios", variant: "destructive" });
+                        }
+                      }}
+                    >
+                      Agregar todos con este rol
+                    </Button>
+                  </div>
+                  {selectedUsersSaldo.length > 0 && (
+                    <div className="flex flex-wrap gap-2 p-3 rounded-lg bg-muted/50 border border-border">
+                      {selectedUsersSaldo.map((u) => (
+                        <Badge
+                          key={u.id}
+                          variant="secondary"
+                          className="pl-2 pr-1 py-1 gap-1 font-normal"
+                        >
+                          <span className="max-w-[140px] truncate">{u.name || u.email || u.id}</span>
+                          <button
+                            type="button"
+                            className="rounded-full hover:bg-muted p-0.5"
+                            onClick={() => setSelectedUsersSaldo((prev) => prev.filter((x) => x.id !== u.id))}
+                            aria-label="Quitar"
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {searchSaldo.trim().length >= 2 && (
+                  <SaldoSearchResults
+                    searchSaldo={searchSaldo}
+                    roleFilterSaldo={roleFilterSaldo}
+                    selectedIds={new Set(selectedUsersSaldo.map((u) => u.id))}
+                    onAdd={(u) => setSelectedUsersSaldo((prev) => (prev.some((x) => x.id === u.id) ? prev : [...prev, u]))}
+                  />
+                )}
+
+                <div className="grid gap-4 sm:grid-cols-2 border-t pt-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Razón de la recarga (obligatorio)</label>
+                    <Input
+                      placeholder="Ej. Compensación por fallo técnico, Cortesía..."
+                      value={reasonSaldo}
+                      onChange={(e) => setReasonSaldo(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Monto (USD)</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={amountSaldo}
+                      onChange={(e) => setAmountSaldo(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    disabled={
+                      selectedUsersSaldo.length === 0 ||
+                      !reasonSaldo.trim() ||
+                      !amountSaldo ||
+                      Number(amountSaldo) <= 0 ||
+                      manualRecharge.isPending ||
+                      !user?.id
+                    }
+                    onClick={async () => {
+                      const amount = Number(amountSaldo);
+                      const reason = reasonSaldo.trim();
+                      if (!user?.id || selectedUsersSaldo.length === 0 || !(amount > 0)) return;
+                      let ok = 0;
+                      let err = 0;
+                      for (const u of selectedUsersSaldo) {
+                        try {
+                          await manualRecharge.mutateAsync({
+                            userId: u.id,
+                            amount,
+                            reason,
+                            fromUserId: user.id,
+                          });
+                          ok++;
+                        } catch {
+                          err++;
+                        }
+                      }
+                      if (ok) {
+                        toast({
+                          title: "Recargas procesadas",
+                          description: err ? `Se acreditaron ${ok} usuario(s). ${err} fallaron.` : `Se acreditó el saldo a ${ok} usuario(s). La operación quedó registrada.`,
+                        });
+                        setReasonSaldo("");
+                        setAmountSaldo("");
+                        setSelectedUsersSaldo([]);
+                      }
+                      if (err && ok === 0) {
+                        toast({ title: "Error", description: "No se pudo procesar ninguna recarga.", variant: "destructive" });
+                      }
+                    }}
+                  >
+                    {manualRecharge.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Procesando…
+                      </>
+                    ) : (
+                      "Procesar recarga(s)"
+                    )}
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    {selectedUsersSaldo.length} usuario(s) seleccionado(s)
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="roles">

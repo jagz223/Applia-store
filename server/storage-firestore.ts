@@ -66,6 +66,8 @@ interface User {
   wallet?: number;
   /** Sum of all service_payment transfers for this user (denormalized for reads). */
   totalEarnings?: number;
+  /** Saldo pendiente (por defecto 0). */
+  pendingBalance?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -140,23 +142,33 @@ class FirestoreStorageImpl implements IStorage {
     } as User;
   }
 
-  async getUsers(params: { role?: string; name?: string; email?: string; lastName?: string; page: number; limit: number }): Promise<{ users: User[]; total: number }> {
+  async getUsers(params: { role?: string; name?: string; email?: string; lastName?: string; search?: string; page: number; limit: number }): Promise<{ users: User[]; total: number }> {
     if (!this.db) return { users: [], total: 0 };
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.USERS).get();
     let list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as User));
-    const { role, name, email, lastName, page, limit } = params;
+    const { role, name, email, lastName, search, page, limit } = params;
     if (role?.trim()) list = list.filter(u => (u.role || "").toLowerCase() === role.trim().toLowerCase());
-    if (name?.trim()) {
-      const n = name.trim().toLowerCase();
-      list = list.filter(u => (u.name || "").toLowerCase().includes(n));
-    }
-    if (email?.trim()) {
-      const e = email.trim().toLowerCase();
-      list = list.filter(u => (u.email || "").toLowerCase().includes(e));
-    }
-    if (lastName?.trim()) {
-      const l = lastName.trim().toLowerCase();
-      list = list.filter(u => (u.lastName || "").toLowerCase().includes(l));
+    if (search?.trim()) {
+      const s = search.trim().toLowerCase();
+      list = list.filter(u => {
+        const name = (u as { name?: string }).name ?? (u as { firstName?: string }).firstName ?? "";
+        const lastName = (u as { lastName?: string }).lastName ?? "";
+        const email = (u as { email?: string }).email ?? "";
+        return name.toLowerCase().includes(s) || lastName.toLowerCase().includes(s) || email.toLowerCase().includes(s);
+      });
+    } else {
+      if (name?.trim()) {
+        const n = name.trim().toLowerCase();
+        list = list.filter(u => (u.name || "").toLowerCase().includes(n));
+      }
+      if (email?.trim()) {
+        const e = email.trim().toLowerCase();
+        list = list.filter(u => (u.email || "").toLowerCase().includes(e));
+      }
+      if (lastName?.trim()) {
+        const l = lastName.trim().toLowerCase();
+        list = list.filter(u => (u.lastName || "").toLowerCase().includes(l));
+      }
     }
     const total = list.length;
     const start = (page - 1) * limit;
@@ -181,6 +193,7 @@ class FirestoreStorageImpl implements IStorage {
       avatar: user.avatar,
       wallet: user.wallet ?? 0,
       totalEarnings: user.totalEarnings ?? 0,
+      pendingBalance: user.pendingBalance ?? 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -599,11 +612,14 @@ class FirestoreStorageImpl implements IStorage {
     const providerId = service?.provider?.id ?? (service as any)?.providerId;
     const id = await this.getNextId("bookings");
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(id.toString());
+    const costNum = (booking as { cost?: number }).cost ?? (service?.price != null ? Number(service.price) : 0);
     const newBooking = {
       id,
       ...booking,
       providerId: providerId ?? (booking as any).providerId,
       notes: booking.notes ?? null,
+      cost: costNum,
+      confirmedByClient: false,
       status: "pending",
       createdAt: new Date(),
     };
@@ -619,6 +635,135 @@ class FirestoreStorageImpl implements IStorage {
     await docRef.update({ status });
     const updated = await docRef.get();
     return { id: parseInt(updated.id), ...updated.data() } as Booking;
+  }
+
+  /**
+   * Marcar reserva como completada y liberar escrow: el monto exacto del servicio sale del
+   * saldo pendiente del cliente y entra en la wallet del profesional. Transacción ACID.
+   */
+  async completeBookingAndReleaseEscrow(bookingId: number): Promise<Booking | undefined> {
+    if (!this.db) return undefined;
+    const bookingsColl = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS);
+    const usersColl = this.db.collection(FIRESTORE_COLLECTIONS.USERS);
+    const providersColl = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS);
+
+    return this.db.runTransaction(async (t) => {
+      const bookingRef = bookingsColl.doc(bookingId.toString());
+      const bookingSnap = await t.get(bookingRef);
+      if (!bookingSnap.exists) return undefined;
+      const data = bookingSnap.data() as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean };
+      if (data.status === "completed") return { id: bookingId, ...data } as Booking;
+      if (data.confirmedByClient !== true) {
+        throw new Error("El servicio requiere confirmación previa del cliente para procesar los fondos retenidos");
+      }
+      const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
+      if (cost <= 0) throw new Error("Costo de reserva no definido");
+      const clientUserId = data.userId;
+      const providerId = data.providerId;
+      if (!clientUserId) throw new Error("Reserva sin cliente asociado");
+      if (providerId == null) throw new Error("Reserva sin profesional asociado");
+
+      const clientRef = usersColl.doc(clientUserId);
+      const clientSnap = await t.get(clientRef);
+      if (!clientSnap.exists) throw new Error("Usuario cliente no encontrado");
+      const clientData = clientSnap.data() as { pendingBalance?: number };
+      const clientPending = typeof clientData.pendingBalance === "number" ? clientData.pendingBalance : 0;
+      if (clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
+
+      const providerRef = providersColl.doc(String(providerId));
+      const providerSnap = await t.get(providerRef);
+      if (!providerSnap.exists) throw new Error("Profesional no encontrado");
+      const providerUserId = (providerSnap.data() as { userId?: string }).userId;
+      if (!providerUserId) throw new Error("Profesional sin usuario asociado");
+
+      const providerUserRef = usersColl.doc(providerUserId);
+      const providerSnap2 = await t.get(providerUserRef);
+      if (!providerSnap2.exists) throw new Error("Usuario del profesional no encontrado");
+      const providerWallet = typeof (providerSnap2.data() as { wallet?: number }).wallet === "number" ? (providerSnap2.data() as { wallet: number }).wallet : 0;
+
+      const now = new Date();
+      t.update(bookingRef, { status: "completed", completedAt: now });
+      t.update(clientRef, { pendingBalance: clientPending - cost, updatedAt: now });
+      t.update(providerUserRef, { wallet: providerWallet + cost, updatedAt: now });
+      return { id: bookingId, ...data, status: "completed" } as Booking;
+    });
+  }
+
+  async updateBookingCost(id: number, cost: number): Promise<Booking | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+    await docRef.update({ cost: Number(cost) });
+    const updated = await docRef.get();
+    return { id: parseInt(updated.id), ...updated.data() } as Booking;
+  }
+
+  async updateBookingSchedule(id: number, date: Date): Promise<Booking | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+    await docRef.update({ date });
+    const updated = await docRef.get();
+    return { id: parseInt(updated.id), ...updated.data() } as Booking;
+  }
+
+  /**
+   * Handshake/Escrow: cliente confirma pago. El monto va al saldo pendiente del cliente (no del profesional).
+   * Transacción ACID:
+   * 1) booking.status === 'confirmed'
+   * 2) client.wallet >= cost
+   * 3) Débito client.wallet -= cost
+   * 4) Crédito client.pendingBalance += cost (dinero retenido del cliente para este servicio)
+   * 5) booking.confirmedByClient = true
+   * Al completar el profesional, ese monto exacto pasará de client.pendingBalance a provider.wallet.
+   */
+  async confirmBookingByClient(bookingId: number): Promise<Booking> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const bookingsColl = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS);
+    const usersColl = this.db.collection(FIRESTORE_COLLECTIONS.USERS);
+
+    return this.db.runTransaction(async (t) => {
+      const bookingRef = bookingsColl.doc(bookingId.toString());
+      const bookingSnap = await t.get(bookingRef);
+      if (!bookingSnap.exists) throw new Error("Reserva no encontrada");
+      const bookingData = bookingSnap.data() as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean };
+      if ((bookingData.status || "pending") !== "confirmed") {
+        throw new Error("Solo puedes confirmar el pago cuando el profesional haya confirmado la reserva");
+      }
+      if (bookingData.confirmedByClient === true) {
+        throw new Error("Esta reserva ya fue confirmada por el cliente");
+      }
+      const cost = typeof bookingData.cost === "number" ? bookingData.cost : Number(bookingData.cost) || 0;
+      if (cost <= 0) throw new Error("El costo de la reserva no está definido");
+      const clientUserId = bookingData.userId;
+      if (!clientUserId) throw new Error("Reserva sin cliente asociado");
+
+      const clientRef = usersColl.doc(clientUserId);
+      const clientSnap = await t.get(clientRef);
+      if (!clientSnap.exists) throw new Error("Usuario cliente no encontrado");
+      const clientData = clientSnap.data() as { wallet?: number; pendingBalance?: number };
+      const clientWallet = typeof clientData.wallet === "number" ? clientData.wallet : 0;
+      const clientPending = typeof clientData.pendingBalance === "number" ? clientData.pendingBalance : 0;
+      if (clientWallet < cost) {
+        throw new Error("Saldo insuficiente. Recarga tu billetera para confirmar el pago.");
+      }
+
+      const now = new Date();
+      t.update(clientRef, {
+        wallet: clientWallet - cost,
+        pendingBalance: clientPending + cost,
+        updatedAt: now,
+      });
+      t.update(bookingRef, { confirmedByClient: true });
+
+      return {
+        id: bookingId,
+        ...bookingData,
+        confirmedByClient: true,
+      } as Booking;
+    });
   }
 
   // ============ PAGOS ESCROW ============
@@ -700,19 +845,28 @@ class FirestoreStorageImpl implements IStorage {
       createdAt: now,
     };
     // Solo se acredita al beneficiario (userId). fromUserId (ej. admin) nunca se descuenta.
-    const shouldUpdateWallet =
+    const shouldCreditServicePayment =
       transfer.transferType === "service_payment" && resolvedStatus === "completed";
+    const shouldCreditManualRecharge =
+      transfer.transferType === "recharge" && resolvedStatus === "completed";
     await this.db.runTransaction(async (t) => {
       const userSnap = await t.get(userRef);
       if (!userSnap.exists) throw new Error("Usuario no encontrado");
       t.set(coll.doc(id.toString()), record);
-      if (shouldUpdateWallet) {
+      if (shouldCreditServicePayment) {
         const data = userSnap.data() as User;
         const currentWallet = typeof data.wallet === "number" ? data.wallet : 0;
         const currentTotalEarnings = typeof data.totalEarnings === "number" ? data.totalEarnings : 0;
         t.update(userRef, {
           wallet: currentWallet + transfer.amount,
           totalEarnings: currentTotalEarnings + transfer.amount,
+          updatedAt: now,
+        });
+      } else if (shouldCreditManualRecharge) {
+        const data = userSnap.data() as User;
+        const currentWallet = typeof data.wallet === "number" ? data.wallet : 0;
+        t.update(userRef, {
+          wallet: currentWallet + transfer.amount,
           updatedAt: now,
         });
       }

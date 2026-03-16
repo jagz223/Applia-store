@@ -195,21 +195,31 @@ export class InMemoryStorage implements IStorage {
     return this.users.find(u => u.email === email);
   }
 
-  async getUsers(params: { role?: string; name?: string; email?: string; lastName?: string; page: number; limit: number }): Promise<{ users: any[]; total: number }> {
+  async getUsers(params: { role?: string; name?: string; email?: string; lastName?: string; search?: string; page: number; limit: number }): Promise<{ users: any[]; total: number }> {
     let list = [...this.users];
-    const { role, name, email, lastName, page, limit } = params;
+    const { role, name, email, lastName, search, page, limit } = params;
     if (role?.trim()) list = list.filter(u => (u.role || "").toLowerCase() === role.trim().toLowerCase());
-    if (name?.trim()) {
-      const n = name.trim().toLowerCase();
-      list = list.filter(u => (u.name || "").toLowerCase().includes(n));
-    }
-    if (email?.trim()) {
-      const e = email.trim().toLowerCase();
-      list = list.filter(u => (u.email || "").toLowerCase().includes(e));
-    }
-    if (lastName?.trim()) {
-      const l = lastName.trim().toLowerCase();
-      list = list.filter(u => (u.lastName || "").toLowerCase().includes(l));
+    if (search?.trim()) {
+      const s = search.trim().toLowerCase();
+      list = list.filter(u => {
+        const name = (u.name ?? (u as { firstName?: string }).firstName ?? "").toString();
+        const lastName = (u.lastName ?? "").toString();
+        const email = (u.email ?? "").toString();
+        return name.toLowerCase().includes(s) || lastName.toLowerCase().includes(s) || email.toLowerCase().includes(s);
+      });
+    } else {
+      if (name?.trim()) {
+        const n = name.trim().toLowerCase();
+        list = list.filter(u => (u.name || "").toLowerCase().includes(n));
+      }
+      if (email?.trim()) {
+        const e = email.trim().toLowerCase();
+        list = list.filter(u => (u.email || "").toLowerCase().includes(e));
+      }
+      if (lastName?.trim()) {
+        const l = lastName.trim().toLowerCase();
+        list = list.filter(u => (u.lastName || "").toLowerCase().includes(l));
+      }
     }
     const total = list.length;
     const start = (page - 1) * limit;
@@ -229,6 +239,7 @@ export class InMemoryStorage implements IStorage {
       ...user,
       wallet: user.wallet ?? 0,
       totalEarnings: user.totalEarnings ?? 0,
+      pendingBalance: user.pendingBalance ?? 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -286,7 +297,8 @@ export class InMemoryStorage implements IStorage {
   }
   
   async createBooking(booking: any): Promise<any> {
-    const newBooking = { ...booking, id: this.bookings.length + 1 };
+    const cost = typeof (booking as { cost?: number }).cost === "number" ? (booking as { cost?: number }).cost : 0;
+    const newBooking = { ...booking, id: this.bookings.length + 1, cost, confirmedByClient: false };
     this.bookings.push(newBooking);
     return newBooking;
   }
@@ -297,6 +309,75 @@ export class InMemoryStorage implements IStorage {
       booking.status = status;
     }
     return booking;
+  }
+
+  async completeBookingAndReleaseEscrow(bookingId: number): Promise<any | undefined> {
+    const booking = this.bookings.find(b => b.id === bookingId) as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean } | undefined;
+    if (!booking) return undefined;
+    if (booking.status === "completed") return booking;
+    if (booking.confirmedByClient !== true) {
+      throw new Error("El servicio requiere confirmación previa del cliente para procesar los fondos retenidos");
+    }
+    const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
+    if (cost <= 0) throw new Error("Costo de reserva no definido");
+    const client = this.users.find((u: { id?: string }) => u.id === booking.userId);
+    if (!client) throw new Error("Usuario cliente no encontrado");
+    const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
+    if (clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
+
+    const provider = this.providers.find((p: { id?: number }) => p.id === booking.providerId);
+    if (!provider) throw new Error("Profesional no encontrado");
+    const providerUserId = (provider as { userId?: string }).userId;
+    if (!providerUserId) throw new Error("Profesional sin usuario asociado");
+    const providerUser = this.users.find((u: { id?: string }) => u.id === providerUserId);
+    if (!providerUser) throw new Error("Usuario del profesional no encontrado");
+    const providerWallet = typeof (providerUser as { wallet?: number }).wallet === "number" ? (providerUser as { wallet: number }).wallet : 0;
+
+    (client as { pendingBalance: number }).pendingBalance = clientPending - cost;
+    (providerUser as { wallet: number }).wallet = providerWallet + cost;
+    (booking as { status: string }).status = "completed";
+    (booking as { completedAt?: Date }).completedAt = new Date();
+    return { ...booking, status: "completed" };
+  }
+
+  async updateBookingCost(id: number, cost: number): Promise<any | undefined> {
+    const booking = this.bookings.find(b => b.id === id);
+    if (!booking) return undefined;
+    (booking as { cost?: number }).cost = Number(cost);
+    return booking;
+  }
+
+  async updateBookingSchedule(id: number, date: Date): Promise<any | undefined> {
+    const booking = this.bookings.find(b => b.id === id);
+    if (!booking) return undefined;
+    (booking as { date?: Date }).date = date;
+    return booking;
+  }
+
+  async confirmBookingByClient(bookingId: number): Promise<any> {
+    const booking = this.bookings.find(b => b.id === bookingId) as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean } | undefined;
+    if (!booking) throw new Error("Reserva no encontrada");
+    if ((booking.status || "pending") !== "confirmed") {
+      throw new Error("Solo puedes confirmar el pago cuando el profesional haya confirmado la reserva");
+    }
+    if (booking.confirmedByClient === true) throw new Error("Esta reserva ya fue confirmada por el cliente");
+    const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
+    if (cost <= 0) throw new Error("El costo de la reserva no está definido");
+    const clientUserId = booking.userId;
+    const providerId = booking.providerId;
+    if (!clientUserId) throw new Error("Reserva sin cliente asociado");
+    if (providerId == null) throw new Error("Reserva sin profesional asociado");
+
+    const client = this.users.find((u: { id?: string }) => u.id === clientUserId);
+    if (!client) throw new Error("Usuario cliente no encontrado");
+    const clientWallet = typeof (client as { wallet?: number }).wallet === "number" ? (client as { wallet: number }).wallet : 0;
+    const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
+    if (clientWallet < cost) throw new Error("Saldo insuficiente. Recarga tu billetera para confirmar el pago.");
+
+    (client as { wallet: number }).wallet = clientWallet - cost;
+    (client as { pendingBalance: number }).pendingBalance = clientPending + cost;
+    (booking as { confirmedByClient: boolean }).confirmedByClient = true;
+    return { ...booking, confirmedByClient: true };
   }
 
   // ============== PAGOS ==============
@@ -1108,9 +1189,12 @@ export class InMemoryStorage implements IStorage {
     this.walletTransfers.push(record);
     // Solo se acredita al beneficiario (userId). fromUserId (admin) nunca se descuenta.
     const isServicePaymentCompleted = transfer.transferType === "service_payment" && resolvedStatus === "completed";
+    const isManualRechargeCompleted = transfer.transferType === "recharge" && resolvedStatus === "completed";
     if (isServicePaymentCompleted) {
       user.wallet = (typeof user.wallet === "number" ? user.wallet : 0) + transfer.amount;
       user.totalEarnings = (typeof user.totalEarnings === "number" ? user.totalEarnings : 0) + transfer.amount;
+    } else if (isManualRechargeCompleted) {
+      user.wallet = (typeof user.wallet === "number" ? user.wallet : 0) + transfer.amount;
     }
     user.updatedAt = new Date();
     return record;

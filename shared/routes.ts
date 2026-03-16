@@ -290,6 +290,7 @@ export const api = {
           200: z.object({
             wallet: z.number(),
             totalEarnings: z.number(),
+            pendingBalance: z.number(),
           }),
         },
       },

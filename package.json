@@ -17,6 +17,7 @@
     "seed:users": "tsx script/seed-users.ts",
     "seed:wallet-fields": "tsx script/seed-wallet-fields.ts",
     "seed:wallet-balance": "tsx script/seed-wallet-balance.ts",
+    "seed:pending-balance": "tsx script/seed-pending-balance.ts",
     "prod": "npm run build && npm run start"
   },
   "dependencies": {
