@@ -3,19 +3,13 @@ import { io, Socket } from "socket.io-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { fetchNotificationsFromServer } from "@/lib/notifications-api";
+import { fetchNotificationsFromServer, type ClientNotification } from "@/lib/notifications-api";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 
 const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
 const ADMIN_WITHDRAWALS_KEY = "/api/admin/withdrawals";
 
-interface Notification {
-  id: string;
-  type: string;
-  data: any;
-  timestamp: Date;
-  read: boolean;
-}
+type Notification = ClientNotification;
 
 interface SocketContextType {
   socket: Socket | null;
@@ -108,7 +102,22 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       const token = localStorage.getItem("token");
       if (token) {
         fetchNotificationsFromServer(token)
-          .then((list) => setNotifications(list))
+          .then((list) => {
+            setNotifications((prev) => {
+              const byId = new Map<string, Notification>();
+              [...prev, ...list].forEach((n) => {
+                const existing = byId.get(n.id);
+                if (!existing) {
+                  byId.set(n.id, n);
+                } else {
+                  byId.set(n.id, existing.read && !n.read ? existing : n);
+                }
+              });
+              const merged = Array.from(byId.values());
+              merged.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+              return merged;
+            });
+          })
           .catch(() => {});
       }
     });
@@ -124,16 +133,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     newSocket.on("notification", (notification: any) => {
       console.log("🔔 New notification:", notification);
-      setNotifications((prev) => [
-        {
-          id: Date.now().toString(),
+      const id = notification?.id != null ? String(notification.id) : `${notification?.type ?? "unknown"}-${notification?.data?.id ?? Date.now().toString()}`;
+      setNotifications((prev) => {
+        const base: Notification = {
+          id,
           type: notification.type,
-          data: notification,
+          data: notification.data ?? notification,
           timestamp: new Date(),
           read: false,
-        },
-        ...prev,
-      ]);
+        };
+        const withoutDup = prev.filter((n) => n.id !== base.id);
+        return [base, ...withoutDup];
+      });
       // Recarga aprobada o rechazada: actualizar wallet/movimientos y avisar al usuario
       const type = notification?.type;
       if (type === "recharge_completed" || type === "recharge_rejected") {
@@ -247,31 +258,36 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       console.log("🔔 New message notification:", notification);
-      setNotifications((prev) => [
-        {
-          id: Date.now().toString(),
+      setNotifications((prev) => {
+        const id = notification?.id != null ? String(notification.id) : `message-${notification?.conversationId ?? Date.now().toString()}`;
+        const base: Notification = {
+          id,
           type: "message",
           data: notification,
           timestamp: new Date(),
           read: false,
-        },
-        ...prev,
-      ]);
+        };
+        const withoutDup = prev.filter((n) => n.id !== base.id);
+        return [base, ...withoutDup];
+      });
     });
 
     newSocket.on("notification:booking", (notification: any) => {
       console.log("🔔 New booking notification:", notification);
-      setNotifications((prev) => [
-        {
-          id: Date.now().toString(),
+      setNotifications((prev) => {
+        const bookingId = notification?.bookingId ?? notification?.data?.bookingId ?? notification?.booking?.id;
+        const id = bookingId != null ? `booking-${bookingId}` : `booking-${Date.now().toString()}`;
+        const base: Notification = {
+          id,
           type: "booking",
           data: notification,
           timestamp: new Date(),
           read: false,
-        },
-        ...prev,
-      ]);
-      // Actualizar listas de reservas tanto del profesional como del cliente (refetch debounced para no saturar servidor)
+        };
+        const withoutDup = prev.filter((n) => n.id !== base.id);
+        return [base, ...withoutDup];
+      });
+      // Actualizar lista de reservas del profesional (refetch debounced para no saturar servidor)
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       debouncedRefetch(queryClient, ["/api/bookings/provider"]);
@@ -280,16 +296,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     newSocket.on("notification:admin", (notification: any) => {
       console.log("[recharge] Cliente recibió notification:admin:", notification);
-      setNotifications((prev) => [
-        {
-          id: Date.now().toString(),
+      setNotifications((prev) => {
+        const id = notification?.id != null ? String(notification.id) : `admin-${notification?.type ?? Date.now().toString()}`;
+        const base: Notification = {
+          id,
           type: "admin",
           data: notification,
           timestamp: new Date(),
           read: false,
-        },
-        ...prev,
-      ]);
+        };
+        const withoutDup = prev.filter((n) => n.id !== base.id);
+        return [base, ...withoutDup];
+      });
       // Si es solicitud de recarga y el usuario es admin: refrescar tabla e informar
       const isRechargePending = notification?.type === "recharge_pending";
       if (isRechargePending && userRef.current?.role === "admin") {
@@ -339,7 +357,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated]);
 
   const clearNotifications = useCallback(() => {
-    setNotifications([]);
+    setNotifications((prev) =>
+      prev.map((n) => (n.read ? n : { ...n, read: true }))
+    );
   }, []);
 
   const markNotificationAsRead = useCallback((id: string) => {
@@ -347,14 +367,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
     const numId = Number(id);
-    if (Number.isInteger(numId) && numId > 0 && numId < 1000000) {
-      const token = localStorage.getItem("token");
-      if (token) {
-        fetch(`/api/notifications/${id}/read`, {
-          method: "PATCH",
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-      }
+    if (!Number.isFinite(numId)) return;
+    const token = localStorage.getItem("token");
+    if (token) {
+      fetch(`/api/notifications/${numId}/read`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
     }
   }, []);
 

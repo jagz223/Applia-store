@@ -13,6 +13,14 @@ export class CatalogService {
     return this.storage.getCategories();
   }
 
+  async getSubcategories(categoryId: number) {
+    return this.storage.getSubcategories(categoryId);
+  }
+
+  async getSubcategoryById(id: number) {
+    return this.storage.getSubcategoryById(id);
+  }
+
   async getAllProviders(profession?: string, category?: string, categoryId?: number) {
     return this.storage.getAllProviders(profession, category, categoryId);
   }
@@ -37,8 +45,8 @@ export class CatalogService {
     return this.storage.deleteProvider(id);
   }
 
-  async getAllServices(categoryId?: number, search?: string, providerCategoryId?: number) {
-    return this.storage.getAllServices(categoryId, search, providerCategoryId);
+  async getAllServices(categoryId?: number, search?: string, providerCategoryId?: number, subcategoryId?: number) {
+    return this.storage.getAllServices(categoryId, search, providerCategoryId, subcategoryId);
   }
 
   async getService(id: number) {

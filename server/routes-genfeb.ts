@@ -257,6 +257,19 @@ export async function registerGenFebRoutes(
           throw err;
         }
         if (!booking) return res.status(404).json({ message: "Booking not found" });
+      } else if (data.status === "cancelled" && isProvider) {
+        // Si el profesional cancela y el cliente ya había confirmado el pago,
+        // se debe devolver el dinero desde pendingBalance a la wallet del cliente.
+        try {
+          booking = await storage.cancelBookingAndRefundClientEscrow(bookingId);
+        } catch (err: any) {
+          const msg = err?.message || "Error al cancelar la reserva";
+          if (msg.includes("Fondos retenidos insuficientes") || msg.includes("Costo de reserva no definido")) {
+            return res.status(400).json({ message: msg });
+          }
+          throw err;
+        }
+        if (!booking) return res.status(404).json({ message: "Booking not found" });
       } else {
         booking = await storage.updateBookingStatus(bookingId, data.status);
         if (!booking) return res.status(404).json({ message: "Booking not found" });

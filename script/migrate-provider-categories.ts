@@ -28,13 +28,20 @@ async function main() {
     if (slug && !Number.isNaN(id)) slugToId.set(slug.trim(), id);
   });
 
+  // Subcategorías legal/financial ahora pertenecen a la categoría professional
+  const professionalId = slugToId.get("professional");
+  const legacySlugToCategoryId = (slug: string): number | undefined => {
+    if (slug === "legal" || slug === "financial") return professionalId ?? undefined;
+    return slugToId.get(slug);
+  };
+
   const providersSnap = await db.collection(FIRESTORE_COLLECTIONS.PROVIDERS).get();
   let updated = 0;
   for (const doc of providersSnap.docs) {
     const data = doc.data();
     const category = (data.category as string)?.trim();
     if (!category) continue;
-    const categoryId = slugToId.get(category);
+    const categoryId = legacySlugToCategoryId(category);
     if (categoryId == null) {
       console.log("  — provider", doc.id, "category", category, "sin categoría en BD, omitido");
       continue;

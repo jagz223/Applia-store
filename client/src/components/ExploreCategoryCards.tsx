@@ -1,17 +1,32 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { CategoryIcon } from "@/components/CategoryIcon";
+import { getCategoryDisplayName } from "@shared/default-categories";
 import { motion } from "framer-motion";
+
+export interface SubcategoryItem {
+  id: number;
+  name: string;
+  slug?: string;
+}
 
 export interface ExploreCategoryCardsProps {
   /** Lista de categorías de proveedor (con id, name, icon, slug). */
   categories: Array<{ id: number | null; name: string } & { slug?: string; icon?: string }>;
+  /** Subcategorías por categoryId (ej. Servicios Profesionales -> Servicios Legales, Consultoría Financiera). */
+  subcategoriesByCategoryId?: Record<number, SubcategoryItem[]>;
   /** Disponibilidad por id de categoría (si tiene al menos un profesional). */
   availability: Record<string, boolean> | undefined;
   /** Se llama al hacer clic en una carta disponible. */
   onSelectCategory: (categoryId: number) => void;
+  /** Se llama al hacer clic en una subcategoría (categoryId, subcategoryId). */
+  onSelectSubcategory?: (categoryId: number, subcategoryId: number) => void;
 }
 
-export function ExploreCategoryCards({ categories, availability, onSelectCategory }: ExploreCategoryCardsProps) {
+export function ExploreCategoryCards({
+  categories,
+  availability,
+  onSelectCategory,
+}: ExploreCategoryCardsProps) {
   return (
     <section className="container mx-auto px-4 py-10 max-w-7xl">
       <div className="text-center mb-8">
@@ -49,7 +64,7 @@ export function ExploreCategoryCards({ categories, availability, onSelectCategor
                   >
                     <CategoryIcon name={iconName} className="w-8 h-8" />
                   </div>
-                  <h3 className="text-lg font-bold mb-1">{cat.name}</h3>
+                  <h3 className="text-lg font-bold mb-1">{getCategoryDisplayName(cat)}</h3>
                   <p className="text-sm text-muted-foreground">
                     {available ? "Disponible" : "Sin profesionales"}
                   </p>

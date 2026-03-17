@@ -419,6 +419,32 @@ export class InMemoryStorage implements IStorage {
     return { ...booking, status: "completed" };
   }
 
+  async cancelBookingAndRefundClientEscrow(bookingId: number): Promise<any | undefined> {
+    const booking = this.bookings.find(b => b.id === bookingId) as { status?: string; userId?: string; cost?: number; confirmedByClient?: boolean } | undefined;
+    if (!booking) return undefined;
+
+    // Si el cliente no confirmó el pago, solo marcar cancelado.
+    if (booking.confirmedByClient !== true) {
+      (booking as { status: string }).status = "cancelled";
+      (booking as { cancelledAt?: Date }).cancelledAt = new Date();
+      return { ...booking, status: "cancelled" };
+    }
+
+    const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
+    if (cost <= 0) throw new Error("Costo de reserva no definido");
+    const client = this.users.find((u: { id?: string }) => u.id === booking.userId);
+    if (!client) throw new Error("Usuario cliente no encontrado");
+    const clientWallet = typeof (client as { wallet?: number }).wallet === "number" ? (client as { wallet: number }).wallet : 0;
+    const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
+    if (clientPending < cost) throw new Error("Fondos retenidos insuficientes para revertir el pago al cliente");
+
+    (client as { wallet: number }).wallet = clientWallet + cost;
+    (client as { pendingBalance: number }).pendingBalance = clientPending - cost;
+    (booking as { status: string }).status = "cancelled";
+    (booking as { cancelledAt?: Date }).cancelledAt = new Date();
+    return { ...booking, status: "cancelled" };
+  }
+
   async updateBookingCost(id: number, cost: number): Promise<any | undefined> {
     const booking = this.bookings.find(b => b.id === id);
     if (!booking) return undefined;
@@ -817,6 +843,14 @@ export class InMemoryStorage implements IStorage {
     ];
   }
 
+  async getSubcategories(_categoryId: number): Promise<import("./storage-contracts").Subcategory[]> {
+    return [];
+  }
+
+  async getSubcategoryById(_id: number): Promise<import("./storage-contracts").Subcategory | undefined> {
+    return undefined;
+  }
+
   async getAllProviders(profession?: string, category?: string, categoryId?: number): Promise<Provider[]> {
     let list = this.providers;
     if (profession) {
@@ -845,6 +879,7 @@ export class InMemoryStorage implements IStorage {
       userId: insertProvider.userId,
       categoryId: (insertProvider as any).categoryId ?? null,
       category: insertProvider.category ?? null,
+      subcategoryId: (insertProvider as any).subcategoryId ?? null,
       profession: insertProvider.profession,
       bio: insertProvider.bio || "",
       yearsExperience: insertProvider.yearsExperience || 0,
@@ -878,9 +913,10 @@ export class InMemoryStorage implements IStorage {
   private providerIdCounter = 1;
 
   async getAllServices(
-    categoryId?: number,
-    search?: string,
-    _providerCategoryId?: number
+    _categoryId?: number,
+    _search?: string,
+    _providerCategoryId?: number,
+    _subcategoryId?: number
   ): Promise<ServiceWithProvider[]> {
     return [];
   }

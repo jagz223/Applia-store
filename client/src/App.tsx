@@ -7,6 +7,7 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { PushForegroundHandler } from "@/components/PushForegroundHandler";
 import { SocketProvider } from "@/hooks/use-socket";
+import { ExploreCategoryProvider } from "@/contexts/ExploreCategoryContext";
 
 // Pages
 import HomePage from "@/pages/Home";
@@ -72,15 +73,17 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <SocketProvider>
-          <PushForegroundHandler />
-          <div className="flex flex-col min-h-screen bg-background font-sans">
-            <Navigation />
-            <main className="flex-grow">
-              <Router />
-            </main>
+          <ExploreCategoryProvider>
+            <PushForegroundHandler />
+            <div className="flex flex-col min-h-screen bg-background font-sans">
+              <Navigation />
+              <main className="flex-grow">
+                <Router />
+              </main>
             <Footer />
             <Toaster />
           </div>
+          </ExploreCategoryProvider>
         </SocketProvider>
       </TooltipProvider>
     </QueryClientProvider>

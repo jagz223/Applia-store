@@ -124,4 +124,9 @@ export type InsertService = z.infer<typeof insertServiceSchema>;
 export type InsertBooking = z.infer<typeof insertBookingSchema>;
 
 export type ProviderWithUser = Provider & { user: typeof users.$inferSelect };
-export type ServiceWithProvider = Service & { provider: ProviderWithUser; category: Category };
+export type ServiceWithProvider = Service & {
+  provider: ProviderWithUser;
+  category: Category;
+  /** Subcategoría enriquecida (ej. Servicios Legales) cuando el servicio tiene subcategoryId. */
+  subcategory?: { id: number; name: string } | null;
+};
