@@ -290,7 +290,9 @@ export const api = {
           200: z.object({
             wallet: z.number(),
             totalEarnings: z.number(),
+            /** Saldo retenido por reservas confirmadas (solo relevante para cliente). */
             pendingBalance: z.number(),
+            /** Fondos en tránsito por solicitud de retiro; independiente de pendingBalance. */
             withdrawingFunds: z.number().optional().default(0),
           }),
         },

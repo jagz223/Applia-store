@@ -176,7 +176,8 @@ export interface IStorage
   updateTransferStatus(transferId: string, status: "pending_approval" | "completed" | "rejected"): Promise<any>;
   getTotalPlatformBalance(): Promise<number>;
   /**
-   * Solicitar retiro (escrow): debita wallet y acredita withdrawingFunds. Atómico.
+   * Solicitar retiro (escrow solo para retiros): debita wallet y acredita withdrawingFunds. Atómico.
+   * withdrawingFunds es el "pending balance" exclusivo de retiros; no se usa pendingBalance (este último es solo escrow de reservas del cliente).
    * Falla si wallet < amount o si withdrawingFunds > 0 (evita colisiones hasta que admin procese).
    */
   requestWithdraw(userId: string, amount: number): Promise<{ ok: true } | { ok: false; code: string; message: string }>;

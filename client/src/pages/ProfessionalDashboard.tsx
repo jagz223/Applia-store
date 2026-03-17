@@ -5,7 +5,7 @@ import {
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
-  CheckCircle2, XCircle, Banknote, Inbox, PlayCircle, History
+  CheckCircle2, XCircle, Banknote, Inbox, PlayCircle, History, UserPlus
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import {
   useWallet,
   useWithdraw,
   useWalletTransfers,
+  useCurrentProvider,
 } from "@/hooks/use-mango-data";
 import { useToast } from "@/hooks/use-toast";
 import { debouncedRefetch } from "@/lib/refetch-utils";
@@ -663,6 +664,7 @@ const DASHBOARD_TABS = ["overview", "bookings", "transactions", "analytics", "in
 
 export default function ProfessionalDashboard() {
   const { user } = useAuth();
+  const { data: providerProfile, isLoading: providerProfileLoading } = useCurrentProvider();
   const queryClient = useQueryClient();
   const { notifyBookingUpdate } = useSocketBookings();
   const { toast } = useToast();
@@ -672,6 +674,8 @@ export default function ProfessionalDashboard() {
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const { data: walletData } = useWallet({ enabled: true });
+  const isProfessionalRole = (user as { role?: string } | null)?.role === "professional";
+  const showBecomeProBanner = isProfessionalRole && !providerProfileLoading && !providerProfile;
   const withdrawMutation = useWithdraw();
   const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
   const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number"
@@ -885,6 +889,26 @@ export default function ProfessionalDashboard() {
       <EconomicReportDialog open={reportDialogOpen} onOpenChange={setReportDialogOpen} walletData={walletData} />
 
       <div className="container mx-auto max-w-full py-6 px-4 overflow-x-hidden">
+        {/* Banner: completar perfil profesional si el paso se omitió */}
+        {showBecomeProBanner && (
+          <Card className="mb-6 border-2 border-mango-orange/50 bg-mango-orange/5">
+            <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
+              <div className="text-center sm:text-left">
+                <h2 className="text-lg font-semibold text-foreground mb-1">Completa tu perfil profesional</h2>
+                <p className="text-sm text-muted-foreground">
+                  Aún no has configurado tu perfil como profesional. Completa categoría, descripción y tarifa para publicar tu servicio y recibir reservas.
+                </p>
+              </div>
+              <Button asChild className="shrink-0">
+                <Link href="/become-pro">
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Configurar como profesional
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Resumen de Actividad (estadísticas de rendimiento) */}
         <ResumenActividad />
 

@@ -634,7 +634,9 @@ export async function registerGenFebRoutes(
     }
   });
 
-  // GET /api/wallet/me - Alias para wallet del usuario autenticado
+  // GET /api/wallet/me - Wallet del usuario autenticado.
+  // pendingBalance = escrow de reservas (solo cliente: dinero retenido al confirmar una reserva).
+  // withdrawingFunds = fondos en tránsito por retiro (independiente; no es pendingBalance).
   app.get("/api/wallet/me", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id;

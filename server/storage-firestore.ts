@@ -1039,6 +1039,7 @@ class FirestoreStorageImpl implements IStorage {
         if (!bankName || !accountNumber) {
           throw new Error("MISSING_BANK_DATA");
         }
+        // withdrawingFunds = escrow solo para retiros (no es pendingBalance, que es solo escrow de reservas del cliente).
         const withdrawingFunds = typeof data.withdrawingFunds === "number" ? data.withdrawingFunds : 0;
         if (withdrawingFunds > 0) {
           throw new Error("WITHDRAW_PENDING");
@@ -1046,7 +1047,7 @@ class FirestoreStorageImpl implements IStorage {
         if (wallet < amount) {
           throw new Error("INSUFFICIENT_BALANCE");
         }
-        // Fondos en Tránsito: debitar wallet y acreditar withdrawingFunds en la misma transacción (atómico).
+        // Fondos en Tránsito (retiros): debitar wallet y acreditar withdrawingFunds en la misma transacción (atómico).
         t.update(userRef, {
           wallet: wallet - amount,
           withdrawingFunds: withdrawingFunds + amount,

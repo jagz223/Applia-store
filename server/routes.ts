@@ -88,6 +88,11 @@ export async function registerRoutes(
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.status(403).json({ message: "Solo proveedores pueden crear servicios" });
+      const allServices = await catalogService.getAllServices();
+      const existingForProvider = allServices.filter((s: { providerId: number }) => s.providerId === provider.id);
+      if (existingForProvider.length >= 1) {
+        return res.status(400).json({ message: "Solo puedes tener un servicio. Edítalo desde Mis servicios." });
+      }
       const data = createServiceBodySchema.parse(req.body);
       const resolvedCategoryId = data.categoryId ?? (provider as { categoryId?: number }).categoryId;
       if (resolvedCategoryId == null || Number.isNaN(Number(resolvedCategoryId)) || Number(resolvedCategoryId) < 1) {
@@ -198,6 +203,26 @@ export async function registerRoutes(
         hourlyRate: data.hourlyRate ?? null,
       } as any);
       await genFebStorage.updateUser(userId, { role: "professional" } as any);
+
+      // Un solo servicio por profesional: se crea desde los datos del proveedor (nombre = nombre del profesional, descripción = bio, precio = tarifa).
+      const categoryId = (provider as { categoryId?: number }).categoryId;
+      if (categoryId != null && !Number.isNaN(Number(categoryId)) && Number(categoryId) >= 1) {
+        const user = await genFebStorage.getUserById(userId);
+        const u = user as { name?: string; firstName?: string; lastName?: string } | null;
+        const serviceTitle =
+          (u?.name ?? ([u?.firstName, u?.lastName].filter(Boolean).join(" ").trim() || (provider as { profession?: string }).profession)) ||
+          (provider as { profession?: string }).profession;
+        await catalogService.createService({
+          providerId: provider.id,
+          categoryId: Number(categoryId),
+          title: serviceTitle,
+          description: (provider as { bio?: string }).bio ?? "",
+          price: (provider as { hourlyRate?: string | null }).hourlyRate ?? "0",
+          imageUrl: "",
+          isActive: true,
+        } as any);
+      }
+
       return res.status(201).json(provider);
     } catch (e: any) {
       if (e.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
