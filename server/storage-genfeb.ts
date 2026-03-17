@@ -161,7 +161,7 @@ export interface IStorage
     options?: {
       page?: number;
       limit?: number;
-      transferType?: "service_payment" | "recharge";
+      transferType?: "service_payment" | "recharge" | "withdrawal" | "payment";
       status?: "pending_approval" | "completed" | "rejected";
       description?: string;
       dateFrom?: string;
@@ -175,6 +175,43 @@ export interface IStorage
   /** Actualizar estado de una transferencia; si es recarga y pasa a completed, acredita el saldo al usuario. */
   updateTransferStatus(transferId: string, status: "pending_approval" | "completed" | "rejected"): Promise<any>;
   getTotalPlatformBalance(): Promise<number>;
+  /**
+   * Solicitar retiro (escrow solo para retiros): debita wallet y acredita withdrawingFunds. Atómico.
+   * withdrawingFunds es el "pending balance" exclusivo de retiros; no se usa pendingBalance (este último es solo escrow de reservas del cliente).
+   * Falla si wallet < amount o si withdrawingFunds > 0 (evita colisiones hasta que admin procese).
+   */
+  requestWithdraw(userId: string, amount: number): Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+  /** Lista usuarios con withdrawingFunds > 0 (solicitudes de retiro pendientes). */
+  getUsersWithPendingWithdrawals(): Promise<Array<{ id: string; name: string; lastName: string; email: string; bankName?: string; accountNumber?: string; withdrawingFunds: number }>>;
+  /**
+   * Aprobar retiro: pone withdrawingFunds en 0 y registra transferencia "Retiro Completado". Atómico.
+   * Asume que el admin ya realizó la transferencia bancaria externa.
+   */
+  processWithdrawalApproval(userId: string, adminUserId: string): Promise<{ transfer: any; user: any }>;
+  /**
+   * Rechazar retiro: devuelve el monto de withdrawingFunds al wallet del usuario. Atómico. Retorna el monto rechazado para registrar en historial.
+   */
+  processWithdrawalRejection(userId: string): Promise<{ user: any; amount: number }>;
+  /** Registrar un retiro rechazado en el historial (para listar en admin). */
+  recordWithdrawalRejection(userId: string, amount: number, adminUserId: string, bankName?: string, accountNumber?: string): Promise<void>;
+  /** Historial de retiros (pendientes, aprobados, rechazados). Paginado y filtrable por estado. */
+  getWithdrawalHistory(options: {
+    page: number;
+    limit: number;
+    status: "all" | "pending" | "approved" | "rejected";
+  }): Promise<{ items: Array<{
+    id: string;
+    userId: string;
+    userName: string;
+    userEmail: string;
+    bankName?: string;
+    accountNumber?: string;
+    amount: number;
+    status: "pending" | "approved" | "rejected";
+    processedAt: Date | null;
+    processedByAdminId?: string;
+    processedByAdminName?: string;
+  }>; total: number }>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -195,21 +232,34 @@ export class InMemoryStorage implements IStorage {
     return this.users.find(u => u.email === email);
   }
 
-  async getUsers(params: { role?: string; name?: string; email?: string; lastName?: string; page: number; limit: number }): Promise<{ users: any[]; total: number }> {
+  async getUsers(params: { role?: string; name?: string; email?: string; lastName?: string; search?: string; page: number; limit: number }): Promise<{ users: any[]; total: number }> {
     let list = [...this.users];
-    const { role, name, email, lastName, page, limit } = params;
+    const { role, name, email, lastName, search, page, limit } = params;
     if (role?.trim()) list = list.filter(u => (u.role || "").toLowerCase() === role.trim().toLowerCase());
-    if (name?.trim()) {
-      const n = name.trim().toLowerCase();
-      list = list.filter(u => (u.name || "").toLowerCase().includes(n));
-    }
-    if (email?.trim()) {
-      const e = email.trim().toLowerCase();
-      list = list.filter(u => (u.email || "").toLowerCase().includes(e));
-    }
-    if (lastName?.trim()) {
-      const l = lastName.trim().toLowerCase();
-      list = list.filter(u => (u.lastName || "").toLowerCase().includes(l));
+    if (search?.trim()) {
+      const s = search.trim().toLowerCase();
+      list = list.filter(u => {
+        const name = (u.name ?? (u as { firstName?: string }).firstName ?? "").toString();
+        const lastName = (u.lastName ?? "").toString();
+        const email = (u.email ?? "").toString();
+        return name.toLowerCase().includes(s) || lastName.toLowerCase().includes(s) || email.toLowerCase().includes(s);
+      });
+    } else {
+      if (name?.trim()) {
+        const n = name.trim().toLowerCase();
+        list = list.filter(u => {
+          const fullName = String(u.name ?? (u as { firstName?: string }).firstName ?? "");
+          return fullName.toLowerCase().includes(n);
+        });
+      }
+      if (email?.trim()) {
+        const e = email.trim().toLowerCase();
+        list = list.filter(u => (u.email || "").toLowerCase().includes(e));
+      }
+      if (lastName?.trim()) {
+        const l = lastName.trim().toLowerCase();
+        list = list.filter(u => (u.lastName || "").toLowerCase().includes(l));
+      }
     }
     const total = list.length;
     const start = (page - 1) * limit;
@@ -229,6 +279,7 @@ export class InMemoryStorage implements IStorage {
       ...user,
       wallet: user.wallet ?? 0,
       totalEarnings: user.totalEarnings ?? 0,
+      pendingBalance: user.pendingBalance ?? 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -239,10 +290,13 @@ export class InMemoryStorage implements IStorage {
   async updateUser(id: string, data: any): Promise<any | undefined> {
     const index = this.users.findIndex(u => u.id === id);
     if (index === -1) return undefined;
-    
+
+    // No permitir que actualizaciones genéricas (perfil, etc.) modifiquen campos financieros.
+    // Solo los métodos dedicados (createTransfer, requestWithdraw, confirmBookingByClient, etc.) deben alterarlos.
+    const { wallet: _w, totalEarnings: _te, pendingBalance: _pb, withdrawingFunds: _wf, ...safeData } = data;
     this.users[index] = {
       ...this.users[index],
-      ...data,
+      ...safeData,
       updatedAt: new Date(),
     };
     return this.users[index];
@@ -274,6 +328,12 @@ export class InMemoryStorage implements IStorage {
     if (status) {
       result = result.filter(b => b.status === status);
     }
+    // Ordenar por más reciente: primero por createdAt (si existe), luego por date.
+    result.sort((a, b) => {
+      const aCreated = (a as { createdAt?: Date }).createdAt ?? (a as { date?: Date }).date ?? new Date(0);
+      const bCreated = (b as { createdAt?: Date }).createdAt ?? (b as { date?: Date }).date ?? new Date(0);
+      return (bCreated as Date).getTime() - (aCreated as Date).getTime();
+    });
     return result;
   }
   
@@ -286,7 +346,8 @@ export class InMemoryStorage implements IStorage {
   }
   
   async createBooking(booking: any): Promise<any> {
-    const newBooking = { ...booking, id: this.bookings.length + 1 };
+    const cost = typeof (booking as { cost?: number }).cost === "number" ? (booking as { cost?: number }).cost : 0;
+    const newBooking = { ...booking, id: this.bookings.length + 1, cost, confirmedByClient: false };
     this.bookings.push(newBooking);
     return newBooking;
   }
@@ -297,6 +358,105 @@ export class InMemoryStorage implements IStorage {
       booking.status = status;
     }
     return booking;
+  }
+
+  async completeBookingAndReleaseEscrow(bookingId: number): Promise<any | undefined> {
+    const booking = this.bookings.find(b => b.id === bookingId) as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean } | undefined;
+    if (!booking) return undefined;
+    if (booking.status === "completed") return booking;
+    if (booking.confirmedByClient !== true) {
+      throw new Error("El servicio requiere confirmación previa del cliente para procesar los fondos retenidos");
+    }
+    const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
+    if (cost <= 0) throw new Error("Costo de reserva no definido");
+    const client = this.users.find((u: { id?: string }) => u.id === booking.userId);
+    if (!client) throw new Error("Usuario cliente no encontrado");
+    const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
+    if (clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
+
+    const provider = this.providers.find((p: { id?: number }) => p.id === booking.providerId);
+    if (!provider) throw new Error("Profesional no encontrado");
+    const providerUserId = (provider as { userId?: string }).userId;
+    if (!providerUserId) throw new Error("Profesional sin usuario asociado");
+    const providerUser = this.users.find((u: { id?: string }) => u.id === providerUserId);
+    if (!providerUser) throw new Error("Usuario del profesional no encontrado");
+    const providerWallet = typeof (providerUser as { wallet?: number }).wallet === "number" ? (providerUser as { wallet: number }).wallet : 0;
+
+    (client as { pendingBalance: number }).pendingBalance = clientPending - cost;
+    (providerUser as { wallet: number }).wallet = providerWallet + cost;
+    (booking as { status: string }).status = "completed";
+    (booking as { completedAt?: Date }).completedAt = new Date();
+
+    const now = new Date();
+    const refId = String(bookingId);
+    const clientTransferRecord = {
+      id: this.walletTransferIdCounter++,
+      userId: booking.userId,
+      fromUserId: null,
+      amount: cost,
+      transferType: "payment",
+      status: "completed",
+      description: "Pago por servicio",
+      referenceId: refId,
+      currency: "USD",
+      createdAt: now,
+    };
+    const providerTransferRecord = {
+      id: this.walletTransferIdCounter++,
+      userId: providerUserId,
+      fromUserId: null,
+      amount: cost,
+      transferType: "service_payment",
+      status: "completed",
+      description: "Pago por servicio completado",
+      referenceId: refId,
+      currency: "USD",
+      createdAt: now,
+    };
+    this.walletTransfers.push(clientTransferRecord);
+    this.walletTransfers.push(providerTransferRecord);
+
+    return { ...booking, status: "completed" };
+  }
+
+  async updateBookingCost(id: number, cost: number): Promise<any | undefined> {
+    const booking = this.bookings.find(b => b.id === id);
+    if (!booking) return undefined;
+    (booking as { cost?: number }).cost = Number(cost);
+    return booking;
+  }
+
+  async updateBookingSchedule(id: number, date: Date): Promise<any | undefined> {
+    const booking = this.bookings.find(b => b.id === id);
+    if (!booking) return undefined;
+    (booking as { date?: Date }).date = date;
+    return booking;
+  }
+
+  async confirmBookingByClient(bookingId: number): Promise<any> {
+    const booking = this.bookings.find(b => b.id === bookingId) as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean } | undefined;
+    if (!booking) throw new Error("Reserva no encontrada");
+    if ((booking.status || "pending") !== "confirmed") {
+      throw new Error("Solo puedes confirmar el pago cuando el profesional haya confirmado la reserva");
+    }
+    if (booking.confirmedByClient === true) throw new Error("Esta reserva ya fue confirmada por el cliente");
+    const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
+    if (cost <= 0) throw new Error("El costo de la reserva no está definido");
+    const clientUserId = booking.userId;
+    const providerId = booking.providerId;
+    if (!clientUserId) throw new Error("Reserva sin cliente asociado");
+    if (providerId == null) throw new Error("Reserva sin profesional asociado");
+
+    const client = this.users.find((u: { id?: string }) => u.id === clientUserId);
+    if (!client) throw new Error("Usuario cliente no encontrado");
+    const clientWallet = typeof (client as { wallet?: number }).wallet === "number" ? (client as { wallet: number }).wallet : 0;
+    const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
+    if (clientWallet < cost) throw new Error("Saldo insuficiente. Recarga tu billetera para confirmar el pago.");
+
+    (client as { wallet: number }).wallet = clientWallet - cost;
+    (client as { pendingBalance: number }).pendingBalance = clientPending + cost;
+    (booking as { confirmedByClient: boolean }).confirmedByClient = true;
+    return { ...booking, confirmedByClient: true };
   }
 
   // ============== PAGOS ==============
@@ -1108,9 +1268,12 @@ export class InMemoryStorage implements IStorage {
     this.walletTransfers.push(record);
     // Solo se acredita al beneficiario (userId). fromUserId (admin) nunca se descuenta.
     const isServicePaymentCompleted = transfer.transferType === "service_payment" && resolvedStatus === "completed";
+    const isManualRechargeCompleted = transfer.transferType === "recharge" && resolvedStatus === "completed";
     if (isServicePaymentCompleted) {
       user.wallet = (typeof user.wallet === "number" ? user.wallet : 0) + transfer.amount;
       user.totalEarnings = (typeof user.totalEarnings === "number" ? user.totalEarnings : 0) + transfer.amount;
+    } else if (isManualRechargeCompleted) {
+      user.wallet = (typeof user.wallet === "number" ? user.wallet : 0) + transfer.amount;
     }
     user.updatedAt = new Date();
     return record;
@@ -1121,7 +1284,7 @@ export class InMemoryStorage implements IStorage {
     options?: {
       page?: number;
       limit?: number;
-      transferType?: "service_payment" | "recharge";
+      transferType?: "service_payment" | "recharge" | "withdrawal" | "payment";
       status?: "pending_approval" | "completed" | "rejected";
       description?: string;
       dateFrom?: string;
@@ -1187,6 +1350,255 @@ export class InMemoryStorage implements IStorage {
 
   async getTotalPlatformBalance(): Promise<number> {
     return this.users.reduce((sum: number, u: any) => sum + (typeof u.wallet === "number" ? u.wallet : 0), 0);
+  }
+
+  /**
+   * Fondos en Tránsito (escrow): debita wallet y acredita withdrawingFunds de forma atómica (en memoria es secuencial).
+   * El monto en withdrawingFunds no puede ser movido por el usuario hasta que admin apruebe o rechace.
+   */
+  async requestWithdraw(
+    userId: string,
+    amount: number
+  ): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { ok: false, code: "invalid_amount", message: "El monto debe ser mayor a cero" };
+    }
+    const user = this.users.find((u: any) => u.id === userId);
+    if (!user) return { ok: false, code: "user_not_found", message: "Usuario no encontrado" };
+    const bankName = typeof user.bankName === "string" ? user.bankName.trim() : "";
+    const accountNumber = typeof user.accountNumber === "string" ? user.accountNumber.trim() : "";
+    if (!bankName || !accountNumber) {
+      return { ok: false, code: "missing_bank_data", message: "Complete los datos bancarios (banco y número de cuenta) en su perfil." };
+    }
+    const wallet = typeof user.wallet === "number" ? user.wallet : 0;
+    const withdrawingFunds = typeof user.withdrawingFunds === "number" ? user.withdrawingFunds : 0;
+    if (withdrawingFunds > 0) {
+      return { ok: false, code: "withdraw_pending", message: "Ya existe un retiro en proceso. Espere a que el administrador lo procese." };
+    }
+    if (wallet < amount) {
+      return { ok: false, code: "insufficient_balance", message: "Saldo insuficiente" };
+    }
+    user.wallet = wallet - amount;
+    user.withdrawingFunds = withdrawingFunds + amount;
+    user.updatedAt = new Date();
+    return { ok: true };
+  }
+
+  async getUsersWithPendingWithdrawals(): Promise<
+    Array<{ id: string; name: string; lastName: string; email: string; bankName?: string; accountNumber?: string; withdrawingFunds: number }>
+  > {
+    return this.users
+      .filter((u: any) => (typeof u.withdrawingFunds === "number" ? u.withdrawingFunds : 0) > 0)
+      .map((u: any) => ({
+        id: u.id,
+        name: u.name ?? u.firstName ?? "",
+        lastName: u.lastName ?? "",
+        email: u.email ?? "",
+        bankName: u.bankName,
+        accountNumber: u.accountNumber,
+        withdrawingFunds: typeof u.withdrawingFunds === "number" ? u.withdrawingFunds : 0,
+      }));
+  }
+
+  /**
+   * Liquidación (aprobación): withdrawingFunds se setea a 0 y se registra un movimiento en historial con status completed.
+   * El monto NO se transfiere a ninguna cuenta de administrador: la deuda se saldó por transferencia bancaria externa manual.
+   */
+  async processWithdrawalApproval(userId: string, adminUserId: string): Promise<{ transfer: any; user: any }> {
+    const user = this.users.find((u: any) => u.id === userId);
+    if (!user) throw new Error("Usuario no encontrado");
+    const withdrawingFunds = typeof user.withdrawingFunds === "number" ? user.withdrawingFunds : 0;
+    if (withdrawingFunds <= 0) throw new Error("No hay retiro pendiente");
+    const id = this.walletTransferIdCounter++;
+    const bankName = typeof user.bankName === "string" ? user.bankName : undefined;
+    const accountNumber = typeof user.accountNumber === "string" ? user.accountNumber : undefined;
+    const record = {
+      id,
+      userId,
+      fromUserId: adminUserId,
+      amount: withdrawingFunds,
+      transferType: "withdrawal",
+      status: "completed",
+      description: "Retiro Completado",
+      referenceId: null,
+      currency: "USD",
+      createdAt: new Date(),
+      bankName,
+      accountNumber,
+    };
+    this.walletTransfers.push(record);
+    user.withdrawingFunds = 0;
+    user.updatedAt = new Date();
+    return { transfer: record, user: { ...user } };
+  }
+
+  /**
+   * Rollback (rechazo): el valor de withdrawingFunds regresa íntegramente al wallet del profesional; luego withdrawingFunds = 0.
+   */
+  async processWithdrawalRejection(userId: string): Promise<{ user: any; amount: number }> {
+    const user = this.users.find((u: any) => u.id === userId);
+    if (!user) throw new Error("Usuario no encontrado");
+    const withdrawingFunds = typeof user.withdrawingFunds === "number" ? user.withdrawingFunds : 0;
+    if (withdrawingFunds <= 0) throw new Error("No hay retiro pendiente");
+    const wallet = typeof user.wallet === "number" ? user.wallet : 0;
+    user.wallet = wallet + withdrawingFunds;
+    user.withdrawingFunds = 0;
+    user.updatedAt = new Date();
+    return { user: { ...user }, amount: withdrawingFunds };
+  }
+
+  private withdrawalRejections: Array<{
+    id: number;
+    userId: string;
+    amount: number;
+    rejectedAt: Date;
+    rejectedByUserId: string;
+    bankName?: string;
+    accountNumber?: string;
+  }> = [];
+  private withdrawalRejectionIdCounter = 1;
+
+  async recordWithdrawalRejection(
+    userId: string,
+    amount: number,
+    adminUserId: string,
+    bankName?: string,
+    accountNumber?: string
+  ): Promise<void> {
+    this.withdrawalRejections.push({
+      id: this.withdrawalRejectionIdCounter++,
+      userId,
+      amount,
+      rejectedAt: new Date(),
+      rejectedByUserId: adminUserId,
+      bankName,
+      accountNumber,
+    });
+  }
+
+  async getWithdrawalHistory(options: {
+    page: number;
+    limit: number;
+    status: "all" | "pending" | "approved" | "rejected";
+  }): Promise<{
+    items: Array<{
+      id: string;
+      userId: string;
+      userName: string;
+      userEmail: string;
+      bankName?: string;
+      accountNumber?: string;
+      amount: number;
+      status: "pending" | "approved" | "rejected";
+      processedAt: Date | null;
+      processedByAdminId?: string;
+      processedByAdminName?: string;
+    }>;
+    total: number;
+  }> {
+    const pendingUsers = await this.getUsersWithPendingWithdrawals();
+    const pending = pendingUsers.map((u) => ({
+      id: `pending-${u.id}`,
+      userId: u.id,
+      amount: u.withdrawingFunds,
+      status: "pending" as const,
+      processedAt: null as Date | null,
+      processedByAdminId: undefined as string | undefined,
+      bankName: u.bankName,
+      accountNumber: u.accountNumber,
+      userName: [u.name, u.lastName].filter(Boolean).join(" ") || u.email || "—",
+      userEmail: u.email ?? "—",
+    }));
+    const approved = this.walletTransfers
+      .filter((t: any) => t.transferType === "withdrawal" && t.status === "completed")
+      .map((t: any) => ({
+        id: `approval-${t.id}`,
+        userId: t.userId,
+        amount: t.amount,
+        status: "approved" as const,
+        processedAt: t.createdAt as Date,
+        processedByAdminId: t.fromUserId,
+        bankName: t.bankName,
+        accountNumber: t.accountNumber,
+      }));
+    const rejected = this.withdrawalRejections.map((r: any) => ({
+      id: `rejection-${r.id}`,
+      userId: r.userId,
+      amount: r.amount,
+      status: "rejected" as const,
+      processedAt: r.rejectedAt as Date,
+      processedByAdminId: r.rejectedByUserId,
+      bankName: r.bankName,
+      accountNumber: r.accountNumber,
+    }));
+    const sortByDate = (a: { processedAt: Date | null }, b: { processedAt: Date | null }) => {
+      if (!a.processedAt) return -1;
+      if (!b.processedAt) return 1;
+      return new Date(b.processedAt).getTime() - new Date(a.processedAt).getTime();
+    };
+    let list: Array<{
+      id: string;
+      userId: string;
+      amount: number;
+      status: "pending" | "approved" | "rejected";
+      processedAt: Date | null;
+      processedByAdminId?: string;
+      bankName?: string;
+      accountNumber?: string;
+      userName?: string;
+      userEmail?: string;
+    }> = [];
+    if (options.status === "pending") list = pending;
+    else if (options.status === "approved") list = approved.sort(sortByDate);
+    else if (options.status === "rejected") list = rejected.sort(sortByDate);
+    else list = [...pending, ...approved.sort(sortByDate), ...rejected.sort(sortByDate)];
+    const total = list.length;
+    const page = Math.max(1, options.page);
+    const limit = Math.min(50, Math.max(1, options.limit));
+    const start = (page - 1) * limit;
+    const slice = list.slice(start, start + limit);
+    const items = await Promise.all(
+      slice.map(async (row) => {
+        if (row.status === "pending" && row.userName != null && row.userEmail != null) {
+          return {
+            id: row.id,
+            userId: row.userId,
+            userName: row.userName,
+            userEmail: row.userEmail,
+            bankName: row.bankName,
+            accountNumber: row.accountNumber,
+            amount: row.amount,
+            status: row.status,
+            processedAt: null as Date | null,
+            processedByAdminId: undefined as string | undefined,
+            processedByAdminName: undefined as string | undefined,
+          };
+        }
+        const user = this.users.find((u: any) => u.id === row.userId);
+        const admin = row.processedByAdminId ? this.users.find((u: any) => u.id === row.processedByAdminId) : null;
+        const userName = user
+          ? ([user.name, (user as any).firstName, (user as any).lastName].filter(Boolean).join(" ") || (user as any).email || "—")
+          : "—";
+        const userEmail = (user as any)?.email ?? "—";
+        const adminName = admin
+          ? ([(admin as any).name, (admin as any).firstName, (admin as any).lastName].filter(Boolean).join(" ") || (admin as any).email || "—")
+          : "—";
+        return {
+          id: row.id,
+          userId: row.userId,
+          userName,
+          userEmail,
+          bankName: row.bankName,
+          accountNumber: row.accountNumber,
+          amount: row.amount,
+          status: row.status,
+          processedAt: row.processedAt,
+          processedByAdminId: row.processedByAdminId,
+          processedByAdminName: adminName,
+        };
+      })
+    );
+    return { items, total };
   }
 
   // ==================== RESEÑAS (MOCK) ====================

@@ -55,6 +55,9 @@ import {
 import { useState } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
 
+/** Oculta los enlaces/botones "Crear servicio" sin eliminar el código. Cambiar a true para mostrar de nuevo. */
+const SHOW_CREATE_SERVICE = false;
+
 export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth();
   const showBecomePro = useShowBecomePro();
@@ -74,6 +77,9 @@ export function Navigation() {
 
   /** Mostrar opciones de profesional si tiene perfil de proveedor o rol professional (por si el perfil no carga). */
   const isProfessional = !!providerProfile || (user as { role?: string } | null)?.role === "professional";
+  /** Panel "Mis servicios" visible solo si tiene al menos un servicio activo (condición distinta a Crear servicio). */
+  const activeServices = myServices.filter((s) => s.isActive !== false);
+  const hasActiveServices = activeServices.length > 0;
 
   const NavLinks = () => (
     <>
@@ -102,7 +108,7 @@ export function Navigation() {
               <span>Reservas</span>
             </Link>
           </DropdownMenuItem>
-          {isProfessional && (
+          {SHOW_CREATE_SERVICE && isProfessional && (
             <DropdownMenuItem>
               <Link href="/create-service" className="flex items-center gap-2 w-full">
                 <PlusCircle className="h-4 w-4" />
@@ -110,15 +116,11 @@ export function Navigation() {
               </Link>
             </DropdownMenuItem>
           )}
-          {isProfessional && (
+          {isProfessional && !myServicesLoading && hasActiveServices && (
             <DropdownMenuItem
-              disabled={myServicesLoading || myServices.length === 0}
-              className={myServices.length === 0 ? "opacity-50 cursor-not-allowed" : ""}
               onSelect={(e) => {
-                if (myServices.length > 0) {
-                  e.preventDefault();
-                  setMyServicesOpen(true);
-                }
+                e.preventDefault();
+                setMyServicesOpen(true);
               }}
             >
               <List className="h-4 w-4" />
@@ -360,14 +362,12 @@ export function Navigation() {
                     <Link href="/professional-dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Panel profesional
                     </Link>
-                    <Link href="/create-service" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                      Crear servicio
-                    </Link>
-                    {myServicesLoading || myServices.length === 0 ? (
-                      <span className="text-lg font-medium text-muted-foreground opacity-50 cursor-not-allowed">
-                        Mis servicios
-                      </span>
-                    ) : (
+                    {SHOW_CREATE_SERVICE && (
+                      <Link href="/create-service" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                        Crear servicio
+                      </Link>
+                    )}
+                    {!myServicesLoading && hasActiveServices && (
                       <button
                         type="button"
                         className="text-lg font-medium text-left w-full hover:text-primary transition-colors"
@@ -452,12 +452,14 @@ export function Navigation() {
               </div>
               <p className="text-base font-medium text-foreground mb-1">Aún no has creado servicios</p>
               <p className="text-sm text-muted-foreground mb-6 max-w-[260px]">¡Empieza ahora y publica tu primer servicio para que los clientes puedan reservarlo!</p>
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" asChild>
-                <Link href="/create-service" onClick={() => setMyServicesOpen(false)}>
-                  <PlusCircle className="h-4 w-4 mr-2" />
-                  Crear servicio
-                </Link>
-              </Button>
+              {SHOW_CREATE_SERVICE && (
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" asChild>
+                  <Link href="/create-service" onClick={() => setMyServicesOpen(false)}>
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    Crear servicio
+                  </Link>
+                </Button>
+              )}
             </div>
           ) : (
             <TooltipProvider delayDuration={300}>

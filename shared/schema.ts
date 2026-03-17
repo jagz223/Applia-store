@@ -51,6 +51,10 @@ export const bookings = pgTable("bookings", {
   date: timestamp("date").notNull(),
   status: text("status").notNull().default("pending"), // pending, confirmed, completed, cancelled
   notes: text("notes"),
+  /** Costo numérico de la reserva/servicio. */
+  cost: decimal("cost", { precision: 10, scale: 2 }),
+  /** Handshake: el cliente confirma el pago (escrow); completed es inalcanzable si es false. */
+  confirmedByClient: boolean("confirmed_by_client").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

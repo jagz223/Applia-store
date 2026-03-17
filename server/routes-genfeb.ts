@@ -73,20 +73,22 @@ export async function registerGenFebRoutes(
   
   // ---------- RESERVAS (BOOKINGS) ----------
   
-  // GET /api/bookings - Listar reservas del usuario
+  // GET /api/bookings - Listar reservas del usuario (cliente)
   app.get("/api/bookings", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.user?.id;
+      const rawId = req.user?.id;
+      const userId = rawId != null ? String(rawId) : undefined;
       const status = req.query.status as string | undefined;
-      
+
       if (!userId) {
         return res.status(401).json({ message: "Unauthorized" });
       }
-      
+
       const bookings = await storage.getBookingsByUser(userId, status);
-      res.json(bookings);
-    } catch (error) {
-      console.error("Error fetching bookings:", error);
+      const list = Array.isArray(bookings) ? bookings : [];
+      res.json(list);
+    } catch (error: any) {
+      console.error("Error fetching bookings:", error?.stack ?? error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -143,6 +145,23 @@ export async function registerGenFebRoutes(
         status: "pending",
         providerId: Number(providerId),
       });
+      const provider = await storage.getProvider(Number(providerId));
+      const providerUserId = provider ? (provider as { userId?: string }).userId : undefined;
+      if (providerUserId) {
+        await storage.createNotification({
+          userId: providerUserId,
+          type: "booking",
+          data: { type: "new_booking", booking: { id: (booking as { id: number }).id, serviceId: data.serviceId, date, status: "pending", userId } },
+        });
+        const io = getIO();
+        if (io) {
+          io.to(`user:${providerUserId}`).emit("notification:booking", {
+            type: "new_booking",
+            booking: { id: (booking as { id: number }).id, serviceId: data.serviceId, date, status: "pending", userId },
+            timestamp: new Date(),
+          });
+        }
+      }
       res.status(201).json(booking);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -153,38 +172,329 @@ export async function registerGenFebRoutes(
     }
   });
   
-  // GET /api/bookings/:id - Obtener reserva por ID
+  // GET /api/bookings/:id - Obtener reserva por ID (incluye serviceTitle para contexto de chat)
   app.get("/api/bookings/:id", async (req, res) => {
     try {
       const booking = await storage.getBooking(Number(req.params.id));
-      
-      if (!booking) {
-        return res.status(404).json({ message: "Booking not found" });
+      if (!booking) return res.status(404).json({ message: "Booking not found" });
+      const b = booking as { serviceId?: number };
+      let serviceTitle: string | undefined;
+      if (b.serviceId != null) {
+        const service = await storage.getService(b.serviceId);
+        serviceTitle = service?.title;
       }
-      
-      res.json(booking);
+      res.json({ ...booking, serviceTitle });
     } catch (error) {
       console.error("Error fetching booking:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
   
-  // PATCH /api/bookings/:id/status - Actualizar estado de reserva
-  app.patch("/api/bookings/:id/status", authenticateJWT, async (req, res) => {
+  // PATCH /api/bookings/:id/status - Actualizar estado de reserva (cliente solo puede cancelar; profesional con restricciones)
+  app.patch("/api/bookings/:id/status", authenticateJWT, async (req: any, res) => {
     try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const data = updateBookingStatusSchema.parse(req.body);
-      const booking = await storage.updateBookingStatus(Number(req.params.id), data.status);
-      
-      if (!booking) {
-        return res.status(404).json({ message: "Booking not found" });
+      const bookingId = Number(req.params.id);
+      const currentBooking = await storage.getBooking(bookingId);
+      if (!currentBooking) return res.status(404).json({ message: "Booking not found" });
+
+      const bid = currentBooking as { userId?: string; providerId?: number; confirmedByClient?: boolean; cost?: number };
+      const isClient = bid.userId === userId;
+      const provider = await storage.getProviderByUserId(userId);
+      const isProvider = provider != null && (provider as { id?: number }).id === bid.providerId;
+
+      // Solo el cliente o el profesional de la reserva pueden cambiar el estado
+      if (!isClient && !isProvider) {
+        return res.status(403).json({ message: "No tienes permiso para cambiar el estado de esta reserva" });
       }
-      
+
+      // Cliente solo puede cancelar (pasar a 'cancelled')
+      if (isClient) {
+        if (data.status !== "cancelled") {
+          return res.status(403).json({ message: "Solo puedes cancelar la reserva. Para confirmar el pago usa el botón Confirmar pago." });
+        }
+      } else {
+        // Es el profesional
+        // FSM Guard: 'in_progress' inalcanzable si confirmedByClient es false
+        if (data.status === "in_progress") {
+          if (bid.confirmedByClient !== true) {
+            return res.status(403).json({
+              message: "Debes esperar a que el cliente confirme el pago antes de marcar como En proceso.",
+            });
+          }
+        }
+        // FSM Guard: completed es inalcanzable si confirmedByClient es false
+        if (data.status === "completed") {
+          if (bid.confirmedByClient !== true) {
+            return res.status(403).json({
+              message: "El servicio requiere confirmación previa del cliente para procesar los fondos retenidos",
+            });
+          }
+        }
+        // No permitir confirmar la reserva si el profesional no ha asignado un costo
+        if (data.status === "confirmed") {
+          const cost = bid.cost;
+          const costNum = typeof cost === "number" ? cost : Number(cost);
+          if (!Number.isFinite(costNum) || costNum <= 0) {
+            return res.status(400).json({
+              message: "Debes asignar un costo a la reserva antes de confirmarla. Edita el monto en Solicitudes pendientes y guárdalo.",
+            });
+          }
+        }
+      }
+
+      let booking: any;
+      if (data.status === "completed" && isProvider) {
+        try {
+          booking = await storage.completeBookingAndReleaseEscrow(bookingId);
+        } catch (err: any) {
+          const msg = err?.message || "Error al completar la reserva";
+          if (msg.includes("confirmación previa") || msg.includes("Costo") || msg.includes("Fondos en espera")) {
+            return res.status(400).json({ message: msg });
+          }
+          throw err;
+        }
+        if (!booking) return res.status(404).json({ message: "Booking not found" });
+      } else {
+        booking = await storage.updateBookingStatus(bookingId, data.status);
+        if (!booking) return res.status(404).json({ message: "Booking not found" });
+      }
+
+      // Notificación al profesional cuando el cliente cancela la reserva (persistida + tiempo real + push)
+      if (data.status === "cancelled" && isClient) {
+        const providerId = (currentBooking as { providerId?: number }).providerId;
+        const provider = providerId != null ? await storage.getProvider(providerId) : undefined;
+        const providerUserId = provider != null ? String((provider as { userId?: string }).userId ?? "") : "";
+        if (providerUserId) {
+          const notifData = { bookingId, message: "El cliente canceló la reserva." };
+          try {
+            await storage.createNotification({
+              userId: providerUserId,
+              type: "booking_cancelled",
+              data: notifData,
+            });
+          } catch (err) {
+            console.error("[booking-cancelled] Error persistiendo notificación para el profesional:", err);
+          }
+          const io = getIO();
+          if (io) {
+            sendNotificationToUser(io, providerUserId, { type: "booking_cancelled", data: notifData });
+          }
+          void notificationService.sendPushToUser(providerUserId, {
+            title: "Reserva cancelada",
+            body: "Un cliente canceló una reserva. Revisa tus reservas para ver el detalle.",
+            data: { url: "/professional-dashboard?tab=bookings", type: "booking_cancelled", bookingId: String(bookingId) },
+          });
+        }
+      }
+
+      // Notificación al cliente cuando el profesional confirma la reserva (persistida para que sobreviva al refresh)
+      if (data.status === "confirmed") {
+        const clientUserId = (currentBooking ?? booking) as { userId?: string };
+        const uid = clientUserId.userId;
+        if (uid) {
+          await storage.createNotification({
+            userId: uid,
+            type: "booking_confirmed_by_provider",
+            data: { bookingId, message: "Confirma el pago para retener los fondos." },
+          });
+          const io = getIO();
+          if (io) {
+            sendNotificationToUser(io, uid, {
+              type: "booking_confirmed_by_provider",
+              data: { bookingId, message: "Confirma el pago para retener los fondos." },
+            });
+          }
+          void notificationService.sendPushToUser(uid, {
+            title: "Reserva confirmada por el profesional",
+            body: "Confirma el pago en Mis Reservas para retener los fondos y que el profesional pueda completar el trabajo.",
+            data: { url: "/bookings", type: "booking_confirmed_by_provider", bookingId: String(bookingId) },
+          });
+        }
+      }
+
       res.json(booking);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation error", errors: error.errors });
       }
       console.error("Error updating booking:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/bookings/:id/confirm-client - Cliente confirma pago (handshake/escrow); transacción ACID
+  app.post("/api/bookings/:id/confirm-client", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const bookingId = Number(req.params.id);
+      if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID de reserva inválido" });
+
+      const existing = await storage.getBooking(bookingId);
+      if (!existing) return res.status(404).json({ message: "Reserva no encontrada" });
+      const bid = existing as { userId?: string; providerId?: number };
+      if (bid.userId !== userId) return res.status(403).json({ message: "Solo el cliente de la reserva puede confirmar el pago" });
+
+      const updated = await storage.confirmBookingByClient(bookingId);
+      const cost = typeof (updated as { cost?: number }).cost === "number" ? (updated as { cost: number }).cost : Number((updated as { cost?: unknown }).cost) || 0;
+      const amountFormatted = cost > 0 ? cost.toFixed(2) : "";
+
+      // Notificación al profesional: fondos agregados (retenidos a su favor) + cliente confirmó el pago
+      const provider = bid.providerId != null ? await storage.getProvider(bid.providerId) : undefined;
+      const providerUserId = provider != null ? String((provider as { userId?: string }).userId ?? "") : "";
+      if (providerUserId) {
+        const notifData = {
+          bookingId,
+          amount: cost,
+          amountFormatted,
+          message: amountFormatted
+            ? `Se te han agregado $${amountFormatted} USD (retenidos). El cliente confirmó el pago. Ya puedes completar el servicio.`
+            : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+        };
+        try {
+          await storage.createNotification({
+            userId: providerUserId,
+            type: "booking_confirmed_by_client",
+            data: notifData,
+          });
+        } catch (err) {
+          console.error("[confirm-client] Error persistiendo notificación para el profesional:", err);
+        }
+        const io = getIO();
+        if (io) {
+          sendNotificationToUser(io, providerUserId, {
+            type: "booking_confirmed_by_client",
+            data: notifData,
+          });
+        }
+        void notificationService.sendPushToUser(providerUserId, {
+          title: "Fondos agregados",
+          body: amountFormatted
+            ? `Se han retenido $${amountFormatted} USD a tu favor. El cliente confirmó el pago. Ya puedes completar el servicio.`
+            : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+          data: { url: "/professional-dashboard?tab=bookings", type: "booking_confirmed_by_client", bookingId: String(bookingId) },
+        });
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      const msg = error?.message || "Error al confirmar el pago";
+      if (msg.includes("Saldo insuficiente")) return res.status(400).json({ message: msg });
+      if (msg.includes("ya fue confirmada") || msg.includes("confirmar el pago cuando")) return res.status(400).json({ message: msg });
+      if (msg.includes("no encontrada")) return res.status(400).json({ message: msg });
+      if (msg.includes("no está definido")) {
+        return res.status(400).json({
+          message: "El profesional aún no ha definido el costo de esta reserva. Por favor espera a que asigne el monto desde su panel.",
+        });
+      }
+      console.error("Error confirm-client:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/bookings/:id/cost - Actualizar costo de la reserva (solo profesional, solo si estado es 'pending')
+  const updateBookingCostSchema = z.object({ cost: z.number().min(0, "El costo debe ser mayor o igual a 0") });
+  app.patch("/api/bookings/:id/cost", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const bookingId = Number(req.params.id);
+      if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID de reserva inválido" });
+      const body = updateBookingCostSchema.parse(req.body);
+      const booking = await storage.getBooking(bookingId);
+      if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
+      const provider = await storage.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "No eres proveedor de esta reserva" });
+      const bid = booking as { providerId?: number; status?: string };
+      if (bid.providerId !== provider.id) return res.status(403).json({ message: "No puedes editar esta reserva" });
+      if ((bid.status || "pending") !== "pending") {
+        return res.status(403).json({ message: "Solo puedes editar el costo cuando la reserva está pendiente" });
+      }
+      const updated = await storage.updateBookingCost(bookingId, body.cost);
+      if (!updated) return res.status(500).json({ message: "Error al actualizar el costo" });
+      const clientUserId = (booking as { userId?: string }).userId;
+      const amountFormatted = typeof body.cost === "number" ? body.cost.toFixed(2) : String(body.cost);
+      if (clientUserId) {
+        const notifData = { bookingId, amount: body.cost, amountFormatted };
+        try {
+          await storage.createNotification({
+            userId: clientUserId,
+            type: "booking_cost_changed",
+            data: notifData,
+          });
+          const io = getIO();
+          if (io) sendNotificationToUser(io, clientUserId, { type: "booking_cost_changed", data: notifData });
+          void notificationService.sendPushToUser(clientUserId, {
+            title: "Se actualizó el monto del servicio",
+            body: `El profesional cambió el monto a $${amountFormatted} USD. Revisa tu reserva.`,
+            data: { url: `/bookings?highlight=${bookingId}`, type: "booking_cost_changed", bookingId: String(bookingId) },
+          }).catch((err: Error) => console.error("[push] Error notificando cambio de monto:", err));
+        } catch (e) {
+          console.error("Error creando notificación de cambio de monto:", e);
+        }
+      }
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Validation error", errors: error.errors });
+      }
+      console.error("Error updating booking cost:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/bookings/:id/schedule - Actualizar fecha/hora de la reserva (solo profesional, solo si estado es 'pending')
+  const updateBookingScheduleSchema = z.object({ date: z.string().min(1, "La fecha es requerida") });
+  app.patch("/api/bookings/:id/schedule", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const bookingId = Number(req.params.id);
+      if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID de reserva inválido" });
+      const body = updateBookingScheduleSchema.parse(req.body);
+      const date = new Date(body.date);
+      if (Number.isNaN(date.getTime())) return res.status(400).json({ message: "Fecha u hora inválida" });
+      const booking = await storage.getBooking(bookingId);
+      if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
+      const provider = await storage.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "No eres proveedor de esta reserva" });
+      const bid = booking as { providerId?: number; status?: string };
+      if (bid.providerId !== (provider as { id: number }).id) return res.status(403).json({ message: "No puedes editar esta reserva" });
+      if ((bid.status || "pending") !== "pending") {
+        return res.status(403).json({ message: "Solo puedes cambiar la fecha cuando la reserva está pendiente" });
+      }
+      const updated = await storage.updateBookingSchedule(bookingId, date);
+      if (!updated) return res.status(500).json({ message: "Error al actualizar la fecha" });
+      const clientUserId = (booking as { userId?: string }).userId;
+      const dateFormatted = date.toLocaleString("es-EC", { dateStyle: "long", timeStyle: "short" });
+      if (clientUserId) {
+        const notifData = { bookingId, dateFormatted, dateIso: date.toISOString() };
+        try {
+          await storage.createNotification({
+            userId: clientUserId,
+            type: "booking_schedule_changed",
+            data: notifData,
+          });
+          const io = getIO();
+          if (io) sendNotificationToUser(io, clientUserId, { type: "booking_schedule_changed", data: notifData });
+          void notificationService.sendPushToUser(clientUserId, {
+            title: "Se cambió la fecha del servicio",
+            body: `La nueva fecha y hora es: ${dateFormatted}. Revisa tu reserva.`,
+            data: { url: `/bookings?highlight=${bookingId}`, type: "booking_schedule_changed", bookingId: String(bookingId) },
+          }).catch((err: Error) => console.error("[push] Error notificando cambio de fecha:", err));
+        } catch (e) {
+          console.error("Error creando notificación de cambio de fecha:", e);
+        }
+      }
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error("Error updating booking schedule:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -326,20 +636,101 @@ export async function registerGenFebRoutes(
     }
   });
 
-  // GET /api/wallet/me - Alias para wallet del usuario autenticado
+  // GET /api/wallet/me - Wallet del usuario autenticado.
+  // pendingBalance = escrow de reservas (solo cliente: dinero retenido al confirmar una reserva).
+  // withdrawingFunds = fondos en tránsito por retiro (independiente; no es pendingBalance).
   app.get("/api/wallet/me", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUserById(userId);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
-      const u = user as { wallet?: number; totalEarnings?: number };
+      const u = user as { wallet?: number; totalEarnings?: number; pendingBalance?: number; withdrawingFunds?: number };
       res.json({
         wallet: typeof u.wallet === "number" ? u.wallet : 0,
         totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
+        pendingBalance: typeof u.pendingBalance === "number" ? u.pendingBalance : 0,
+        withdrawingFunds: typeof u.withdrawingFunds === "number" ? u.withdrawingFunds : 0,
       });
     } catch (error) {
       console.error("Error fetching user wallet:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Feature flag: futura API bancaria para automatizar retiros (por ahora siempre manual vía Admin → Payouts).
+  const ENABLE_BANK_API = process.env.ENABLE_BANK_API === "true";
+
+  // POST /api/wallet/withdraw - Solicitar retiro (escrow: wallet -> withdrawingFunds).
+  // Atomicidad: storage.requestWithdraw (y processWithdrawal en admin) realizan actualizaciones atómicas
+  // (transacción en Firestore; en memoria es secuencial) para evitar discrepancias de balance.
+  // Validación: requiere bankName y accountNumber en el perfil. Si ENABLE_BANK_API=true en el futuro,
+  // aquí se conectaría la llamada a la API bancaria en lugar del flujo manual.
+  app.post("/api/wallet/withdraw", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await storage.getUserById(userId);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+      const u = user as { bankName?: string; accountNumber?: string };
+      const bankName = typeof u.bankName === "string" ? u.bankName.trim() : "";
+      const accountNumber = typeof u.accountNumber === "string" ? u.accountNumber.trim() : "";
+      if (!bankName || !accountNumber) {
+        return res.status(400).json({
+          message: "Para retirar fondos debes completar los datos bancarios (banco y número de cuenta) en tu perfil.",
+          code: "missing_bank_data",
+        });
+      }
+      const schema = z.object({ amount: z.number().positive("El monto debe ser mayor a cero") });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors?.[0]?.message ?? "Datos inválidos",
+          code: "validation",
+        });
+      }
+      // Modo manual (default): requestWithdraw mueve saldo a withdrawingFunds; el admin procesa en Panel → Payouts.
+      // if (ENABLE_BANK_API) { ... llamada futura a API bancaria ... }
+      const result = await storage.requestWithdraw(userId, parsed.data.amount);
+      if (!result.ok) {
+        const status = ["insufficient_balance", "withdraw_pending", "missing_bank_data"].includes(result.code) ? 400 : 400;
+        return res.status(status).json({ message: result.message, code: result.code });
+      }
+      const amountFormatted = new Intl.NumberFormat("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parsed.data.amount);
+      const userName = (user as { name?: string; firstName?: string; lastName?: string }).name
+        ?? ([((user as { firstName?: string }).firstName ?? ""), ((user as { lastName?: string }).lastName ?? "")].filter(Boolean).join(" ") || (user as { email?: string }).email || "Usuario");
+
+      // Notificación persistente para cada admin (aparece en la campana al cargar o al conectarse)
+      const { users: adminUsers } = await storage.getUsers({ role: "admin", page: 1, limit: 100, name: "", email: "", lastName: "" });
+      for (const admin of adminUsers ?? []) {
+        const adminId = (admin as { id?: string }).id;
+        if (adminId) {
+          await storage.createNotification({
+            userId: adminId,
+            type: "admin",
+            data: {
+              type: "withdrawal_requested",
+              message: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
+              userId,
+              userName,
+              amount: parsed.data.amount,
+              amountFormatted,
+            },
+          });
+        }
+      }
+
+      const io = getIO();
+      if (io) {
+        sendNotificationToAdmins(io, {
+          type: "withdrawal_requested",
+          message: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
+          data: { userId, userName, amount: parsed.data.amount, amountFormatted },
+        });
+      }
+      return res.status(200).json({ message: "Retiro solicitado. Aparecerás en Panel de Administración → Solicitudes de Retiro para que el administrador procese la transferencia.", ok: true });
+    } catch (error) {
+      console.error("Error requesting withdraw:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -369,33 +760,80 @@ export async function registerGenFebRoutes(
         amountMin: Number.isFinite(amountMin) ? amountMin : undefined,
         amountMax: Number.isFinite(amountMax) ? amountMax : undefined,
       });
-      res.json(result);
+      const transfers = (result.transfers || []).map((t: { createdAt?: unknown; [k: string]: unknown }) => {
+        const raw = t.createdAt;
+        let iso: string | undefined;
+        if (raw instanceof Date) iso = raw.toISOString();
+        else if (raw && typeof raw === "object" && "toDate" in raw && typeof (raw as { toDate: () => Date }).toDate === "function") iso = (raw as { toDate: () => Date }).toDate().toISOString();
+        else if (raw && typeof raw === "object" && "seconds" in raw) iso = new Date((raw as { seconds: number }).seconds * 1000).toISOString();
+        else if (typeof raw === "string") iso = raw;
+        return { ...t, createdAt: iso ?? raw };
+      });
+      res.json({ transfers, total: result.total });
     } catch (error) {
       console.error("Error fetching wallet transfers:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  // GET /api/professional/stats - Estadísticas del profesional (servicios completados/rechazados, ganancias)
+  // GET /api/professional/stats - Estadísticas del profesional desde reservas (ganancias, este mes, completados/rechazados)
   app.get("/api/professional/stats", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       if (req.user?.role !== "professional") return res.status(403).json({ message: "Se requiere rol de profesional" });
-      const { transfers } = await storage.getTransfersByUser(userId, {
-        transferType: "service_payment",
-        page: 1,
-        limit: 10000,
-      });
-      const completed = transfers.filter((t: { status?: string }) => t.status === "completed");
-      const rejected = transfers.filter((t: { status?: string }) => t.status === "rejected");
+      const provider = await storage.getProviderByUserId(userId);
+      if (!provider) {
+        return res.json({
+          completedCount: 0,
+          rejectedCount: 0,
+          totalEarnings: 0,
+          earningsThisMonth: 0,
+          earningsLastMonth: 0,
+          pendingOrActiveCount: 0,
+        });
+      }
+      const bookings = await storage.getBookingsByProvider((provider as { id: number }).id);
+      const completed = bookings.filter((b: { status?: string }) => b.status === "completed");
+      const rejected = bookings.filter((b: { status?: string }) => b.status === "rejected");
       const completedCount = completed.length;
       const rejectedCount = rejected.length;
       const totalEarnings = completed.reduce(
-        (sum: number, t: { amount?: number }) => sum + (typeof t.amount === "number" ? t.amount : 0),
+        (sum: number, b: { cost?: number }) => sum + (typeof b.cost === "number" ? b.cost : Number(b.cost) || 0),
         0
       );
-      res.json({ completedCount, rejectedCount, totalEarnings });
+      const now = new Date();
+      const thisYear = now.getFullYear();
+      const thisMonth = now.getMonth();
+      const lastMonth = thisMonth === 0 ? 11 : thisMonth - 1;
+      const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear;
+      const toDate = (v: unknown): Date | null => {
+        if (v instanceof Date) return v;
+        if (v && typeof (v as { toDate?: () => Date }).toDate === "function") return (v as { toDate: () => Date }).toDate();
+        if (typeof v === "string" || typeof v === "number") return new Date(v);
+        return null;
+      };
+      let earningsThisMonth = 0;
+      let earningsLastMonth = 0;
+      for (const b of completed) {
+        const cost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
+        const completedAt = toDate((b as { completedAt?: unknown }).completedAt);
+        if (completedAt) {
+          if (completedAt.getFullYear() === thisYear && completedAt.getMonth() === thisMonth) earningsThisMonth += cost;
+          if (completedAt.getFullYear() === lastMonthYear && completedAt.getMonth() === lastMonth) earningsLastMonth += cost;
+        }
+      }
+      const pendingOrActiveCount = bookings.filter(
+        (b: { status?: string }) => b.status === "pending" || b.status === "confirmed" || b.status === "in_progress"
+      ).length;
+      res.json({
+        completedCount,
+        rejectedCount,
+        totalEarnings,
+        earningsThisMonth,
+        earningsLastMonth,
+        pendingOrActiveCount,
+      });
     } catch (error) {
       console.error("Error fetching professional stats:", error);
       res.status(500).json({ message: "Internal server error" });
@@ -511,6 +949,40 @@ export async function registerGenFebRoutes(
         return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
       }
       const transfer = await storage.createTransfer(parsed.data);
+      const data = parsed.data;
+
+      if (data.status === "completed" && data.userId && data.amount != null) {
+        const amountFormatted = new Intl.NumberFormat("es-EC", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(data.amount);
+        const message = `Recibiste $${amountFormatted} USD`;
+        const payload = {
+          type: "balance_credited",
+          data: { amount: data.amount, amountFormatted, message },
+          timestamp: new Date(),
+        };
+
+        await storage.createNotification({
+          userId: data.userId,
+          type: "balance_credited",
+          data: { amount: data.amount, amountFormatted, message },
+        });
+
+        const io = getIO();
+        if (io) {
+          sendNotificationToUser(io, data.userId, payload);
+        }
+
+        void notificationService
+          .sendPushToUser(data.userId, {
+            title: "Saldo acreditado",
+            body: message,
+            data: { type: "balance_credited", url: "/movimientos" },
+          })
+          .catch((err) => console.error("[push] Error notificando saldo acreditado:", err));
+      }
+
       res.status(201).json(transfer);
     } catch (error: any) {
       if (error?.message === "Usuario no encontrado") {

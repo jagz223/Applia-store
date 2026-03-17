@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import { type InsertProvider, type InsertService, type InsertBooking, type ServiceWithProvider } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+import { debouncedRefetch } from "@/lib/refetch-utils";
 
 // ==========================================
 // HELPERS
@@ -197,6 +198,9 @@ export function useCreateService() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.services.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      debouncedRefetch(queryClient, [api.services.list.path]);
+      debouncedRefetch(queryClient, ["/api/me/services"]);
       toast({ title: "Service Created", description: "Your service is now available for booking." });
     },
     onError: (err: Error) => {
@@ -251,6 +255,8 @@ export function useDeleteService() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.services.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      debouncedRefetch(queryClient, [api.services.list.path]);
+      debouncedRefetch(queryClient, ["/api/me/services"]);
       toast({ title: "Servicio eliminado", description: "El servicio se ha eliminado correctamente." });
     },
     onError: (err: Error) => {
@@ -280,9 +286,13 @@ export function useUpdateService(serviceId: number) {
       }
       return res.json();
     },
-    onSuccess: (_, __, context) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.services.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.services.get.path, serviceId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      debouncedRefetch(queryClient, [api.services.list.path]);
+      debouncedRefetch(queryClient, [api.services.get.path, serviceId]);
+      debouncedRefetch(queryClient, ["/api/me/services"]);
       toast({ title: "Servicio actualizado", description: "Los cambios se han guardado correctamente." });
     },
     onError: (err: Error) => {
@@ -294,7 +304,8 @@ export function useUpdateService(serviceId: number) {
 // ==========================================
 // BOOKINGS
 // ==========================================
-export function useBookings() {
+export function useBookings(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled !== false;
   return useQuery({
     queryKey: [api.bookings.list.path],
     queryFn: async () => {
@@ -303,8 +314,17 @@ export function useBookings() {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (!res.ok) throw new Error("Failed to fetch bookings");
-      return api.bookings.list.responses[200].parse(await res.json());
+      const json = await res.json();
+      try {
+        return api.bookings.list.responses[200].parse(json);
+      } catch (e) {
+        if (Array.isArray(json)) return json;
+        throw e;
+      }
     },
+    enabled,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -322,6 +342,8 @@ export function useBookingsByProvider(params?: { status?: string }) {
       if (!res.ok) throw new Error("Failed to fetch provider bookings");
       return res.json();
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -355,6 +377,9 @@ export function useCreateBooking() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      debouncedRefetch(queryClient, [api.bookings.list.path]);
+      debouncedRefetch(queryClient, ["/api/bookings/provider"]);
       toast({
         title: BOOKING_SUCCESS_TOAST.title,
         description: BOOKING_SUCCESS_TOAST.description,
@@ -389,10 +414,121 @@ export function useUpdateBookingStatus() {
       if (!res.ok) throw new Error("Failed to update status");
       return api.bookings.updateStatus.responses[200].parse(await res.json());
     },
+    onSuccess: (_data, { status }) => {
+      // Refrescar inmediatamente la lista de reservas para que la UI se actualice al instante.
+      queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
+      if (status === "completed") {
+        queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+        queryClient.invalidateQueries({ queryKey: ["/api/professional/stats"] });
+        debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+        debouncedRefetch(queryClient, ["/api/professional/stats"]);
+      }
+      toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
+    },
+  });
+}
+
+/** Actualizar costo de una reserva (solo permitido para el profesional y solo si la reserva está pendiente). */
+export function useUpdateBookingCost() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ id, cost }: { id: number; cost: number }) => {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${id}/cost`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ cost: Number(cost) }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "No se pudo actualizar el costo");
+      }
+      return res.json();
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
-      toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
+      debouncedRefetch(queryClient, [api.bookings.list.path]);
+      debouncedRefetch(queryClient, ["/api/bookings/provider"]);
+      toast({ title: "Costo actualizado", description: "El costo de la reserva se ha guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+/** Actualizar fecha/hora de una reserva (solo profesional, solo si estado es 'pending'). */
+export function useUpdateBookingSchedule() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ id, date }: { id: number; date: string }) => {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${id}/schedule`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ date }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "No se pudo actualizar la fecha");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      debouncedRefetch(queryClient, [api.bookings.list.path]);
+      debouncedRefetch(queryClient, ["/api/bookings/provider"]);
+      toast({ title: "Fecha actualizada", description: "La fecha del servicio se ha guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+/** Confirmación del cliente (handshake/escrow): debita wallet y retiene en pendingBalance del profesional. */
+export function useConfirmBookingByClient() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (bookingId: number) => {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${bookingId}/confirm-client`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || "No se pudo confirmar el pago");
+      return data;
+    },
+    onSuccess: () => {
+      // Refrescar inmediatamente la lista de reservas y wallet para que el cambio se vea al instante.
+      queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
+      queryClient.refetchQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      toast({ title: "Pago confirmado", description: "Los fondos se han retenido. El profesional podrá completar el trabajo." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
 }
@@ -430,7 +566,14 @@ export function useProfessionalStats(options?: { enabled?: boolean }) {
       });
       if (!res.ok) throw new Error("Failed to fetch professional stats");
       const data = await res.json();
-      return data as { completedCount: number; rejectedCount: number; totalEarnings: number };
+      return data as {
+        completedCount: number;
+        rejectedCount: number;
+        totalEarnings: number;
+        earningsThisMonth?: number;
+        earningsLastMonth?: number;
+        pendingOrActiveCount?: number;
+      };
     },
     enabled: options?.enabled !== false,
   });
@@ -525,6 +668,38 @@ export function useRechargeRequest() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+      debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
+    },
+  });
+}
+
+/** Solicitar retiro: mueve fondos de wallet a “en proceso de retiro” (escrow). Falla si ya hay retiro pendiente o saldo insuficiente. */
+export function useWithdraw() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (amount: number) => {
+      const token = getToken();
+      const path = (api.genfeb.wallet as { withdraw?: { path: string; method: string } }).withdraw?.path ?? "/api/wallet/withdraw";
+      const res = await fetch(path, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ amount }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al solicitar retiro");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+      debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
     },
   });
 }
@@ -578,6 +753,156 @@ export function useUpdateTransferStatus() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
       queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+      debouncedRefetch(queryClient, [ADMIN_WALLET_TRANSFERS_KEY]);
+      debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
     },
+  });
+}
+
+/** Recarga manual por admin: acredita saldo a un usuario y registra la transacción con motivo (solo admin). */
+export function useAdminManualRecharge() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (params: { userId: string; amount: number; reason: string; fromUserId: string }) => {
+      const token = getToken();
+      const res = await fetch("/api/wallet/transfers", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: params.userId,
+          fromUserId: params.fromUserId,
+          amount: params.amount,
+          transferType: "recharge",
+          status: "completed",
+          description: params.reason,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al procesar la recarga");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+      debouncedRefetch(queryClient, [ADMIN_WALLET_TRANSFERS_KEY]);
+      debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error en recarga manual", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+const ADMIN_WITHDRAWALS_KEY = "/api/admin/withdrawals";
+const ADMIN_WITHDRAWALS_HISTORY_KEY = "/api/admin/withdrawals/history";
+
+export type WithdrawalHistoryStatus = "all" | "pending" | "approved" | "rejected";
+
+export type WithdrawalHistoryItem = {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  bankName?: string;
+  accountNumber?: string;
+  amount: number;
+  status: "pending" | "approved" | "rejected";
+  processedAt: string | null;
+  processedByAdminId?: string;
+  processedByAdminName?: string;
+};
+
+/** Lista solicitudes de retiro pendientes (usuarios con withdrawingFunds > 0). Solo admin. */
+export function useAdminWithdrawals(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [ADMIN_WITHDRAWALS_KEY],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(ADMIN_WITHDRAWALS_KEY, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al cargar solicitudes de retiro");
+      }
+      return res.json() as Promise<Array<{
+        id: string;
+        name: string;
+        lastName: string;
+        email: string;
+        bankName?: string;
+        accountNumber?: string;
+        withdrawingFunds: number;
+      }>>;
+    },
+    enabled: options?.enabled !== false,
+  });
+}
+
+/** Aprobar o rechazar una solicitud de retiro (solo admin). adminNote opcional (ej. motivo de rechazo, datos bancarios incorrectos). */
+export function useProcessWithdrawal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, action, adminNote }: { userId: string; action: "approve" | "reject"; adminNote?: string }) => {
+      const token = getToken();
+      const res = await fetch(`${ADMIN_WITHDRAWALS_KEY}/${userId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ action, ...(adminNote?.trim() ? { adminNote: adminNote.trim() } : {}) }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al procesar la solicitud");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_HISTORY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_KEY]);
+      debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_HISTORY_KEY]);
+      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+    },
+  });
+}
+
+/** Historial de retiros (pendientes, aprobados, rechazados) con paginación y filtro. Solo admin. */
+export function useAdminWithdrawalHistory(params: {
+  page: number;
+  limit: number;
+  status: WithdrawalHistoryStatus;
+  enabled?: boolean;
+}) {
+  const { page, limit, status, enabled = true } = params;
+  return useQuery({
+    queryKey: [ADMIN_WITHDRAWALS_HISTORY_KEY, page, limit, status],
+    queryFn: async () => {
+      const token = getToken();
+      const search = new URLSearchParams({ page: String(page), limit: String(limit), status });
+      const res = await fetch(`${ADMIN_WITHDRAWALS_HISTORY_KEY}?${search.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al cargar historial de retiros");
+      }
+      return res.json() as Promise<{
+        items: WithdrawalHistoryItem[];
+        total: number;
+        page: number;
+        limit: number;
+      }>;
+    },
+    enabled: enabled !== false,
   });
 }

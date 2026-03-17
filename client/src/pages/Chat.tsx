@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import {
   useConversations,
@@ -16,7 +17,7 @@ import {
   ChatUnauthenticated,
 } from "@/components/chat";
 import { Card } from "@/components/ui/card";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Info } from "lucide-react";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -38,6 +39,8 @@ export default function Chat() {
   const [mobileShowList, setMobileShowList] = useState(true);
   const isMobile = useIsMobile();
   const resolvedWithRef = useRef<string | null>(null);
+  /** Contexto de la conversación al abrir desde reserva/servicio (para mostrar recordatorio). */
+  const [chatContext, setChatContext] = useState<{ bookingId: number | null; serviceId: number | null }>({ bookingId: null, serviceId: null });
 
   const conversationsQuery = useConversations(!!isAuthenticated);
   const conversations = conversationsQuery.data ?? [];
@@ -56,6 +59,35 @@ export default function Chat() {
   const getOrCreateConversation = useGetOrCreateConversation();
 
   useChatRealtime(selectedConversationId);
+
+  const bookingIdForContext = chatContext.bookingId && selectedConversationId ? chatContext.bookingId : null;
+  const serviceIdForContext = chatContext.serviceId && selectedConversationId && !chatContext.bookingId ? chatContext.serviceId : null;
+  const { data: bookingContext } = useQuery({
+    queryKey: ["booking", bookingIdForContext],
+    queryFn: async () => {
+      const res = await fetch(`/api/bookings/${bookingIdForContext}`);
+      if (!res.ok) throw new Error("Booking not found");
+      return res.json() as Promise<{ id: number; serviceTitle?: string }>;
+    },
+    enabled: !!bookingIdForContext,
+  });
+  const { data: serviceContext } = useQuery({
+    queryKey: ["service", serviceIdForContext],
+    queryFn: async () => {
+      const res = await fetch(`/api/services/${serviceIdForContext}`);
+      if (!res.ok) throw new Error("Service not found");
+      return res.json() as Promise<{ id: number; title?: string }>;
+    },
+    enabled: !!serviceIdForContext,
+  });
+
+  const chatReminderText =
+    selectedConversationId &&
+    (bookingContext?.serviceTitle != null
+      ? `Este chat es sobre la reserva #${bookingContext.id} — ${bookingContext.serviceTitle}. Ambos pueden ver este recordatorio.`
+      : serviceContext?.title
+        ? `Este chat es sobre el servicio: ${serviceContext.title}. Ambos pueden ver este recordatorio.`
+        : null);
 
   // Indicar conversación abierta para no mostrar notificación en la campana ni badge en la lista
   useEffect(() => {
@@ -85,13 +117,17 @@ export default function Chat() {
     }
   }, [conversationsQuery.isSuccess, conversations, selectedConversationId, setLocation]);
 
-  // Resolver ?with= y ?serviceId= al cargar (una sola vez por with)
+  // Resolver ?with=, ?bookingId= y ?serviceId= al cargar (guardar contexto para recordatorio)
   useEffect(() => {
     if (!isAuthenticated || !conversationsQuery.isSuccess) return;
     const params = new URLSearchParams(window.location.search);
     const withUserId = params.get("with");
+    const bookingIdParam = params.get("bookingId");
     const serviceIdParam = params.get("serviceId");
-    const serviceId = serviceIdParam ? parseInt(serviceIdParam, 10) : undefined;
+    const bookingId = bookingIdParam ? parseInt(bookingIdParam, 10) : null;
+    const serviceId = serviceIdParam ? parseInt(serviceIdParam, 10) : null;
+    if (bookingId != null && !Number.isNaN(bookingId)) setChatContext((prev) => ({ ...prev, bookingId }));
+    if (serviceId != null && !Number.isNaN(serviceId)) setChatContext((prev) => ({ ...prev, serviceId }));
     if (!withUserId) {
       resolvedWithRef.current = null;
       return;
@@ -268,6 +304,7 @@ export default function Chat() {
                         onLoadMoreMessages={messagesQuery.fetchNextPage}
                         isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
                         onBack={handleBackToMobileList}
+                        reminderText={chatReminderText ?? undefined}
                       />
                     ) : (
                       <ChatEmptyState />
@@ -343,6 +380,7 @@ export default function Chat() {
                       onLoadMoreMessages={messagesQuery.fetchNextPage}
                       isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
                       onBack={() => setSelectedConversationId(null)}
+                      reminderText={chatReminderText ?? undefined}
                     />
                   ) : (
                     <ChatEmptyState />

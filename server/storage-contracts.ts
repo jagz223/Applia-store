@@ -26,6 +26,7 @@ export interface IUserStorage {
     name?: string;
     email?: string;
     lastName?: string;
+    search?: string;
     page: number;
     limit: number;
   }): Promise<{ users: unknown[]; total: number }>;
@@ -78,4 +79,18 @@ export interface IBookingStorage {
   getBooking(id: number): Promise<Booking | undefined>;
   createBooking(booking: InsertBooking & { status: string; providerId?: number }): Promise<Booking>;
   updateBookingStatus(id: number, status: string): Promise<Booking | undefined>;
+  /** Actualizar costo de la reserva (solo permitido cuando status es 'pending'). */
+  updateBookingCost(id: number, cost: number): Promise<Booking | undefined>;
+  /** Actualizar fecha/hora de la reserva (solo permitido cuando status es 'pending'). */
+  updateBookingSchedule(id: number, date: Date): Promise<Booking | undefined>;
+  /**
+   * Confirmación del cliente (handshake/escrow): debita wallet del cliente y acredita su propio pendingBalance
+   * (monto exacto del servicio). Solo válido si booking.status === 'confirmed'. Transacción ACID.
+   */
+  confirmBookingByClient(bookingId: number): Promise<Booking>;
+  /**
+   * Completar reserva y liberar escrow: monto exacto del servicio sale del pendingBalance del cliente
+   * y entra en la wallet del profesional. Solo válido si confirmedByClient === true. Transacción ACID.
+   */
+  completeBookingAndReleaseEscrow(bookingId: number): Promise<Booking | undefined>;
 }

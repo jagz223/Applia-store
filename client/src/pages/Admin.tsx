@@ -1,15 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { 
   Users, DollarSign, FileText, Star, Settings, 
   BarChart3, Shield, Bell, Database, Layers,
   CheckCircle, XCircle, Clock, TrendingUp, UserPlus,
-  Search, ChevronLeft, ChevronRight, Loader2, Wallet
+  Search, ChevronLeft, ChevronRight, Loader2, Wallet, Banknote, History
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -22,8 +24,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { useAuth } from "@/hooks/use-auth";
-import { useAdminWalletTransfers, useUpdateTransferStatus } from "@/hooks/use-mango-data";
+import { useAdminWalletTransfers, useUpdateTransferStatus, useAdminManualRecharge, useAdminWithdrawals, useProcessWithdrawal, useAdminWithdrawalHistory, type WithdrawalHistoryStatus, type WithdrawalHistoryItem } from "@/hooks/use-mango-data";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -65,6 +69,374 @@ const mockProviders = [
 
 type TransferStatusFilter = "" | "pending_approval" | "completed" | "rejected";
 
+type UserOption = { id: string; name: string; email: string; role?: string };
+
+const SALDO_DEBOUNCE_MS = 1000;
+const ROLE_LABELS: Record<string, string> = {
+  client: "Cliente",
+  professional: "Profesional",
+  admin: "Administrador",
+};
+
+type WithdrawalRequest = {
+  id: string;
+  name: string;
+  lastName: string;
+  email: string;
+  bankName?: string;
+  accountNumber?: string;
+  withdrawingFunds: number;
+};
+
+const WITHDRAWAL_HISTORY_LIMIT = 10;
+const HISTORY_STATUS_OPTIONS: { value: WithdrawalHistoryStatus; label: string }[] = [
+  { value: "all", label: "Todas" },
+  { value: "pending", label: "Pendientes" },
+  { value: "approved", label: "Aprobadas" },
+  { value: "rejected", label: "Rechazadas" },
+];
+
+function WithdrawalHistorySection({ formatUsd }: { formatUsd: (n: number) => string }) {
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyStatus, setHistoryStatus] = useState<WithdrawalHistoryStatus>("all");
+  const { data, isLoading } = useAdminWithdrawalHistory({
+    page: historyPage,
+    limit: WITHDRAWAL_HISTORY_LIMIT,
+    status: historyStatus,
+    enabled: true,
+  });
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / WITHDRAWAL_HISTORY_LIMIT));
+
+  const statusLabel = (s: string) => {
+    if (s === "pending") return "Pendiente";
+    if (s === "approved") return "Aprobada";
+    if (s === "rejected") return "Rechazada";
+    return s;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Label className="text-muted-foreground">Filtrar por estado:</Label>
+        <Select
+          value={historyStatus}
+          onValueChange={(v) => {
+            setHistoryStatus(v as WithdrawalHistoryStatus);
+            setHistoryPage(1);
+          }}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {HISTORY_STATUS_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : items.length === 0 ? (
+        <p className="text-center py-8 text-muted-foreground">No hay registros con el filtro seleccionado.</p>
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/50">
+                  <th className="text-left p-3 font-medium">Fecha</th>
+                  <th className="text-left p-3 font-medium">Profesional</th>
+                  <th className="text-left p-3 font-medium">Monto</th>
+                  <th className="text-left p-3 font-medium">Banco</th>
+                  <th className="text-left p-3 font-medium">Número de cuenta</th>
+                  <th className="text-left p-3 font-medium">Procesado por</th>
+                  <th className="text-left p-3 font-medium">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((row: WithdrawalHistoryItem) => (
+                  <tr key={row.id} className="border-b border-border hover:bg-muted/30">
+                    <td className="p-3 text-muted-foreground">
+                      {row.processedAt
+                        ? format(new Date(row.processedAt), "dd/MM/yyyy HH:mm", { locale: es })
+                        : "—"}
+                    </td>
+                    <td className="p-3">
+                      <p className="font-medium">{row.userName}</p>
+                      {row.userEmail && <p className="text-xs text-muted-foreground">{row.userEmail}</p>}
+                    </td>
+                    <td className="p-3 font-medium tabular-nums">{formatUsd(row.amount)}</td>
+                    <td className="p-3 text-muted-foreground">{row.bankName ?? "—"}</td>
+                    <td className="p-3 font-mono text-muted-foreground">{row.accountNumber ?? "—"}</td>
+                    <td className="p-3 text-muted-foreground">{row.processedByAdminName ?? "—"}</td>
+                    <td className="p-3">
+                      <Badge
+                        variant={row.status === "approved" ? "default" : row.status === "rejected" ? "destructive" : "secondary"}
+                      >
+                        {statusLabel(row.status)}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-2 pt-2">
+              <p className="text-sm text-muted-foreground">
+                {total} registro{total !== 1 ? "s" : ""} · Página {historyPage} de {totalPages}
+              </p>
+              <div className="flex gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={historyPage <= 1}
+                  onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={historyPage >= totalPages}
+                  onClick={() => setHistoryPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; description?: string; variant?: "destructive" }) => void }) {
+  const { data: withdrawals = [], isLoading } = useAdminWithdrawals({ enabled: true });
+  const processWithdrawal = useProcessWithdrawal();
+  const [withdrawalDialogOpen, setWithdrawalDialogOpen] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null);
+  const [adminNote, setAdminNote] = useState("");
+  const formatUsd = (n: number) =>
+    new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+  const openWithdrawalDialog = (userId: string, action: "approve" | "reject") => {
+    setPendingUserId(userId);
+    setPendingAction(action);
+    setAdminNote("");
+    setWithdrawalDialogOpen(true);
+  };
+
+  const closeWithdrawalDialog = () => {
+    setWithdrawalDialogOpen(false);
+    setPendingUserId(null);
+    setPendingAction(null);
+    setAdminNote("");
+  };
+
+  const confirmWithdrawalAction = () => {
+    if (!pendingUserId || !pendingAction) return;
+    processWithdrawal.mutate(
+      { userId: pendingUserId, action: pendingAction, adminNote: adminNote.trim() || undefined },
+      {
+        onSuccess: () => {
+          closeWithdrawalDialog();
+          toast({
+            title: pendingAction === "approve" ? "Pago aprobado" : "Retiro rechazado",
+            description: pendingAction === "approve"
+              ? "El retiro fue registrado y el profesional será notificado."
+              : "Los fondos fueron devueltos a la billetera del usuario.",
+          });
+        },
+        onError: (err: Error) => {
+          toast({ title: "Error", description: err.message, variant: "destructive" });
+        },
+      }
+    );
+  };
+
+  const [withdrawalSubTab, setWithdrawalSubTab] = useState<"pending" | "history">("pending");
+
+  return (
+    <>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Banknote className="h-5 w-5" />
+          Solicitudes de Retiro
+        </CardTitle>
+        <CardDescription>
+          Gestiona solicitudes pendientes o consulta el historial de retiros aprobados y rechazados.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Tabs value={withdrawalSubTab} onValueChange={(v) => setWithdrawalSubTab(v as "pending" | "history")}>
+          <TabsList className="grid w-full max-w-sm grid-cols-2 mb-4">
+            <TabsTrigger value="pending" className="gap-1.5">
+              <Banknote className="h-4 w-4" />
+              Pendientes
+            </TabsTrigger>
+            <TabsTrigger value="history" className="gap-1.5">
+              <History className="h-4 w-4" />
+              Historial
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="pending" className="mt-0 overflow-x-auto">
+            {isLoading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : withdrawals.length === 0 ? (
+              <p className="text-center py-8 text-muted-foreground">No hay solicitudes de retiro pendientes.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <th className="text-left p-3 font-medium">Profesional</th>
+                      <th className="text-left p-3 font-medium">Monto a retirar</th>
+                      <th className="text-left p-3 font-medium">Banco</th>
+                      <th className="text-left p-3 font-medium">Número de cuenta</th>
+                      <th className="text-left p-3 font-medium">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(withdrawals as WithdrawalRequest[]).map((row) => (
+                      <tr key={row.id} className="border-b border-border hover:bg-muted/30">
+                        <td className="p-3">
+                          <p className="font-medium">{[row.name, row.lastName].filter(Boolean).join(" ") || row.email || row.id}</p>
+                          {row.email && <p className="text-xs text-muted-foreground">{row.email}</p>}
+                        </td>
+                        <td className="p-3 font-medium tabular-nums">{formatUsd(row.withdrawingFunds)}</td>
+                        <td className="p-3 text-muted-foreground">{row.bankName ?? "—"}</td>
+                        <td className="p-3 font-mono text-muted-foreground">{row.accountNumber ?? "—"}</td>
+                        <td className="p-3">
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="text-green-700 hover:text-green-800 bg-green-500/15 hover:bg-green-500/25 border-green-500/30"
+                              disabled={processWithdrawal.isPending}
+                              onClick={() => openWithdrawalDialog(row.id, "approve")}
+                            >
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                              Aprobar pago
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600 hover:text-red-700 border-red-500/50 hover:bg-red-500/10"
+                              disabled={processWithdrawal.isPending}
+                              onClick={() => openWithdrawalDialog(row.id, "reject")}
+                            >
+                              <XCircle className="h-4 w-4 mr-1" />
+                              Rechazar pago
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="history" className="mt-0 overflow-x-auto">
+            <WithdrawalHistorySection formatUsd={formatUsd} />
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+
+    <Dialog open={withdrawalDialogOpen} onOpenChange={(open) => !open && closeWithdrawalDialog()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {pendingAction === "approve" ? "Confirmar aprobación del retiro" : "Confirmar rechazo del retiro"}
+          </DialogTitle>
+          <DialogDescription>
+            {pendingAction === "approve"
+              ? "Confirma que realizaste la transferencia bancaria al profesional. El usuario recibirá una notificación sin que se muestre tu nombre."
+              : "Los fondos volverán a la billetera del usuario. Opcionalmente indica el motivo (ej. datos bancarios incorrectos, banco en mantenimiento)."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <Label htmlFor="admin-note" className="text-sm text-muted-foreground">
+            Nota (opcional)
+          </Label>
+          <Textarea
+            id="admin-note"
+            placeholder={
+              pendingAction === "reject"
+                ? "Ej: datos bancarios incorrectos, banco en mantenimiento, cuenta bloqueada…"
+                : "Ej: referencia de transferencia, observación interna…"
+            }
+            value={adminNote}
+            onChange={(e) => setAdminNote(e.target.value)}
+            rows={3}
+            className="resize-none"
+            maxLength={500}
+          />
+          {adminNote.length >= 500 && (
+            <p className="text-xs text-muted-foreground">Máximo 500 caracteres.</p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={closeWithdrawalDialog} disabled={processWithdrawal.isPending}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={confirmWithdrawalAction}
+            disabled={processWithdrawal.isPending}
+            variant={pendingAction === "reject" ? "destructive" : "default"}
+          >
+            {processWithdrawal.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Procesando…
+              </>
+            ) : pendingAction === "approve" ? (
+              "Aprobar retiro"
+            ) : (
+              "Rechazar retiro"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
+  );
+}
+
+/** Búsqueda de usuarios por nombre (debounced 1s). Solo parámetro name, sin filtro por rol. */
+function useSaldoUserSearch(debouncedName: string) {
+  return useQuery({
+    queryKey: ["admin", "users", "saldo-search-by-name", debouncedName],
+    queryFn: async () => {
+      const token = localStorage.getItem("token");
+      const params = new URLSearchParams({ page: "1", limit: "50" });
+      if (debouncedName) params.set("name", debouncedName);
+      const url = `/api/admin/users?${params.toString()}`;
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Error al buscar usuarios");
+      return res.json();
+    },
+    enabled: debouncedName.trim().length >= 2,
+    staleTime: 30_000,
+  });
+}
+
 export default function AdminPanel() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -72,7 +444,10 @@ export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== "undefined") {
       const p = new URLSearchParams(window.location.search);
-      if (p.get("tab") === "recargas") return "recargas";
+      const tab = p.get("tab");
+      if (tab === "recargas") return "recargas";
+      if (tab === "saldo") return "saldo";
+      if (tab === "payouts") return "payouts";
     }
     return "overview";
   });
@@ -84,7 +459,10 @@ export default function AdminPanel() {
   useEffect(() => {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const q = new URLSearchParams(search);
-    if (q.get("tab") === "recargas") setActiveTab("recargas");
+    const tab = q.get("tab");
+    if (tab === "recargas") setActiveTab("recargas");
+    if (tab === "saldo") setActiveTab("saldo");
+    if (tab === "payouts") setActiveTab("payouts");
     const highlight = q.get("highlight");
     if (highlight) {
       const id = parseInt(highlight, 10);
@@ -113,8 +491,55 @@ export default function AdminPanel() {
     window.addEventListener("admin-open-recargas", handler);
     return () => window.removeEventListener("admin-open-recargas", handler);
   }, []);
+
+  // Escuchar evento al hacer clic en notificación de solicitud de retiro (abrir pestaña Payouts)
+  useEffect(() => {
+    const handler = () => {
+      setActiveTab("payouts");
+      if (typeof window !== "undefined" && window.history.replaceState) {
+        const params = new URLSearchParams(window.location.search);
+        params.set("tab", "payouts");
+        window.history.replaceState(null, "", `/admin?${params.toString()}`);
+      }
+    };
+    window.addEventListener("admin-open-payouts", handler);
+    return () => window.removeEventListener("admin-open-payouts", handler);
+  }, []);
+
   const [userFilters, setUserFilters] = useState({ role: "", name: "", email: "", lastName: "" });
   const [transferStatusFilter, setTransferStatusFilter] = useState<TransferStatusFilter>("");
+
+  // Gestión de Saldo: selector de usuarios/roles y recarga manual
+  const [selectedUsersSaldo, setSelectedUsersSaldo] = useState<UserOption[]>([]);
+  const [selectedRolesSaldo, setSelectedRolesSaldo] = useState<string[]>([]);
+  const [searchSaldoInput, setSearchSaldoInput] = useState("");
+  const [debouncedSearchSaldo, setDebouncedSearchSaldo] = useState("");
+  const [saldoComboboxOpen, setSaldoComboboxOpen] = useState(false);
+  const saldoDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [reasonSaldo, setReasonSaldo] = useState("");
+  const [amountSaldo, setAmountSaldo] = useState("");
+
+  useEffect(() => {
+    if (saldoDebounceRef.current) clearTimeout(saldoDebounceRef.current);
+    saldoDebounceRef.current = setTimeout(() => {
+      setDebouncedSearchSaldo(searchSaldoInput.trim());
+      saldoDebounceRef.current = null;
+    }, SALDO_DEBOUNCE_MS);
+    return () => {
+      if (saldoDebounceRef.current) clearTimeout(saldoDebounceRef.current);
+    };
+  }, [searchSaldoInput]);
+
+  const { data: saldoSearchData, isLoading: saldoSearchLoading } = useSaldoUserSearch(debouncedSearchSaldo);
+  const saldoSearchUsers = (saldoSearchData?.users ?? []) as any[];
+  const saldoSearchList: UserOption[] = saldoSearchUsers.map((u: any) => ({
+    id: u.id,
+    name: String(u.name ?? u.firstName ?? ""),
+    email: String(u.email ?? ""),
+    role: u.role,
+  }));
+
+  const manualRecharge = useAdminManualRecharge();
   const [transferToReview, setTransferToReview] = useState<{
     id: number;
     referenceId?: string;
@@ -210,28 +635,28 @@ export default function AdminPanel() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b px-6 py-4">
-        <div className="container mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Shield className="h-8 w-8 text-mango-orange" />
-            <div>
-              <h1 className="text-2xl font-bold">Panel de Administración</h1>
-              <p className="text-gray-500">GenFeb S.A.S.</p>
+      {/* Header: compacto en móvil */}
+      <div className="bg-white border-b px-4 sm:px-6 py-3 sm:py-4">
+        <div className="container mx-auto flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-mango-orange shrink-0" />
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-2xl font-bold truncate">Panel de Administración</h1>
+              <p className="text-gray-500 text-sm truncate">GenFeb S.A.S.</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <Button variant="outline" size="icon">
-              <Bell className="h-5 w-5" />
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <Button variant="outline" size="icon" className="h-9 w-9">
+              <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
-            <Avatar>
-              <AvatarFallback>{user?.name?.[0]}</AvatarFallback>
+            <Avatar className="h-8 w-8 sm:h-10 sm:w-10">
+              <AvatarFallback className="text-sm">{user?.name?.[0]}</AvatarFallback>
             </Avatar>
           </div>
         </div>
       </div>
 
-      <div className="container mx-auto py-6 px-4">
+      <div className="container mx-auto py-4 sm:py-6 px-3 sm:px-4 overflow-x-hidden">
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card>
@@ -279,17 +704,41 @@ export default function AdminPanel() {
           </Card>
         </div>
 
-        {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-4">
-            <TabsTrigger value="overview">Resumen</TabsTrigger>
-            <TabsTrigger value="users">Usuarios</TabsTrigger>
-            <TabsTrigger value="providers">Proveedores</TabsTrigger>
-            <TabsTrigger value="bookings">Reservas</TabsTrigger>
-            <TabsTrigger value="recargas">Recargas</TabsTrigger>
-            <TabsTrigger value="roles">Roles</TabsTrigger>
-            <TabsTrigger value="settings">Configuración</TabsTrigger>
-          </TabsList>
+        {/* Tabs: en móvil scroll horizontal para evitar solapamientos */}
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => {
+            setActiveTab(v);
+            if (typeof window !== "undefined" && window.history.replaceState) {
+              const url = new URL(window.location.href);
+              url.searchParams.set("tab", v);
+              window.history.replaceState(null, "", url.pathname + url.search);
+            }
+          }}
+        >
+          <div className="relative -mx-3 sm:mx-0 mb-4">
+            <div className="overflow-x-auto overflow-y-hidden pb-1 scroll-smooth md:overflow-visible pr-2 md:pr-0">
+              <TabsList className="inline-flex w-max min-w-full md:flex md:flex-wrap md:w-auto md:min-w-0 h-auto flex-nowrap gap-1 p-1 rounded-lg border border-transparent md:border-0">
+                <TabsTrigger value="overview" className="shrink-0">Resumen</TabsTrigger>
+                <TabsTrigger value="users" className="shrink-0">Usuarios</TabsTrigger>
+                <TabsTrigger value="providers" className="shrink-0">Proveedores</TabsTrigger>
+                <TabsTrigger value="bookings" className="shrink-0">Reservas</TabsTrigger>
+                <TabsTrigger value="recargas" className="shrink-0">Recargas</TabsTrigger>
+                <TabsTrigger value="saldo" className="gap-1.5 shrink-0">
+                  <Wallet className="h-4 w-4 shrink-0" />
+                  <span className="hidden sm:inline">Gestión de Saldo</span>
+                  <span className="sm:hidden">Saldo</span>
+                </TabsTrigger>
+                <TabsTrigger value="payouts" className="gap-1.5 shrink-0">
+                  <Banknote className="h-4 w-4 shrink-0" />
+                  <span className="hidden sm:inline">Solicitudes de Retiro</span>
+                  <span className="sm:hidden">Retiros</span>
+                </TabsTrigger>
+                <TabsTrigger value="roles" className="shrink-0">Roles</TabsTrigger>
+                <TabsTrigger value="settings" className="shrink-0">Configuración</TabsTrigger>
+              </TabsList>
+            </div>
+          </div>
 
           <TabsContent value="overview">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -749,6 +1198,246 @@ export default function AdminPanel() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+          </TabsContent>
+
+          <TabsContent value="saldo">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Wallet className="h-5 w-5" />
+                  Gestión de Saldo
+                </CardTitle>
+                <CardDescription>
+                  Recargas manuales o bonos: corrige errores de pago o asigna créditos. Busca usuarios por nombre o agrega un rol (se acredita a todos los usuarios con ese rol). Indica monto y razón. La operación queda registrada.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Agregar por usuario</label>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <Popover open={saldoComboboxOpen} onOpenChange={setSaldoComboboxOpen} modal={false}>
+                      <PopoverAnchor asChild>
+                        <div
+                          className="relative flex-1 min-w-[200px] max-w-md flex items-center rounded-md border border-input bg-background cursor-text"
+                          onClick={() => setSaldoComboboxOpen(true)}
+                        >
+                          <Search className="absolute left-3 h-4 w-4 text-muted-foreground pointer-events-none" />
+                          <Input
+                            placeholder="Buscar por nombre (mín. 2 letras)..."
+                            value={searchSaldoInput}
+                            onChange={(e) => setSearchSaldoInput(e.target.value)}
+                            onFocus={() => setSaldoComboboxOpen(true)}
+                            className="pl-9 border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+                          />
+                        </div>
+                      </PopoverAnchor>
+                      <PopoverContent
+                        className="w-[var(--radix-popover-trigger-width)] p-0"
+                        align="start"
+                        onOpenAutoFocus={(e) => e.preventDefault()}
+                      >
+                        <Command shouldFilter={false}>
+                          <CommandList>
+                            <CommandEmpty>
+                              {debouncedSearchSaldo.length < 2
+                                ? "Escribe al menos 2 letras (búsqueda tras 1 s sin escribir)."
+                                : saldoSearchLoading
+                                  ? "Buscando…"
+                                  : "No se encontraron usuarios"}
+                            </CommandEmpty>
+                            {!saldoSearchLoading && saldoSearchList.length > 0 && (
+                              <CommandGroup>
+                                {saldoSearchList.map((u) => {
+                                  const alreadyAdded = selectedUsersSaldo.some((x) => x.id === u.id);
+                                  return (
+                                    <CommandItem
+                                      key={u.id}
+                                      value={u.id}
+                                      onSelect={() => {
+                                        if (alreadyAdded) return;
+                                        setSelectedUsersSaldo((prev) => [...prev, u]);
+                                        setSearchSaldoInput("");
+                                        setDebouncedSearchSaldo("");
+                                        setSaldoComboboxOpen(false);
+                                      }}
+                                      disabled={alreadyAdded}
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <p className="font-medium truncate">{u.name || u.email || u.id}</p>
+                                        <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                                      </div>
+                                      {alreadyAdded && <span className="text-xs text-muted-foreground">Ya agregado</span>}
+                                    </CommandItem>
+                                  );
+                                })}
+                              </CommandGroup>
+                            )}
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Agregar por rol</label>
+                  <p className="text-xs text-muted-foreground">El saldo se acreditará a todos los usuarios con ese rol. Selecciona un rol para agregarlo.</p>
+                  <Select
+                    value=""
+                    onValueChange={(v) => {
+                      if (!v || selectedRolesSaldo.includes(v)) return;
+                      setSelectedRolesSaldo((prev) => [...prev, v]);
+                    }}
+                  >
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue placeholder="Seleccionar rol" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="client">{ROLE_LABELS.client}</SelectItem>
+                      <SelectItem value="professional">{ROLE_LABELS.professional}</SelectItem>
+                      <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {(selectedUsersSaldo.length > 0 || selectedRolesSaldo.length > 0) && (
+                  <div className="flex flex-wrap gap-2 p-3 rounded-lg bg-muted/50 border border-border">
+                    {selectedUsersSaldo.map((u) => (
+                      <Badge key={`u-${u.id}`} variant="secondary" className="pl-2 pr-1 py-1 gap-1 font-normal">
+                        <span className="max-w-[140px] truncate">{u.name || u.email || u.id}</span>
+                        <button
+                          type="button"
+                          className="rounded-full hover:bg-muted p-0.5"
+                          onClick={() => setSelectedUsersSaldo((prev) => prev.filter((x) => x.id !== u.id))}
+                          aria-label="Quitar"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </Badge>
+                    ))}
+                    {selectedRolesSaldo.map((roleCode) => (
+                      <Badge key={`r-${roleCode}`} variant="outline" className="pl-2 pr-1 py-1 gap-1 font-normal">
+                        <span>{ROLE_LABELS[roleCode] ?? roleCode}</span>
+                        <button
+                          type="button"
+                          className="rounded-full hover:bg-muted p-0.5"
+                          onClick={() => setSelectedRolesSaldo((prev) => prev.filter((r) => r !== roleCode))}
+                          aria-label="Quitar rol"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid gap-4 sm:grid-cols-2 border-t pt-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Razón de la recarga (obligatorio)</label>
+                    <Input
+                      placeholder="Ej. Compensación por fallo técnico, Cortesía..."
+                      value={reasonSaldo}
+                      onChange={(e) => setReasonSaldo(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Monto (USD)</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={amountSaldo}
+                      onChange={(e) => setAmountSaldo(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    disabled={
+                      (selectedUsersSaldo.length === 0 && selectedRolesSaldo.length === 0) ||
+                      !reasonSaldo.trim() ||
+                      !amountSaldo ||
+                      Number(amountSaldo) <= 0 ||
+                      manualRecharge.isPending ||
+                      !user?.id
+                    }
+                    onClick={async () => {
+                      const amount = Number(amountSaldo);
+                      const reason = reasonSaldo.trim();
+                      if (!user?.id || !(amount > 0)) return;
+
+                      const userIdsToCredit = new Set<string>(selectedUsersSaldo.map((u) => u.id));
+                      if (selectedRolesSaldo.length > 0) {
+                        try {
+                          const token = localStorage.getItem("token");
+                          for (const roleCode of selectedRolesSaldo) {
+                            const res = await fetch(
+                              `/api/admin/users?role=${encodeURIComponent(roleCode)}&page=1&limit=500`,
+                              { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+                            );
+                            if (!res.ok) continue;
+                            const data = await res.json();
+                            const list = (data.users ?? []) as { id: string }[];
+                            list.forEach((u: { id: string }) => userIdsToCredit.add(u.id));
+                          }
+                        } catch {
+                          toast({ title: "Error", description: "No se pudieron cargar usuarios por rol.", variant: "destructive" });
+                          return;
+                        }
+                      }
+
+                      const finalList = Array.from(userIdsToCredit);
+                      if (finalList.length === 0) return;
+                      let ok = 0;
+                      let err = 0;
+                      for (const userId of finalList) {
+                        try {
+                          await manualRecharge.mutateAsync({
+                            userId,
+                            amount,
+                            reason,
+                            fromUserId: user.id,
+                          });
+                          ok++;
+                        } catch {
+                          err++;
+                        }
+                      }
+                      if (ok) {
+                        toast({
+                          title: "Recargas procesadas",
+                          description: err ? `Se acreditaron ${ok} usuario(s). ${err} fallaron.` : `Se acreditó el saldo a ${ok} usuario(s). La operación quedó registrada.`,
+                        });
+                        setReasonSaldo("");
+                        setAmountSaldo("");
+                        setSelectedUsersSaldo([]);
+                        setSelectedRolesSaldo([]);
+                      }
+                      if (err && ok === 0) {
+                        toast({ title: "Error", description: "No se pudo procesar ninguna recarga.", variant: "destructive" });
+                      }
+                    }}
+                  >
+                    {manualRecharge.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Procesando…
+                      </>
+                    ) : (
+                      "Procesar recarga(s)"
+                    )}
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    {selectedUsersSaldo.length} usuario(s) + {selectedRolesSaldo.length} rol(es) seleccionados
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="payouts">
+            <AdminWithdrawalsTab toast={toast} />
           </TabsContent>
 
           <TabsContent value="roles">

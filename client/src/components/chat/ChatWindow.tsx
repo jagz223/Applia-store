@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { User, ArrowLeft, FileText, Calendar, MapPin, Bell, BellOff, Loader2 } from "lucide-react";
+import { User, ArrowLeft, FileText, Calendar, MapPin, Bell, BellOff, Loader2, Info } from "lucide-react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { MessageList } from "./MessageList";
 import { MessageInput } from "./MessageInput";
@@ -22,6 +22,8 @@ interface ChatWindowProps {
   onLoadMoreMessages?: () => void;
   isLoadingMoreMessages?: boolean;
   onBack?: () => void;
+  /** Pequeño recordatorio de contexto (ej. "Este chat es sobre la reserva #X — Servicio Y"). */
+  reminderText?: string | null;
 }
 
 export function ChatWindow({
@@ -38,6 +40,7 @@ export function ChatWindow({
   onLoadMoreMessages,
   isLoadingMoreMessages,
   onBack,
+  reminderText,
 }: ChatWindowProps) {
   const push = usePushNotifications();
   const displayMessages = messages.map((m) => ({
@@ -53,6 +56,12 @@ export function ChatWindow({
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
+      {reminderText && (
+        <div className="shrink-0 px-3 py-2 bg-primary/10 border-b border-primary/20 flex items-center gap-2 text-sm text-foreground">
+          <Info className="h-4 w-4 shrink-0 text-primary" />
+          <span>{reminderText}</span>
+        </div>
+      )}
       <header className="p-4 border-b border-border flex items-center justify-between shrink-0 min-w-0">
         <div className="flex items-center gap-3">
           {onBack && (

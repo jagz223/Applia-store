@@ -18,7 +18,7 @@ import { Loader2 } from "lucide-react";
 import { useEffect } from "react";
 
 const becomeProFormSchema = insertProviderSchema.extend({
-  categoryId: z.number().int().positive().optional(),
+  categoryId: z.number().int().positive({ message: "Selecciona una categoría para tu perfil y tu servicio." }),
   category: z.string().optional(),
 });
 type BecomeProForm = z.infer<typeof becomeProFormSchema>;
@@ -52,7 +52,7 @@ export default function BecomePro() {
 
   useEffect(() => {
     if (existingProfile) {
-      setLocation("/dashboard");
+      setLocation("/professional-dashboard");
     }
   }, [existingProfile, setLocation]);
 
@@ -63,10 +63,10 @@ export default function BecomePro() {
   if (!isAuthenticated) {
     return (
       <div className="container max-w-md py-20 text-center">
-        <h1 className="text-2xl font-bold mb-4">Sign in required</h1>
-        <p className="mb-6 text-muted-foreground">You need an account to become a provider.</p>
+        <h1 className="text-2xl font-bold mb-4">Inicia sesión</h1>
+        <p className="mb-6 text-muted-foreground">Necesitas una cuenta para registrarte como proveedor.</p>
         <a href={api.auth.replit.login.path}>
-          <Button className="w-full">Sign In / Sign Up</Button>
+          <Button className="w-full">Iniciar sesión / Registrarse</Button>
         </a>
       </div>
     );
@@ -81,12 +81,14 @@ export default function BecomePro() {
         category: slug ?? data.category ?? undefined,
       } as InsertProvider,
       {
-        onSuccess: () => setLocation("/dashboard"),
-        onError: (err: Error) => {
-          if (err.message?.includes("Ya tienes") || err.message?.includes("perfil de proveedor")) {
-            queryClient.invalidateQueries({ queryKey: ["user"] });
-            setLocation("/create-service");
-          }
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["user"] });
+          queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+          queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+          setLocation("/professional-dashboard");
+        },
+        onError: () => {
+          queryClient.invalidateQueries({ queryKey: ["user"] });
         },
       }
     );
@@ -95,14 +97,14 @@ export default function BecomePro() {
   return (
     <div className="container max-w-2xl py-12 px-4">
       <div className="mb-8 text-center">
-        <h1 className="text-3xl font-display font-bold text-primary mb-2">Join as a Pro</h1>
-        <p className="text-muted-foreground">Start earning by offering your services on Mango.</p>
+        <h1 className="text-3xl font-display font-bold text-primary mb-2">Datos de proveedor</h1>
+        <p className="text-muted-foreground">Completa tu perfil. Con estos datos se creará tu único servicio (nombre = tu nombre, descripción = tu bio, precio = tu tarifa).</p>
       </div>
 
       <Card className="border-border/50 shadow-xl">
         <CardHeader>
-          <CardTitle>Professional Profile</CardTitle>
-          <CardDescription>Tell us about your skills and experience.</CardDescription>
+          <CardTitle>Perfil de proveedor</CardTitle>
+          <CardDescription>Indica tu categoría, profesión, experiencia y tarifa. Tu servicio se publicará automáticamente.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -136,14 +138,14 @@ export default function BecomePro() {
                   </FormItem>
                 )}
               />
-              <FormField
+                  <FormField
                 control={form.control}
                 name="profession"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Profession / Title</FormLabel>
+                    <FormLabel>Profesión / Título</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. Master Plumber, Graphic Designer" {...field} />
+                      <Input placeholder="Ej. Plomero, Diseñador gráfico" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -156,12 +158,12 @@ export default function BecomePro() {
                   name="yearsExperience"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Years Experience</FormLabel>
+                      <FormLabel>Años de experiencia</FormLabel>
                       <FormControl>
                         <Input 
                           type="number" 
                           {...field} 
-                          onChange={e => field.onChange(parseInt(e.target.value))} 
+                          onChange={e => field.onChange(parseInt(e.target.value) || 0)} 
                         />
                       </FormControl>
                       <FormMessage />
@@ -174,7 +176,7 @@ export default function BecomePro() {
                   name="hourlyRate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Hourly Rate ($)</FormLabel>
+                      <FormLabel>Tarifa por hora (USD)</FormLabel>
                       <FormControl>
                          <Input 
                           type="number" 
@@ -192,10 +194,10 @@ export default function BecomePro() {
                 name="bio"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Bio & Skills</FormLabel>
+                    <FormLabel>Descripción y habilidades</FormLabel>
                     <FormControl>
                       <Textarea 
-                        placeholder="Describe your expertise, certifications, and what you offer..." 
+                        placeholder="Describe tu experiencia, certificaciones y qué ofreces. Esta descripción será la de tu servicio." 
                         className="h-32"
                         {...field} 
                       />
@@ -210,7 +212,7 @@ export default function BecomePro() {
                 className="w-full text-lg h-12" 
                 disabled={createProvider.isPending}
               >
-                {createProvider.isPending ? "Creating Profile..." : "Create Profile"}
+                {createProvider.isPending ? "Creando perfil y servicio…" : "Crear perfil y servicio"}
               </Button>
             </form>
           </Form>

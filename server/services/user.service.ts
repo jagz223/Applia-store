@@ -10,6 +10,7 @@ export interface GetUsersParams {
   name?: string;
   email?: string;
   lastName?: string;
+  search?: string;
   page: number;
   limit: number;
 }

@@ -290,7 +290,22 @@ export const api = {
           200: z.object({
             wallet: z.number(),
             totalEarnings: z.number(),
+            /** Saldo retenido por reservas confirmadas (solo relevante para cliente). */
+            pendingBalance: z.number(),
+            /** Fondos en tránsito por solicitud de retiro; independiente de pendingBalance. */
+            withdrawingFunds: z.number().optional().default(0),
           }),
+        },
+      },
+      withdraw: {
+        method: 'POST' as const,
+        path: '/api/wallet/withdraw',
+        input: z.object({
+          amount: z.number().positive(),
+        }),
+        responses: {
+          200: z.object({ message: z.string(), ok: z.literal(true) }),
+          400: z.object({ message: z.string(), code: z.string().optional() }),
         },
       },
       platformBalance: {

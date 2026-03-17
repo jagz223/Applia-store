@@ -99,7 +99,11 @@ export default function Register() {
         description: `Bienvenido ${result.user.name}, tu cuenta ha sido creada correctamente`,
       });
 
-      setLocation("/dashboard");
+      if (data.role === "professional") {
+        setLocation("/become-pro");
+      } else {
+        setLocation("/dashboard");
+      }
     } catch (error: any) {
       toast({
         variant: "destructive",
