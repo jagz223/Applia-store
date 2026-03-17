@@ -161,7 +161,7 @@ export interface IStorage
     options?: {
       page?: number;
       limit?: number;
-      transferType?: "service_payment" | "recharge" | "withdrawal";
+      transferType?: "service_payment" | "recharge" | "withdrawal" | "payment";
       status?: "pending_approval" | "completed" | "rejected";
       description?: string;
       dateFrom?: string;
@@ -328,6 +328,12 @@ export class InMemoryStorage implements IStorage {
     if (status) {
       result = result.filter(b => b.status === status);
     }
+    // Ordenar por más reciente: primero por createdAt (si existe), luego por date.
+    result.sort((a, b) => {
+      const aCreated = (a as { createdAt?: Date }).createdAt ?? (a as { date?: Date }).date ?? new Date(0);
+      const bCreated = (b as { createdAt?: Date }).createdAt ?? (b as { date?: Date }).date ?? new Date(0);
+      return (bCreated as Date).getTime() - (aCreated as Date).getTime();
+    });
     return result;
   }
   
@@ -380,6 +386,36 @@ export class InMemoryStorage implements IStorage {
     (providerUser as { wallet: number }).wallet = providerWallet + cost;
     (booking as { status: string }).status = "completed";
     (booking as { completedAt?: Date }).completedAt = new Date();
+
+    const now = new Date();
+    const refId = String(bookingId);
+    const clientTransferRecord = {
+      id: this.walletTransferIdCounter++,
+      userId: booking.userId,
+      fromUserId: null,
+      amount: cost,
+      transferType: "payment",
+      status: "completed",
+      description: "Pago por servicio",
+      referenceId: refId,
+      currency: "USD",
+      createdAt: now,
+    };
+    const providerTransferRecord = {
+      id: this.walletTransferIdCounter++,
+      userId: providerUserId,
+      fromUserId: null,
+      amount: cost,
+      transferType: "service_payment",
+      status: "completed",
+      description: "Pago por servicio completado",
+      referenceId: refId,
+      currency: "USD",
+      createdAt: now,
+    };
+    this.walletTransfers.push(clientTransferRecord);
+    this.walletTransfers.push(providerTransferRecord);
+
     return { ...booking, status: "completed" };
   }
 
@@ -1284,7 +1320,7 @@ export class InMemoryStorage implements IStorage {
     options?: {
       page?: number;
       limit?: number;
-      transferType?: "service_payment" | "recharge" | "withdrawal";
+      transferType?: "service_payment" | "recharge" | "withdrawal" | "payment";
       status?: "pending_approval" | "completed" | "rejected";
       description?: string;
       dateFrom?: string;

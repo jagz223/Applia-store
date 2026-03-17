@@ -43,7 +43,7 @@ const STATUS_CONFIG: Record<
 
 export default function Bookings() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { data: bookings, isLoading: bookingsLoading } = useBookings();
+  const { data: bookings, isLoading: bookingsLoading, isFetching, isError: bookingsError, refetch: refetchBookings } = useBookings({ enabled: isAuthenticated });
   const confirmPayment = useConfirmBookingByClient();
   const updateStatus = useUpdateBookingStatus();
   const [location] = useLocation();
@@ -52,7 +52,7 @@ export default function Bookings() {
   const [subTab, setSubTab] = useState<"new" | "pending" | "done">("new");
   const [showAllHistory, setShowAllHistory] = useState(false);
 
-  const list = (bookings ?? []) as Array<{
+  const list = (Array.isArray(bookings) ? [...bookings] : []) as Array<{
     id: number;
     serviceId: number;
     date: string | Date;
@@ -60,8 +60,19 @@ export default function Bookings() {
     cost?: number;
     confirmedByClient?: boolean;
     notes?: string | null;
+    createdAt?: string | Date;
     service?: { id: number; title: string; price?: string; provider?: { userId?: string; user?: { firstName?: string; lastName?: string } } };
   }>;
+
+  // Ordenar del más nuevo al más viejo, tomando en cuenta fecha de creación
+  // (y usando la fecha de la reserva como respaldo).
+  list.sort((a, b) => {
+    const aCreated = (a as any).createdAt ?? a.date;
+    const bCreated = (b as any).createdAt ?? b.date;
+    const aTime = toDate(aCreated).getTime();
+    const bTime = toDate(bCreated).getTime();
+    return bTime - aTime;
+  });
 
   const newOnes = list.filter((b) => b.status === "pending");
   const pending = list.filter((b) => b.status === "confirmed" || b.status === "in_progress");
@@ -261,10 +272,10 @@ export default function Bookings() {
       <Dialog open={bookingToConfirm != null} onOpenChange={(open) => !open && setBookingToConfirm(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>¿Ya recibiste este servicio?</DialogTitle>
+            <DialogTitle>¿El monto es el correcto?</DialogTitle>
             <DialogDescription>
-              Confirma solo si el profesional ya realizó el trabajo acordado. Al confirmar, se descontará el monto de tu
-              billetera y se retendrán los fondos para este servicio.
+              Confirma solo si estás de acuerdo con que este sea el monto decidido para el trabajo acordado. Al confirmar,
+              se descontará el monto de tu billetera y se retendrán los fondos para este servicio.
             </DialogDescription>
           </DialogHeader>
           {bookingToConfirm && (
@@ -299,7 +310,7 @@ export default function Bookings() {
               onClick={() => setBookingToConfirm(null)}
               disabled={confirmPayment.isPending}
             >
-              Aún no he recibido el servicio
+              En desacuerdo
             </Button>
             <Button
               type="button"
@@ -323,7 +334,7 @@ export default function Bookings() {
               ) : (
                 <>
                   <ShieldCheck className="h-4 w-4" />
-                  Sí, recibí el servicio
+                  Estoy de acuerdo
                 </>
               )}
             </Button>
@@ -346,11 +357,37 @@ export default function Bookings() {
           </div>
         </div>
 
-        {bookingsLoading ? (
+        {!isAuthenticated ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <Calendar className="h-14 w-14 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Inicia sesión para ver tus reservas</h3>
+              <p className="text-muted-foreground mb-6 max-w-sm">
+                Las reservas que realices desde la ficha del servicio aparecerán aquí una vez que hayas iniciado sesión.
+              </p>
+              <Button asChild>
+                <Link href="/login">Iniciar sesión</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (bookingsLoading || isFetching) ? (
           <div className="flex flex-col items-center justify-center py-16 gap-4">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
             <p className="text-muted-foreground">Cargando reservas...</p>
           </div>
+        ) : bookingsError ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <AlertCircle className="h-14 w-14 text-destructive mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Error al cargar reservas</h3>
+              <p className="text-muted-foreground mb-6 max-w-sm">
+                No se pudieron cargar tus reservas. Comprueba tu conexión e intenta de nuevo.
+              </p>
+              <Button onClick={() => refetchBookings()} variant="outline">
+                Reintentar
+              </Button>
+            </CardContent>
+          </Card>
         ) : !bookings?.length ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">

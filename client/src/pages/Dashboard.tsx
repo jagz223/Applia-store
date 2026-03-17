@@ -31,6 +31,9 @@ import {
   Banknote
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { useWalletTransfers } from "@/hooks/use-mango-data";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
 
 // Mock data for dashboard
 const kpiData = [
@@ -72,14 +75,6 @@ const kpiData = [
   },
 ];
 
-const recentTransactions = [
-  { id: 1, client: "Carlos Mendoza", service: "Consulta Legal", amount: 150, status: "completed", date: "22 Feb 2026" },
-  { id: 2, client: "María García", service: "Asesoría Financiera", amount: 200, status: "pending", date: "21 Feb 2026" },
-  { id: 3, client: "Roberto Sánchez", service: "Mantenimiento", amount: 85, status: "completed", date: "20 Feb 2026" },
-  { id: 4, client: "Ana López", service: "Consulta Técnica", amount: 120, status: "completed", date: "19 Feb 2026" },
-  { id: 5, client: "Pedro Torres", service: " Auditoría", amount: 350, status: "cancelled", date: "18 Feb 2026" },
-];
-
 const monthlyData = [
   { month: "Ene", income: 12400, expenses: 8200 },
   { month: "Feb", income: 15800, expenses: 9100 },
@@ -98,6 +93,21 @@ const servicesByCategory = [
 
 export default function Dashboard() {
   const [timeRange, setTimeRange] = useState("6m");
+  const [transactionsPage, setTransactionsPage] = useState(1);
+
+  const { data: recentTransfersData, isLoading: recentLoading } = useWalletTransfers({
+    page: 1,
+    limit: 5,
+  });
+  const recentTransfers = recentTransfersData?.transfers ?? [];
+
+  const { data: pagedTransfersData, isLoading: pagedLoading } = useWalletTransfers({
+    page: transactionsPage,
+    limit: 10,
+  });
+  const pagedTransfers = pagedTransfersData?.transfers ?? [];
+  const pagedTotal = pagedTransfersData?.total ?? 0;
+  const pagedTotalPages = Math.max(1, Math.ceil(pagedTotal / 10));
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -124,6 +134,72 @@ export default function Dashboard() {
         return <Badge variant="outline">{status}</Badge>;
     }
   };
+
+  const formatAmount = (amount: number) =>
+    new Intl.NumberFormat("es-EC", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+
+  const getTransferMeta = (t: any) => {
+    const type = t.transferType as "service_payment" | "recharge" | "withdrawal" | "payment" | undefined;
+    const status = t.status as "pending_approval" | "completed" | "rejected" | undefined;
+    const isPending = status === "pending_approval";
+
+    // Créditos (verde): recarga o ingreso por servicio completado.
+    const isCredit =
+      status === "completed" && (type === "recharge" || type === "service_payment");
+    // Débitos (rojo): retiros completados o pago por servicio (cliente).
+    const isDebit = status === "completed" && (type === "withdrawal" || type === "payment");
+
+    let amountColor = "text-foreground";
+    if (isPending) {
+      amountColor = "text-muted-foreground";
+    } else if (isCredit) {
+      amountColor = "text-emerald-600";
+    } else if (isDebit) {
+      amountColor = "text-red-600";
+    }
+
+    let label = "Transacción";
+    if (type === "recharge") label = "Recarga de saldo";
+    if (type === "service_payment") label = "Pago de servicio";
+    if (type === "payment") label = "Pago por servicio";
+    if (type === "withdrawal") label = "Retiro de fondos";
+
+    const createdAt = parseTransferDate(t.createdAt);
+    const dateStr = createdAt
+      ? format(createdAt, "dd MMM yyyy HH:mm", { locale: es })
+      : "";
+
+    return { isCredit, isDebit, isPending, amountColor, label, dateStr };
+  };
+
+  /** Convierte createdAt de la API (Date, ISO string, Firestore Timestamp) a Date válido o null. */
+  function parseTransferDate(value: unknown): Date | null {
+    if (value == null) return null;
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+    if (typeof value === "string") {
+      const d = new Date(value);
+      return Number.isFinite(d.getTime()) ? d : null;
+    }
+    if (typeof value === "number") {
+      const d = new Date(value);
+      return Number.isFinite(d.getTime()) ? d : null;
+    }
+    if (typeof value === "object" && value !== null && "seconds" in value) {
+      const d = new Date((value as { seconds: number }).seconds * 1000);
+      return Number.isFinite(d.getTime()) ? d : null;
+    }
+    if (typeof value === "object" && value !== null && "toDate" in value && typeof (value as { toDate: () => Date }).toDate === "function") {
+      const d = (value as { toDate: () => Date }).toDate();
+      return Number.isFinite(d.getTime()) ? d : null;
+    }
+    const d = new Date(String(value));
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -339,10 +415,23 @@ export default function Dashboard() {
                     </Button>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-5">
-                      {recentTransactions.map((transaction) => (
+                    {recentLoading ? (
+                      <div className="flex flex-col items-center justify-center py-10 gap-3">
+                        <Receipt className="w-8 h-8 text-muted-foreground animate-pulse" />
+                        <p className="text-sm text-muted-foreground">Cargando transacciones…</p>
+                      </div>
+                    ) : recentTransfers.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+                        <Receipt className="w-8 h-8 opacity-60" />
+                        <p className="text-sm">Aún no tienes transacciones.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-5">
+                        {recentTransfers.map((t: any) => {
+                          const { amountColor, label, dateStr } = getTransferMeta(t);
+                          return (
                         <div 
-                          key={transaction.id}
+                            key={t.id}
                           className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 sm:p-5 rounded-lg bg-background/50 border border-border hover:border-primary/30 transition-colors min-w-0"
                         >
                           <div className="flex items-start sm:items-center gap-4 min-w-0">
@@ -350,22 +439,28 @@ export default function Dashboard() {
                               <Banknote className="w-5 h-5 text-primary" />
                             </div>
                             <div className="min-w-0 space-y-1.5">
-                              <p className="font-medium truncate text-foreground">{transaction.client}</p>
-                              <p className="text-sm text-muted-foreground truncate">{transaction.service}</p>
+                              <p className="font-medium truncate text-foreground">{label}</p>
+                              <p className="text-sm text-muted-foreground truncate">
+                                {t.description || "Sin descripción"}
+                              </p>
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-4 gap-y-2 shrink-0 border-t border-border/60 pt-3 sm:border-0 sm:pt-0 sm:gap-4">
                             <div className="text-right">
-                              <p className="font-bold text-foreground">${transaction.amount}</p>
-                              <p className="text-xs text-muted-foreground mt-0.5">{transaction.date}</p>
+                              <p className={`font-bold ${amountColor}`}>
+                                {formatAmount(t.amount)}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{dateStr}</p>
                             </div>
                             <div className="w-full sm:w-auto flex justify-center sm:justify-end">
-                              {getStatusBadge(transaction.status)}
+                              {getStatusBadge(t.status)}
                             </div>
                           </div>
                         </div>
-                      ))}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </motion.div>
@@ -378,10 +473,73 @@ export default function Dashboard() {
                   <CardDescription>Historial completo de transacciones</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-center py-12 text-muted-foreground">
-                    <Receipt className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>Vista detallada de transacciones en desarrollo</p>
-                  </div>
+                  {pagedLoading ? (
+                    <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+                      <Receipt className="w-8 h-8 animate-pulse" />
+                      <p className="text-sm">Cargando transacciones…</p>
+                    </div>
+                  ) : pagedTransfers.length === 0 ? (
+                    <div className="text-center py-10 text-muted-foreground">
+                      <Receipt className="w-10 h-10 mx-auto mb-3 opacity-60" />
+                      <p>No hay transacciones para mostrar.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {pagedTransfers.map((t: any) => {
+                        const { amountColor, label, dateStr } = getTransferMeta(t);
+                        return (
+                          <div
+                            key={t.id}
+                            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 border border-border rounded-lg bg-background/40"
+                          >
+                            <div className="flex items-start gap-3 min-w-0">
+                              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                <Banknote className="w-4 h-4 text-primary" />
+                              </div>
+                              <div className="min-w-0 space-y-1">
+                                <p className="font-medium text-sm truncate">{label}</p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {t.description || "Sin descripción"}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              <p className={`font-semibold text-sm ${amountColor}`}>
+                                {formatAmount(t.amount)}
+                              </p>
+                              <p className="text-xs text-muted-foreground">{dateStr}</p>
+                              <div>{getStatusBadge(t.status)}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div className="flex items-center justify-between pt-2">
+                        <p className="text-xs text-muted-foreground">
+                          Página {transactionsPage} de {pagedTotalPages}
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={transactionsPage <= 1}
+                            onClick={() => setTransactionsPage((p) => Math.max(1, p - 1))}
+                          >
+                            Anterior
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={transactionsPage >= pagedTotalPages}
+                            onClick={() =>
+                              setTransactionsPage((p) => Math.min(pagedTotalPages, p + 1))
+                            }
+                          >
+                            Siguiente
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>

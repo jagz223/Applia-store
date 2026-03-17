@@ -329,7 +329,8 @@ export function useUpdateService(serviceId: number) {
 // ==========================================
 // BOOKINGS
 // ==========================================
-export function useBookings() {
+export function useBookings(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled !== false;
   return useQuery({
     queryKey: [api.bookings.list.path],
     queryFn: async () => {
@@ -338,8 +339,15 @@ export function useBookings() {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (!res.ok) throw new Error("Failed to fetch bookings");
-      return api.bookings.list.responses[200].parse(await res.json());
+      const json = await res.json();
+      try {
+        return api.bookings.list.responses[200].parse(json);
+      } catch (e) {
+        if (Array.isArray(json)) return json;
+        throw e;
+      }
     },
+    enabled,
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   });
@@ -432,10 +440,11 @@ export function useUpdateBookingStatus() {
       return api.bookings.updateStatus.responses[200].parse(await res.json());
     },
     onSuccess: (_data, { status }) => {
+      // Refrescar inmediatamente la lista de reservas para que la UI se actualice al instante.
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
-      debouncedRefetch(queryClient, [api.bookings.list.path]);
-      debouncedRefetch(queryClient, ["/api/bookings/provider"]);
+      queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
       if (status === "completed") {
         queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
         queryClient.invalidateQueries({ queryKey: ["/api/professional/stats"] });
@@ -534,11 +543,13 @@ export function useConfirmBookingByClient() {
       return data;
     },
     onSuccess: () => {
+      // Refrescar inmediatamente la lista de reservas y wallet para que el cambio se vea al instante.
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
-      debouncedRefetch(queryClient, [api.bookings.list.path]);
-      debouncedRefetch(queryClient, ["/api/bookings/provider"]);
-      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
+      queryClient.refetchQueries({ queryKey: [api.genfeb.wallet.me.path] });
       toast({ title: "Pago confirmado", description: "Los fondos se han retenido. El profesional podrá completar el trabajo." });
     },
     onError: (err: Error) => {

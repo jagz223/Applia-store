@@ -25,8 +25,8 @@ import type {
 } from "@shared/schema";
 import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
 
-/** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed). */
-export type WalletTransferType = "service_payment" | "recharge" | "withdrawal";
+/** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed); payment = client paid for a service (outflow from pending to provider). */
+export type WalletTransferType = "service_payment" | "recharge" | "withdrawal" | "payment";
 
 /** Transfer status: only "completed" recharge adds to wallet; "pending_approval" waits for staff. */
 export type WalletTransferStatus = "pending_approval" | "completed" | "rejected";
@@ -613,32 +613,65 @@ class FirestoreStorageImpl implements IStorage {
 
   // ============ RESERVAS ============
 
+  /** Convierte createdAt/date de Firestore (Timestamp o { _seconds, _nanoseconds }) a ms. Nunca usa .getTime() sobre el valor crudo. */
+  private timestampToMs(x: unknown): number {
+    if (x == null) return 0;
+    if (typeof x === "number" && !Number.isNaN(x)) return x;
+    if (typeof x === "string") return new Date(x).getTime();
+    if (typeof x === "object") {
+      const o = x as Record<string, unknown>;
+      const sec = o.seconds ?? o._seconds;
+      if (typeof sec === "number" && !Number.isNaN(sec)) return sec * 1000;
+      if (typeof o.toMillis === "function") return (o.toMillis as () => number)();
+    }
+    if (x instanceof Date) return x.getTime();
+    return 0;
+  }
+
   async getBookingsByUser(userId: string, status?: string): Promise<(Booking & { service: ServiceWithProvider })[]> {
     if (!this.db) return [];
-    
-    let query = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS)
-      .where("userId", "==", userId);
-    
-    const snapshot = await query.get();
-    
-    const bookings: (Booking & { service: ServiceWithProvider })[] = [];
-    
-    for (const doc of snapshot.docs) {
-      const booking = {
-        id: parseInt(doc.id),
-        ...doc.data(),
-      } as Booking;
-      
-      if (status && booking.status !== status) continue;
-      
-      const service = await this.getService(booking.serviceId);
-      bookings.push({
-        ...booking,
-        service: service!,
+    try {
+      const query = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS)
+        .where("userId", "==", userId);
+
+      const snapshot = await query.get();
+
+      const bookings: (Booking & { service: ServiceWithProvider })[] = [];
+
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        const numericId = parseInt(doc.id, 10);
+        const booking = {
+          id: Number.isNaN(numericId) ? 0 : numericId,
+          ...data,
+        } as Booking;
+
+        if (status && booking.status !== status) continue;
+
+        let service: ServiceWithProvider | undefined;
+        try {
+          service = await this.getService(booking.serviceId);
+        } catch (_) {
+          service = undefined;
+        }
+        const serviceFallback = service ?? ({ id: 0, title: "Servicio", provider: undefined, category: {} } as ServiceWithProvider);
+        bookings.push({
+          ...booking,
+          service: serviceFallback,
+        });
+      }
+
+      bookings.sort((a, b) => {
+        const aMs = this.timestampToMs((a as any).createdAt ?? (a as any).date);
+        const bMs = this.timestampToMs((b as any).createdAt ?? (b as any).date);
+        return bMs - aMs;
       });
+
+      return bookings;
+    } catch (err) {
+      console.error("[getBookingsByUser]", err);
+      return [];
     }
-    
-    return bookings;
   }
 
   async getBookingsByProvider(providerId: number): Promise<(Booking & { service: ServiceWithProvider, user: User })[]> {
@@ -772,13 +805,19 @@ class FirestoreStorageImpl implements IStorage {
 
   /**
    * Marcar reserva como completada y liberar escrow: el monto exacto del servicio sale del
-   * saldo pendiente del cliente y entra en la wallet del profesional. Transacción ACID.
+   * saldo pendiente del cliente y entra en la wallet del profesional. Se registran dos
+   * filas en wallet_transfers (cliente: payment; profesional: service_payment) para que
+   * ambas partes vean el movimiento en sus transacciones.
    */
   async completeBookingAndReleaseEscrow(bookingId: number): Promise<Booking | undefined> {
     if (!this.db) return undefined;
     const bookingsColl = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS);
     const usersColl = this.db.collection(FIRESTORE_COLLECTIONS.USERS);
     const providersColl = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS);
+    const transfersColl = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
+
+    const transferId1 = await this.getNextId("wallet_transfers");
+    const transferId2 = await this.getNextId("wallet_transfers");
 
     return this.db.runTransaction(async (t) => {
       const bookingRef = bookingsColl.doc(bookingId.toString());
@@ -818,6 +857,34 @@ class FirestoreStorageImpl implements IStorage {
       t.update(bookingRef, { status: "completed", completedAt: now });
       t.update(clientRef, { pendingBalance: clientPending - cost, updatedAt: now });
       t.update(providerUserRef, { wallet: providerWallet + cost, updatedAt: now });
+
+      const clientTransferRecord = {
+        id: transferId1,
+        userId: clientUserId,
+        fromUserId: null,
+        amount: cost,
+        transferType: "payment" as WalletTransferType,
+        status: "completed" as WalletTransferStatus,
+        description: "Pago por servicio",
+        referenceId: String(bookingId),
+        currency: "USD",
+        createdAt: now,
+      };
+      const providerTransferRecord = {
+        id: transferId2,
+        userId: providerUserId,
+        fromUserId: null,
+        amount: cost,
+        transferType: "service_payment" as WalletTransferType,
+        status: "completed" as WalletTransferStatus,
+        description: "Pago por servicio completado",
+        referenceId: String(bookingId),
+        currency: "USD",
+        createdAt: now,
+      };
+      t.set(transfersColl.doc(String(transferId1)), clientTransferRecord);
+      t.set(transfersColl.doc(String(transferId2)), providerTransferRecord);
+
       return { id: bookingId, ...data, status: "completed" } as Booking;
     });
   }

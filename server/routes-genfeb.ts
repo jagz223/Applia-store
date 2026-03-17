@@ -73,20 +73,22 @@ export async function registerGenFebRoutes(
   
   // ---------- RESERVAS (BOOKINGS) ----------
   
-  // GET /api/bookings - Listar reservas del usuario
+  // GET /api/bookings - Listar reservas del usuario (cliente)
   app.get("/api/bookings", authenticateJWT, async (req: any, res) => {
     try {
-      const userId = req.user?.id;
+      const rawId = req.user?.id;
+      const userId = rawId != null ? String(rawId) : undefined;
       const status = req.query.status as string | undefined;
-      
+
       if (!userId) {
         return res.status(401).json({ message: "Unauthorized" });
       }
-      
+
       const bookings = await storage.getBookingsByUser(userId, status);
-      res.json(bookings);
-    } catch (error) {
-      console.error("Error fetching bookings:", error);
+      const list = Array.isArray(bookings) ? bookings : [];
+      res.json(list);
+    } catch (error: any) {
+      console.error("Error fetching bookings:", error?.stack ?? error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -771,7 +773,16 @@ export async function registerGenFebRoutes(
         amountMin: Number.isFinite(amountMin) ? amountMin : undefined,
         amountMax: Number.isFinite(amountMax) ? amountMax : undefined,
       });
-      res.json(result);
+      const transfers = (result.transfers || []).map((t: { createdAt?: unknown; [k: string]: unknown }) => {
+        const raw = t.createdAt;
+        let iso: string | undefined;
+        if (raw instanceof Date) iso = raw.toISOString();
+        else if (raw && typeof raw === "object" && "toDate" in raw && typeof (raw as { toDate: () => Date }).toDate === "function") iso = (raw as { toDate: () => Date }).toDate().toISOString();
+        else if (raw && typeof raw === "object" && "seconds" in raw) iso = new Date((raw as { seconds: number }).seconds * 1000).toISOString();
+        else if (typeof raw === "string") iso = raw;
+        return { ...t, createdAt: iso ?? raw };
+      });
+      res.json({ transfers, total: result.total });
     } catch (error) {
       console.error("Error fetching wallet transfers:", error);
       res.status(500).json({ message: "Internal server error" });
