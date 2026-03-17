@@ -147,6 +147,7 @@ export const FIRESTORE_COLLECTIONS = {
   USERS: "users",
   USER_ROLES: "user_roles",
   CATEGORIES: "categories",
+  SUB_CATEGORIES: "sub_categories",
   PROVIDERS: "providers",
   SERVICES: "services",
   SERVICE_ADDONS: "service_addons",

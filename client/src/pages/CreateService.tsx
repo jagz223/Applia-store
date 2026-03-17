@@ -2,7 +2,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertServiceSchema } from "@shared/schema";
 import { type InsertService } from "@shared/schema";
-import { useCreateService, useCurrentProvider, useCategories } from "@/hooks/use-mango-data";
+import { useCreateService, useCurrentProvider, useCategories, useSubcategories } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Tag } from "lucide-react";
 import { useEffect, useMemo } from "react";
+import { getCategoryDisplayName } from "@shared/default-categories";
 
 export default function CreateService() {
   const { user, isLoading: authLoading } = useAuth();
@@ -22,11 +24,12 @@ export default function CreateService() {
   const createService = useCreateService();
   const [, setLocation] = useLocation();
 
-  const form = useForm<InsertService>({
+  const form = useForm<InsertService & { subcategoryId?: number | null }>({
     resolver: zodResolver(insertServiceSchema),
     defaultValues: {
       providerId: 0,
       categoryId: 0,
+      subcategoryId: undefined,
       title: "",
       description: "",
       price: "0",
@@ -48,6 +51,7 @@ export default function CreateService() {
   }, [categories, providerCategoryId, providerCategorySlug]);
 
   const resolvedCategoryId = providerCategory?.id ?? providerCategoryId;
+  const { data: subcategories = [] } = useSubcategories(resolvedCategoryId ?? undefined);
 
   useEffect(() => {
     if (provider) {
@@ -89,14 +93,14 @@ export default function CreateService() {
     );
   }
 
-  function onSubmit(data: InsertService) {
+  function onSubmit(data: InsertService & { subcategoryId?: number | null }) {
     // If user leaves image blank, we can use a placeholder in frontend display, 
     // but schema requires string.
     if (!data.imageUrl) {
         data.imageUrl = "https://images.unsplash.com/photo-1581092921461-eab62e97a783?w=500&h=300&fit=crop";
     }
-    
-    createService.mutate(data, {
+    const payload = { ...data, subcategoryId: data.subcategoryId ?? undefined };
+    createService.mutate(payload, {
       onSuccess: () => setLocation("/dashboard"),
     });
   }
@@ -135,7 +139,7 @@ export default function CreateService() {
                       <div className="flex h-10 w-full items-center gap-2 rounded-md border border-input bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                         <Tag className="h-4 w-4 shrink-0" />
                         <span>
-                          {providerCategory ? providerCategory.name : "Categoría de tu perfil de proveedor"}
+                          {providerCategory ? getCategoryDisplayName(providerCategory) : "Categoría de tu perfil de proveedor"}
                         </span>
                       </div>
                     </FormControl>
@@ -143,6 +147,37 @@ export default function CreateService() {
                   </FormItem>
                 )}
               />
+
+              {subcategories.length > 0 && (
+                <FormField
+                  control={form.control}
+                  name="subcategoryId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Subcategoría (opcional)</FormLabel>
+                      <Select
+                        onValueChange={(v) => field.onChange(v === "none" || !v ? undefined : Number(v))}
+                        value={field.value != null ? String(field.value) : "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona una subcategoría" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">Ninguna</SelectItem>
+                          {subcategories.map((sub) => (
+                            <SelectItem key={String(sub.id)} value={String(sub.id)}>
+                              {sub.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <FormField

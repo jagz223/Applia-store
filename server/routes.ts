@@ -36,6 +36,14 @@ export async function registerRoutes(
     const categories = await catalogService.getCategories();
     res.json(categories);
   });
+  app.get("/api/subcategories", async (req, res) => {
+    const categoryId = req.query.categoryId != null ? Number(req.query.categoryId) : undefined;
+    if (categoryId == null || Number.isNaN(categoryId)) {
+      return res.json([]);
+    }
+    const list = await catalogService.getSubcategories(categoryId);
+    res.json(list);
+  });
   app.get("/api/provider-categories", (_req, res) => res.json(PROVIDER_CATEGORIES));
   app.get("/api/provider-categories/availability", async (_req, res) => {
     res.json(await catalogService.getProviderCategoryAvailability());
@@ -54,7 +62,8 @@ export async function registerRoutes(
     const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
     const search = (req.query.search as string) || undefined;
     const providerCategoryId = req.query.providerCategoryId ? Number(req.query.providerCategoryId) : undefined;
-    res.json(await catalogService.getAllServices(categoryId, search, providerCategoryId));
+    const subcategoryId = req.query.subcategoryId ? Number(req.query.subcategoryId) : undefined;
+    res.json(await catalogService.getAllServices(categoryId, search, providerCategoryId, subcategoryId));
   });
   app.get(api.services.get.path, async (req, res) => {
     const service = await catalogService.getService(Number(req.params.id));
@@ -72,7 +81,9 @@ export async function registerRoutes(
     res.json(mine);
   });
 
-  const createServiceBodySchema = insertServiceSchema;
+  const createServiceBodySchema = insertServiceSchema.extend({
+    subcategoryId: z.number().int().positive().optional().nullable(),
+  });
   const updateServiceBodySchema = z.object({
     title: z.string().min(1).max(500).optional(),
     description: z.string().max(5000).optional(),
@@ -80,6 +91,7 @@ export async function registerRoutes(
     imageUrl: z.string().url().optional().or(z.literal("")),
     isActive: z.boolean().optional(),
     categoryId: z.number().int().positive().optional(),
+    subcategoryId: z.number().int().positive().optional().nullable(),
   });
 
   app.post(api.services.create.path, authenticateJWT, async (req: any, res) => {
@@ -107,6 +119,7 @@ export async function registerRoutes(
         price: data.price ?? "0",
         imageUrl: data.imageUrl ?? "",
         isActive: data.isActive ?? true,
+        subcategoryId: data.subcategoryId ?? undefined,
       } as any);
       return res.status(201).json(service);
     } catch (e: any) {
@@ -173,6 +186,7 @@ export async function registerRoutes(
   const createProviderBodySchema = insertProviderSchema.extend({
     category: providerCategorySchema.optional(),
     categoryId: z.number().int().positive().optional(),
+    subcategoryId: z.number().int().positive().optional().nullable(),
   });
   const updateProviderBodySchema = z.object({
     category: providerCategorySchema.optional(),
@@ -197,6 +211,7 @@ export async function registerRoutes(
         userId,
         categoryId: data.categoryId ?? undefined,
         category: data.category ?? null,
+        subcategoryId: data.subcategoryId ?? undefined,
         profession: data.profession,
         bio: data.bio ?? "",
         yearsExperience: data.yearsExperience ?? 0,
@@ -215,6 +230,7 @@ export async function registerRoutes(
         await catalogService.createService({
           providerId: provider.id,
           categoryId: Number(categoryId),
+          subcategoryId: (provider as { subcategoryId?: number | null }).subcategoryId ?? undefined,
           title: serviceTitle,
           description: (provider as { bio?: string }).bio ?? "",
           price: (provider as { hourlyRate?: string | null }).hourlyRate ?? "0",

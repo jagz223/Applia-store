@@ -27,6 +27,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
 import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
 import { isBeforeToday } from "@/lib/date-utils";
 import { CategoryIcon } from "@/components/CategoryIcon";
@@ -49,6 +50,14 @@ export default function Booking() {
 
   const { data: categories } = useCategories();
   const { data: categoryAvailability } = useProviderCategoryAvailability();
+  const visibleCategories = useMemo(() => {
+    const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
+    const hidden = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
+    return (categories ?? []).filter((c) => {
+      const slug = (c as { slug?: string }).slug;
+      return slug && providerSlugs.has(slug) && !hidden.has(slug);
+    });
+  }, [categories]);
   const categoryIdNum = selectedService ? Number(selectedService) : undefined;
   const { data: services = [], isLoading: isLoadingServices } = useServices(
     { providerCategoryId: categoryIdNum },
@@ -321,7 +330,7 @@ export default function Booking() {
                         <div className="space-y-3">
                           <Label>Tipo de Servicio</Label>
                           <div className="grid sm:grid-cols-2 gap-3">
-                            {categories
+                            {visibleCategories
                               ?.filter((cat): cat is typeof cat & { id: number; icon?: string } => cat.id != null)
                               ?.map((cat) => {
                                 const hasServices = categoryAvailability?.[String(cat.id)] === true;
@@ -343,7 +352,7 @@ export default function Booking() {
                                     <span className={`flex shrink-0 p-2 rounded-lg ${hasServices ? "bg-muted/80" : "bg-muted"}`}>
                                       <CategoryIcon name={cat.icon ?? "HelpCircle"} className="h-5 w-5" />
                                     </span>
-                                    {cat.name}
+                                    {getCategoryDisplayName(cat)}
                                     {!hasServices && (
                                       <span className="text-xs ml-auto shrink-0">Sin servicios</span>
                                     )}
@@ -513,7 +522,7 @@ export default function Booking() {
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Categoría:</span>
                               <span>
-                                {categories?.find((c) => c.id != null && String(c.id) === selectedService)?.name ?? "—"}
+                                {getCategoryDisplayName(categories?.find((c) => c.id != null && String(c.id) === selectedService)) || "—"}
                               </span>
                             </div>
                             <div className="flex justify-between">

@@ -3,7 +3,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
-import { useCurrentProvider, useMyServices, useDeleteService, useWallet } from "@/hooks/use-mango-data";
+import { useCurrentProvider, useMyServices, useDeleteService, useWallet, useCategories } from "@/hooks/use-mango-data";
+import { getCategoryDisplayName } from "@shared/default-categories";
+import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { 
   Briefcase, 
   Calendar, 
@@ -69,6 +71,23 @@ export function Navigation() {
   const formatWallet = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
   const [location] = useLocation();
+  const { exploreCategoryDisplayName: exploreCategoryFromContext } = useExploreCategoryDisplayName();
+  const { data: categories = [] } = useCategories();
+  const exploreCategoryFromUrl = (() => {
+    const pathname = location.split("?")[0];
+    const search = pathname === "/explore"
+      ? (location.includes("?") ? location.split("?")[1] : (typeof window !== "undefined" ? window.location.search.slice(1) : ""))
+      : "";
+    if (pathname !== "/explore" || !search) return null;
+    const params = new URLSearchParams(search.startsWith("?") ? search : search);
+    const categoryId = params.get("providerCategoryId");
+    if (!categoryId) return null;
+    const id = Number(categoryId);
+    if (Number.isNaN(id)) return null;
+    const cat = categories.find((c) => c.id === id);
+    return cat ? getCategoryDisplayName(cat) : null;
+  })();
+  const exploreCategoryDisplayName = exploreCategoryFromContext ?? exploreCategoryFromUrl;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [myServicesOpen, setMyServicesOpen] = useState(false);
   const [serviceToDelete, setServiceToDelete] = useState<number | null>(null);
@@ -170,11 +189,12 @@ export function Navigation() {
         
         {/* Logo & Desktop Nav */}
         <div className="flex items-center gap-8">
-          <Link href="/" className="flex items-center gap-2">
-            {/* Using static logo import as requested */}
+          <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-2">
             <img src="/logo GenFeb.jpg" alt="GENFEB Logo" className="h-8 w-auto object-contain" />
             <span className="hidden text-xl font-bold font-display text-primary sm:inline-block tracking-wider">
-              GENFEB<span className="text-accent">.S.A.S</span>
+              {exploreCategoryDisplayName ?? (
+                <>GENFEB<span className="text-accent">.S.A.S</span></>
+              )}
             </span>
           </Link>
           <div className="hidden lg:flex items-center gap-6">

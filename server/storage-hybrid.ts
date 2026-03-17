@@ -9,9 +9,9 @@ import type { FirestoreStorage } from "./storage-firestore";
 const FIRESTORE_METHODS = new Set([
   "getUserById", "getUserByEmail", "createUser", "updateUser", "updateUserPassword",
   "getUserRole", "updateUserRole",
-  "getCategories", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider",
+  "getCategories", "getSubcategories", "getSubcategoryById", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider",
   "getAllServices", "getService", "createService",
-  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow",
+  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getNotifications", "createNotification", "markNotificationAsRead",
 ]);
 
@@ -36,11 +36,15 @@ export class HybridStorage implements IStorage {
   getUserRole(userId: string) { return this.delegate("getUserRole", [userId]); }
   updateUserRole(userId: string, data: any) { return this.delegate("updateUserRole", [userId, data]); }
   getCategories() { return this.delegate("getCategories", []); }
+  getSubcategories(categoryId: number) { return this.delegate("getSubcategories", [categoryId]); }
+  getSubcategoryById(id: number) { return this.delegate("getSubcategoryById", [id]); }
   getAllProviders(profession?: string) { return this.delegate("getAllProviders", [profession]); }
   getProvider(id: number) { return this.delegate("getProvider", [id]); }
   getProviderByUserId(userId: string) { return this.delegate("getProviderByUserId", [userId]); }
   createProvider(provider: any) { return this.delegate("createProvider", [provider]); }
-  getAllServices(categoryId?: number, search?: string) { return this.delegate("getAllServices", [categoryId, search]); }
+  getAllServices(categoryId?: number, search?: string, providerCategoryId?: number, subcategoryId?: number) {
+    return this.delegate("getAllServices", [categoryId, search, providerCategoryId, subcategoryId]);
+  }
   getService(id: number) { return this.delegate("getService", [id]); }
   createService(service: any) { return this.delegate("createService", [service]); }
   getBookingsByUser(userId: string, status?: string) { return this.delegate("getBookingsByUser", [userId, status]); }
@@ -52,6 +56,7 @@ export class HybridStorage implements IStorage {
   updateBookingSchedule(id: number, date: Date) { return this.delegate("updateBookingSchedule", [id, date]); }
   confirmBookingByClient(bookingId: number) { return this.delegate("confirmBookingByClient", [bookingId]); }
   completeBookingAndReleaseEscrow(bookingId: number) { return this.delegate("completeBookingAndReleaseEscrow", [bookingId]); }
+  cancelBookingAndRefundClientEscrow(bookingId: number) { return this.delegate("cancelBookingAndRefundClientEscrow", [bookingId]); }
 
   getPaymentsByUser(userId: string) { return this.memory.getPaymentsByUser(userId); }
   getEscrowPayments(userId: string) { return this.memory.getEscrowPayments(userId); }

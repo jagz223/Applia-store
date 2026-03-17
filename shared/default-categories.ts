@@ -1,7 +1,30 @@
 /**
  * Categorías por defecto del sistema (único sistema para servicios y proveedores).
- * Se usan en seed y en migración. Slug = identificador único para mapear provider.category (string) → categoryId.
+ * Se usan en seed de categorías y en migración. Slug = identificador único para mapear provider.category (string) → categoryId.
+ * Nota: "Servicios Legales" y "Consultoría Financiera" no son categorías aquí; solo existen como subcategorías en default-subcategories.ts (seeder de subcategorías).
  */
+
+/** Slugs ocultos en la UI (vista categorías, explorar, configurarse como profesional) hasta que se activen. */
+export const HIDDEN_CATEGORY_SLUGS_IN_UI: ReadonlyArray<string> = ["delivery", "marketplace", "transport"];
+
+/** Nombres de marca para mostrar en la UI (Familia GenFeb). Solo afecta la visualización. */
+export const CATEGORY_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  technical: "Fix Go",
+  professional: "Pro Go",
+  maintenance: "Man Go",
+  delivery: "Pack Go",
+  marketplace: "Shog Go",
+  transport: "Car Go",
+} as const;
+
+/** Devuelve el nombre de marca para una categoría (por slug) o el nombre original si no hay mapeo. */
+export function getCategoryDisplayName(category: { slug?: string; name?: string } | null | undefined): string {
+  if (!category) return "";
+  const slug = (category as { slug?: string }).slug;
+  if (slug && slug in CATEGORY_DISPLAY_NAMES) return (CATEGORY_DISPLAY_NAMES as Record<string, string>)[slug];
+  return (category as { name?: string }).name ?? "";
+}
+
 export const DEFAULT_CATEGORIES: ReadonlyArray<{
   slug: string;
   name: string;
@@ -10,8 +33,7 @@ export const DEFAULT_CATEGORIES: ReadonlyArray<{
   imageUrl?: string;
 }> = [
   { slug: "technical", name: "Servicios Técnicos", type: "technical", icon: "Wrench" },
-  { slug: "legal", name: "Servicios Legales", type: "legal", icon: "Scale" },
-  { slug: "financial", name: "Consultoría Financiera", type: "profession", icon: "TrendingUp" },
+  { slug: "professional", name: "Servicios Profesionales", type: "profession", icon: "Briefcase" },
   { slug: "maintenance", name: "Mantenimiento", type: "technical", icon: "Home" },
   { slug: "delivery", name: "Delivery", type: "technical", icon: "Package" },
   { slug: "marketplace", name: "Marketplace", type: "technical", icon: "Store" },

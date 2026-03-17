@@ -29,6 +29,28 @@ export function useCategories() {
   });
 }
 
+export interface Subcategory {
+  id: number;
+  name: string;
+  slug: string;
+  categoryId: number;
+  categorySlug?: string;
+  icon?: string | null;
+}
+
+/** Subcategorías de una categoría (ej. Servicios Legales y Consultoría Financiera bajo Servicios Profesionales). */
+export function useSubcategories(categoryId: number | null | undefined) {
+  return useQuery({
+    queryKey: ["/api/subcategories", categoryId],
+    queryFn: async () => {
+      const res = await fetch(`/api/subcategories?categoryId=${categoryId}`);
+      if (!res.ok) throw new Error("Failed to fetch subcategories");
+      return res.json() as Promise<Subcategory[]>;
+    },
+    enabled: categoryId != null && !Number.isNaN(Number(categoryId)) && Number(categoryId) >= 1,
+  });
+}
+
 // ==========================================
 // PROVIDERS
 // ==========================================
@@ -144,6 +166,7 @@ export function useServices(
     categoryId?: string;
     search?: string;
     providerCategoryId?: number;
+    subcategoryId?: number;
   },
   options?: { enabled?: boolean }
 ) {
@@ -155,6 +178,8 @@ export function useServices(
       if (params?.search) queryParams.append("search", params.search);
       if (params?.providerCategoryId != null)
         queryParams.append("providerCategoryId", String(params.providerCategoryId));
+      if (params?.subcategoryId != null)
+        queryParams.append("subcategoryId", String(params.subcategoryId));
       const url = `${api.services.list.path}?${queryParams.toString()}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch services");

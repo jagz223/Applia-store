@@ -77,10 +77,10 @@ export default function HomePage() {
   ];
 
   const serviceCategories = [
-    { name: "Servicios Técnicos", icon: Wrench, count: 245, color: "text-primary" },
+    { name: "Fix Go", icon: Wrench, count: 245, color: "text-primary" },
     { name: "Servicios Legales", icon: Scale, count: 128, color: "text-secondary" },
     { name: "Consultoría Financiera", icon: TrendingUp, count: 96, color: "text-accent" },
-    { name: "Mantenimiento", icon: Home, count: 187, color: "text-primary" },
+    { name: "Man Go", icon: Home, count: 187, color: "text-primary" },
   ];
 
   const stats = [

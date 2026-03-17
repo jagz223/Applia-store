@@ -45,26 +45,38 @@ export interface IRoleStorage {
   seedRoles(): Promise<void>;
 }
 
+/** Subcategoría (pertenece a una categoría). */
+export interface Subcategory {
+  id: number;
+  name: string;
+  slug: string;
+  categoryId: number;
+  categorySlug?: string;
+  icon?: string | null;
+}
+
 /** Datos parciales para actualizar un proveedor (solo campos editables). */
 export type ProviderUpdate = Partial<
-  Pick<Provider, "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate">
+  Pick<Provider, "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate"> & { subcategoryId?: number | null }
 >;
 
 /** Datos parciales para actualizar un servicio (solo campos editables). */
 export type ServiceUpdate = Partial<
-  Pick<Service, "title" | "description" | "price" | "imageUrl" | "isActive" | "categoryId">
+  Pick<Service, "title" | "description" | "price" | "imageUrl" | "isActive" | "categoryId"> & { subcategoryId?: number | null }
 >;
 
-/** Contrato para catálogo: categorías, proveedores, servicios. */
+/** Contrato para catálogo: categorías, subcategorías, proveedores, servicios. */
 export interface ICatalogStorage {
   getCategories(): Promise<Category[]>;
+  getSubcategories(categoryId: number): Promise<Subcategory[]>;
+  getSubcategoryById(id: number): Promise<Subcategory | undefined>;
   getAllProviders(profession?: string, category?: string, categoryId?: number): Promise<Provider[]>;
   getProvider(id: number | null | undefined): Promise<Provider | undefined>;
   getProviderByUserId(userId: string): Promise<Provider | undefined>;
   createProvider(provider: InsertProvider): Promise<Provider>;
   updateProvider(id: number, data: ProviderUpdate): Promise<Provider | undefined>;
   deleteProvider(id: number): Promise<boolean>;
-  getAllServices(categoryId?: number, search?: string, providerCategoryId?: number): Promise<ServiceWithProvider[]>;
+  getAllServices(categoryId?: number, search?: string, providerCategoryId?: number, subcategoryId?: number): Promise<ServiceWithProvider[]>;
   getService(id: number): Promise<ServiceWithProvider | undefined>;
   createService(service: InsertService): Promise<Service>;
   updateService(id: number, data: ServiceUpdate): Promise<Service | undefined>;
@@ -93,4 +105,10 @@ export interface IBookingStorage {
    * y entra en la wallet del profesional. Solo válido si confirmedByClient === true. Transacción ACID.
    */
   completeBookingAndReleaseEscrow(bookingId: number): Promise<Booking | undefined>;
+  /**
+   * Cancelación por el profesional cuando el cliente ya confirmó el pago:
+   * el monto retenido sale del pendingBalance del cliente y regresa íntegramente a su wallet.
+   * La reserva pasa a estado 'cancelled'. Transacción ACID.
+   */
+  cancelBookingAndRefundClientEscrow(bookingId: number): Promise<Booking | undefined>;
 }

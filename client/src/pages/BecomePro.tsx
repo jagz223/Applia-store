@@ -4,7 +4,7 @@ import { z } from "zod";
 import { insertProviderSchema } from "@shared/schema";
 import { type InsertProvider } from "@shared/schema";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCreateProvider, useCurrentProvider, useCategories } from "@/hooks/use-mango-data";
+import { useCreateProvider, useCurrentProvider, useCategories, useSubcategories } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { api } from "@shared/routes";
@@ -15,11 +15,17 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
+
+/** Solo categorías válidas para proveedor (excluye legal/financial, que son subcategorías). */
+const PROVIDER_CATEGORY_SLUGS = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
+const HIDDEN_SLUGS = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
 
 const becomeProFormSchema = insertProviderSchema.extend({
   categoryId: z.number().int().positive({ message: "Selecciona una categoría para tu perfil y tu servicio." }),
   category: z.string().optional(),
+  subcategoryId: z.number().int().positive().optional().nullable(),
 });
 type BecomeProForm = z.infer<typeof becomeProFormSchema>;
 
@@ -31,24 +37,41 @@ export default function BecomePro() {
   const [, setLocation] = useLocation();
 
   const { data: categories = [] } = useCategories();
+  const providerCategories = useMemo(
+    () =>
+      categories.filter(
+        (c) => {
+          const slug = (c as { slug?: string }).slug;
+          return slug && PROVIDER_CATEGORY_SLUGS.has(slug) && !HIDDEN_SLUGS.has(slug);
+        }
+      ),
+    [categories]
+  );
   const form = useForm<BecomeProForm>({
     resolver: zodResolver(becomeProFormSchema),
     defaultValues: {
       userId: "",
       categoryId: undefined,
       category: undefined,
+      subcategoryId: undefined,
       profession: "",
       bio: "",
       yearsExperience: 0,
       hourlyRate: "50",
     },
   });
+  const selectedCategoryId = form.watch("categoryId");
+  const { data: subcategories = [] } = useSubcategories(selectedCategoryId);
 
   useEffect(() => {
     if (user) {
       form.setValue("userId", user.id);
     }
   }, [user, form]);
+
+  useEffect(() => {
+    form.setValue("subcategoryId", undefined);
+  }, [selectedCategoryId, form]);
 
   useEffect(() => {
     if (existingProfile) {
@@ -79,6 +102,7 @@ export default function BecomePro() {
         ...data,
         categoryId: data.categoryId,
         category: slug ?? data.category ?? undefined,
+        subcategoryId: data.subcategoryId ?? undefined,
       } as InsertProvider,
       {
         onSuccess: () => {
@@ -125,11 +149,11 @@ export default function BecomePro() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {categories
+                        {providerCategories
                           ?.filter((cat) => cat.id != null)
                           .map((cat) => (
                             <SelectItem key={String(cat.id)} value={String(cat.id)}>
-                              {cat.name}
+                              {getCategoryDisplayName(cat)}
                             </SelectItem>
                           ))}
                       </SelectContent>
@@ -138,6 +162,36 @@ export default function BecomePro() {
                   </FormItem>
                 )}
               />
+              {subcategories.length > 0 && (
+                <FormField
+                  control={form.control}
+                  name="subcategoryId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Subcategoría (opcional)</FormLabel>
+                      <Select
+                        onValueChange={(v) => field.onChange(v === "none" || !v ? undefined : Number(v))}
+                        value={field.value != null ? String(field.value) : "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona una subcategoría" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">Ninguna</SelectItem>
+                          {subcategories.map((sub) => (
+                            <SelectItem key={String(sub.id)} value={String(sub.id)}>
+                              {sub.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
                   <FormField
                 control={form.control}
                 name="profession"

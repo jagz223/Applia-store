@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { isBeforeToday } from "@/lib/date-utils";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@shared/routes";
+import { getCategoryDisplayName } from "@shared/default-categories";
 import { useSocketBookings } from "@/hooks/use-socket";
 
 export default function ServiceDetails() {
@@ -114,7 +115,7 @@ export default function ServiceDetails() {
           
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <Badge className="bg-primary/10 text-primary hover:bg-primary/20">{service.category?.name}</Badge>
+              <Badge className="bg-primary/10 text-primary hover:bg-primary/20">{getCategoryDisplayName(service.category)}</Badge>
               <div className="flex items-center text-amber-500 font-bold text-sm">
                 <Star className="h-4 w-4 fill-current mr-1" />
                 {Number(service.provider.rating).toFixed(1)} ({service.provider.reviewCount} reviews)

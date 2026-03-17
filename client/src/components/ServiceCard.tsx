@@ -1,4 +1,5 @@
 import { type ServiceWithProvider } from "@shared/schema";
+import { getCategoryDisplayName } from "@shared/default-categories";
 import { Link } from "wouter";
 import { Star, ArrowRight, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -30,11 +31,16 @@ export function ServiceCard({ service }: ServiceCardProps) {
             {/* Gradient overlay */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
             
-            {/* Category badge */}
-            <div className="absolute top-4 left-4">
+            {/* Category / subcategory badges */}
+            <div className="absolute top-4 left-4 flex flex-wrap gap-1.5">
               <Badge className="bg-white/95 text-foreground backdrop-blur-md shadow-lg font-bold border-0 px-3 py-1">
-                {service.category?.name || "Servicio"}
+                {getCategoryDisplayName(service.category) || "Servicio"}
               </Badge>
+              {service.subcategory?.name && (
+                <Badge variant="secondary" className="bg-white/90 text-muted-foreground backdrop-blur-md shadow-lg border-0 px-2.5 py-0.5 text-xs">
+                  {service.subcategory.name}
+                </Badge>
+              )}
             </div>
 
             {/* Price tag */}

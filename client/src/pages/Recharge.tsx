@@ -19,7 +19,7 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
-import { useRechargeRequest, useWallet, useWithdraw } from "@/hooks/use-mango-data";
+import { useRechargeRequest, useWallet } from "@/hooks/use-mango-data";
 import { useToast } from "@/hooks/use-toast";
 
 const BANK_ACCOUNT_NUMBER = "7700896747";
@@ -33,16 +33,11 @@ export default function Recharge() {
   const { toast } = useToast();
   const rechargeRequest = useRechargeRequest();
   const { data: walletData } = useWallet({ enabled: isAuthenticated });
-  const withdrawMutation = useWithdraw();
   const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
-  const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number"
-    ? (walletData as { withdrawingFunds: number }).withdrawingFunds
-    : 0;
   const [amount, setAmount] = useState<string>("");
   const [transferDate, setTransferDate] = useState<Date | undefined>(undefined);
   const [transferTime, setTransferTime] = useState<string>("");
   const [transferCode, setTransferCode] = useState<string>("");
-  const [withdrawAmount, setWithdrawAmount] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 
@@ -137,84 +132,18 @@ export default function Recharge() {
           </p>
         </div>
 
-        {/* Resumen de billetera: saldo disponible y fondos en proceso de retiro */}
+        {/* Resumen de billetera: solo información de saldo disponible */}
         <Card className="border-border bg-card shadow-sm mb-8">
           <CardHeader>
             <CardTitle className="text-lg">Tu billetera</CardTitle>
             <CardDescription>
-              Saldo disponible para gastar y fondos en proceso de retiro hasta que el administrador procese el pago.
+              Saldo disponible en tu wallet para usar en tus pagos.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-6">
-              <div>
-                <p className="text-sm text-muted-foreground">Saldo disponible</p>
-                <p className="text-2xl font-semibold tabular-nums text-foreground">{formatUsd(wallet)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Fondos en proceso de retiro</p>
-                <p className="text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-500">
-                  {formatUsd(withdrawingFunds)}
-                </p>
-              </div>
-            </div>
-            <div className="pt-2 border-t border-border">
-              <Label htmlFor="withdraw-amount" className="text-sm font-medium">
-                Retirar fondos
-              </Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                El monto se descontará del saldo disponible y quedará en proceso de retiro hasta que el administrador lo procese. No puede haber más de un retiro pendiente.
-              </p>
-              <div className="flex flex-wrap items-end gap-2">
-                <Input
-                  id="withdraw-amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={withdrawAmount}
-                  onChange={(e) => setWithdrawAmount(e.target.value)}
-                  className="w-32 bg-background border-border"
-                />
-                <Button
-                  disabled={
-                    withdrawingFunds > 0 ||
-                    !(parseFloat(withdrawAmount) > 0) ||
-                    parseFloat(withdrawAmount) > wallet ||
-                    withdrawMutation.isPending
-                  }
-                  onClick={() => {
-                    const num = parseFloat(withdrawAmount);
-                    if (!Number.isFinite(num) || num <= 0 || num > wallet) return;
-                    withdrawMutation.mutate(num, {
-                      onSuccess: () => {
-                        setWithdrawAmount("");
-                        toast({
-                          title: "Retiro solicitado",
-                          description: "Los fondos están en proceso de retiro. Un administrador procesará el pago.",
-                        });
-                      },
-                      onError: (err: Error) => {
-                        toast({ title: "Error", description: err.message, variant: "destructive" });
-                      },
-                    });
-                  }}
-                >
-                  {withdrawMutation.isPending ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Procesando…
-                    </>
-                  ) : (
-                    "Retirar fondos"
-                  )}
-                </Button>
-              </div>
-              {withdrawingFunds > 0 && (
-                <p className="text-sm text-amber-600 dark:text-amber-500 mt-2">
-                  Tienes un retiro pendiente. Espera a que se procese antes de solicitar otro.
-                </p>
-              )}
+          <CardContent>
+            <div>
+              <p className="text-sm text-muted-foreground">Saldo disponible</p>
+              <p className="text-2xl font-semibold tabular-nums text-foreground">{formatUsd(wallet)}</p>
             </div>
           </CardContent>
         </Card>

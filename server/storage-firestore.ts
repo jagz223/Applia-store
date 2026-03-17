@@ -303,6 +303,41 @@ class FirestoreStorageImpl implements IStorage {
     } as Category));
   }
 
+  async getSubcategories(categoryId: number): Promise<import("./storage-contracts").Subcategory[]> {
+    if (!this.db) return [];
+    const snapshot = await this.db
+      .collection(FIRESTORE_COLLECTIONS.SUB_CATEGORIES)
+      .where("categoryId", "==", categoryId)
+      .get();
+    return snapshot.docs.map((doc) => {
+      const d = doc.data();
+      const id = typeof d?.id === "number" ? d.id : parseInt(doc.id, 10);
+      return {
+        id,
+        name: (d?.name as string) ?? "",
+        slug: (d?.slug as string) ?? "",
+        categoryId: (d?.categoryId ?? d?.categoria) as number,
+        categorySlug: d?.categorySlug as string | undefined,
+        icon: d?.icon ?? null,
+      } as import("./storage-contracts").Subcategory;
+    });
+  }
+
+  async getSubcategoryById(id: number): Promise<import("./storage-contracts").Subcategory | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.SUB_CATEGORIES).doc(String(id)).get();
+    if (!doc.exists) return undefined;
+    const d = doc.data()!;
+    return {
+      id: typeof d?.id === "number" ? d.id : parseInt(doc.id, 10),
+      name: (d?.name as string) ?? "",
+      slug: (d?.slug as string) ?? "",
+      categoryId: (d?.categoryId ?? d?.categoria) as number,
+      categorySlug: d?.categorySlug as string | undefined,
+      icon: d?.icon ?? null,
+    } as import("./storage-contracts").Subcategory;
+  }
+
   // ============ PROVEEDORES ============
 
   async getAllProviders(profession?: string, category?: string, categoryId?: number): Promise<Provider[]> {
@@ -338,10 +373,8 @@ class FirestoreStorageImpl implements IStorage {
     const doc = await this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS).doc(String(safeId)).get();
     if (!doc.exists) return undefined;
 
-    return {
-      id: parseInt(doc.id, 10),
-      ...doc.data(),
-    } as Provider;
+    const provider = { id: parseInt(doc.id, 10), ...doc.data() } as Provider;
+    return this.enrichProviderWithSubcategory(provider);
   }
 
   /** Enriquece un proveedor con los datos del usuario (para ServiceWithProvider). */
@@ -367,19 +400,22 @@ class FirestoreStorageImpl implements IStorage {
 
   async getProviderByUserId(userId: string): Promise<Provider | undefined> {
     if (!this.db) return undefined;
-    
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS)
       .where("userId", "==", userId)
       .limit(1)
       .get();
-    
     if (snapshot.empty) return undefined;
-    
     const doc = snapshot.docs[0];
-    return {
-      id: parseInt(doc.id),
-      ...doc.data(),
-    } as Provider;
+    const provider = { id: parseInt(doc.id), ...doc.data() } as Provider;
+    return this.enrichProviderWithSubcategory(provider);
+  }
+
+  /** Añade subcategory { id, name } al proveedor cuando tiene subcategoryId. */
+  private async enrichProviderWithSubcategory<T extends { subcategoryId?: number | null }>(provider: T): Promise<T & { subcategory?: { id: number; name: string } | null }> {
+    const subId = (provider as { subcategoryId?: number | null }).subcategoryId;
+    if (subId == null || Number.isNaN(Number(subId))) return provider as T & { subcategory?: null };
+    const sub = await this.getSubcategoryById(Number(subId));
+    return { ...provider, subcategory: sub ? { id: sub.id, name: sub.name } : null } as T & { subcategory?: { id: number; name: string } | null };
   }
 
   async createProvider(provider: InsertProvider): Promise<Provider> {
@@ -391,6 +427,7 @@ class FirestoreStorageImpl implements IStorage {
       ...provider,
       categoryId: (provider as { categoryId?: number }).categoryId ?? null,
       category: provider.category ?? null,
+      subcategoryId: (provider as { subcategoryId?: number | null }).subcategoryId ?? null,
       isVerified: provider.isVerified ?? false,
       rating: provider.rating ?? "0",
       reviewCount: provider.reviewCount ?? 0,
@@ -430,7 +467,8 @@ class FirestoreStorageImpl implements IStorage {
   async getAllServices(
     categoryId?: number,
     search?: string,
-    providerCategoryId?: number
+    providerCategoryId?: number,
+    subcategoryId?: number
   ): Promise<ServiceWithProvider[]> {
     if (!this.db) return [];
     let query = this.db.collection(FIRESTORE_COLLECTIONS.SERVICES);
@@ -447,6 +485,7 @@ class FirestoreStorageImpl implements IStorage {
       id != null && typeof id === "number" && !Number.isNaN(id);
 
     const allCategories = await this.getCategories();
+    const subcategoryCache = new Map<number, { id: number; name: string }>();
     let servicesWithProviders: ServiceWithProvider[] = [];
     for (const service of services) {
       const provider = providerIdValid(service.providerId)
@@ -454,10 +493,20 @@ class FirestoreStorageImpl implements IStorage {
         : undefined;
       const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
       const category = allCategories.find((c) => c.id === service.categoryId);
+      const subId = (service as { subcategoryId?: number | null }).subcategoryId;
+      let subcategory: { id: number; name: string } | null = null;
+      if (subId != null && !Number.isNaN(Number(subId))) {
+        if (!subcategoryCache.has(Number(subId))) {
+          const sub = await this.getSubcategoryById(Number(subId));
+          if (sub) subcategoryCache.set(sub.id, { id: sub.id, name: sub.name });
+        }
+        subcategory = subcategoryCache.get(Number(subId)) ?? null;
+      }
       servicesWithProviders.push({
         ...service,
         provider: providerWithUser ?? undefined,
         category: category ?? (allCategories[0] as Category),
+        subcategory,
       } as ServiceWithProvider);
     }
 
@@ -465,6 +514,12 @@ class FirestoreStorageImpl implements IStorage {
       servicesWithProviders = servicesWithProviders.filter((s) => {
         const p = s.provider as { categoryId?: number } | undefined;
         return p?.categoryId === providerCategoryId;
+      });
+    }
+    if (subcategoryId != null && !Number.isNaN(subcategoryId)) {
+      servicesWithProviders = servicesWithProviders.filter((s) => {
+        const subId = (s as { subcategoryId?: number | null }).subcategoryId;
+        return subId != null && Number(subId) === subcategoryId;
       });
     }
     if (search) {
@@ -499,11 +554,17 @@ class FirestoreStorageImpl implements IStorage {
     const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
     const allCategories = await this.getCategories();
     const category = allCategories.find((c) => c.id === service.categoryId) ?? (allCategories[0] as Category | undefined);
-
+    const subId = (service as { subcategoryId?: number | null }).subcategoryId;
+    let subcategory: { id: number; name: string } | null = null;
+    if (subId != null && !Number.isNaN(Number(subId))) {
+      const sub = await this.getSubcategoryById(Number(subId));
+      if (sub) subcategory = { id: sub.id, name: sub.name };
+    }
     return {
       ...service,
       provider: providerWithUser ?? undefined,
       category: category ?? ({} as Category),
+      subcategory,
     } as ServiceWithProvider;
   }
 
@@ -514,6 +575,7 @@ class FirestoreStorageImpl implements IStorage {
     const newService = {
       id,
       ...service,
+      subcategoryId: (service as { subcategoryId?: number | null }).subcategoryId ?? null,
       isActive: service.isActive ?? true,
     };
     await docRef.set(newService);
@@ -656,6 +718,56 @@ class FirestoreStorageImpl implements IStorage {
     await docRef.update({ status });
     const updated = await docRef.get();
     return { id: parseInt(updated.id), ...updated.data() } as Booking;
+  }
+
+  /**
+   * Cancelación por el profesional cuando el cliente ya confirmó el pago:
+   * el monto retenido sale del pendingBalance del cliente y regresa íntegramente a su wallet.
+   * La reserva pasa a estado 'cancelled'. Transacción ACID.
+   */
+  async cancelBookingAndRefundClientEscrow(bookingId: number): Promise<Booking | undefined> {
+    if (!this.db) return undefined;
+    const bookingsColl = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS);
+    const usersColl = this.db.collection(FIRESTORE_COLLECTIONS.USERS);
+
+    return this.db.runTransaction(async (t) => {
+      const bookingRef = bookingsColl.doc(bookingId.toString());
+      const bookingSnap = await t.get(bookingRef);
+      if (!bookingSnap.exists) return undefined;
+      const data = bookingSnap.data() as { status?: string; userId?: string; cost?: number; confirmedByClient?: boolean };
+
+      if (data.confirmedByClient !== true) {
+        // Si el cliente no confirmó el pago, solo marcamos cancelado sin mover dinero.
+        const now = new Date();
+        t.update(bookingRef, { status: "cancelled", cancelledAt: now });
+        return { id: bookingId, ...data, status: "cancelled" } as Booking;
+      }
+
+      const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
+      if (cost <= 0) throw new Error("Costo de reserva no definido");
+      const clientUserId = data.userId;
+      if (!clientUserId) throw new Error("Reserva sin cliente asociado");
+
+      const clientRef = usersColl.doc(clientUserId);
+      const clientSnap = await t.get(clientRef);
+      if (!clientSnap.exists) throw new Error("Usuario cliente no encontrado");
+      const clientData = clientSnap.data() as { wallet?: number; pendingBalance?: number };
+      const clientWallet = typeof clientData.wallet === "number" ? clientData.wallet : 0;
+      const clientPending = typeof clientData.pendingBalance === "number" ? clientData.pendingBalance : 0;
+      if (clientPending < cost) {
+        throw new Error("Fondos retenidos insuficientes para revertir el pago al cliente");
+      }
+
+      const now = new Date();
+      t.update(bookingRef, { status: "cancelled", cancelledAt: now });
+      t.update(clientRef, {
+        wallet: clientWallet + cost,
+        pendingBalance: clientPending - cost,
+        updatedAt: now,
+      });
+
+      return { id: bookingId, ...data, status: "cancelled" } as Booking;
+    });
   }
 
   /**
