@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { User, ArrowLeft, FileText, Calendar, MapPin, Bell, BellOff, Loader2 } from "lucide-react";
+import { User, ArrowLeft, FileText, Calendar, MapPin, Bell, BellOff, Loader2, Info } from "lucide-react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { MessageList } from "./MessageList";
 import { MessageInput } from "./MessageInput";

@@ -641,14 +641,92 @@ export async function registerGenFebRoutes(
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUserById(userId);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
-      const u = user as { wallet?: number; totalEarnings?: number; pendingBalance?: number };
+      const u = user as { wallet?: number; totalEarnings?: number; pendingBalance?: number; withdrawingFunds?: number };
       res.json({
         wallet: typeof u.wallet === "number" ? u.wallet : 0,
         totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
         pendingBalance: typeof u.pendingBalance === "number" ? u.pendingBalance : 0,
+        withdrawingFunds: typeof u.withdrawingFunds === "number" ? u.withdrawingFunds : 0,
       });
     } catch (error) {
       console.error("Error fetching user wallet:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Feature flag: futura API bancaria para automatizar retiros (por ahora siempre manual vía Admin → Payouts).
+  const ENABLE_BANK_API = process.env.ENABLE_BANK_API === "true";
+
+  // POST /api/wallet/withdraw - Solicitar retiro (escrow: wallet -> withdrawingFunds).
+  // Atomicidad: storage.requestWithdraw (y processWithdrawal en admin) realizan actualizaciones atómicas
+  // (transacción en Firestore; en memoria es secuencial) para evitar discrepancias de balance.
+  // Validación: requiere bankName y accountNumber en el perfil. Si ENABLE_BANK_API=true en el futuro,
+  // aquí se conectaría la llamada a la API bancaria en lugar del flujo manual.
+  app.post("/api/wallet/withdraw", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await storage.getUserById(userId);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+      const u = user as { bankName?: string; accountNumber?: string };
+      const bankName = typeof u.bankName === "string" ? u.bankName.trim() : "";
+      const accountNumber = typeof u.accountNumber === "string" ? u.accountNumber.trim() : "";
+      if (!bankName || !accountNumber) {
+        return res.status(400).json({
+          message: "Para retirar fondos debes completar los datos bancarios (banco y número de cuenta) en tu perfil.",
+          code: "missing_bank_data",
+        });
+      }
+      const schema = z.object({ amount: z.number().positive("El monto debe ser mayor a cero") });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors?.[0]?.message ?? "Datos inválidos",
+          code: "validation",
+        });
+      }
+      // Modo manual (default): requestWithdraw mueve saldo a withdrawingFunds; el admin procesa en Panel → Payouts.
+      // if (ENABLE_BANK_API) { ... llamada futura a API bancaria ... }
+      const result = await storage.requestWithdraw(userId, parsed.data.amount);
+      if (!result.ok) {
+        const status = ["insufficient_balance", "withdraw_pending", "missing_bank_data"].includes(result.code) ? 400 : 400;
+        return res.status(status).json({ message: result.message, code: result.code });
+      }
+      const amountFormatted = new Intl.NumberFormat("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parsed.data.amount);
+      const userName = (user as { name?: string; firstName?: string; lastName?: string }).name
+        ?? ([((user as { firstName?: string }).firstName ?? ""), ((user as { lastName?: string }).lastName ?? "")].filter(Boolean).join(" ") || (user as { email?: string }).email || "Usuario");
+
+      // Notificación persistente para cada admin (aparece en la campana al cargar o al conectarse)
+      const { users: adminUsers } = await storage.getUsers({ role: "admin", page: 1, limit: 100, name: "", email: "", lastName: "" });
+      for (const admin of adminUsers ?? []) {
+        const adminId = (admin as { id?: string }).id;
+        if (adminId) {
+          await storage.createNotification({
+            userId: adminId,
+            type: "admin",
+            data: {
+              type: "withdrawal_requested",
+              message: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
+              userId,
+              userName,
+              amount: parsed.data.amount,
+              amountFormatted,
+            },
+          });
+        }
+      }
+
+      const io = getIO();
+      if (io) {
+        sendNotificationToAdmins(io, {
+          type: "withdrawal_requested",
+          message: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
+          data: { userId, userName, amount: parsed.data.amount, amountFormatted },
+        });
+      }
+      return res.status(200).json({ message: "Retiro solicitado. Aparecerás en Panel de Administración → Solicitudes de Retiro para que el administrador procese la transferencia.", ok: true });
+    } catch (error) {
+      console.error("Error requesting withdraw:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });

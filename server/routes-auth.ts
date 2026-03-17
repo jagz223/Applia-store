@@ -225,6 +225,8 @@ export async function registerAuthRoutes(
         role: user.role,
         phone: user.phone,
         avatar: user.avatar,
+        bankName: (user as { bankName?: string }).bankName,
+        accountNumber: (user as { accountNumber?: string }).accountNumber,
         createdAt: user.createdAt,
         provider: provider ?? null,
       });
@@ -234,6 +236,11 @@ export async function registerAuthRoutes(
     }
   });
   
+  /** Limpia el número de cuenta: solo dígitos, guiones y espacios; elimina caracteres inválidos. */
+  function sanitizeAccountNumber(value: string): string {
+    return value.replace(/[^\d\s\-]/g, "").replace(/\s+/g, " ").trim();
+  }
+
   // PUT /api/auth/profile - Actualizar perfil
   app.put("/api/auth/profile", authenticateJWT, async (req: any, res) => {
     try {
@@ -242,6 +249,8 @@ export async function registerAuthRoutes(
         lastName: z.string().min(2).optional(),
         phone: z.string().optional(),
         avatar: z.string().url().optional(),
+        bankName: z.string().max(120).optional().transform((v) => (v === "" ? undefined : v?.trim())),
+        accountNumber: z.string().max(40).optional().transform((v) => (v === "" ? undefined : v == null ? undefined : sanitizeAccountNumber(v))),
       });
       
       const data = updateSchema.parse(req.body);
@@ -251,10 +260,10 @@ export async function registerAuthRoutes(
       if (!updatedUser) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
-      
+      const { password: _p, ...safeUser } = updatedUser as Record<string, unknown>;
       res.json({
         message: "Perfil actualizado",
-        user: updatedUser,
+        user: safeUser,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {

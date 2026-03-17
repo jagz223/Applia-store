@@ -9,6 +9,7 @@ import { useAuth } from "./use-auth";
 import { useSocket, useSocketChat } from "./use-socket";
 import { chatApi } from "@/lib/chat-api";
 import { toDate } from "@/lib/date-utils";
+import { debouncedRefetch } from "@/lib/refetch-utils";
 import type { ConversationEnriched, Message } from "@/types/chat";
 
 /** Mensajes por página (alineado con backend). Balance UX / carga servidor. */
@@ -87,6 +88,9 @@ export function useSendMessage(conversationId: number | null, _recipientId?: str
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.messages(conversationId ?? 0) });
+      // Refetch inmediato para que el mensaje aparezca al instante (sin debounce)
+      void queryClient.refetchQueries({ queryKey: QUERY_KEYS.conversations });
+      void queryClient.refetchQueries({ queryKey: QUERY_KEYS.messages(conversationId ?? 0) });
       // No emitir message:send por socket: el backend ya notifica al destinatario al crear el mensaje (POST /api/messages).
       // Emitir aquí duplicaba la notificación en la campanita del receptor.
     },
@@ -103,6 +107,8 @@ export function useMarkConversationAsRead(conversationId: number | null, enabled
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.messages(conversationId ?? 0) });
+      void queryClient.refetchQueries({ queryKey: QUERY_KEYS.conversations });
+      void queryClient.refetchQueries({ queryKey: QUERY_KEYS.messages(conversationId ?? 0) });
     },
   });
 
@@ -122,6 +128,7 @@ export function useGetOrCreateConversation() {
       if (existing) return existing.id;
       const created = await chatApi.createConversation({ participantId, serviceId });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });
+      debouncedRefetch(queryClient, QUERY_KEYS.conversations);
       return created.id;
     },
   });
@@ -139,10 +146,11 @@ export function useChatRealtime(conversationId: number | null) {
       const notifConvId = data?.conversationId != null ? String(data.conversationId) : null;
       if (notifConvId != null) {
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });
+        debouncedRefetch(queryClient, QUERY_KEYS.conversations);
       }
       if (conversationId != null && notifConvId === String(conversationId)) {
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.messages(conversationId) });
-        queryClient.refetchQueries({ queryKey: QUERY_KEYS.messages(conversationId) });
+        debouncedRefetch(queryClient, QUERY_KEYS.messages(conversationId));
       }
     };
     socket.on("notification:message", handler);

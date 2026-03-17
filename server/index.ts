@@ -89,7 +89,7 @@ app.use((req, res, next) => {
     const projectId = process.env.FIREBASE_PROJECT_ID || "(no set)";
     log(`Firestore en uso: proyecto "${projectId}" (cuenta: ${process.env.FIREBASE_CLIENT_EMAIL || "?"})`);
   } else {
-    log("Firestore no configurado — almacenamiento en memoria (login/usuarios no persistidos)");
+    log("Firestore no configurado — almacenamiento en memoria (usuarios, wallet y reservas se pierden al reiniciar el servidor)");
   }
 
   await registerRoutes(httpServer, app);

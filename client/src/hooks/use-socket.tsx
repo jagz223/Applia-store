@@ -4,8 +4,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { fetchNotificationsFromServer } from "@/lib/notifications-api";
+import { debouncedRefetch } from "@/lib/refetch-utils";
 
 const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
+const ADMIN_WITHDRAWALS_KEY = "/api/admin/withdrawals";
 
 interface Notification {
   id: string;
@@ -98,9 +100,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     newSocket.on("connect", () => {
       console.log("🔌 Connected to GenFeb socket server");
       setIsConnected(true);
-      // Al reconectar, refrescar reservas del profesional y notificaciones para no perder actualizaciones
+      // Al reconectar, refrescar reservas del profesional (debounced para no saturar)
       if (userRef.current?.role === "professional") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+        debouncedRefetch(queryClient, ["/api/bookings/provider"]);
       }
       const token = localStorage.getItem("token");
       if (token) {
@@ -136,6 +139,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       if (type === "recharge_completed" || type === "recharge_rejected") {
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+        debouncedRefetch(queryClient, ["/api/wallet/me"]);
+        debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
         const amount = notification?.data?.amountFormatted ?? notification?.data?.amount ?? "";
         if (type === "recharge_completed") {
           toast({
@@ -153,6 +158,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       if (type === "balance_credited") {
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+        debouncedRefetch(queryClient, ["/api/wallet/me"]);
+        debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
         const message = notification?.data?.message;
         const amount = notification?.data?.amountFormatted;
         toast({
@@ -162,6 +169,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
       if (type === "booking_confirmed_by_provider") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        debouncedRefetch(queryClient, ["/api/bookings"]);
         toast({
           title: "Reserva confirmada por el profesional",
           description: "Confirma el pago en Mis Reservas para retener los fondos.",
@@ -169,6 +177,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
       if (type === "booking_confirmed_by_client") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        debouncedRefetch(queryClient, ["/api/bookings/provider"]);
+        debouncedRefetch(queryClient, ["/api/bookings"]);
+        debouncedRefetch(queryClient, ["/api/wallet/me"]);
         const amount = notification?.data?.amountFormatted ?? notification?.data?.amount;
         toast({
           title: "Fondos agregados",
@@ -179,6 +191,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
       if (type === "booking_cancelled") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        debouncedRefetch(queryClient, ["/api/bookings/provider"]);
+        debouncedRefetch(queryClient, ["/api/bookings"]);
         toast({
           title: "Reserva cancelada",
           description: "Un cliente canceló una reserva. Revisa tu panel de reservas.",
@@ -187,6 +202,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
       if (type === "booking_schedule_changed") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        debouncedRefetch(queryClient, ["/api/bookings"]);
         const dateFormatted = notification?.data?.dateFormatted ?? notification?.data?.data?.dateFormatted;
         toast({
           title: "Se cambió la fecha del servicio",
@@ -195,10 +211,32 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
       if (type === "booking_cost_changed") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        debouncedRefetch(queryClient, ["/api/bookings"]);
         const amount = notification?.data?.amountFormatted ?? notification?.data?.data?.amountFormatted ?? notification?.data?.amount;
         toast({
           title: "Se actualizó el monto del servicio",
           description: amount != null ? `El nuevo monto es $${amount} USD. Revisa tu reserva.` : "El profesional actualizó el monto. Revisa Mis Reservas.",
+        });
+      }
+      if (type === "withdrawal_approved") {
+        queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+        debouncedRefetch(queryClient, ["/api/wallet/me"]);
+        debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
+        toast({
+          title: "Retiro aprobado",
+          description: notification?.body ?? "Tu retiro fue aprobado. Tus fondos fueron enviados a la cuenta bancaria registrada.",
+        });
+      }
+      if (type === "withdrawal_rejected") {
+        queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+        debouncedRefetch(queryClient, ["/api/wallet/me"]);
+        debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
+        toast({
+          title: "Retiro rechazado",
+          description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu billetera.",
+          variant: "destructive",
         });
       }
     });
@@ -233,6 +271,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         },
         ...prev,
       ]);
+      // Actualizar lista de reservas del profesional (refetch debounced para no saturar servidor)
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      debouncedRefetch(queryClient, ["/api/bookings/provider"]);
     });
 
     newSocket.on("notification:admin", (notification: any) => {
@@ -251,11 +292,35 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       const isRechargePending = notification?.type === "recharge_pending";
       if (isRechargePending && userRef.current?.role === "admin") {
         queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
+        debouncedRefetch(queryClient, [ADMIN_WALLET_TRANSFERS_KEY]);
         toast({
           title: "Nueva solicitud de recarga recibida",
           description: notification?.data?.userName
             ? `${notification.data.userName} ha solicitado una recarga. Revisa el panel de recargas.`
             : "Revisa el panel de administración.",
+        });
+      }
+      // Si es solicitud de retiro (payout): refrescar Payouts para que aparezca el usuario al instante
+      const isWithdrawalRequested = notification?.type === "withdrawal_requested";
+      if (isWithdrawalRequested && userRef.current?.role === "admin") {
+        queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_KEY] });
+        debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_KEY]);
+        toast({
+          title: "Nueva solicitud de retiro",
+          description: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
+        });
+      }
+      // Otro admin ya procesó el retiro (aprobado o rechazado): actualizar lista Payouts para que desaparezca el usuario
+      const isWithdrawalProcessedByOther = notification?.type === "withdrawal_processed_by_other";
+      if (isWithdrawalProcessedByOther && userRef.current?.role === "admin") {
+        queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_KEY] });
+        debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_KEY]);
+        const action = notification?.action === "approved" ? "aprobado" : "rechazado";
+        const who = notification?.data?.processedByAdminName ?? "otro administrador";
+        const name = notification?.data?.professionalName ?? "el usuario";
+        toast({
+          title: "Retiro ya procesado",
+          description: `El retiro de ${name} fue ${action} por ${who}. Ya no aparece en Solicitudes de Retiro.`,
         });
       }
     });

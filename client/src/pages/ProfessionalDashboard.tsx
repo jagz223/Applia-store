@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { 
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText,
@@ -14,13 +15,36 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
-import { useBookingsByProvider, useUpdateBookingStatus, useUpdateBookingCost, useUpdateBookingSchedule, useProfessionalStats } from "@/hooks/use-mango-data";
+import {
+  useBookingsByProvider,
+  useUpdateBookingStatus,
+  useUpdateBookingCost,
+  useUpdateBookingSchedule,
+  useProfessionalStats,
+  useWallet,
+  useWithdraw,
+  useWalletTransfers,
+} from "@/hooks/use-mango-data";
+import { useToast } from "@/hooks/use-toast";
+import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
+
+const formatUsd = (n: number) =>
+  new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
 // Mock data solo para calificación y transacciones recientes (no hay API aún)
 const mockBookings = {
@@ -253,8 +277,11 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     };
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
     return (
-      <div
+      <motion.div
         key={booking.id}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: "easeOut" }}
         className={`flex flex-wrap items-start justify-between gap-4 p-4 border border-border rounded-lg bg-card ${isHighlighted ? "notification-highlight" : ""}`}
       >
         <div className="min-w-0 flex-1">
@@ -394,7 +421,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
             </TooltipProvider>
           )}
         </div>
-      </div>
+      </motion.div>
     );
   }
 
@@ -510,14 +537,150 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
   );
 }
 
+/** Dialog que muestra resumen económico y permite descargar reporte CSV (transferencias, ingresos, estado de retiros). */
+function EconomicReportDialog({
+  open,
+  onOpenChange,
+  walletData,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  walletData: { wallet?: number; totalEarnings?: number; withdrawingFunds?: number } | undefined;
+}) {
+  const { data: transfersData, isLoading } = useWalletTransfers({
+    page: 1,
+    limit: 500,
+    enabled: open,
+  });
+  const transfers = transfersData?.transfers ?? [];
+  const totalEarnings = typeof walletData?.totalEarnings === "number" ? walletData.totalEarnings : 0;
+  const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
+  const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number"
+    ? (walletData as { withdrawingFunds: number }).withdrawingFunds
+    : 0;
+  const totalWithdrawn = transfers
+    .filter((t: { transferType?: string; status?: string }) => t.transferType === "withdrawal" && t.status === "completed")
+    .reduce((sum: number, t: { amount?: number }) => sum + (typeof t.amount === "number" ? t.amount : 0), 0);
+
+  const downloadCsv = () => {
+    const headers = ["Fecha", "Tipo", "Descripción", "Monto (USD)", "Estado"];
+    const typeLabels: Record<string, string> = {
+      service_payment: "Ingreso por servicio",
+      recharge: "Recarga",
+      withdrawal: "Retiro",
+    };
+    const statusLabels: Record<string, string> = {
+      pending_approval: "Pendiente aprobación",
+      completed: "Completado",
+      rejected: "Rechazado",
+    };
+    const rows = transfers.map((t: { createdAt?: string; transferType?: string; description?: string; amount?: number; status?: string }) => [
+      t.createdAt ? format(new Date(t.createdAt), "yyyy-MM-dd HH:mm", { locale: es }) : "",
+      typeLabels[t.transferType ?? ""] ?? t.transferType ?? "",
+      t.description ?? "",
+      typeof t.amount === "number" ? t.amount.toFixed(2) : "",
+      statusLabels[t.status ?? ""] ?? t.status ?? "",
+    ]);
+    const csv = [headers.join(","), ...rows.map((r: string[]) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `reporte-economico-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Reporte Económico</DialogTitle>
+          <DialogDescription>
+            Resumen de ingresos, transferencias y estado de retiros. Puedes descargar el historial en CSV.
+          </DialogDescription>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-muted-foreground">Ingresos totales</p>
+                <p className="font-semibold text-lg">{formatUsd(totalEarnings)}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-muted-foreground">Retiros completados</p>
+                <p className="font-semibold text-lg">{formatUsd(totalWithdrawn)}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-muted-foreground">Saldo disponible</p>
+                <p className="font-semibold text-lg">{formatUsd(wallet)}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-muted-foreground">Retiro pendiente</p>
+                <p className="font-semibold text-lg">{withdrawingFunds > 0 ? formatUsd(withdrawingFunds) : "—"}</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Últimas {transfers.length} transferencias. Estado: Pendiente aprobación / Completado / Rechazado.
+            </p>
+            <div className="max-h-48 overflow-y-auto rounded border text-sm">
+              {transfers.length === 0 ? (
+                <p className="p-4 text-muted-foreground text-center">Sin movimientos aún.</p>
+              ) : (
+                <ul className="divide-y">
+                  {transfers.slice(0, 20).map((t: { id?: number; createdAt?: string; description?: string; amount?: number; status?: string; transferType?: string }) => (
+                    <li key={t.id ?? Math.random()} className="flex justify-between items-center p-2">
+                      <span className="text-muted-foreground truncate">
+                        {t.createdAt ? format(new Date(t.createdAt), "dd/MM/yyyy", { locale: es }) : ""} · {t.description ?? t.transferType ?? ""}
+                      </span>
+                      <span className="font-medium tabular-nums">{typeof t.amount === "number" ? formatUsd(t.amount) : ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Cerrar
+              </Button>
+              <Button onClick={downloadCsv}>
+                <FileText className="h-4 w-4 mr-2" />
+                Descargar CSV
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const DASHBOARD_TABS = ["overview", "bookings", "transactions", "analytics", "invoices"] as const;
 
 export default function ProfessionalDashboard() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { notifyBookingUpdate } = useSocketBookings();
+  const { toast } = useToast();
   const [location, setLocation] = useLocation();
   const [timeRange, setTimeRange] = useState("month");
+  const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const { data: walletData } = useWallet({ enabled: true });
+  const withdrawMutation = useWithdraw();
+  const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
+  const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number"
+    ? (walletData as { withdrawingFunds: number }).withdrawingFunds
+    : 0;
+  const userBankName = (user as { bankName?: string })?.bankName ?? "";
+  const userAccountNumber = (user as { accountNumber?: string })?.accountNumber ?? "";
+  const hasBankData = Boolean(typeof userBankName === "string" && userBankName.trim() && typeof userAccountNumber === "string" && userAccountNumber.trim());
+  const pendingWithdrawal = withdrawingFunds > 0;
 
   const getTabFromUrl = () => {
     const search = typeof window !== "undefined" ? window.location.search : "";
@@ -531,11 +694,12 @@ export default function ProfessionalDashboard() {
     setCurrentTabState(getTabFromUrl());
   }, [location]);
 
-  // Al abrir la pestaña Reservas, refrescar lista para ver confirmación del cliente y estado actual
+  // Al abrir la pestaña Reservas, refrescar lista (debounced para no saturar el servidor)
   const prevTabRef = useRef(currentTab);
   useEffect(() => {
     if (prevTabRef.current !== "bookings" && currentTab === "bookings") {
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      debouncedRefetch(queryClient, ["/api/bookings/provider"]);
     }
     prevTabRef.current = currentTab;
   }, [currentTab, queryClient]);
@@ -612,17 +776,113 @@ export default function ProfessionalDashboard() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full sm:w-auto">
-            <Button variant="outline" size="sm" className="flex-1 sm:flex-initial min-w-0">
+            <Button variant="outline" size="sm" className="flex-1 sm:flex-initial min-w-0" onClick={() => setReportDialogOpen(true)}>
               <FileText className="h-4 w-4 mr-2 shrink-0" />
               <span className="truncate">Generar Reporte</span>
             </Button>
-            <Button size="sm" className="flex-1 sm:flex-initial min-w-0">
-              <CreditCard className="h-4 w-4 mr-2 shrink-0" />
-              <span className="truncate">Retirar Fondos</span>
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-block">
+                    <Button
+                      size="sm"
+                      className="flex-1 sm:flex-initial min-w-0"
+                      disabled={pendingWithdrawal}
+                      onClick={() => !pendingWithdrawal && setWithdrawDialogOpen(true)}
+                    >
+                      <CreditCard className="h-4 w-4 mr-2 shrink-0" />
+                      <span className="truncate">Retirar Fondos</span>
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {pendingWithdrawal ? "Solicitud en revisión por el administrador" : "Solicitar retiro de fondos a tu cuenta bancaria"}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
       </div>
+
+      {/* Dialog Retirar Fondos */}
+      <Dialog open={withdrawDialogOpen} onOpenChange={setWithdrawDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Retirar Fondos</DialogTitle>
+            <DialogDescription>
+              El monto se moverá a &quot;En proceso de retiro&quot; y aparecerás en Panel Admin → Payouts para que el administrador realice la transferencia a tu cuenta.
+            </DialogDescription>
+          </DialogHeader>
+          {!hasBankData ? (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-amber-600 dark:text-amber-500">
+                Para retirar fondos debes completar los datos bancarios (nombre del banco y número de cuenta) en tu perfil.
+              </p>
+              <Button asChild variant="outline">
+                <Link href="/settings" onClick={() => setWithdrawDialogOpen(false)}>Ir a Configuración</Link>
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">Saldo disponible: <strong>{formatUsd(wallet)}</strong></p>
+              <div className="space-y-2">
+                <Label htmlFor="withdraw-amount">Monto a retirar (USD)</Label>
+                <Input
+                  id="withdraw-amount"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  placeholder="0.00"
+                  value={withdrawAmount}
+                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                  disabled={withdrawMutation.isPending}
+                />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setWithdrawDialogOpen(false)} disabled={withdrawMutation.isPending}>
+                  Cancelar
+                </Button>
+                <Button
+                  disabled={
+                    withdrawMutation.isPending ||
+                    !(parseFloat(withdrawAmount) > 0) ||
+                    parseFloat(withdrawAmount) > wallet
+                  }
+                  onClick={() => {
+                    const num = parseFloat(withdrawAmount);
+                    if (!Number.isFinite(num) || num <= 0 || num > wallet) return;
+                    withdrawMutation.mutate(num, {
+                      onSuccess: () => {
+                        setWithdrawAmount("");
+                        setWithdrawDialogOpen(false);
+                        toast({
+                          title: "Solicitud enviada",
+                          description: "Aparecerás en Panel Admin → Payouts. El administrador procesará la transferencia.",
+                        });
+                      },
+                      onError: (err: Error) => {
+                        toast({ title: "Error", description: err.message, variant: "destructive" });
+                      },
+                    });
+                  }}
+                >
+                  {withdrawMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Procesando…
+                    </>
+                  ) : (
+                    "Solicitar retiro"
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Generar Reporte */}
+      <EconomicReportDialog open={reportDialogOpen} onOpenChange={setReportDialogOpen} walletData={walletData} />
 
       <div className="container mx-auto max-w-full py-6 px-4 overflow-x-hidden">
         {/* Resumen de Actividad (estadísticas de rendimiento) */}

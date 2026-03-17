@@ -25,8 +25,8 @@ import type {
 } from "@shared/schema";
 import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
 
-/** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet. */
-export type WalletTransferType = "service_payment" | "recharge";
+/** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed). */
+export type WalletTransferType = "service_payment" | "recharge" | "withdrawal";
 
 /** Transfer status: only "completed" recharge adds to wallet; "pending_approval" waits for staff. */
 export type WalletTransferStatus = "pending_approval" | "completed" | "rejected";
@@ -68,6 +68,11 @@ interface User {
   totalEarnings?: number;
   /** Saldo pendiente (por defecto 0). */
   pendingBalance?: number;
+  /** Metadatos financieros: banco y número de cuenta para retiros/pagos. */
+  bankName?: string;
+  accountNumber?: string;
+  /** Fondos en proceso de retiro (escrow hasta que el admin procese el pago). Default 0. */
+  withdrawingFunds?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -207,17 +212,30 @@ class FirestoreStorageImpl implements IStorage {
 
   async updateUser(id: string, data: Partial<User>): Promise<User | undefined> {
     if (!this.db) return undefined;
-    
+
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(id);
     const doc = await docRef.get();
-    
+
     if (!doc.exists) return undefined;
-    
+
+    // No permitir que actualizaciones genéricas (perfil, etc.) modifiquen campos financieros.
+    // Solo los métodos dedicados (createTransfer, requestWithdraw, confirmBookingByClient, etc.) deben alterarlos.
+    const { wallet, totalEarnings, pendingBalance, withdrawingFunds, ...safeData } = data as Partial<User> & {
+      wallet?: number;
+      totalEarnings?: number;
+      pendingBalance?: number;
+      withdrawingFunds?: number;
+    };
+    void wallet;
+    void totalEarnings;
+    void pendingBalance;
+    void withdrawingFunds;
+
     await docRef.update({
-      ...data,
+      ...safeData,
       updatedAt: new Date(),
     });
-    
+
     const updated = await docRef.get();
     return { id: updated.id, ...updated.data() } as User;
   }
@@ -998,6 +1016,337 @@ class FirestoreStorageImpl implements IStorage {
       if (typeof w === "number") total += w;
     });
     return total;
+  }
+
+  async requestWithdraw(
+    userId: string,
+    amount: number
+  ): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+    if (!this.db) return { ok: false, code: "unavailable", message: "Storage no configurado" };
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { ok: false, code: "invalid_amount", message: "El monto debe ser mayor a cero" };
+    }
+    const userRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(userId);
+    const now = new Date();
+    try {
+      await this.db.runTransaction(async (t) => {
+        const userSnap = await t.get(userRef);
+        if (!userSnap.exists) throw new Error("Usuario no encontrado");
+        const data = userSnap.data() as User;
+        const wallet = typeof data.wallet === "number" ? data.wallet : 0;
+        const bankName = typeof data.bankName === "string" ? data.bankName.trim() : "";
+        const accountNumber = typeof data.accountNumber === "string" ? data.accountNumber.trim() : "";
+        if (!bankName || !accountNumber) {
+          throw new Error("MISSING_BANK_DATA");
+        }
+        const withdrawingFunds = typeof data.withdrawingFunds === "number" ? data.withdrawingFunds : 0;
+        if (withdrawingFunds > 0) {
+          throw new Error("WITHDRAW_PENDING");
+        }
+        if (wallet < amount) {
+          throw new Error("INSUFFICIENT_BALANCE");
+        }
+        // Fondos en Tránsito: debitar wallet y acreditar withdrawingFunds en la misma transacción (atómico).
+        t.update(userRef, {
+          wallet: wallet - amount,
+          withdrawingFunds: withdrawingFunds + amount,
+          updatedAt: now,
+        });
+      });
+      return { ok: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "WITHDRAW_PENDING") {
+        return { ok: false, code: "withdraw_pending", message: "Ya existe un retiro en proceso. Espere a que el administrador lo procese." };
+      }
+      if (msg === "INSUFFICIENT_BALANCE") {
+        return { ok: false, code: "insufficient_balance", message: "Saldo insuficiente" };
+      }
+      if (msg === "Usuario no encontrado") {
+        return { ok: false, code: "user_not_found", message: msg };
+      }
+      if (msg === "MISSING_BANK_DATA") {
+        return { ok: false, code: "missing_bank_data", message: "Complete los datos bancarios (banco y número de cuenta) en su perfil." };
+      }
+      throw e;
+    }
+  }
+
+  async getUsersWithPendingWithdrawals(): Promise<
+    Array<{ id: string; name: string; lastName: string; email: string; bankName?: string; accountNumber?: string; withdrawingFunds: number }>
+  > {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.USERS)
+      .where("withdrawingFunds", ">", 0)
+      .get();
+    return snap.docs.map((d) => {
+      const data = d.data() as User;
+      const name = data.name ?? (data as { firstName?: string }).firstName ?? "";
+      const lastName = data.lastName ?? "";
+      return {
+        id: d.id,
+        name,
+        lastName,
+        email: data.email ?? "",
+        bankName: data.bankName,
+        accountNumber: data.accountNumber,
+        withdrawingFunds: typeof data.withdrawingFunds === "number" ? data.withdrawingFunds : 0,
+      };
+    });
+  }
+
+  /**
+   * Liquidación (aprobación): withdrawingFunds → 0 y se crea registro en historial con status completed.
+   * El monto NO se acredita a ninguna cuenta de admin; la deuda se saldó por transferencia bancaria externa.
+   */
+  async processWithdrawalApproval(userId: string, adminUserId: string): Promise<{ transfer: WalletTransfer; user: User }> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const userRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(userId);
+    const coll = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
+    const id = await this.getNextId("wallet_transfers");
+    const now = new Date();
+    let transferResult: WalletTransfer | null = null;
+    let userResult: User | null = null;
+    await this.db.runTransaction(async (t) => {
+      const userSnap = await t.get(userRef);
+      if (!userSnap.exists) throw new Error("Usuario no encontrado");
+      const data = userSnap.data() as User;
+      const withdrawingFunds = typeof data.withdrawingFunds === "number" ? data.withdrawingFunds : 0;
+      if (withdrawingFunds <= 0) throw new Error("No hay retiro pendiente");
+      const bankName = typeof data.bankName === "string" ? data.bankName : undefined;
+      const accountNumber = typeof data.accountNumber === "string" ? data.accountNumber : undefined;
+      const record = {
+        id,
+        userId,
+        fromUserId: adminUserId,
+        amount: withdrawingFunds,
+        transferType: "withdrawal" as WalletTransferType,
+        status: "completed" as WalletTransferStatus,
+        description: "Retiro Completado",
+        referenceId: null,
+        currency: "USD",
+        createdAt: now,
+        bankName,
+        accountNumber,
+      };
+      t.set(coll.doc(id.toString()), record);
+      t.update(userRef, { withdrawingFunds: 0, updatedAt: now });
+      transferResult = { ...record } as WalletTransfer;
+      userResult = { ...data, withdrawingFunds: 0, updatedAt: now };
+    });
+    if (!transferResult || !userResult) throw new Error("Transacción no devolvió resultado");
+    return { transfer: transferResult, user: userResult };
+  }
+
+  /**
+   * Rollback (rechazo): withdrawingFunds regresa íntegramente al wallet del profesional; luego withdrawingFunds = 0.
+   */
+  async processWithdrawalRejection(userId: string): Promise<{ user: User; amount: number }> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const userRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(userId);
+    const now = new Date();
+    let userResult: User | null = null;
+    let amount = 0;
+    await this.db.runTransaction(async (t) => {
+      const userSnap = await t.get(userRef);
+      if (!userSnap.exists) throw new Error("Usuario no encontrado");
+      const data = userSnap.data() as User;
+      const withdrawingFunds = typeof data.withdrawingFunds === "number" ? data.withdrawingFunds : 0;
+      if (withdrawingFunds <= 0) throw new Error("No hay retiro pendiente");
+      amount = withdrawingFunds;
+      const wallet = typeof data.wallet === "number" ? data.wallet : 0;
+      t.update(userRef, {
+        wallet: wallet + withdrawingFunds,
+        withdrawingFunds: 0,
+        updatedAt: now,
+      });
+      userResult = { ...data, wallet: wallet + withdrawingFunds, withdrawingFunds: 0, updatedAt: now };
+    });
+    if (!userResult) throw new Error("Transacción no devolvió resultado");
+    return { user: userResult, amount };
+  }
+
+  async recordWithdrawalRejection(
+    userId: string,
+    amount: number,
+    adminUserId: string,
+    bankName?: string,
+    accountNumber?: string
+  ): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("withdrawal_rejections");
+    const coll = this.db.collection(FIRESTORE_COLLECTIONS.WITHDRAWAL_REJECTIONS);
+    await coll.doc(id.toString()).set({
+      id,
+      userId,
+      amount,
+      rejectedAt: new Date(),
+      rejectedByUserId: adminUserId,
+      bankName: bankName ?? null,
+      accountNumber: accountNumber ?? null,
+    });
+  }
+
+  async getWithdrawalHistory(options: {
+    page: number;
+    limit: number;
+    status: "all" | "pending" | "approved" | "rejected";
+  }): Promise<{
+    items: Array<{
+      id: string;
+      userId: string;
+      userName: string;
+      userEmail: string;
+      bankName?: string;
+      accountNumber?: string;
+      amount: number;
+      status: "pending" | "approved" | "rejected";
+      processedAt: Date | null;
+      processedByAdminId?: string;
+      processedByAdminName?: string;
+    }>;
+    total: number;
+  }> {
+    if (!this.db) return { items: [], total: 0 };
+    const toMs = (x: unknown) =>
+      x instanceof Date ? x.getTime() : (x as { toMillis?: () => number })?.toMillis?.() ?? 0;
+
+    const pendingUsers = await this.getUsersWithPendingWithdrawals();
+    const pending = pendingUsers.map((u) => ({
+      id: `pending-${u.id}`,
+      userId: u.id,
+      amount: u.withdrawingFunds,
+      status: "pending" as const,
+      processedAt: null as Date | null,
+      processedByAdminId: undefined as string | undefined,
+      bankName: u.bankName,
+      accountNumber: u.accountNumber,
+      userName: [u.name, u.lastName].filter(Boolean).join(" ") || u.email || "—",
+      userEmail: u.email ?? "—",
+    }));
+
+    const approvedSnap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS)
+      .where("transferType", "==", "withdrawal")
+      .where("status", "==", "completed")
+      .get();
+    const approved = approvedSnap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: `approval-${d.id}`,
+        userId: data.userId,
+        amount: data.amount as number,
+        status: "approved" as const,
+        processedAt: data.createdAt,
+        processedByAdminId: data.fromUserId as string,
+        bankName: data.bankName as string | undefined,
+        accountNumber: data.accountNumber as string | undefined,
+      };
+    });
+
+    const rejSnap = await this.db.collection(FIRESTORE_COLLECTIONS.WITHDRAWAL_REJECTIONS).get();
+    const rejected = rejSnap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: `rejection-${d.id}`,
+        userId: data.userId as string,
+        amount: data.amount as number,
+        status: "rejected" as const,
+        processedAt: data.rejectedAt,
+        processedByAdminId: data.rejectedByUserId as string,
+        bankName: data.bankName as string | undefined,
+        accountNumber: data.accountNumber as string | undefined,
+      };
+    });
+
+    const sortByDate = (a: { processedAt: unknown }, b: { processedAt: unknown }) => {
+      const am = a.processedAt == null ? 0 : toMs(a.processedAt);
+      const bm = b.processedAt == null ? 0 : toMs(b.processedAt);
+      if (am === 0 && bm === 0) return 0;
+      if (am === 0) return -1;
+      if (bm === 0) return 1;
+      return bm - am;
+    };
+    let list: Array<{
+      id: string;
+      userId: string;
+      amount: number;
+      status: "pending" | "approved" | "rejected";
+      processedAt: unknown;
+      processedByAdminId?: string;
+      bankName?: string;
+      accountNumber?: string;
+      userName?: string;
+      userEmail?: string;
+    }> = [];
+    if (options.status === "pending") list = pending;
+    else if (options.status === "approved") list = approved.sort(sortByDate);
+    else if (options.status === "rejected") list = rejected.sort(sortByDate);
+    else list = [...pending, ...approved.sort(sortByDate), ...rejected.sort(sortByDate)];
+
+    const total = list.length;
+    const page = Math.max(1, options.page);
+    const limit = Math.min(50, Math.max(1, options.limit));
+    const start = (page - 1) * limit;
+    const slice = list.slice(start, start + limit);
+
+    const items: Array<{
+      id: string;
+      userId: string;
+      userName: string;
+      userEmail: string;
+      bankName?: string;
+      accountNumber?: string;
+      amount: number;
+      status: "pending" | "approved" | "rejected";
+      processedAt: Date | null;
+      processedByAdminId?: string;
+      processedByAdminName?: string;
+    }> = [];
+    for (const row of slice) {
+      if (row.status === "pending" && row.userName != null && row.userEmail != null) {
+        items.push({
+          id: row.id,
+          userId: row.userId,
+          userName: row.userName,
+          userEmail: row.userEmail,
+          bankName: row.bankName,
+          accountNumber: row.accountNumber,
+          amount: row.amount,
+          status: row.status,
+          processedAt: null,
+          processedByAdminId: undefined,
+          processedByAdminName: undefined,
+        });
+        continue;
+      }
+      const user = await this.getUserById(row.userId);
+      const admin = row.processedByAdminId ? await this.getUserById(row.processedByAdminId) : null;
+      const u = user as { name?: string; firstName?: string; lastName?: string; email?: string } | null;
+      const a = admin as { name?: string; firstName?: string; lastName?: string; email?: string } | null;
+      const userName = u
+        ? (u.name ?? ([u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || "—"))
+        : "—";
+      const userEmail = u?.email ?? "—";
+      const adminName = a
+        ? (a.name ?? ([a.firstName, a.lastName].filter(Boolean).join(" ") || a.email || "—"))
+        : "—";
+      items.push({
+        id: row.id,
+        userId: row.userId,
+        userName,
+        userEmail,
+        bankName: row.bankName,
+        accountNumber: row.accountNumber,
+        amount: row.amount,
+        status: row.status,
+        processedAt: row.processedAt instanceof Date ? row.processedAt : new Date(toMs(row.processedAt)),
+        processedByAdminId: row.processedByAdminId,
+        processedByAdminName: adminName,
+      });
+    }
+    return { items, total };
   }
 
   // ============ DOCUMENTOS (BÓVEDA) ============

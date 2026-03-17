@@ -291,7 +291,19 @@ export const api = {
             wallet: z.number(),
             totalEarnings: z.number(),
             pendingBalance: z.number(),
+            withdrawingFunds: z.number().optional().default(0),
           }),
+        },
+      },
+      withdraw: {
+        method: 'POST' as const,
+        path: '/api/wallet/withdraw',
+        input: z.object({
+          amount: z.number().positive(),
+        }),
+        responses: {
+          200: z.object({ message: z.string(), ok: z.literal(true) }),
+          400: z.object({ message: z.string(), code: z.string().optional() }),
         },
       },
       platformBalance: {

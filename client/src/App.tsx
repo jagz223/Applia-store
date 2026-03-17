@@ -32,6 +32,7 @@ import Bookings from "@/pages/Bookings";
 import Recharge from "@/pages/Recharge";
 import RechargeConfirm from "@/pages/RechargeConfirm";
 import Movimientos from "@/pages/Movimientos";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -60,6 +61,7 @@ function Router() {
       <Route path="/recharge" component={Recharge} />
       <Route path="/recharge/confirm" component={RechargeConfirm} />
       <Route path="/movimientos" component={Movimientos} />
+      <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -54,7 +54,16 @@ function getNotificationPath(notification: { type: string; data?: any }): string
         if (transferId != null) q.set("highlight", String(transferId));
         return `/admin?${q.toString()}`;
       }
+      if (data.type === "withdrawal_requested") {
+        return "/admin?tab=payouts";
+      }
+      if (data.type === "withdrawal_processed_by_other") {
+        return "/admin?tab=payouts";
+      }
       return "/dashboard";
+    case "withdrawal_approved":
+    case "withdrawal_rejected":
+      return "/movimientos";
     case "recharge_completed":
     case "recharge_rejected":
     case "balance_credited":
@@ -100,6 +109,9 @@ export function NotificationBell() {
         window.dispatchEvent(new CustomEvent("bookings-page-highlight", { detail: { bookingId: Number(bookingId) } }));
       }
     }
+    if (notification.type === "admin" && data?.type === "withdrawal_requested") {
+      window.dispatchEvent(new CustomEvent("admin-open-payouts", { detail: {} }));
+    }
     if (notification.type === "booking_schedule_changed" || notification.type === "booking_cost_changed") {
       const bookingId = data.bookingId ?? data.data?.bookingId;
       if (bookingId != null) {
@@ -130,6 +142,10 @@ export function NotificationBell() {
         return <Calendar className="h-4 w-4 text-amber-500" />;
       case "recharge_rejected":
         return <Bell className="h-4 w-4 text-red-500" />;
+      case "withdrawal_approved":
+        return <Bell className="h-4 w-4 text-green-500" />;
+      case "withdrawal_rejected":
+        return <Bell className="h-4 w-4 text-red-500" />;
       default:
         return <Bell className="h-4 w-4 text-gray-500" />;
     }
@@ -156,12 +172,35 @@ export function NotificationBell() {
       const amount = data?.data?.amountFormatted ?? data?.amountFormatted;
       if (amount != null) return `Recibiste $${amount} USD`;
     }
+    if (type === "withdrawal_approved") {
+      const message = data?.message ?? "Tu retiro fue aprobado. Tus fondos fueron enviados a la cuenta bancaria registrada.";
+      const note = data?.adminNote;
+      return note ? `${message} Nota: ${note}` : message;
+    }
+    if (type === "withdrawal_rejected") {
+      const message = data?.message ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu billetera.";
+      const note = data?.adminNote;
+      return note ? `${message} Nota: ${note}` : message;
+    }
+    if (type === "admin" && data?.type === "withdrawal_requested") {
+      const name = data?.userName ?? data?.data?.userName;
+      const amount = data?.amountFormatted ?? data?.data?.amountFormatted ?? data?.amount;
+      if (name && amount) return `${name} solicitó retirar $${amount} USD. Revisa Solicitudes de Retiro en el Panel de Administración.`;
+      return "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.";
+    }
+    if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
+      return data?.message ?? "El retiro fue procesado por otro administrador. Revisa Solicitudes de Retiro.";
+    }
     return null;
   };
 
   const getTitle = (type: string, data?: { type?: string }) => {
     if (type === "booking" && data?.type === "new_booking") return "Nueva reserva";
     if (type === "admin" && data?.type === "recharge_pending") return "Nueva solicitud de recarga";
+    if (type === "admin" && data?.type === "withdrawal_requested") return "Nueva solicitud de retiro";
+    if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
+      return data?.action === "rejected" ? "Retiro rechazado por otro admin" : "Retiro aprobado por otro admin";
+    }
     if (type === "recharge_completed") return "Recarga aprobada";
     if (type === "recharge_rejected") return "Recarga rechazada";
     if (type === "balance_credited") return "Saldo acreditado";
@@ -170,6 +209,8 @@ export function NotificationBell() {
     if (type === "booking_cancelled") return "Reserva cancelada";
     if (type === "booking_schedule_changed") return "Se cambió la fecha del servicio";
     if (type === "booking_cost_changed") return "Se actualizó el monto del servicio";
+    if (type === "withdrawal_approved") return "Retiro procesado";
+    if (type === "withdrawal_rejected") return "Retiro rechazado";
     switch (type) {
       case "message":
         return "Nuevo mensaje";

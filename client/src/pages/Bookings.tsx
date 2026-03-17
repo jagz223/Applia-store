@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/use-auth";
 import { useBookings, useConfirmBookingByClient, useUpdateBookingStatus } from "@/hooks/use-mango-data";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,12 @@ import {
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
+
+const listItemMotion = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.25, ease: "easeOut" },
+};
 
 const STATUS_CONFIG: Record<
   string,
@@ -69,8 +76,12 @@ export default function Bookings() {
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
 
     return (
-      <li key={booking.id}>
-        <Card className={`${needsClientConfirmation ? "ring-2 ring-primary/50" : ""} ${isHighlighted ? "notification-highlight" : ""}`}>
+      <motion.li
+        key={booking.id}
+        {...listItemMotion}
+        className={isHighlighted ? "notification-highlight" : ""}
+      >
+        <Card className={needsClientConfirmation ? "ring-2 ring-primary/50" : ""}>
           <CardHeader className="pb-2">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <CardTitle className="text-lg">
@@ -183,7 +194,7 @@ export default function Bookings() {
             </div>
           </CardContent>
         </Card>
-      </li>
+      </motion.li>
     );
   };
 
