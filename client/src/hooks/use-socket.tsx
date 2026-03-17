@@ -271,9 +271,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         },
         ...prev,
       ]);
-      // Actualizar lista de reservas del profesional (refetch debounced para no saturar servidor)
+      // Actualizar listas de reservas tanto del profesional como del cliente (refetch debounced para no saturar servidor)
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       debouncedRefetch(queryClient, ["/api/bookings/provider"]);
+      debouncedRefetch(queryClient, ["/api/bookings"]);
     });
 
     newSocket.on("notification:admin", (notification: any) => {

@@ -5,7 +5,7 @@ import {
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
-  CheckCircle2, XCircle, Banknote, Inbox, PlayCircle, History, UserPlus
+  CheckCircle2, XCircle, Banknote, Inbox, PlayCircle, History, UserPlus, Receipt
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,14 +67,6 @@ const mockRating = {
   ],
 };
 
-const mockRecentTransactions = [
-  { id: 1, client: "Juan Pérez", service: "Electricista", amount: 85, date: "2024-01-15", status: "completed" },
-  { id: 2, client: "María López", service: "Plomería", amount: 120, date: "2024-01-14", status: "completed" },
-  { id: 3, client: "Carlos García", service: "Pintura", amount: 200, date: "2024-01-13", status: "pending" },
-  { id: 4, client: "Ana Martínez", service: "Limpieza", amount: 65, date: "2024-01-12", status: "completed" },
-  { id: 5, client: "Pedro Sánchez", service: "Jardinería", amount: 90, date: "2024-01-11", status: "completed" },
-];
-
 const mockMonthlyData = [
   { month: "Ene", earnings: 2800 },
   { month: "Feb", earnings: 3200 },
@@ -91,6 +83,157 @@ const STATUS_OPTIONS = [
   { value: "completed", label: "Completada" },
   { value: "cancelled", label: "Cancelada" },
 ];
+
+function formatWalletAmount(amount: number) {
+  return new Intl.NumberFormat("es-EC", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function parseTransferDate(value: unknown): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+  if (typeof value === "string") {
+    const d = new Date(value);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+  if (typeof value === "number") {
+    const d = new Date(value);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+  if (typeof value === "object" && value !== null && "seconds" in value) {
+    const d = new Date((value as { seconds: number }).seconds * 1000);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+  if (typeof value === "object" && value !== null && "toDate" in value && typeof (value as { toDate: () => Date }).toDate === "function") {
+    const d = (value as { toDate: () => Date }).toDate();
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+  const d = new Date(String(value));
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function getTransferMetaForProfessional(t: any) {
+  const type = t.transferType as "service_payment" | "recharge" | "withdrawal" | undefined;
+  const status = t.status as "pending_approval" | "completed" | "rejected" | undefined;
+  const isPending = status === "pending_approval";
+
+  const isCredit =
+    status === "completed" && (type === "recharge" || type === "service_payment");
+  const isDebit = status === "completed" && type === "withdrawal";
+
+  let amountColor = "text-foreground";
+  if (isPending) {
+    amountColor = "text-muted-foreground";
+  } else if (isCredit) {
+    amountColor = "text-emerald-600";
+  } else if (isDebit) {
+    amountColor = "text-red-600";
+  }
+
+  let label = "Transacción";
+  if (type === "recharge") label = "Recarga de saldo";
+  if (type === "service_payment") label = "Ingreso por servicio";
+  if (type === "withdrawal") label = "Retiro de fondos";
+
+  const createdAt = parseTransferDate(t.createdAt);
+  const dateStr = createdAt
+    ? format(createdAt, "dd MMM yyyy HH:mm", { locale: es })
+    : "";
+
+  return { amountColor, label, dateStr, isPending, isCredit, isDebit };
+}
+
+function ProfessionalTransactions() {
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useWalletTransfers({ page, limit: 10 });
+  const transfers = data?.transfers ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / 10));
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+        <Receipt className="w-8 h-8 animate-pulse" />
+        <p className="text-sm">Cargando transacciones…</p>
+      </div>
+    );
+  }
+
+  if (transfers.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+        <Receipt className="w-8 h-8 opacity-60" />
+        <p className="text-sm">Aún no tienes transacciones.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {transfers.map((t: any) => {
+        const { amountColor, label, dateStr } = getTransferMetaForProfessional(t);
+        return (
+          <div
+            key={t.id}
+            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 border border-border rounded-lg bg-card"
+          >
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <Banknote className="w-4 h-4 text-primary" />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium text-sm truncate">{label}</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {t.description || "Sin descripción"}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <p className={`font-semibold text-sm ${amountColor}`}>
+                {formatWalletAmount(t.amount)}
+              </p>
+              <p className="text-xs text-muted-foreground">{dateStr}</p>
+              <Badge variant={t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"}>
+                {t.status === "pending_approval"
+                  ? "Pendiente"
+                  : t.status === "completed"
+                    ? "Completado"
+                    : "Rechazado"}
+              </Badge>
+            </div>
+          </div>
+        );
+      })}
+      <div className="flex items-center justify-between pt-2">
+        <p className="text-xs text-muted-foreground">
+          Página {page} de {totalPages}
+        </p>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Anterior
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          >
+            Siguiente
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ResumenActividad() {
   const { data: stats, isLoading } = useProfessionalStats();
@@ -213,7 +356,7 @@ const BOOKINGS_SUB_TABS = ["pending", "in_progress", "ready", "history"] as cons
 type BookingsSubTab = (typeof BOOKINGS_SUB_TABS)[number];
 
 function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBookingId?: number | null }) {
-  const { data: bookings, isLoading } = useBookingsByProvider();
+  const { data: bookings, isLoading, isFetching } = useBookingsByProvider();
   const updateStatus = useUpdateBookingStatus();
   const updateCost = useUpdateBookingCost();
   const updateSchedule = useUpdateBookingSchedule();
@@ -242,6 +385,8 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     () => list.filter((b) => b.status === "completed" || b.status === "cancelled"),
     [list]
   );
+
+  const isLoadingOrRefetching = isLoading || isFetching;
 
   function renderBookingRow(booking: BookingItem) {
     const date = toDate(booking.date);
@@ -277,6 +422,21 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
       );
     };
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
+
+    // Reglas de transición de estado:
+    // pending -> confirmed -> in_progress -> completed, con "cancelled" siempre disponible.
+    const nextStatusMap: Record<string, string | undefined> = {
+      pending: "confirmed",
+      confirmed: "in_progress",
+      in_progress: "completed",
+    };
+    const allowedStatusValues = new Set<string>();
+    allowedStatusValues.add(booking.status);
+    allowedStatusValues.add("cancelled");
+    const nextStatus = nextStatusMap[booking.status];
+    if (nextStatus) {
+      allowedStatusValues.add(nextStatus);
+    }
     return (
       <motion.div
         key={booking.id}
@@ -372,7 +532,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="inline-block">
-                    <Select
+                      <Select
                       value={booking.status}
                       onValueChange={(value) =>
                         updateStatus.mutate(
@@ -395,7 +555,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {STATUS_OPTIONS.map((opt) => (
+                        {STATUS_OPTIONS.filter((opt) => allowedStatusValues.has(opt.value)).map((opt) => (
                           <SelectItem
                             key={opt.value}
                             value={opt.value}
@@ -575,8 +735,8 @@ function EconomicReportDialog({
       completed: "Completado",
       rejected: "Rechazado",
     };
-    const rows = transfers.map((t: { createdAt?: string; transferType?: string; description?: string; amount?: number; status?: string }) => [
-      t.createdAt ? format(new Date(t.createdAt), "yyyy-MM-dd HH:mm", { locale: es }) : "",
+    const rows = transfers.map((t: { createdAt?: unknown; transferType?: string; description?: string; amount?: number; status?: string }) => [
+      (() => { const d = parseTransferDate(t.createdAt); return d ? format(d, "yyyy-MM-dd HH:mm", { locale: es }) : ""; })(),
       typeLabels[t.transferType ?? ""] ?? t.transferType ?? "",
       t.description ?? "",
       typeof t.amount === "number" ? t.amount.toFixed(2) : "",
@@ -633,14 +793,17 @@ function EconomicReportDialog({
                 <p className="p-4 text-muted-foreground text-center">Sin movimientos aún.</p>
               ) : (
                 <ul className="divide-y">
-                  {transfers.slice(0, 20).map((t: { id?: number; createdAt?: string; description?: string; amount?: number; status?: string; transferType?: string }) => (
+                  {transfers.slice(0, 20).map((t: { id?: number; createdAt?: unknown; description?: string; amount?: number; status?: string; transferType?: string }) => {
+                    const d = parseTransferDate(t.createdAt);
+                    return (
                     <li key={t.id ?? Math.random()} className="flex justify-between items-center p-2">
                       <span className="text-muted-foreground truncate">
-                        {t.createdAt ? format(new Date(t.createdAt), "dd/MM/yyyy", { locale: es }) : ""} · {t.description ?? t.transferType ?? ""}
+                        {d ? format(d, "dd/MM/yyyy", { locale: es }) : ""} · {t.description ?? t.transferType ?? ""}
                       </span>
                       <span className="font-medium tabular-nums">{typeof t.amount === "number" ? formatUsd(t.amount) : ""}</span>
                     </li>
-                  ))}
+                  );
+                  })}
                 </ul>
               )}
             </div>
@@ -1114,34 +1277,7 @@ export default function ProfessionalDashboard() {
                 <CardDescription>Todas tus transacciones y ganancias</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {mockRecentTransactions.map((transaction) => (
-                    <div key={transaction.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="flex items-center gap-4">
-                        <div className={`p-2 rounded-full ${
-                          transaction.status === "completed" ? "bg-green-100" : "bg-orange-100"
-                        }`}>
-                          {transaction.status === "completed" ? (
-                            <DollarSign className="h-4 w-4 text-green-600" />
-                          ) : (
-                            <Clock className="h-4 w-4 text-orange-600" />
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-medium">{transaction.client}</p>
-                          <p className="text-sm text-gray-500">{transaction.service}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-medium">${transaction.amount}</p>
-                        <p className="text-sm text-gray-500">{transaction.date}</p>
-                        <Badge variant={transaction.status === "completed" ? "default" : "secondary"}>
-                          {transaction.status === "completed" ? "Completado" : "Pendiente"}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ProfessionalTransactions />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1204,22 +1340,9 @@ export default function ProfessionalDashboard() {
                 <CardDescription>Descargar facturas de tus servicios</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {mockRecentTransactions.filter(t => t.status === "completed").map((invoice) => (
-                    <div key={invoice.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div>
-                        <p className="font-medium">Factura #{invoice.id.toString().padStart(6, "0")}</p>
-                        <p className="text-sm text-gray-500">{invoice.client} - {invoice.service}</p>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="font-medium">${invoice.amount}</span>
-                        <Button size="sm" variant="outline">
-                          <FileText className="h-4 w-4 mr-1" />
-                          PDF
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+                  <FileText className="h-8 w-8 opacity-60" />
+                  <p className="text-sm">La exportación de facturas estará disponible próximamente.</p>
                 </div>
               </CardContent>
             </Card>
