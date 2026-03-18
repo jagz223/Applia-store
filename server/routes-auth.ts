@@ -23,7 +23,7 @@ const effectiveSecret = JWT_SECRET || devSecret;
 
 // ============== ESQUEMAS DE VALIDACIÓN ==============
 
-// Schema para registro de usuario
+// Schema para registro de usuario (avatar = URL de Firebase Storage, obligatoria)
 const registerSchema = z.object({
   email: z.string().email("Email inválido"),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
@@ -31,6 +31,7 @@ const registerSchema = z.object({
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
   phone: z.string().optional(),
   role: z.enum(["client", "professional", "admin"]).default("client"),
+  avatar: z.string().url("La foto de perfil debe ser una URL válida"),
 });
 
 // Schema para login
@@ -103,7 +104,6 @@ export async function registerAuthRoutes(
       // Hashear la contraseña
       const hashedPassword = await bcrypt.hash(data.password, 10);
       
-      // Crear el usuario en storage de GenFeb
       const user = await genFebStorage.createUser({
         email: data.email,
         password: hashedPassword,
@@ -111,9 +111,9 @@ export async function registerAuthRoutes(
         lastName: data.lastName,
         phone: data.phone,
         role: data.role,
+        avatar: data.avatar,
       });
-      
-      // Generar token
+
       const token = generateToken({
         id: user.id,
         email: user.email,
@@ -122,7 +122,7 @@ export async function registerAuthRoutes(
         role: user.role,
         phone: user.phone,
       });
-      
+
       res.status(201).json({
         message: "Usuario registrado exitosamente",
         token,
@@ -133,6 +133,7 @@ export async function registerAuthRoutes(
           lastName: user.lastName,
           role: user.role,
           phone: user.phone,
+          avatar: (user as { avatar?: string }).avatar,
         },
       });
     } catch (error) {
