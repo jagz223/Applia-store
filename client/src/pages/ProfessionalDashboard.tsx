@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { 
-  DollarSign, TrendingUp, Calendar, Users, 
-  Star, Clock, CreditCard, FileText,
+import {
+  DollarSign, TrendingUp, Calendar, Users,
+  Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
   CheckCircle2, XCircle, Banknote, Inbox, PlayCircle, History, UserPlus, Receipt
 } from "lucide-react";
@@ -37,6 +37,7 @@ import {
   useWalletTransfers,
   useCurrentProvider,
 } from "@/hooks/use-mango-data";
+import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 import { useToast } from "@/hooks/use-toast";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Link, useLocation } from "wouter";
@@ -823,6 +824,134 @@ function EconomicReportDialog({
   );
 }
 
+function InvoicesTabContent() {
+  const [page, setPage] = useState(1);
+  const { user } = useAuth();
+  const { data, isLoading } = useWalletTransfers({ page, limit: 10 });
+  const transfers = data?.transfers ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / 10));
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Facturas</CardTitle>
+          <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <p className="text-sm">Cargando transacciones…</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (transfers.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Facturas</CardTitle>
+          <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+          <FileText className="h-8 w-8 opacity-60" />
+          <p className="text-sm">Aún no tienes transacciones para facturar.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Facturas</CardTitle>
+        <CardDescription>Descarga una factura en PDF por cada transacción</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {transfers.map((t: TransferForInvoice & { id: number; status?: string }) => {
+          const label = getTransferTypeLabel(t.transferType);
+          const dateStr = parseTransferDate(t.createdAt)
+            ? format(parseTransferDate(t.createdAt)!, "dd MMM yyyy HH:mm", { locale: es })
+            : "—";
+          return (
+            <div
+              key={t.id}
+              className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
+            >
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <Receipt className="w-4 h-4 text-primary" />
+                </div>
+                <div className="min-w-0 space-y-1">
+                  <p className="font-medium text-sm">{label}</p>
+                  <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
+                  <p className="text-xs text-muted-foreground">{dateStr}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <p className="font-semibold text-sm">{formatWalletAmount(t.amount)}</p>
+                <Badge
+                  variant={
+                    t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"
+                  }
+                >
+                  {t.status === "pending_approval" ? "Pendiente" : t.status === "completed" ? "Completado" : "Rechazado"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    user &&
+                    downloadInvoicePdf(
+                      {
+                        id: t.id,
+                        amount: t.amount,
+                        transferType: t.transferType,
+                        description: t.description,
+                        createdAt: t.createdAt,
+                        status: t.status,
+                      },
+                      {
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                        name: (user as { name?: string }).name,
+                        email: user.email,
+                      }
+                    )
+                  }
+                  disabled={!user}
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Generar factura
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-muted-foreground">
+            Página {page} de {totalPages}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 const DASHBOARD_TABS = ["overview", "bookings", "transactions", "analytics", "invoices"] as const;
 
 export default function ProfessionalDashboard() {
@@ -1334,18 +1463,7 @@ export default function ProfessionalDashboard() {
           </TabsContent>
 
           <TabsContent value="invoices">
-            <Card>
-              <CardHeader>
-                <CardTitle>Facturas Emitidas</CardTitle>
-                <CardDescription>Descargar facturas de tus servicios</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
-                  <FileText className="h-8 w-8 opacity-60" />
-                  <p className="text-sm">La exportación de facturas estará disponible próximamente.</p>
-                </div>
-              </CardContent>
-            </Card>
+            <InvoicesTabContent />
           </TabsContent>
         </Tabs>
       </div>
