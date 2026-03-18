@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, UserPlus, Loader2 } from "lucide-react";
+import { Eye, EyeOff, UserPlus, Loader2, Camera, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,8 @@ import { Label } from "@/components/ui/label";
 import { api } from "@shared/routes";
 import { isGuest } from "@/lib/auth-utils";
 import { AlreadyAuthenticatedView } from "@/components/AlreadyAuthenticatedView";
+import { uploadProfileImage } from "@/lib/firebase-client";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const registerSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
@@ -34,9 +36,35 @@ type RegisterForm = z.infer<typeof registerSchema>;
 export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [profileImage, setProfileImage] = useState<File | null>(null);
+  const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user, isLoading: authLoading, setUser } = useAuth();
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ variant: "destructive", title: "Formato inválido", description: "Solo se permiten imágenes (JPG, PNG, WebP, GIF)." });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ variant: "destructive", title: "Archivo muy grande", description: "La imagen no debe superar 5 MB." });
+      return;
+    }
+    setProfileImage(file);
+    const reader = new FileReader();
+    reader.onload = () => setProfileImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const removeImage = () => {
+    setProfileImage(null);
+    setProfileImagePreview(null);
+  };
 
   if (authLoading) {
     return (
@@ -67,14 +95,20 @@ export default function Register() {
   });
 
   const onSubmit = async (data: RegisterForm) => {
+    if (!profileImage) {
+      toast({ variant: "destructive", title: "Foto requerida", description: "Debes subir una foto de perfil o tomar una con la cámara." });
+      return;
+    }
     setIsLoading(true);
     try {
+      const avatarUrl = await uploadProfileImage(profileImage);
+
       const response = await fetch(api.auth.register.path, {
         method: api.auth.register.method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, avatar: avatarUrl }),
       });
 
       const text = await response.text();
@@ -90,13 +124,12 @@ export default function Register() {
         throw new Error(result.message || "Error al registrar usuario");
       }
 
-      // Guardar token y usuario
       localStorage.setItem("token", result.token);
       setUser(result.user);
 
       toast({
         title: "Cuenta creada",
-        description: `Bienvenido ${result.user.name}, tu cuenta ha sido creada correctamente`,
+        description: `Bienvenido ${result.user.name}, tu cuenta ha sido creada correctamente.`,
       });
 
       if (data.role === "professional") {
@@ -129,6 +162,69 @@ export default function Register() {
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <FormLabel className="text-base">Foto de perfil (obligatoria)</FormLabel>
+                <p className="text-sm text-muted-foreground">
+                  Sube una foto desde tu dispositivo o toma una con la cámara.
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  capture="user"
+                  className="hidden"
+                  onChange={handleImageChange}
+                />
+                {profileImagePreview ? (
+                  <div className="flex items-center gap-4 p-3 rounded-lg border bg-muted/30">
+                    <Avatar className="h-16 w-16 ring-2 ring-mango-orange/50">
+                      <AvatarImage src={profileImagePreview} alt="Vista previa" />
+                      <AvatarFallback>Foto</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{profileImage.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {(profileImage.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                    <Button type="button" variant="ghost" size="icon" onClick={removeImage} aria-label="Quitar foto">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => {
+                        fileInputRef.current?.removeAttribute("capture");
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Subir imagen
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => {
+                        fileInputRef.current?.setAttribute("capture", "user");
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <Camera className="h-4 w-4 mr-2" />
+                      Tomar foto
+                    </Button>
+                  </div>
+                )}
+                {!profileImagePreview && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    Máximo 5 MB. Formatos: JPG, PNG, WebP, GIF.
+                  </p>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}

@@ -1,5 +1,6 @@
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getMessaging, isSupported, type Messaging } from "firebase/messaging";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL, type FirebaseStorage } from "firebase/storage";
 
 type FirebaseClientConfig = {
   apiKey: string;
@@ -12,6 +13,7 @@ type FirebaseClientConfig = {
 
 let firebaseApp: FirebaseApp | null = null;
 let messagingPromise: Promise<Messaging | null> | null = null;
+let storageInstance: FirebaseStorage | null = null;
 
 function buildConfig(): FirebaseClientConfig {
   const {
@@ -56,6 +58,49 @@ export function getFirebaseApp(): FirebaseApp | null {
   const config = buildConfig();
   firebaseApp = initializeApp(config);
   return firebaseApp;
+}
+
+export function getFirebaseStorage(): FirebaseStorage | null {
+  if (typeof window === "undefined") return null;
+  const app = getFirebaseApp();
+  if (!app) return null;
+  if (!storageInstance) storageInstance = getStorage(app);
+  return storageInstance;
+}
+
+const MAX_AVATAR_SIZE_MB = 5;
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+/**
+ * Sube una imagen de perfil a Firebase Storage y devuelve la URL de descarga.
+ * Usado en registro (y opcionalmente en perfil). El archivo no pasa por el servidor.
+ */
+export async function uploadProfileImage(file: File): Promise<string> {
+  if (file.size > MAX_AVATAR_SIZE_MB * 1024 * 1024) {
+    throw new Error(`La imagen no debe superar ${MAX_AVATAR_SIZE_MB} MB`);
+  }
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+  const path = `avatars/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on(
+      "state_changed",
+      () => {},
+      (err) => reject(err),
+      () => resolve()
+    );
+  });
+
+  return getDownloadURL(storageRef);
 }
 
 export async function getMessagingIfSupported(): Promise<Messaging | null> {
