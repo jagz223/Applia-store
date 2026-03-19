@@ -23,7 +23,9 @@ const effectiveSecret = JWT_SECRET || devSecret;
 
 // ============== ESQUEMAS DE VALIDACIÓN ==============
 
-// Schema para registro de usuario (avatar = URL de Firebase Storage, obligatoria)
+// Schema para registro de usuario
+// avatar puede venir como URL (opcional). Si el cliente sube archivo a Storage,
+// en el registro enviará solo la downloadURL.
 const registerSchema = z.object({
   email: z.string().email("Email inválido"),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
@@ -31,7 +33,7 @@ const registerSchema = z.object({
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
   phone: z.string().optional(),
   role: z.enum(["client", "professional", "admin"]).default("client"),
-  avatar: z.string().url("La foto de perfil debe ser una URL válida"),
+  avatar: z.string().url("La foto de perfil debe ser una URL válida").optional().or(z.literal("")),
 });
 
 // Schema para login
@@ -111,7 +113,7 @@ export async function registerAuthRoutes(
         lastName: data.lastName,
         phone: data.phone,
         role: data.role,
-        avatar: data.avatar,
+        avatar: data.avatar ? data.avatar : undefined,
       });
 
       const token = generateToken({

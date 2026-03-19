@@ -26,6 +26,7 @@ const registerSchema = z.object({
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
   confirmPassword: z.string(),
   role: z.enum(["client", "professional"]),
+  avatar: z.string().url("La URL de la imagen debe ser válida").optional().or(z.literal("")),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Las contraseñas no coinciden",
   path: ["confirmPassword"],
@@ -91,17 +92,26 @@ export default function Register() {
       password: "",
       confirmPassword: "",
       role: "client",
+      avatar: "",
     },
   });
 
   const onSubmit = async (data: RegisterForm) => {
-    if (!profileImage) {
-      toast({ variant: "destructive", title: "Foto requerida", description: "Debes subir una foto de perfil o tomar una con la cámara." });
+    const hasFile = profileImage != null;
+    const hasUrl = typeof data.avatar === "string" && data.avatar.trim().length > 0;
+    if (!hasFile && !hasUrl) {
+      toast({
+        variant: "destructive",
+        title: "Avatar requerido",
+        description: "Debes subir una foto o pegar una URL de imagen de perfil.",
+      });
       return;
     }
     setIsLoading(true);
     try {
-      const avatarUrl = await uploadProfileImage(profileImage);
+      const avatarUrl = hasFile
+        ? await uploadProfileImage(profileImage!)
+        : data.avatar.trim();
 
       const response = await fetch(api.auth.register.path, {
         method: api.auth.register.method,
@@ -163,9 +173,9 @@ export default function Register() {
           <form onSubmit={form.handleSubmit(onSubmit)}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <FormLabel className="text-base">Foto de perfil (obligatoria)</FormLabel>
+                <FormLabel className="text-base">Foto de perfil (opcional)</FormLabel>
                 <p className="text-sm text-muted-foreground">
-                  Sube una foto desde tu dispositivo o toma una con la cámara.
+                  Puedes subir una foto desde tu dispositivo o tomar una con la cámara. Si no lo haces, puedes pegar una URL.
                 </p>
                 <input
                   ref={fileInputRef}
@@ -225,6 +235,19 @@ export default function Register() {
                   </p>
                 )}
               </div>
+              <FormField
+                control={form.control}
+                name="avatar"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>URL de la imagen de perfil (opcional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="https://ejemplo.com/imagen.jpg" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
