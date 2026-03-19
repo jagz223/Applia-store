@@ -104,14 +104,17 @@ export async function registerAuthRoutes(
       const hashedPassword = await bcrypt.hash(data.password, 10);
       
       // Crear el usuario en storage de GenFeb
-      const user = await genFebStorage.createUser({
+      // Nota: el contrato del storage tipa esto como unknown; aquí lo tratamos como objeto de usuario.
+      const user = (await genFebStorage.createUser({
         email: data.email,
         password: hashedPassword,
         name: data.name,
         lastName: data.lastName,
         phone: data.phone,
         role: data.role,
-      });
+        rating: 5,
+        ratingCount: 0,
+      })) as any;
       
       // Generar token
       const token = generateToken({

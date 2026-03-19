@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
-import { useCurrentProvider, useMyServices, useDeleteService, useWallet, useCategories } from "@/hooks/use-mango-data";
+import { useCurrentProvider, useMyServices, useWallet, useCategories } from "@/hooks/use-mango-data";
 import { getCategoryDisplayName } from "@shared/default-categories";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { 
@@ -25,11 +25,11 @@ import {
   ChevronDown,
   List,
   Pencil,
-  Trash2,
   Loader2,
   Wrench,
   PackageOpen,
   Wallet,
+  Star,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -44,16 +44,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useState } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
 
@@ -65,9 +55,12 @@ export function Navigation() {
   const showBecomePro = useShowBecomePro();
   const { data: providerProfile } = useCurrentProvider();
   const { data: myServices = [], isLoading: myServicesLoading } = useMyServices({ enabled: !!providerProfile || (user as { role?: string } | null)?.role === "professional" });
-  const deleteService = useDeleteService();
   const { data: walletData } = useWallet({ enabled: isAuthenticated });
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
+  const userRating =
+    typeof (walletData as { rating?: number } | undefined)?.rating === "number"
+      ? (walletData as { rating: number }).rating
+      : 5;
   const formatWallet = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
   const [location] = useLocation();
@@ -90,7 +83,6 @@ export function Navigation() {
   const exploreCategoryDisplayName = exploreCategoryFromContext ?? exploreCategoryFromUrl;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [myServicesOpen, setMyServicesOpen] = useState(false);
-  const [serviceToDelete, setServiceToDelete] = useState<number | null>(null);
 
   const isActive = (path: string) => location === path || location.startsWith(path + '/');
 
@@ -143,7 +135,7 @@ export function Navigation() {
               }}
             >
               <List className="h-4 w-4" />
-              <span>Mis servicios</span>
+              <span>Mi Servicio</span>
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
@@ -220,6 +212,11 @@ export function Navigation() {
               <Wallet className="h-4 w-4 sm:h-4 w-4 shrink-0" aria-hidden />
               <span className="text-sm font-semibold tabular-nums truncate max-w-[80px] sm:max-w-[100px]">
                 {walletData === undefined ? "—" : formatWallet(walletBalance)}
+              </span>
+              <span className="mx-1 h-4 w-px bg-primary/30" aria-hidden />
+              <span className="flex items-center gap-1 text-sm font-semibold tabular-nums">
+                <Star className="h-4 w-4 text-amber-500 fill-amber-500" aria-hidden />
+                <span className="text-foreground">{Number(userRating).toFixed(1)}</span>
               </span>
             </div>
           )}
@@ -365,6 +362,11 @@ export function Navigation() {
                   <span className="text-base font-semibold text-primary tabular-nums">
                     {walletData === undefined ? "—" : formatWallet(walletBalance)}
                   </span>
+                  <span className="mx-1 h-5 w-px bg-primary/30" aria-hidden />
+                  <span className="flex items-center gap-1 text-base font-semibold tabular-nums">
+                    <Star className="h-5 w-5 text-amber-500 fill-amber-500" aria-hidden />
+                    <span className="text-foreground">{Number(userRating).toFixed(1)}</span>
+                  </span>
                 </div>
               )}
               <div className="flex flex-col gap-4 mt-4">
@@ -396,7 +398,7 @@ export function Navigation() {
                           setMyServicesOpen(true);
                         }}
                       >
-                        Mis servicios
+                        Mi Servicio
                       </button>
                     )}
                   </>
@@ -437,14 +439,14 @@ export function Navigation() {
       </div>
     </nav>
 
-    {/* Panel Mis servicios */}
+    {/* Panel Mi Servicio */}
     <Sheet open={myServicesOpen} onOpenChange={setMyServicesOpen}>
       <SheetContent
-        side="right"
-        className="w-full sm:max-w-md bg-white border-l border-border overflow-y-auto rounded-l-xl shadow-lg"
+        side="left"
+        className="w-[360px] max-w-[92vw] bg-white border-r border-border overflow-y-auto rounded-r-xl shadow-lg"
       >
         <div className="pb-4 border-b border-border/80">
-          <h2 className="text-xl font-bold text-foreground tracking-tight">Mis servicios</h2>
+          <h2 className="text-xl font-bold text-foreground tracking-tight">Mi Servicio</h2>
           <p className="text-sm text-muted-foreground mt-1">Gestiona y edita tus publicaciones</p>
         </div>
 
@@ -521,24 +523,6 @@ export function Navigation() {
                               </TooltipTrigger>
                               <TooltipContent>Editar</TooltipContent>
                             </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-transform hover:scale-110"
-                                  onClick={() => setServiceToDelete(s.id)}
-                                  disabled={deleteService.isPending}
-                                >
-                                  {deleteService.isPending && deleteService.variables === s.id ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="h-4 w-4" />
-                                  )}
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Eliminar</TooltipContent>
-                            </Tooltip>
                           </div>
                         </div>
                       </CardContent>
@@ -550,31 +534,6 @@ export function Navigation() {
         </div>
       </SheetContent>
     </Sheet>
-
-    <AlertDialog open={serviceToDelete != null} onOpenChange={(open) => !open && setServiceToDelete(null)}>
-      <AlertDialogContent className="rounded-xl border border-border bg-card shadow-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle>¿Eliminar este servicio?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Esta acción no se puede deshacer. El servicio dejará de estar visible para los clientes.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter className="gap-2 sm:gap-0">
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-          <AlertDialogAction
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            onClick={() => {
-              if (serviceToDelete != null) {
-                deleteService.mutate(serviceToDelete);
-                setServiceToDelete(null);
-              }
-            }}
-          >
-            Eliminar
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
     </>
   );
 }

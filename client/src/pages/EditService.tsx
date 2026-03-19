@@ -16,6 +16,7 @@ const editServiceSchema = z.object({
   title: z.string().min(1, "El nombre es obligatorio").max(500),
   description: z.string().max(5000).optional(),
   price: z.string().min(1, "El precio es obligatorio"),
+  // imageUrl existe en el backend, pero ya no se configura desde la UI.
   imageUrl: z.string().url("URL no válida").optional().or(z.literal("")),
 });
 
@@ -59,6 +60,7 @@ export default function EditService() {
         title: data.title,
         description: data.description ?? "",
         price: data.price,
+        // No permitimos configurar desde UI; se envía solo si ya existía en el servicio.
         imageUrl: data.imageUrl || undefined,
       },
       {
@@ -109,7 +111,7 @@ export default function EditService() {
         <CardHeader>
           <CardTitle>Editar servicio</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Modifica el nombre, la descripción, el precio o la imagen de tu publicación.
+            Modifica el nombre, la descripción o el precio de tu publicación.
           </p>
         </CardHeader>
         <CardContent>
@@ -157,24 +159,10 @@ export default function EditService() {
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="imageUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>URL de la imagen (opcional)</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://..." {...field} value={field.value ?? ""} />
-                    </FormControl>
-                    {field.value && (
-                      <div className="mt-2 rounded-lg overflow-hidden border border-border max-w-xs">
-                        <img src={field.value} alt="Vista previa" className="w-full h-32 object-cover" />
-                      </div>
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {/*
+                Deshabilitado: no se configura foto del servicio.
+                La foto que se muestra en el detalle es únicamente la del profesional.
+              */}
 
               <Button type="submit" className="w-full" disabled={updateService.isPending}>
                 {updateService.isPending ? (

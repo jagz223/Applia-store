@@ -12,6 +12,7 @@ const FIRESTORE_METHODS = new Set([
   "getCategories", "getSubcategories", "getSubcategoryById", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider",
   "getAllServices", "getService", "createService",
   "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
+  "getPendingBookingRatings", "submitBookingRating",
   "getNotifications", "createNotification", "markNotificationAsRead",
 ]);
 
@@ -57,6 +58,10 @@ export class HybridStorage implements IStorage {
   confirmBookingByClient(bookingId: number) { return this.delegate("confirmBookingByClient", [bookingId]); }
   completeBookingAndReleaseEscrow(bookingId: number) { return this.delegate("completeBookingAndReleaseEscrow", [bookingId]); }
   cancelBookingAndRefundClientEscrow(bookingId: number) { return this.delegate("cancelBookingAndRefundClientEscrow", [bookingId]); }
+  getPendingBookingRatings(userId: string) { return this.delegate("getPendingBookingRatings", [userId]); }
+  submitBookingRating(raterUserId: string, bookingId: number, ratedUserId: string, roleRated: "professional" | "client", stars: number) {
+    return this.delegate("submitBookingRating", [raterUserId, bookingId, ratedUserId, roleRated, stars]);
+  }
 
   getPaymentsByUser(userId: string) { return this.memory.getPaymentsByUser(userId); }
   getEscrowPayments(userId: string) { return this.memory.getEscrowPayments(userId); }

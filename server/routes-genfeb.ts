@@ -5,6 +5,7 @@ import { authenticateJWT } from "./routes-auth";
 import { z } from "zod";
 import { notificationService } from "./services/notification.service";
 import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
+import { calcCommission, calcProviderNet } from "@shared/platform-commission";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
@@ -161,6 +162,18 @@ export async function registerGenFebRoutes(
             timestamp: new Date(),
           });
         }
+        // Push FCM para cuando el profesional no tiene la app abierta
+        void notificationService
+          .sendPushToUser(providerUserId, {
+            title: "Nueva reserva",
+            body: "Tienes una nueva reserva. Revisa tus reservas para ver el detalle.",
+            data: {
+              url: `/professional-dashboard?tab=bookings&highlight=${(booking as { id: number }).id}`,
+              type: "booking",
+              bookingId: String((booking as { id: number }).id),
+            },
+          })
+          .catch((err) => console.error("[push] Error notificando nueva reserva:", err));
       }
       res.status(201).json(booking);
     } catch (error) {
@@ -303,6 +316,48 @@ export async function registerGenFebRoutes(
         }
       }
 
+      // Notificación al cliente cuando el profesional cancela la reserva (persistida + tiempo real + push)
+      if (data.status === "cancelled" && isProvider) {
+        const clientUserId = (bid.userId as string | undefined) ?? (currentBooking as { userId?: string }).userId;
+        if (clientUserId) {
+          const refundHappened = bid.confirmedByClient === true;
+          const rawCost = typeof booking?.cost === "number" ? booking.cost : bid.cost;
+          const costNum = typeof rawCost === "number" ? rawCost : Number(rawCost);
+          const amountFormatted =
+            refundHappened && Number.isFinite(costNum) && costNum > 0
+              ? new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(costNum)
+              : "";
+
+          const message = refundHappened
+            ? amountFormatted
+              ? `El profesional canceló el servicio. Se te devolvieron ${amountFormatted} a tu billetera.`
+              : "El profesional canceló el servicio. Se te devolvió el monto retenido a tu billetera."
+            : "El profesional canceló el servicio. No se realizó ningún cobro.";
+
+          const notifData = { bookingId, message };
+          try {
+            await storage.createNotification({
+              userId: clientUserId,
+              type: "booking_cancelled_by_provider",
+              data: notifData,
+            });
+          } catch (err) {
+            console.error("[booking_cancelled_by_provider] Error persistiendo notificación para el cliente:", err);
+          }
+
+          const io = getIO();
+          if (io) {
+            sendNotificationToUser(io, clientUserId, { type: "booking_cancelled_by_provider", data: notifData });
+          }
+
+          void notificationService.sendPushToUser(clientUserId, {
+            title: "Servicio cancelado",
+            body: message,
+            data: { url: `/bookings?highlight=${bookingId}`, type: "booking_cancelled_by_provider", bookingId: String(bookingId), message },
+          });
+        }
+      }
+
       // Notificación al cliente cuando el profesional confirma la reserva (persistida para que sobreviva al refresh)
       if (data.status === "confirmed") {
         const clientUserId = (currentBooking ?? booking) as { userId?: string };
@@ -338,6 +393,48 @@ export async function registerGenFebRoutes(
     }
   });
 
+  // ---------- CALIFICACIONES (RATINGS) ----------
+  const submitRatingSchema = z.object({
+    bookingId: z.number(),
+    ratedUserId: z.string().min(1),
+    roleRated: z.enum(["professional", "client"]),
+    stars: z.number().min(1).max(5),
+  });
+
+  app.get("/api/ratings/pending", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const pending = await storage.getPendingBookingRatings(userId);
+      return res.json({ pending });
+    } catch (error) {
+      console.error("Error fetching pending ratings:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/ratings", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const body = submitRatingSchema.parse(req.body);
+      await storage.submitBookingRating(
+        userId,
+        body.bookingId,
+        body.ratedUserId,
+        body.roleRated,
+        body.stars
+      );
+      return res.json({ ok: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error("Error submitting rating:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // POST /api/bookings/:id/confirm-client - Cliente confirma pago (handshake/escrow); transacción ACID
   app.post("/api/bookings/:id/confirm-client", authenticateJWT, async (req: any, res) => {
     try {
@@ -354,6 +451,10 @@ export async function registerGenFebRoutes(
       const updated = await storage.confirmBookingByClient(bookingId);
       const cost = typeof (updated as { cost?: number }).cost === "number" ? (updated as { cost: number }).cost : Number((updated as { cost?: unknown }).cost) || 0;
       const amountFormatted = cost > 0 ? cost.toFixed(2) : "";
+      const commission = calcCommission(cost);
+      const providerNet = calcProviderNet(cost);
+      const commissionFormatted = commission > 0 ? commission.toFixed(2) : "";
+      const providerNetFormatted = providerNet > 0 ? providerNet.toFixed(2) : "";
 
       // Notificación al profesional: fondos agregados (retenidos a su favor) + cliente confirmó el pago
       const provider = bid.providerId != null ? await storage.getProvider(bid.providerId) : undefined;
@@ -363,8 +464,12 @@ export async function registerGenFebRoutes(
           bookingId,
           amount: cost,
           amountFormatted,
+          commission,
+          commissionFormatted,
+          providerNet,
+          providerNetFormatted,
           message: amountFormatted
-            ? `Se te han agregado $${amountFormatted} USD (retenidos). El cliente confirmó el pago. Ya puedes completar el servicio.`
+            ? `Se te han retenido $${amountFormatted} USD (retenidos). El cliente confirmó el pago. Recibirás $${providerNetFormatted} USD (90%) y la plataforma tomará $${commissionFormatted} USD (10%). Ya puedes completar el servicio.`
             : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
         };
         try {
@@ -386,7 +491,7 @@ export async function registerGenFebRoutes(
         void notificationService.sendPushToUser(providerUserId, {
           title: "Fondos agregados",
           body: amountFormatted
-            ? `Se han retenido $${amountFormatted} USD a tu favor. El cliente confirmó el pago. Ya puedes completar el servicio.`
+            ? `Se han retenido $${amountFormatted} USD a tu favor. Recibirás $${providerNetFormatted} USD (90%) y la plataforma tomará $${commissionFormatted} USD (10%). Ya puedes completar el servicio.`
             : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
           data: { url: "/professional-dashboard?tab=bookings", type: "booking_confirmed_by_client", bookingId: String(bookingId) },
         });
@@ -448,6 +553,37 @@ export async function registerGenFebRoutes(
         } catch (e) {
           console.error("Error creando notificación de cambio de monto:", e);
         }
+      }
+
+      // Recordatorio para el profesional: comisión y neto al acordar este monto
+      const commission = calcCommission(body.cost);
+      const providerNet = calcProviderNet(body.cost);
+      const commissionFormatted = commission.toFixed(2);
+      const providerNetFormatted = providerNet.toFixed(2);
+      const proNotifData = {
+        bookingId,
+        amount: body.cost,
+        amountFormatted,
+        commission,
+        commissionFormatted,
+        providerNet,
+        providerNetFormatted,
+      };
+      try {
+        await storage.createNotification({
+          userId,
+          type: "booking_cost_commission_reminder",
+          data: proNotifData,
+        });
+        const io = getIO();
+        if (io) sendNotificationToUser(io, userId, { type: "booking_cost_commission_reminder", data: proNotifData });
+        void notificationService.sendPushToUser(userId, {
+          title: "Recordatorio de comisión",
+          body: `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (90%). La plataforma tomará $${commissionFormatted} USD (10%).`,
+          data: { url: `/professional-dashboard?tab=bookings&highlight=${bookingId}`, type: "booking_cost_commission_reminder", bookingId: String(bookingId) },
+        }).catch((err: Error) => console.error("[push] Error notificando recordatorio de comisión:", err));
+      } catch (e) {
+        console.error("Error creando recordatorio de comisión:", e);
       }
       res.json(updated);
     } catch (error) {
@@ -638,10 +774,12 @@ export async function registerGenFebRoutes(
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUserById(userId);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
-      const u = user as { wallet?: number; totalEarnings?: number };
+      const u = user as { wallet?: number; totalEarnings?: number; rating?: number; ratingCount?: number };
       res.json({
         wallet: typeof u.wallet === "number" ? u.wallet : 0,
         totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
+        rating: typeof u.rating === "number" ? u.rating : 5,
+        ratingCount: typeof u.ratingCount === "number" ? u.ratingCount : 0,
       });
     } catch (error) {
       console.error("Error fetching user wallet:", error);
@@ -658,12 +796,14 @@ export async function registerGenFebRoutes(
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUserById(userId);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
-      const u = user as { wallet?: number; totalEarnings?: number; pendingBalance?: number; withdrawingFunds?: number };
+      const u = user as { wallet?: number; totalEarnings?: number; pendingBalance?: number; withdrawingFunds?: number; rating?: number; ratingCount?: number };
       res.json({
         wallet: typeof u.wallet === "number" ? u.wallet : 0,
         totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
         pendingBalance: typeof u.pendingBalance === "number" ? u.pendingBalance : 0,
         withdrawingFunds: typeof u.withdrawingFunds === "number" ? u.withdrawingFunds : 0,
+        rating: typeof u.rating === "number" ? u.rating : 5,
+        ratingCount: typeof u.ratingCount === "number" ? u.ratingCount : 0,
       });
     } catch (error) {
       console.error("Error fetching user wallet:", error);
@@ -741,6 +881,26 @@ export async function registerGenFebRoutes(
           data: { userId, userName, amount: parsed.data.amount, amountFormatted },
         });
       }
+
+      // Push FCM para cada admin (si no tienen la app abierta)
+      void Promise.all(
+        (adminUsers ?? []).map((admin: { id?: string }) => {
+          const adminId = admin?.id;
+          if (!adminId) return;
+          return notificationService.sendPushToUser(adminId, {
+            title: "Nueva solicitud de retiro",
+            body: `${userName} solicitó retirar ${amountFormatted} USD. Revisa Solicitudes de Retiro en el panel.`,
+            data: {
+              url: "/admin?tab=payouts",
+              type: "admin",
+              withdrawalType: "withdrawal_requested",
+              userId,
+              userName,
+              amountFormatted,
+            },
+          });
+        })
+      ).catch((err) => console.error("[push] Error notificando admins por retiro:", err));
       return res.status(200).json({ message: "Retiro solicitado. Aparecerás en Panel de Administración → Solicitudes de Retiro para que el administrador procese la transferencia.", ok: true });
     } catch (error) {
       console.error("Error requesting withdraw:", error);
@@ -811,10 +971,10 @@ export async function registerGenFebRoutes(
       const rejected = bookings.filter((b: { status?: string }) => b.status === "rejected");
       const completedCount = completed.length;
       const rejectedCount = rejected.length;
-      const totalEarnings = completed.reduce(
-        (sum: number, b: { cost?: number }) => sum + (typeof b.cost === "number" ? b.cost : Number(b.cost) || 0),
-        0
-      );
+      const totalEarnings = completed.reduce((sum: number, b: { cost?: number }) => {
+        const cost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
+        return sum + calcProviderNet(cost);
+      }, 0);
       const now = new Date();
       const thisYear = now.getFullYear();
       const thisMonth = now.getMonth();
@@ -832,8 +992,8 @@ export async function registerGenFebRoutes(
         const cost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
         const completedAt = toDate((b as { completedAt?: unknown }).completedAt);
         if (completedAt) {
-          if (completedAt.getFullYear() === thisYear && completedAt.getMonth() === thisMonth) earningsThisMonth += cost;
-          if (completedAt.getFullYear() === lastMonthYear && completedAt.getMonth() === lastMonth) earningsLastMonth += cost;
+          if (completedAt.getFullYear() === thisYear && completedAt.getMonth() === thisMonth) earningsThisMonth += calcProviderNet(cost);
+          if (completedAt.getFullYear() === lastMonthYear && completedAt.getMonth() === lastMonth) earningsLastMonth += calcProviderNet(cost);
         }
       }
       const pendingOrActiveCount = bookings.filter(
@@ -1161,6 +1321,23 @@ export async function registerGenFebRoutes(
       res.status(204).send();
     } catch (error) {
       console.error("Error deleting document:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/support/admin - Obtener un administrador para soporte (para abrir chat).
+  // Nota: accesible solo a usuarios autenticados (Chat requiere autenticación).
+  app.get("/api/support/admin", authenticateJWT, async (req: any, res) => {
+    try {
+      const { users } = await storage.getUsers({ role: "admin", page: 1, limit: 1, name: "", email: "", lastName: "" });
+      const admin = Array.isArray(users) && users.length ? users[0] : null;
+      const adminId = admin && typeof (admin as any).id === "string" ? (admin as any).id : (admin && (admin as any).id != null ? String((admin as any).id) : null);
+      if (!adminId) {
+        return res.status(404).json({ message: "No hay administrador disponible" });
+      }
+      res.json({ adminId });
+    } catch (error) {
+      console.error("Error in /api/support/admin:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });

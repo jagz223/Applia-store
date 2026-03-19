@@ -94,11 +94,8 @@ export default function CreateService() {
   }
 
   function onSubmit(data: InsertService & { subcategoryId?: number | null }) {
-    // If user leaves image blank, we can use a placeholder in frontend display, 
-    // but schema requires string.
-    if (!data.imageUrl) {
-        data.imageUrl = "https://images.unsplash.com/photo-1581092921461-eab62e97a783?w=500&h=300&fit=crop";
-    }
+    // No mostramos foto del servicio en la UI; guardamos vacío para no depender de assets.
+    data.imageUrl = "";
     const payload = { ...data, subcategoryId: data.subcategoryId ?? undefined };
     createService.mutate(payload, {
       onSuccess: () => setLocation("/dashboard"),
@@ -209,19 +206,10 @@ export default function CreateService() {
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="imageUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Image URL (Optional)</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://..." {...field} value={field.value || ''} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {/*
+                Deshabilitado: no se configura foto del servicio.
+                La foto que se muestra es únicamente la del profesional en el círculo.
+              */}
 
               <Button type="submit" className="w-full" disabled={createService.isPending}>
                 {createService.isPending ? "Creating..." : "Create Service"}

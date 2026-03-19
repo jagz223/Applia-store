@@ -8,6 +8,7 @@ import { Footer } from "@/components/Footer";
 import { PushForegroundHandler } from "@/components/PushForegroundHandler";
 import { SocketProvider } from "@/hooks/use-socket";
 import { ExploreCategoryProvider } from "@/contexts/ExploreCategoryContext";
+import { RatingGate } from "@/components/RatingGate";
 
 // Pages
 import HomePage from "@/pages/Home";
@@ -35,6 +36,7 @@ import RechargeConfirm from "@/pages/RechargeConfirm";
 import Movimientos from "@/pages/Movimientos";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
+import Notifications from "@/pages/Notifications";
 
 function Router() {
   return (
@@ -63,6 +65,7 @@ function Router() {
       <Route path="/recharge/confirm" component={RechargeConfirm} />
       <Route path="/movimientos" component={Movimientos} />
       <Route path="/settings" component={Settings} />
+      <Route path="/notifications" component={Notifications} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -75,6 +78,7 @@ function App() {
         <SocketProvider>
           <ExploreCategoryProvider>
             <PushForegroundHandler />
+            <RatingGate />
             <div className="flex flex-col min-h-screen bg-background font-sans">
               <Navigation />
               <main className="flex-grow">

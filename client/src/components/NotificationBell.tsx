@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { useSocket } from "@/hooks/use-socket";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 
 /** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificación (con highlight para resaltar el elemento). */
@@ -20,6 +20,14 @@ function getNotificationPath(notification: { type: string; data?: any }): string
         const bookingId = data.booking?.id ?? data.bookingId;
         if (bookingId != null) q.set("highlight", String(bookingId));
         return `/professional-dashboard?${q.toString()}`;
+      }
+      if (data.type === "booking_update") {
+        const bookingId = data.booking?.id ?? data.bookingId;
+        if (bookingId != null) {
+          const q = new URLSearchParams({ highlight: String(bookingId) });
+          return `/bookings?${q.toString()}`;
+        }
+        return "/bookings";
       }
       return "/bookings";
     case "booking_confirmed_by_provider": {
@@ -39,6 +47,22 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       const bookingId = data.bookingId ?? data.data?.bookingId;
       if (bookingId != null) q.set("highlight", String(bookingId));
       return `/professional-dashboard?${q.toString()}`;
+    }
+    case "booking_cancelled_by_provider": {
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) {
+        const q = new URLSearchParams({ highlight: String(bookingId) });
+        return `/bookings?${q.toString()}`;
+      }
+      return "/bookings";
+    }
+    case "booking_cost_commission_reminder": {
+      const bookingId = data.bookingId ?? data.data?.bookingId;
+      if (bookingId != null) {
+        const q = new URLSearchParams({ tab: "bookings", highlight: String(bookingId) });
+        return `/professional-dashboard?${q.toString()}`;
+      }
+      return "/professional-dashboard?tab=bookings";
     }
     case "booking_schedule_changed":
     case "booking_cost_changed": {
@@ -78,6 +102,28 @@ export function NotificationBell() {
   const push = usePushNotifications();
   const [, setLocation] = useLocation();
   const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+
+  const PAGE_SIZE = 10;
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(notifications.length / PAGE_SIZE)), [notifications.length]);
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+
+  const pageNotifications = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return notifications.slice(start, end);
+  }, [notifications, currentPage]);
+
+  useEffect(() => {
+    if (!open) return;
+    // Reiniciamos a la página 1 cada vez que se abre la campana.
+    setPage(1);
+  }, [open]);
+
+  useEffect(() => {
+    // Si cambian las notificaciones y reducimos el total de páginas, ajustamos el estado.
+    if (page !== currentPage) setPage(currentPage);
+  }, [currentPage, page]);
 
   const handleNotificationClick = (notification: { id: string; type: string; data?: any }) => {
     markNotificationAsRead(notification.id);
@@ -137,9 +183,13 @@ export function NotificationBell() {
         return <Calendar className="h-4 w-4 text-green-500" />;
       case "booking_cancelled":
         return <Calendar className="h-4 w-4 text-red-500" />;
+      case "booking_cancelled_by_provider":
+        return <Calendar className="h-4 w-4 text-red-500" />;
       case "booking_schedule_changed":
       case "booking_cost_changed":
         return <Calendar className="h-4 w-4 text-amber-500" />;
+      case "booking_cost_commission_reminder":
+        return <Calendar className="h-4 w-4 text-blue-500" />;
       case "recharge_rejected":
         return <Bell className="h-4 w-4 text-red-500" />;
       case "withdrawal_approved":
@@ -154,7 +204,12 @@ export function NotificationBell() {
   const getDescription = (type: string, data?: { amountFormatted?: string; dateFormatted?: string; message?: string; data?: { amountFormatted?: string; dateFormatted?: string } }) => {
     if (type === "booking_confirmed_by_client") {
       const amount = data?.amountFormatted ?? data?.data?.amountFormatted;
-      if (amount) return `Se te han agregado $${amount} USD. Completa el servicio para liberar los fondos.`;
+      const providerNet = (data as any)?.providerNetFormatted ?? (data as any)?.data?.providerNetFormatted;
+      const commission = (data as any)?.commissionFormatted ?? (data as any)?.data?.commissionFormatted;
+      if (amount && providerNet && commission) {
+        return `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (90%) y la plataforma tomará $${commission} USD (10%). Completa el servicio para liberar los fondos.`;
+      }
+      if (amount) return `Se te han retenido $${amount} USD. Completa el servicio para liberar los fondos.`;
     }
     if (type === "booking_schedule_changed") {
       const dateFormatted = data?.dateFormatted ?? data?.data?.dateFormatted;
@@ -165,6 +220,21 @@ export function NotificationBell() {
       const amount = data?.amountFormatted ?? data?.data?.amountFormatted;
       if (amount) return `Nuevo monto: $${amount} USD. Revisa tu reserva.`;
       return "Se ha actualizado el monto del servicio. Revisa tu reserva.";
+    }
+    if (type === "booking_cost_commission_reminder") {
+      const amountFormatted = (data as any)?.amountFormatted ?? (data as any)?.data?.amountFormatted;
+      const providerNetFormatted = (data as any)?.providerNetFormatted ?? (data as any)?.data?.providerNetFormatted;
+      const commissionFormatted = (data as any)?.commissionFormatted ?? (data as any)?.data?.commissionFormatted;
+      if (amountFormatted && providerNetFormatted && commissionFormatted) {
+        return `Al acordar ${"$"}${amountFormatted} USD, recibirás ${"$"}${providerNetFormatted} USD (90%). Comisión de plataforma: ${"$"}${commissionFormatted} USD (10%).`;
+      }
+      return "Recuerda que al confirmar el pago recibirás el 90% del monto acordado.";
+    }
+    if (type === "booking" && data?.type === "booking_update") {
+      const status = (data as any)?.booking?.status as string | undefined;
+      if (status === "in_progress") return "El profesional marcó tu reserva como en proceso. Revisa tu lista de reservas.";
+      if (status === "completed") return "El servicio fue completado. Puedes revisar la reserva y dejar tu calificación cuando corresponda.";
+      return "La reserva fue actualizada.";
     }
     if (type === "balance_credited") {
       const message = data?.data?.message ?? data?.message;
@@ -182,6 +252,14 @@ export function NotificationBell() {
       const note = data?.adminNote;
       return note ? `${message} Nota: ${note}` : message;
     }
+    if (type === "booking_cancelled_by_provider") {
+      const message = data?.message ?? data?.data?.message;
+      return message ?? "El profesional canceló el servicio. El monto fue devuelto a tu billetera.";
+    }
+    if (type === "booking_cancelled") {
+      const message = data?.message ?? data?.data?.message;
+      return message ?? null;
+    }
     if (type === "admin" && data?.type === "withdrawal_requested") {
       const name = data?.userName ?? data?.data?.userName;
       const amount = data?.amountFormatted ?? data?.data?.amountFormatted ?? data?.amount;
@@ -196,6 +274,12 @@ export function NotificationBell() {
 
   const getTitle = (type: string, data?: { type?: string }) => {
     if (type === "booking" && data?.type === "new_booking") return "Nueva reserva";
+    if (type === "booking" && data?.type === "booking_update") {
+      const status = (data as any)?.booking?.status as string | undefined;
+      if (status === "in_progress") return "Servicio en proceso";
+      if (status === "completed") return "Servicio completado";
+      return "Reserva actualizada";
+    }
     if (type === "admin" && data?.type === "recharge_pending") return "Nueva solicitud de recarga";
     if (type === "admin" && data?.type === "withdrawal_requested") return "Nueva solicitud de retiro";
     if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
@@ -206,7 +290,9 @@ export function NotificationBell() {
     if (type === "balance_credited") return "Saldo acreditado";
     if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el profesional";
     if (type === "booking_confirmed_by_client") return "Fondos agregados";
+    if (type === "booking_cost_commission_reminder") return "Recordatorio de comisión";
     if (type === "booking_cancelled") return "Reserva cancelada";
+    if (type === "booking_cancelled_by_provider") return "Servicio cancelado";
     if (type === "booking_schedule_changed") return "Se cambió la fecha del servicio";
     if (type === "booking_cost_changed") return "Se actualizó el monto del servicio";
     if (type === "withdrawal_approved") return "Retiro procesado";
@@ -262,7 +348,7 @@ export function NotificationBell() {
           </div>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {notifications.slice(0, 10).map((notification) => (
+            {pageNotifications.map((notification) => (
               <button
                 key={notification.id}
                 type="button"
@@ -297,11 +383,50 @@ export function NotificationBell() {
           </div>
         )}
 
-        {notifications.length > 10 && (
-          <p className="text-xs text-center text-muted-foreground mt-2">
-            +{notifications.length - 10} notificaciones más
-          </p>
+        {notifications.length > PAGE_SIZE && currentPage === 1 && (
+          <div className="mt-2 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => setPage(2)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
+              aria-label="Ver más notificaciones"
+            >
+              +{notifications.length - PAGE_SIZE} notificaciones más
+            </button>
+          </div>
         )}
+
+        {notifications.length > PAGE_SIZE && totalPages > 1 && (
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
+              Anterior
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Página {currentPage}/{totalPages}
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+              Siguiente
+            </Button>
+          </div>
+        )}
+
+        {currentPage > 1 && (
+          <div className="mt-2 flex items-center justify-center">
+            <Button variant="ghost" size="sm" className="text-xs" onClick={() => setPage(1)}>
+              Limpiar filtro (volver a las nuevas)
+            </Button>
+          </div>
+        )}
+
+        <div className="mt-3">
+          <Link
+            href="/notifications"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
+            onClick={() => setOpen(false)}
+          >
+            Ver historial completo
+          </Link>
+        </div>
 
         <div className="mt-4 pt-3 border-t border-border">
           <Button

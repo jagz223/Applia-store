@@ -4,11 +4,13 @@ import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 
 export function Footer() {
   const showBecomePro = useShowBecomePro();
+  // "Suscríbete" oculto en todo el sitio (requisito UI).
+  const hideNewsletterAlways = true;
 
   return (
     <footer className="bg-white border-t border-border/50 mt-auto">
       <div className="container mx-auto px-4 py-12 md:py-16 max-w-7xl">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-12">
+        <div className={`grid grid-cols-1 gap-12 md:grid-cols-3`}>
           
           {/* Brand */}
           <div className="space-y-4">
@@ -34,7 +36,6 @@ export function Footer() {
               <li><Link href="/explore" className="hover:text-primary transition-colors">Explorar Servicios</Link></li>
               <li><Link href="/categories" className="hover:text-primary transition-colors">Categorías</Link></li>
               {showBecomePro && <li><Link href="/become-pro" className="hover:text-primary transition-colors">Conviértete en Profesional</Link></li>}
-              <li><a href="#" className="hover:text-primary transition-colors">Cómo Funciona</a></li>
             </ul>
           </div>
 
@@ -42,28 +43,16 @@ export function Footer() {
           <div>
             <h4 className="font-bold text-foreground mb-4">Soporte</h4>
             <ul className="space-y-3 text-sm text-muted-foreground">
-              <li><a href="#" className="hover:text-primary transition-colors">Centro de Ayuda</a></li>
-              <li><a href="#" className="hover:text-primary transition-colors">Guidelines de Seguridad</a></li>
-              <li><a href="#" className="hover:text-primary transition-colors">Términos de Servicio</a></li>
-              <li><a href="#" className="hover:text-primary transition-colors">Política de Privacidad</a></li>
+              <li>
+                <Link href="/chat?support=1" className="hover:text-primary transition-colors">
+                  Centro de Ayuda
+                </Link>
+              </li>
             </ul>
           </div>
 
-          {/* Newsletter (Visual Only) */}
-          <div>
-            <h4 className="font-bold text-foreground mb-4">Suscríbete</h4>
-            <p className="text-sm text-muted-foreground mb-4">Recibe las últimas actualizaciones y ofertas.</p>
-            <div className="flex gap-2">
-              <input 
-                type="email" 
-                placeholder="Tu correo electrónico" 
-                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              />
-              <button className="bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm">
-                Unirse
-              </button>
-            </div>
-          </div>
+          {/* Newsletter (Visual Only) - oculto */}
+          {hideNewsletterAlways ? null : null}
         </div>
 
         <div className="mt-12 pt-8 border-t border-border/50 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">

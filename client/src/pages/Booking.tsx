@@ -22,7 +22,7 @@ import {
   Mail,
   Loader2
 } from "lucide-react";
-import { useCategories, useServices, useProviderCategoryAvailability, useCreateBooking } from "@/hooks/use-mango-data";
+import { useCategories, useServices, useProviderCategoryAvailability, useCreateBooking, useProviderCompletedCount } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { useMemo } from "react";
@@ -32,6 +32,68 @@ import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
 import { isBeforeToday } from "@/lib/date-utils";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
+
+type ProviderOption = {
+  id: number;
+  name: string;
+  profession: string;
+  rating: number;
+  reviewCount: number;
+  price: number;
+  firstServiceId: number;
+  profileImageUrl?: string | null;
+};
+
+function ProviderOptionCard({
+  provider,
+  selected,
+  onSelect,
+}: {
+  provider: ProviderOption;
+  selected: boolean;
+  onSelect: (providerId: number, firstServiceId: number) => void;
+}) {
+  const { data: completedCount, isLoading: completedCountLoading } = useProviderCompletedCount(provider.id);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(provider.id, provider.firstServiceId)}
+      className={`
+        w-full p-4 rounded-lg border text-left transition-all flex items-center justify-between
+        ${selected ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}
+      `}
+    >
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden shrink-0">
+          {provider.profileImageUrl ? (
+            <img src={provider.profileImageUrl} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <User className="w-6 h-6 text-primary" />
+          )}
+        </div>
+        <div>
+          <p className="font-medium">{provider.name}</p>
+          <p className="text-sm text-muted-foreground">{provider.profession}</p>
+          <div className="flex items-center gap-1 mt-1">
+            <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+            <span className="text-sm">{provider.rating > 0 ? provider.rating.toFixed(1) : "—"}</span>
+            <span className="text-xs text-muted-foreground">({provider.reviewCount} reseñas)</span>
+            {completedCountLoading ? (
+              <span className="text-xs text-muted-foreground">· ... completados</span>
+            ) : (
+              <span className="text-xs text-muted-foreground">· {completedCount ?? 0} servicios completados</span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="font-bold text-lg">${Number(provider.price).toFixed(0)}</p>
+        <p className="text-xs text-muted-foreground">desde</p>
+      </div>
+    </button>
+  );
+}
 
 export default function Booking() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
@@ -401,42 +463,12 @@ export default function Booking() {
                         ) : (
                           <div className="space-y-4">
                             {providersInCategory.map((provider) => (
-                              <button
+                              <ProviderOptionCard
                                 key={provider.id}
-                                type="button"
-                                onClick={() => handleSelectProvider(provider.id, provider.firstServiceId)}
-                                className={`
-                                  w-full p-4 rounded-lg border text-left transition-all flex items-center justify-between
-                                  ${selectedProvider === String(provider.id)
-                                    ? "border-primary bg-primary/10"
-                                    : "border-border hover:border-primary/50"}
-                                `}
-                              >
-                                <div className="flex items-center gap-4">
-                                  <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden shrink-0">
-                                    {provider.profileImageUrl ? (
-                                      <img src={provider.profileImageUrl} alt="" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <User className="w-6 h-6 text-primary" />
-                                    )}
-                                  </div>
-                                  <div>
-                                    <p className="font-medium">{provider.name}</p>
-                                    <p className="text-sm text-muted-foreground">{provider.profession}</p>
-                                    <div className="flex items-center gap-1 mt-1">
-                                      <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                                      <span className="text-sm">{provider.rating > 0 ? provider.rating.toFixed(1) : "—"}</span>
-                                      <span className="text-xs text-muted-foreground">
-                                        ({provider.reviewCount} reseñas)
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <p className="font-bold text-lg">${Number(provider.price).toFixed(0)}</p>
-                                  <p className="text-xs text-muted-foreground">desde</p>
-                                </div>
-                              </button>
+                                provider={provider}
+                                selected={selectedProvider === String(provider.id)}
+                                onSelect={handleSelectProvider}
+                              />
                             ))}
                           </div>
                         )}

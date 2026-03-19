@@ -127,6 +127,167 @@ export function registerAdminRoutes(app: Express): void {
 
   app.use("/api/admin/users", authenticateJWT, requireAdmin, adminUsersRouter);
 
+  /**
+   * GET /api/admin/providers/with-services
+   * Lista profesionales que tienen al menos un servicio (activo o no), con métricas para el admin panel.
+   * Incluye rating (de user), estado de verificación (provider.isVerified) y conteo de reservas.
+   */
+  app.get("/api/admin/providers/with-services", authenticateJWT, requireAdmin, async (_req, res) => {
+    try {
+      // Usamos getAllServices y agrupamos por providerId para filtrar solo proveedores con servicios.
+      const services = await genFebStorage.getAllServices();
+      const byProviderId = new Map<number, any[]>();
+      for (const s of services ?? []) {
+        const pid = (s as { providerId?: number; provider?: { id?: number } }).providerId ?? (s as any)?.provider?.id;
+        if (pid == null) continue;
+        const arr = byProviderId.get(Number(pid)) ?? [];
+        arr.push(s);
+        byProviderId.set(Number(pid), arr);
+      }
+
+      const items: Array<{
+        providerId: number;
+        userId: string;
+        name: string;
+        email?: string | null;
+        profession?: string | null;
+        category?: string | null;
+        serviceCount: number;
+        bookingsCount: number;
+        rating: number;
+        ratingCount: number;
+        verified: boolean;
+      }> = [];
+
+      for (const [providerId, providerServices] of byProviderId.entries()) {
+        const provider = await genFebStorage.getProvider(providerId);
+        if (!provider) continue;
+        const userId = String((provider as { userId?: string }).userId ?? "");
+        if (!userId) continue;
+        const rawUser = await genFebStorage.getUserById(userId);
+        const u = rawUser as { name?: string; firstName?: string; lastName?: string; email?: string | null; rating?: number; ratingCount?: number } | null;
+        const name =
+          (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) || "Usuario";
+        const rating = typeof u?.rating === "number" ? u.rating : 5;
+        const ratingCount = typeof u?.ratingCount === "number" ? u.ratingCount : 0;
+        const email = u?.email ?? null;
+
+        const bookings = await genFebStorage.getBookingsByProvider(providerId);
+        const bookingsCount = (bookings ?? []).length;
+
+        items.push({
+          providerId,
+          userId,
+          name,
+          email,
+          profession: (provider as { profession?: string | null }).profession ?? null,
+          category: (provider as { category?: string | null }).category ?? null,
+          serviceCount: providerServices.length,
+          bookingsCount,
+          rating,
+          ratingCount,
+          verified: (provider as { isVerified?: boolean | null }).isVerified === true,
+        });
+      }
+
+      // Orden: más reservas primero
+      items.sort((a, b) => b.bookingsCount - a.bookingsCount);
+      return res.status(200).json({ providers: items, total: items.length });
+    } catch (error) {
+      console.error("Error listing providers with services:", error);
+      return res.status(500).json({ message: "Error al listar proveedores" });
+    }
+  });
+
+  /**
+   * GET /api/admin/bookings
+   * Lista todas las reservas (admin), enriquecidas con service + provider + client (cuando el storage lo provee).
+   * Estrategia: iterar todos los proveedores y unir sus bookings (cada booking pertenece a 1 providerId).
+   */
+  app.get("/api/admin/bookings", authenticateJWT, requireAdmin, async (_req, res) => {
+    try {
+      const providers = await genFebStorage.getAllProviders();
+      const map = new Map<number, any>();
+      for (const p of providers ?? []) {
+        const providerId = (p as { id?: number }).id;
+        if (providerId == null) continue;
+        const bookings = await genFebStorage.getBookingsByProvider(Number(providerId));
+        for (const b of bookings ?? []) {
+          const bid = Number((b as { id?: number }).id);
+          if (!Number.isFinite(bid)) continue;
+          map.set(bid, b);
+        }
+      }
+      const list = Array.from(map.values());
+      const toMs = (x: unknown) =>
+        x instanceof Date
+          ? x.getTime()
+          : (x as { toDate?: () => Date })?.toDate?.()?.getTime?.() ?? (typeof x === "string" ? new Date(x).getTime() : 0);
+      list.sort((a: any, b: any) => toMs(b.createdAt ?? b.date) - toMs(a.createdAt ?? a.date));
+      return res.status(200).json({ bookings: list, total: list.length });
+    } catch (error) {
+      console.error("Error listing admin bookings:", error);
+      return res.status(500).json({ message: "Error al listar reservas" });
+    }
+  });
+
+  const adminUpdateBookingSchema = z.object({
+    status: z.enum(["pending", "confirmed", "in_progress", "completed", "cancelled"]).optional(),
+    cost: z.number().min(0).optional(),
+    scheduleIso: z.string().min(1).optional(),
+  });
+
+  /**
+   * PATCH /api/admin/bookings/:id
+   * Permite al admin corregir status/costo/horario. Se recomienda usarlo solo en casos especiales.
+   */
+  app.patch("/api/admin/bookings/:id", authenticateJWT, requireAdmin, async (req: any, res) => {
+    try {
+      const bookingId = Number(req.params.id);
+      if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID inválido" });
+      const body = adminUpdateBookingSchema.parse(req.body);
+      const current = await genFebStorage.getBooking(bookingId);
+      if (!current) return res.status(404).json({ message: "Reserva no encontrada" });
+
+      if (body.cost != null) {
+        await genFebStorage.updateBookingCost(bookingId, body.cost);
+      }
+      if (body.scheduleIso) {
+        const d = new Date(body.scheduleIso);
+        if (!Number.isFinite(d.getTime())) return res.status(400).json({ message: "scheduleIso inválido" });
+        await genFebStorage.updateBookingSchedule(bookingId, d);
+      }
+
+      if (body.status) {
+        const bid = current as { confirmedByClient?: boolean; status?: string };
+        if (body.status === "completed") {
+          if (bid.confirmedByClient === true) {
+            await genFebStorage.completeBookingAndReleaseEscrow(bookingId);
+          } else {
+            await genFebStorage.updateBookingStatus(bookingId, "completed");
+          }
+        } else if (body.status === "cancelled") {
+          if (bid.confirmedByClient === true) {
+            await genFebStorage.cancelBookingAndRefundClientEscrow(bookingId);
+          } else {
+            await genFebStorage.updateBookingStatus(bookingId, "cancelled");
+          }
+        } else {
+          await genFebStorage.updateBookingStatus(bookingId, body.status);
+        }
+      }
+
+      const updated = await genFebStorage.getBooking(bookingId);
+      return res.status(200).json(updated ?? current);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error("Error updating admin booking:", error);
+      return res.status(500).json({ message: "Error al actualizar la reserva" });
+    }
+  });
+
   // GET /api/admin/withdrawals - Lista usuarios con withdrawingFunds > 0 (solo admin)
   app.get("/api/admin/withdrawals", authenticateJWT, requireAdmin, async (_req, res) => {
     try {
@@ -213,6 +374,22 @@ export function registerAdminRoutes(app: Express): void {
                 processedByAdminName: adminName,
               },
             });
+            // Push FCM a otros admins: mismo evento, pero fuera de tiempo real
+            void notificationService
+              .sendPushToUser(aid, {
+                title: "Retiro aprobado por otro admin",
+                body: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}.`,
+                data: {
+                  url: "/admin?tab=payouts",
+                  type: "admin",
+                  withdrawalType: "withdrawal_processed_by_other",
+                  action: "approved",
+                  professionalUserId: userId,
+                  professionalName,
+                  amountFormatted,
+                },
+              })
+              .catch((err) => console.error("[push] Error notificando retiro aprobado por otro admin:", err));
           }
         }
         if (io) {
@@ -282,6 +459,21 @@ export function registerAdminRoutes(app: Express): void {
                 processedByAdminName: adminName,
               },
             });
+            // Push FCM a otros admins: mismo evento, pero fuera de tiempo real
+            void notificationService
+              .sendPushToUser(aid, {
+                title: "Retiro rechazado por otro admin",
+                body: `El retiro de ${professionalName} fue rechazado por ${adminName}.`,
+                data: {
+                  url: "/admin?tab=payouts",
+                  type: "admin",
+                  withdrawalType: "withdrawal_processed_by_other",
+                  action: "rejected",
+                  professionalUserId: userId,
+                  professionalName,
+                },
+              })
+              .catch((err) => console.error("[push] Error notificando retiro rechazado por otro admin:", err));
           }
         }
         if (io) {

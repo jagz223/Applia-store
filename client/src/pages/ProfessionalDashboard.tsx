@@ -44,38 +44,10 @@ import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
+import { calcCommission, calcProviderNet } from "@shared/platform-commission";
 
 const formatUsd = (n: number) =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
-
-// Mock data solo para calificación y transacciones recientes (no hay API aún)
-const mockBookings = {
-  total: 156,
-  completed: 134,
-  pending: 12,
-  cancelled: 10,
-};
-
-const mockRating = {
-  average: 4.8,
-  total: 89,
-  breakdown: [
-    { stars: 5, count: 72 },
-    { stars: 4, count: 12 },
-    { stars: 3, count: 3 },
-    { stars: 2, count: 1 },
-    { stars: 1, count: 1 },
-  ],
-};
-
-const mockMonthlyData = [
-  { month: "Ene", earnings: 2800 },
-  { month: "Feb", earnings: 3200 },
-  { month: "Mar", earnings: 2900 },
-  { month: "Abr", earnings: 3500 },
-  { month: "May", earnings: 3100 },
-  { month: "Jun", earnings: 3250 },
-];
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pendiente" },
@@ -365,6 +337,13 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
   const [costInputs, setCostInputs] = useState<Record<number, string>>({});
   const [scheduleInputs, setScheduleInputs] = useState<Record<number, { date: string; time: string }>>({});
   const [subTab, setSubTab] = useState<BookingsSubTab>("pending");
+  const PAGE_SIZE = 10;
+  const [pageBySubTab, setPageBySubTab] = useState<Record<BookingsSubTab, number>>({
+    pending: 1,
+    in_progress: 1,
+    ready: 1,
+    history: 1,
+  });
 
   const list = (bookings ?? []) as BookingItem[];
   const pending = useMemo(() => list.filter((b) => b.status === "pending"), [list]);
@@ -389,6 +368,63 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 
   const isLoadingOrRefetching = isLoading || isFetching;
 
+  const clampPage = (p: number, total: number) => Math.min(Math.max(1, p), total);
+
+  const pendingTotalPages = Math.max(1, Math.ceil(pending.length / PAGE_SIZE));
+  const pendingPage = clampPage(pageBySubTab.pending, pendingTotalPages);
+  const pendingPageItems = useMemo(
+    () => pending.slice((pendingPage - 1) * PAGE_SIZE, pendingPage * PAGE_SIZE),
+    [pending, pendingPage],
+  );
+
+  const inProgressTotalPages = Math.max(1, Math.ceil(inProgress.length / PAGE_SIZE));
+  const inProgressPage = clampPage(pageBySubTab.in_progress, inProgressTotalPages);
+  const inProgressPageItems = useMemo(
+    () => inProgress.slice((inProgressPage - 1) * PAGE_SIZE, inProgressPage * PAGE_SIZE),
+    [inProgress, inProgressPage],
+  );
+
+  const readyTotalPages = Math.max(1, Math.ceil(ready.length / PAGE_SIZE));
+  const readyPage = clampPage(pageBySubTab.ready, readyTotalPages);
+  const readyPageItems = useMemo(
+    () => ready.slice((readyPage - 1) * PAGE_SIZE, readyPage * PAGE_SIZE),
+    [ready, readyPage],
+  );
+
+  const historyTotalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
+  const historyPage = clampPage(pageBySubTab.history, historyTotalPages);
+  const historyPageItems = useMemo(
+    () => history.slice((historyPage - 1) * PAGE_SIZE, historyPage * PAGE_SIZE),
+    [history, historyPage],
+  );
+
+  const setPageForSubTab = (tab: BookingsSubTab, nextPage: number) => {
+    setPageBySubTab((prev) => ({ ...prev, [tab]: nextPage }));
+  };
+
+  useEffect(() => {
+    if (highlightedBookingId == null) return;
+    if (!list.length) return;
+
+    const booking = list.find((b) => b.id === highlightedBookingId);
+    if (!booking) return;
+
+    const getTargetSubTab = (): BookingsSubTab => {
+      if (booking.status === "pending") return "pending";
+      if (booking.status === "completed" || booking.status === "cancelled") return "history";
+      if (booking.confirmedByClient === true) return "ready";
+      return "in_progress";
+    };
+
+    const target = getTargetSubTab();
+    const arr = target === "pending" ? pending : target === "in_progress" ? inProgress : target === "ready" ? ready : history;
+    const idx = arr.findIndex((b) => b.id === highlightedBookingId);
+    const nextPage = idx >= 0 ? Math.floor(idx / PAGE_SIZE) + 1 : 1;
+
+    setSubTab(target);
+    setPageBySubTab((prev) => ({ ...prev, [target]: nextPage }));
+  }, [highlightedBookingId, list, pending, inProgress, ready, history]);
+
   function renderBookingRow(booking: BookingItem) {
     const date = toDate(booking.date);
     const dateStr = format(date, "yyyy-MM-dd");
@@ -402,6 +438,10 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     const refPrice = booking.service?.price != null ? Number(booking.service.price) : 0;
     const currentCost = savedCost > 0 ? savedCost : refPrice;
     const costDisplay = costInputs[booking.id] ?? String(currentCost);
+    const parsedCostDisplay = parseFloat(String(costDisplay).replace(",", "."));
+    const costForCommission = Number.isFinite(parsedCostDisplay) ? parsedCostDisplay : Number(currentCost || 0);
+    const commission = costForCommission > 0 ? calcCommission(costForCommission) : 0;
+    const providerNet = costForCommission > 0 ? calcProviderNet(costForCommission) : 0;
     const hasValidCost = savedCost > 0;
     const scheduleDisplay = scheduleInputs[booking.id] ?? { date: dateStr, time: timeStr };
     const handleCostBlur = () => {
@@ -500,6 +540,12 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 </Button>
                 {!hasValidCost && (
                   <span className="text-xs text-amber-600 dark:text-amber-500">Asigna el monto y guarda antes de confirmar la reserva.</span>
+                )}
+                {costForCommission > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    Neto profesional: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> (90%) · Comisión:{" "}
+                    <span className="font-medium text-foreground">${commission.toFixed(2)}</span> (10%)
+                  </span>
                 )}
               </>
             ) : (
@@ -663,32 +709,140 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 <p className="text-sm text-muted-foreground">
                   Asigna el costo y confirma la reserva para que el cliente pueda confirmar el pago.
                 </p>
-                {pending.length === 0 ? renderEmpty("No hay solicitudes pendientes. Las nuevas reservas aparecerán aquí.") : (
-                  <div className="space-y-4">{pending.map(renderBookingRow)}</div>
+                {pending.length === 0 ? (
+                  renderEmpty("No hay solicitudes pendientes. Las nuevas reservas aparecerán aquí.")
+                ) : (
+                  <>
+                    <div className="space-y-4">{pendingPageItems.map(renderBookingRow)}</div>
+                    {pendingTotalPages > 1 && (
+                      <div className="flex items-center justify-between gap-3 pt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={pendingPage <= 1}
+                          onClick={() => setPageForSubTab("pending", pendingPage - 1)}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          Página {pendingPage}/{pendingTotalPages}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={pendingPage >= pendingTotalPages}
+                          onClick={() => setPageForSubTab("pending", pendingPage + 1)}
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
               <TabsContent value="in_progress" className="mt-6 space-y-4 focus-visible:outline-none">
                 <p className="text-sm text-muted-foreground">
                   Reservas aceptadas: en espera de confirmación de pago del cliente o ya en ejecución.
                 </p>
-                {inProgress.length === 0 ? renderEmpty("No hay servicios en curso.") : (
-                  <div className="space-y-4">{inProgress.map(renderBookingRow)}</div>
+                {inProgress.length === 0 ? (
+                  renderEmpty("No hay servicios en curso.")
+                ) : (
+                  <>
+                    <div className="space-y-4">{inProgressPageItems.map(renderBookingRow)}</div>
+                    {inProgressTotalPages > 1 && (
+                      <div className="flex items-center justify-between gap-3 pt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={inProgressPage <= 1}
+                          onClick={() => setPageForSubTab("in_progress", inProgressPage - 1)}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          Página {inProgressPage}/{inProgressTotalPages}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={inProgressPage >= inProgressTotalPages}
+                          onClick={() => setPageForSubTab("in_progress", inProgressPage + 1)}
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
               <TabsContent value="ready" className="mt-6 space-y-4 focus-visible:outline-none">
                 <p className="text-sm text-muted-foreground">
                   El cliente ya confirmó el pago. Estas reservas están listas para que las completes y pasen a historial.
                 </p>
-                {ready.length === 0 ? renderEmpty("No hay reservas listas para completar.") : (
-                  <div className="space-y-4">{ready.map(renderBookingRow)}</div>
+                {ready.length === 0 ? (
+                  renderEmpty("No hay reservas listas para completar.")
+                ) : (
+                  <>
+                    <div className="space-y-4">{readyPageItems.map(renderBookingRow)}</div>
+                    {readyTotalPages > 1 && (
+                      <div className="flex items-center justify-between gap-3 pt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={readyPage <= 1}
+                          onClick={() => setPageForSubTab("ready", readyPage - 1)}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          Página {readyPage}/{readyTotalPages}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={readyPage >= readyTotalPages}
+                          onClick={() => setPageForSubTab("ready", readyPage + 1)}
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
               <TabsContent value="history" className="mt-6 space-y-4 focus-visible:outline-none">
                 <p className="text-sm text-muted-foreground">
                   Completados, cancelados o rechazados.
                 </p>
-                {history.length === 0 ? renderEmpty("Aún no hay historial de servicios.") : (
-                  <div className="space-y-4">{history.map(renderBookingRow)}</div>
+                {history.length === 0 ? (
+                  renderEmpty("Aún no hay historial de servicios.")
+                ) : (
+                  <>
+                    <div className="space-y-4">{historyPageItems.map(renderBookingRow)}</div>
+                    {historyTotalPages > 1 && (
+                      <div className="flex items-center justify-between gap-3 pt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={historyPage <= 1}
+                          onClick={() => setPageForSubTab("history", historyPage - 1)}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          Página {historyPage}/{historyTotalPages}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={historyPage >= historyTotalPages}
+                          onClick={() => setPageForSubTab("history", historyPage + 1)}
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
             </>
@@ -952,7 +1106,7 @@ function InvoicesTabContent() {
   );
 }
 
-const DASHBOARD_TABS = ["overview", "bookings", "transactions", "analytics", "invoices"] as const;
+const DASHBOARD_TABS = ["overview", "bookings", "transactions", "invoices"] as const;
 
 export default function ProfessionalDashboard() {
   const { user } = useAuth();
@@ -1054,8 +1208,137 @@ export default function ProfessionalDashboard() {
     ? ((earningsThisMonth - earningsLastMonth) / earningsLastMonth) * 100
     : (earningsThisMonth > 0 ? 100 : 0);
 
-  // Calculate rating percentage
-  const ratingPercentage = (mockRating.average / 5) * 100;
+  const { data: providerBookings, isLoading: providerBookingsLoading } = useBookingsByProvider();
+  const bookingsSafe = (providerBookings ?? []) as Array<{
+    status?: string;
+    cost?: number | string;
+    completedAt?: unknown;
+    date?: unknown;
+  }>;
+
+  const completedBookings = useMemo(
+    () => bookingsSafe.filter((b) => b.status === "completed"),
+    [bookingsSafe],
+  );
+
+  const bookingPendingCount = useMemo(
+    () => bookingsSafe.filter((b) => b.status === "pending").length,
+    [bookingsSafe],
+  );
+
+  const bookingCancelledCount = useMemo(
+    () => bookingsSafe.filter((b) => b.status === "cancelled").length,
+    [bookingsSafe],
+  );
+
+  const last6Months = useMemo(() => {
+    const now = new Date();
+    return Array.from({ length: 6 }, (_, idx) => {
+      const d = new Date(now);
+      d.setDate(1);
+      d.setHours(0, 0, 0, 0);
+      d.setMonth(now.getMonth() - (5 - idx));
+      return d;
+    });
+  }, []);
+
+  const monthlyEarnings = useMemo(() => {
+    const computeMonthLabel = (d: Date) => {
+      const raw = format(d, "MMM", { locale: es });
+      return raw.replace(".", "").charAt(0).toUpperCase() + raw.replace(".", "").slice(1);
+    };
+
+    const toCost = (v: unknown) => {
+      const n = typeof v === "number" ? v : Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    return last6Months.map((monthDate) => {
+      const year = monthDate.getFullYear();
+      const month = monthDate.getMonth();
+      const earnings = completedBookings.reduce((sum, b) => {
+        const completedAt = toDate((b as any).completedAt ?? (b as any).date);
+        if (Number.isNaN(completedAt.getTime())) return sum;
+        if (completedAt.getFullYear() !== year || completedAt.getMonth() !== month) return sum;
+        return sum + calcProviderNet(toCost((b as any).cost));
+      }, 0);
+      return { month: computeMonthLabel(monthDate), earnings };
+    });
+  }, [completedBookings, last6Months]);
+
+  const monthlyEarningsMax = useMemo(() => Math.max(...monthlyEarnings.map((m) => m.earnings), 0), [monthlyEarnings]);
+
+  const providerUserId = (providerProfile as any)?.userId as string | undefined;
+  const { data: reviewStats } = useQuery({
+    queryKey: ["/api/reviews/stats/provider", providerUserId],
+    enabled: !!providerUserId,
+    retry: false,
+    queryFn: async () => {
+      const res = await fetch(`/api/reviews/stats/provider/${encodeURIComponent(providerUserId!)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudieron cargar las estadísticas de reseñas");
+      }
+      return res.json() as Promise<{
+        averageRating?: number;
+        totalReviews?: number;
+        distribution?: Record<string, number>;
+      }>;
+    },
+  });
+
+  const ratingAverage = Number(reviewStats?.averageRating ?? walletData?.rating ?? 0);
+  const ratingTotalReviews = Number(reviewStats?.totalReviews ?? walletData?.ratingCount ?? 0);
+  const ratingDistribution = reviewStats?.distribution ?? { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  const ratingStarsTotal = ratingTotalReviews || 0;
+  const ratingPercentage = ratingStarsTotal > 0 ? (ratingAverage / 5) * 100 : 0;
+
+  const incomeByCategoryTop3 = useMemo(() => {
+    const toCost = (v: unknown) => {
+      const n = typeof v === "number" ? v : Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const map = new Map<string, number>();
+    for (const b of completedBookings) {
+      const service = (b as any).service;
+      const categoryName =
+        service?.category?.name ||
+        service?.category?.type ||
+        service?.subcategory?.name ||
+        service?.title ||
+        (b as any).serviceId?.toString?.() ||
+        "Servicio";
+      const prev = map.get(categoryName) ?? 0;
+      map.set(categoryName, prev + calcProviderNet(toCost((b as any).cost)));
+    }
+
+    const total = Array.from(map.values()).reduce((sum, v) => sum + v, 0);
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, value]) => ({
+        name,
+        value,
+        percent: total > 0 ? Math.round((value / total) * 100) : 0,
+      }));
+  }, [completedBookings]);
+
+  const earningsTrendDelta =
+    monthlyEarnings.length > 0 ? monthlyEarnings[monthlyEarnings.length - 1].earnings - monthlyEarnings[0].earnings : 0;
+  const earningsTrendPositive = earningsTrendDelta >= 0;
+
+  const totalEarnings6m = useMemo(
+    () => monthlyEarnings.reduce((sum, m) => sum + (Number.isFinite(m.earnings) ? m.earnings : 0), 0),
+    [monthlyEarnings],
+  );
+
+  const avgEarnings6m = useMemo(() => (monthlyEarnings.length > 0 ? totalEarnings6m / monthlyEarnings.length : 0), [totalEarnings6m, monthlyEarnings]);
+
+  // Panel Económico (Bóveda Profesional): ocultar secciones específicas por UI.
+  const SHOW_PRO_MONTHLY_EARNINGS = false;
+  const SHOW_PRO_RATING_BREAKDOWN = false;
+  const SHOW_PRO_QUICK_ACTIONS = false;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1255,9 +1538,9 @@ export default function ProfessionalDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold flex items-center gap-2">
-                {mockRating.average} <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
+                {ratingAverage.toFixed(1)} <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
               </div>
-              <p className="text-xs text-gray-500">{mockRating.total} reseñas</p>
+              <p className="text-xs text-gray-500">{ratingTotalReviews} reseñas</p>
             </CardContent>
           </Card>
         </div>
@@ -1268,86 +1551,67 @@ export default function ProfessionalDashboard() {
             <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
             <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>
             <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Transacciones</TabsTrigger>
-            <TabsTrigger value="analytics" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Análisis</TabsTrigger>
             <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Facturas</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Monthly Earnings Chart */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Ingresos Mensuales</CardTitle>
-                  <CardDescription>Evolución de tus ingresos en los últimos 6 meses</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-64 flex items-end justify-between gap-2">
-                    {mockMonthlyData.map((data, index) => (
-                      <div key={index} className="flex-1 flex flex-col items-center gap-2">
-                        <div 
-                          className="w-full bg-mango-orange rounded-t transition-all hover:bg-mango-orange/80"
-                          style={{ 
-                            height: `${(data.earnings / 4000) * 100}%`,
-                            minHeight: "20px"
-                          }}
-                        />
-                        <span className="text-xs text-gray-500">{data.month}</span>
-                        <span className="text-xs font-medium">${data.earnings}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+              {SHOW_PRO_MONTHLY_EARNINGS && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Ingresos Mensuales</CardTitle>
+                    <CardDescription>Evolución de tus ingresos en los últimos 6 meses</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-64 flex items-end justify-between gap-2">
+                      {monthlyEarnings.map((data, index) => {
+                        const heightPct = monthlyEarningsMax > 0 ? (data.earnings / monthlyEarningsMax) * 100 : 0;
+                        return (
+                          <div key={index} className="flex-1 flex flex-col items-center gap-2">
+                            <div
+                              className="w-full bg-mango-orange rounded-t transition-all hover:bg-mango-orange/80"
+                              style={{
+                                height: `${heightPct}%`,
+                                minHeight: "20px",
+                              }}
+                            />
+                            <span className="text-xs text-gray-500">{data.month}</span>
+                            <span className="text-xs font-medium">${data.earnings}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-              {/* Rating Breakdown */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Desglose de Calificaciones</CardTitle>
-                  <CardDescription>Distribución de tus reseñas</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1 w-20">
-                      <span className="text-sm font-medium">5</span>
-                      <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
-                    </div>
-                    <Progress value={72} className="flex-1" />
-                    <span className="text-sm text-gray-500 w-12 text-right">72</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1 w-20">
-                      <span className="text-sm font-medium">4</span>
-                      <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
-                    </div>
-                    <Progress value={12} className="flex-1" />
-                    <span className="text-sm text-gray-500 w-12 text-right">12</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1 w-20">
-                      <span className="text-sm font-medium">3</span>
-                      <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
-                    </div>
-                    <Progress value={3} className="flex-1" />
-                    <span className="text-sm text-gray-500 w-12 text-right">3</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1 w-20">
-                      <span className="text-sm font-medium">2</span>
-                      <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
-                    </div>
-                    <Progress value={1} className="flex-1" />
-                    <span className="text-sm text-gray-500 w-12 text-right">1</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1 w-20">
-                      <span className="text-sm font-medium">1</span>
-                      <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
-                    </div>
-                    <Progress value={1} className="flex-1" />
-                    <span className="text-sm text-gray-500 w-12 text-right">1</span>
-                  </div>
-                </CardContent>
-              </Card>
+              {SHOW_PRO_RATING_BREAKDOWN && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Desglose de Calificaciones</CardTitle>
+                    <CardDescription>Distribución de tus reseñas</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {[5, 4, 3, 2, 1].map((stars) => {
+                      const count =
+                        (ratingDistribution as any)?.[stars] ??
+                        (ratingDistribution as any)?.[String(stars)] ??
+                        0;
+                      const pct = ratingStarsTotal > 0 ? Math.round((count / ratingStarsTotal) * 100) : 0;
+                      return (
+                        <div key={stars} className="flex items-center gap-4">
+                          <div className="flex items-center gap-1 w-20">
+                            <span className="text-sm font-medium">{stars}</span>
+                            <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+                          </div>
+                          <Progress value={pct} className="flex-1" />
+                          <span className="text-sm text-gray-500 w-12 text-right">{count}</span>
+                        </div>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Booking Stats */}
               <Card>
@@ -1357,41 +1621,42 @@ export default function ProfessionalDashboard() {
                 <CardContent>
                   <div className="grid grid-cols-3 gap-4 text-center">
                     <div className="p-4 bg-green-50 rounded-lg">
-                      <div className="text-2xl font-bold text-green-600">{mockBookings.completed}</div>
+                      <div className="text-2xl font-bold text-green-600">{completedBookings.length}</div>
                       <div className="text-sm text-gray-500">Completadas</div>
                     </div>
                     <div className="p-4 bg-orange-50 rounded-lg">
-                      <div className="text-2xl font-bold text-orange-600">{mockBookings.pending}</div>
+                      <div className="text-2xl font-bold text-orange-600">{bookingPendingCount}</div>
                       <div className="text-sm text-gray-500">Pendientes</div>
                     </div>
                     <div className="p-4 bg-red-50 rounded-lg">
-                      <div className="text-2xl font-bold text-red-600">{mockBookings.cancelled}</div>
+                      <div className="text-2xl font-bold text-red-600">{bookingCancelledCount}</div>
                       <div className="text-sm text-gray-500">Canceladas</div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Quick Actions */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Acciones Rápidas</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <Button variant="outline" className="w-full justify-start">
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    Solicitar retiro de fondos
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <FileText className="h-4 w-4 mr-2" />
-                    Descargar reporte de impuestos
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Calendar className="h-4 w-4 mr-2" />
-                    Ver calendario de pagos
-                  </Button>
-                </CardContent>
-              </Card>
+              {SHOW_PRO_QUICK_ACTIONS && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Acciones Rápidas</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <Button variant="outline" className="w-full justify-start">
+                      <CreditCard className="h-4 w-4 mr-2" />
+                      Solicitar retiro de fondos
+                    </Button>
+                    <Button variant="outline" className="w-full justify-start">
+                      <FileText className="h-4 w-4 mr-2" />
+                      Descargar reporte de impuestos
+                    </Button>
+                    <Button variant="outline" className="w-full justify-start">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      Ver calendario de pagos
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </TabsContent>
 
@@ -1409,57 +1674,6 @@ export default function ProfessionalDashboard() {
                 <ProfessionalTransactions />
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="analytics">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Distribución de Ingresos</CardTitle>
-                  <CardDescription>Por tipo de servicio</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-mango-orange rounded-full" />
-                        <span>Servicios Domésticos</span>
-                      </div>
-                      <span className="font-medium">45%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-green-500 rounded-full" />
-                        <span>Servicios Profesionales</span>
-                      </div>
-                      <span className="font-medium">35%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-blue-500 rounded-full" />
-                        <span>Mantenimiento</span>
-                      </div>
-                      <span className="font-medium">20%</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Tendencia de Trabajo</CardTitle>
-                  <CardDescription>Últimos 6 meses</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-center h-48">
-                    <Activity className="h-16 w-16 text-gray-300" />
-                  </div>
-                  <p className="text-center text-gray-500">
-                    Tus servicios tienen una tendencia positiva
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
 
           <TabsContent value="invoices">

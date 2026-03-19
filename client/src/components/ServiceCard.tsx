@@ -1,7 +1,7 @@
 import { type ServiceWithProvider } from "@shared/schema";
 import { getCategoryDisplayName } from "@shared/default-categories";
 import { Link } from "wouter";
-import { Star, ArrowRight, MapPin } from "lucide-react";
+import { Star, ArrowRight, MapPin, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 
@@ -10,7 +10,8 @@ interface ServiceCardProps {
 }
 
 export function ServiceCard({ service }: ServiceCardProps) {
-  const imageSrc = service.imageUrl || `https://images.unsplash.com/photo-1581092921461-eab62e97a783?w=500&h=300&fit=crop`;
+  const hasServiceImage = Boolean(service.imageUrl);
+  const imageSrc = hasServiceImage ? service.imageUrl : "";
 
   return (
     <motion.div
@@ -23,11 +24,13 @@ export function ServiceCard({ service }: ServiceCardProps) {
         <div className="group relative flex flex-col overflow-hidden rounded-3xl bg-white dark:bg-card border border-border/30 shadow-lg shadow-black/5 transition-all duration-500 hover:shadow-2xl hover:shadow-primary/15 cursor-pointer h-full">
           {/* Image Container */}
           <div className="relative aspect-[4/3] overflow-hidden">
-            <img
-              src={imageSrc}
-              alt={service.title}
-              className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
-            />
+            {hasServiceImage && (
+              <img
+                src={imageSrc}
+                alt={service.title}
+                className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
+              />
+            )}
             {/* Gradient overlay */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
             
@@ -59,7 +62,7 @@ export function ServiceCard({ service }: ServiceCardProps) {
                 {service.provider?.user?.profileImageUrl ? (
                   <img src={service.provider.user.profileImageUrl} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  (service.provider?.user?.firstName?.[0] || "P").toUpperCase()
+                  <User className="w-5 h-5" />
                 )}
               </div>
               <div className="flex-1 min-w-0">
@@ -69,10 +72,10 @@ export function ServiceCard({ service }: ServiceCardProps) {
                 <div className="flex items-center gap-1.5 text-amber-500">
                   <Star className="h-3.5 w-3.5 fill-current" />
                   <span className="text-xs font-bold text-foreground">
-                    {Number(service.provider?.rating || 0).toFixed(1)}
+                    {Number((service.provider?.user as { rating?: number } | undefined)?.rating ?? 5).toFixed(1)}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    ({service.provider?.reviewCount || 0})
+                    ({Number((service.provider?.user as { ratingCount?: number } | undefined)?.ratingCount ?? 0)})
                   </span>
                 </div>
               </div>

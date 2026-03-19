@@ -10,7 +10,6 @@ import {
   TrendingUp, 
   TrendingDown, 
   DollarSign, 
-  Users, 
   Calendar,
   FileText,
   CreditCard,
@@ -31,49 +30,12 @@ import {
   Banknote
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import { useWalletTransfers } from "@/hooks/use-mango-data";
+import { useAuth } from "@/hooks/use-auth";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-
-// Mock data for dashboard
-const kpiData = [
-  {
-    title: "Ingresos Totales",
-    value: "$45,280",
-    change: "+12.5%",
-    trend: "up",
-    icon: DollarSign,
-    color: "text-accent",
-    bgColor: "bg-accent/10",
-  },
-  {
-    title: "Servicios Completados",
-    value: "156",
-    change: "+8.2%",
-    trend: "up",
-    icon: CheckCircle,
-    color: "text-primary",
-    bgColor: "bg-primary/10",
-  },
-  {
-    title: "Clientes Activos",
-    value: "89",
-    change: "+15.3%",
-    trend: "up",
-    icon: Users,
-    color: "text-secondary",
-    bgColor: "bg-secondary/10",
-  },
-  {
-    title: "Pendientes",
-    value: "23",
-    change: "-5.1%",
-    trend: "down",
-    icon: Clock,
-    color: "text-warning",
-    bgColor: "bg-warning/10",
-  },
-];
+import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 
 const monthlyData = [
   { month: "Ene", income: 12400, expenses: 8200 },
@@ -94,12 +56,100 @@ const servicesByCategory = [
 export default function Dashboard() {
   const [timeRange, setTimeRange] = useState("6m");
   const [transactionsPage, setTransactionsPage] = useState(1);
+  const [overviewPage, setOverviewPage] = useState(1);
 
-  const { data: recentTransfersData, isLoading: recentLoading } = useWalletTransfers({
-    page: 1,
-    limit: 5,
+  const { user } = useAuth();
+
+  // Ocultar la sección KPI que se ve en la imagen (Ingresos Totales / Servicios Completados / Pendientes),
+  // para que no se muestre como "panel económico" al público.
+  const SHOW_DASHBOARD_KPI_CARDS = false;
+  const SHOW_DASHBOARD_HEADER_ACTIONS = false;
+
+  const {
+    data: kpis,
+    isLoading: kpisLoading,
+    isError: kpisError,
+  } = useQuery({
+    queryKey: ["/api/reports/kpis", String(user?.id ?? "")],
+    enabled: !!user?.id,
+    retry: false,
+    queryFn: async () => {
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/reports/kpis", {
+        headers: {
+          "x-user-id": String(user?.id ?? ""),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudieron cargar KPIs");
+      }
+      return res.json() as Promise<{
+        totalIncome: number;
+        totalExpenses: number;
+        completedServices: number;
+        pendingBookings: number;
+        activeClients?: number;
+        monthlyGrowth?: number;
+        averageRating?: number;
+      }>;
+    },
   });
-  const recentTransfers = recentTransfersData?.transfers ?? [];
+
+  const formattedIncome = (() => {
+    const n = Number(kpis?.totalIncome ?? 0);
+    return `$${Math.round(n).toLocaleString("en-US")}`;
+  })();
+
+  const monthlyGrowth = Number(kpis?.monthlyGrowth ?? 0);
+  const incomeChange =
+    Number.isFinite(monthlyGrowth) && monthlyGrowth !== 0
+      ? `${monthlyGrowth >= 0 ? "+" : ""}${monthlyGrowth.toFixed(1)}%`
+      : undefined;
+  const incomeTrend = monthlyGrowth >= 0 ? "up" : "down";
+
+  const kpiCards: Array<{
+    title: string;
+    value: string;
+    change?: string;
+    trend?: "up" | "down";
+    icon: typeof DollarSign;
+    color: string;
+    bgColor: string;
+  }> = [
+    {
+      title: "Ingresos Totales",
+      value: formattedIncome,
+      change: incomeChange,
+      trend: incomeTrend,
+      icon: DollarSign,
+      color: "text-accent",
+      bgColor: "bg-accent/10",
+    },
+    {
+      title: "Servicios Completados",
+      value: String(kpis?.completedServices ?? 0),
+      icon: CheckCircle,
+      color: "text-primary",
+      bgColor: "bg-primary/10",
+    },
+    {
+      title: "Pendientes",
+      value: String(kpis?.pendingBookings ?? 0),
+      icon: Clock,
+      color: "text-warning",
+      bgColor: "bg-warning/10",
+    },
+  ];
+
+  const { data: overviewTransfersData, isLoading: overviewLoading } = useWalletTransfers({
+    page: overviewPage,
+    limit: 10,
+  });
+  const overviewTransfers = overviewTransfersData?.transfers ?? [];
+  const overviewTotal = overviewTransfersData?.total ?? 0;
+  const overviewTotalPages = Math.max(1, Math.ceil(overviewTotal / 10));
 
   const { data: pagedTransfersData, isLoading: pagedLoading } = useWalletTransfers({
     page: transactionsPage,
@@ -126,6 +176,10 @@ export default function Dashboard() {
     switch (status) {
       case "completed":
         return <Badge className="badge-success"><CheckCircle className="w-3 h-3 mr-1" />Completado</Badge>;
+      case "pending_approval":
+        return <Badge className="badge-warning"><Clock className="w-3 h-3 mr-1" />Pendiente</Badge>;
+      case "rejected":
+        return <Badge className="badge-danger"><XCircle className="w-3 h-3 mr-1" />Rechazado</Badge>;
       case "pending":
         return <Badge className="badge-warning"><Clock className="w-3 h-3 mr-1" />Pendiente</Badge>;
       case "cancelled":
@@ -142,6 +196,143 @@ export default function Dashboard() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
+
+  function InvoicesTabContent() {
+    const [page, setPage] = useState(1);
+    const { data, isLoading } = useWalletTransfers({ page, limit: 10 });
+    const transfers = (data?.transfers ?? []) as Array<TransferForInvoice & { id: number; status?: string }>;
+    const total = data?.total ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / 10));
+
+    if (isLoading) {
+      return (
+        <Card className="card-industrial">
+          <CardHeader>
+            <CardTitle>Facturas</CardTitle>
+            <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+            <Receipt className="w-8 h-8 opacity-60 animate-pulse" />
+            <p className="text-sm">Cargando transacciones…</p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (transfers.length === 0) {
+      return (
+        <Card className="card-industrial">
+          <CardHeader>
+            <CardTitle>Facturas</CardTitle>
+            <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+            <FileText className="w-8 h-8 opacity-60" />
+            <p className="text-sm">Aún no tienes transacciones para facturar.</p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <Card className="card-industrial">
+        <CardHeader>
+          <CardTitle>Facturas</CardTitle>
+          <CardDescription>Descarga una factura en PDF por cada transacción</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {transfers.map((t) => {
+            const label = getTransferTypeLabel(t.transferType);
+            const parsedDate = parseTransferDate(t.createdAt);
+            const dateStr = parsedDate ? format(parsedDate, "dd MMM yyyy HH:mm", { locale: es }) : "—";
+            const status = t.status;
+            return (
+              <div
+                key={t.id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
+              >
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <Receipt className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-medium text-sm">{label}</p>
+                    <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
+                    <p className="text-xs text-muted-foreground">{dateStr}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <p className="font-semibold text-sm">{formatAmount(t.amount)}</p>
+                  <Badge
+                    variant={
+                      status === "completed"
+                        ? "default"
+                        : status === "rejected"
+                          ? "destructive"
+                          : "secondary"
+                    }
+                  >
+                    {status === "pending_approval" ? "Pendiente" : status === "completed" ? "Completado" : "Rechazado"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      user &&
+                      downloadInvoicePdf(
+                        {
+                          id: t.id,
+                          amount: t.amount,
+                          transferType: t.transferType,
+                          description: t.description,
+                          createdAt: t.createdAt ?? null,
+                          status: t.status,
+                        },
+                        {
+                          firstName: user.firstName,
+                          lastName: user.lastName,
+                          name: (user as { name?: string }).name,
+                          email: user.email,
+                        }
+                      )
+                    }
+                    disabled={!user}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Generar factura
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-xs text-muted-foreground">
+              Página {page} de {totalPages}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Siguiente
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const getTransferMeta = (t: any) => {
     const type = t.transferType as "service_payment" | "recharge" | "withdrawal" | "payment" | undefined;
@@ -220,29 +411,34 @@ export default function Dashboard() {
               </p>
             </div>
             <div className="flex gap-3 justify-center md:justify-end flex-wrap">
-              <Button variant="outline" className="border-primary/50 text-primary">
-                <Download className="w-4 h-4 mr-2" />
-                Exportar Reporte
-              </Button>
-              <Button className="bg-accent hover:bg-accent/90">
-                <CreditCard className="w-4 h-4 mr-2" />
-                Gestionar Pagos
-              </Button>
+              {SHOW_DASHBOARD_HEADER_ACTIONS && (
+                <>
+                  <Button variant="outline" className="border-primary/50 text-primary">
+                    <Download className="w-4 h-4 mr-2" />
+                    Exportar Reporte
+                  </Button>
+                  <Button className="bg-accent hover:bg-accent/90">
+                    <CreditCard className="w-4 h-4 mr-2" />
+                    Gestionar Pagos
+                  </Button>
+                </>
+              )}
             </div>
           </motion.div>
         </div>
       </section>
 
       {/* KPI Cards */}
+      {SHOW_DASHBOARD_KPI_CARDS && (
       <section className="py-8">
         <div className="container px-4 mx-auto max-w-7xl">
           <motion.div 
             variants={containerVariants}
             initial="hidden"
             animate="visible"
-            className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6"
+            className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6"
           >
-            {kpiData.map((kpi, index) => (
+            {kpiCards.map((kpi, index) => (
               <motion.div key={index} variants={itemVariants}>
                 <Card className="card-industrial hover:border-primary/50 transition-all duration-300">
                   <CardContent className="p-6">
@@ -250,14 +446,23 @@ export default function Dashboard() {
                       <div className={`p-3 rounded-lg ${kpi.bgColor}`}>
                         <kpi.icon className={`w-6 h-6 ${kpi.color}`} />
                       </div>
-                      <Badge variant="outline" className={kpi.trend === "up" ? "border-accent/50 text-accent" : "border-warning/50 text-warning"}>
-                        {kpi.trend === "up" ? (
-                          <ArrowUpRight className="w-3 h-3 mr-1" />
-                        ) : (
-                          <ArrowDownRight className="w-3 h-3 mr-1" />
-                        )}
-                        {kpi.change}
-                      </Badge>
+                      {kpi.change ? (
+                        <Badge
+                          variant="outline"
+                          className={
+                            kpi.trend === "up"
+                              ? "border-accent/50 text-accent"
+                              : "border-warning/50 text-warning"
+                          }
+                        >
+                          {kpi.trend === "up" ? (
+                            <ArrowUpRight className="w-3 h-3 mr-1" />
+                          ) : (
+                            <ArrowDownRight className="w-3 h-3 mr-1" />
+                          )}
+                          {kpi.change}
+                        </Badge>
+                      ) : null}
                     </div>
                     <div className="mt-4">
                       <p className="text-3xl font-bold font-display">{kpi.value}</p>
@@ -270,6 +475,7 @@ export default function Dashboard() {
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* Main Content */}
       <section className="py-6 pb-16">
@@ -312,86 +518,8 @@ export default function Dashboard() {
             </div>
 
             <TabsContent value="overview" className="space-y-6">
-              {/* Charts Row */}
-              <div className="grid lg:grid-cols-3 gap-6">
-                {/* Income Chart */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
-                  className="lg:col-span-2"
-                >
-                  <Card className="card-industrial">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Activity className="w-5 h-5 text-primary" />
-                        Ingresos vs Gastos
-                      </CardTitle>
-                      <CardDescription>
-                        Evolución mensual de tu actividad financiera
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-[300px] flex items-end justify-between gap-2 px-4">
-                        {monthlyData.map((data, index) => (
-                          <div key={index} className="flex-1 flex flex-col items-center gap-2">
-                            <div className="w-full flex flex-col gap-1">
-                              <div 
-                                className="w-full bg-accent/60 rounded-t-sm transition-all hover:bg-accent"
-                                style={{ height: `${(data.income / 25000) * 200}px` }}
-                                title={`Ingresos: $${data.income.toLocaleString()}`}
-                              ></div>
-                              <div 
-                                className="w-full bg-primary/60 rounded-t-sm transition-all hover:bg-primary"
-                                style={{ height: `${(data.expenses / 25000) * 200}px` }}
-                                title={`Gastos: $${data.expenses.toLocaleString()}`}
-                              ></div>
-                            </div>
-                            <span className="text-xs text-muted-foreground">{data.month}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-center gap-6 mt-4 pt-4 border-t border-border">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-accent"></div>
-                          <span className="text-sm text-muted-foreground">Ingresos</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-primary"></div>
-                          <span className="text-sm text-muted-foreground">Gastos</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-
-                {/* Services by Category */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                >
-                  <Card className="card-industrial h-full">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <PieChart className="w-5 h-5 text-primary" />
-                        Servicios por Categoría
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                      {servicesByCategory.map((cat, index) => (
-                        <div key={index} className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span>{cat.category}</span>
-                            <span className="text-muted-foreground">{cat.count} ({cat.percentage}%)</span>
-                          </div>
-                          <Progress value={cat.percentage} className="h-2" />
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              </div>
+              {/* Ocultamos los gráficos de "Ingresos vs Gastos" y "Servicios por Categoría" */}
+              <div className="grid lg:grid-cols-1 gap-6">
 
               {/* Recent Transactions */}
               <motion.div 
@@ -404,30 +532,27 @@ export default function Dashboard() {
                     <div>
                       <CardTitle className="flex items-center justify-center sm:justify-start gap-2">
                         <Receipt className="w-5 h-5 text-primary shrink-0" />
-                        Transacciones Recientes
+                        Transacciones y Facturas Recientes
                       </CardTitle>
                       <CardDescription>
-                        Últimas 5 transacciones del período seleccionado
+                        Últimas 10 transacciones y facturas (ordenadas por fecha)
                       </CardDescription>
                     </div>
-                    <Button variant="ghost" size="sm" asChild className="shrink-0">
-                      <Link href="/payments">Ver todas</Link>
-                    </Button>
                   </CardHeader>
                   <CardContent>
-                    {recentLoading ? (
+                    {overviewLoading ? (
                       <div className="flex flex-col items-center justify-center py-10 gap-3">
                         <Receipt className="w-8 h-8 text-muted-foreground animate-pulse" />
-                        <p className="text-sm text-muted-foreground">Cargando transacciones…</p>
+                        <p className="text-sm text-muted-foreground">Cargando transacciones y facturas…</p>
                       </div>
-                    ) : recentTransfers.length === 0 ? (
+                    ) : overviewTransfers.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
                         <Receipt className="w-8 h-8 opacity-60" />
-                        <p className="text-sm">Aún no tienes transacciones.</p>
+                        <p className="text-sm">Aún no tienes transacciones para mostrar.</p>
                       </div>
                     ) : (
                       <div className="space-y-5">
-                        {recentTransfers.map((t: any) => {
+                        {overviewTransfers.map((t: any) => {
                           const { amountColor, label, dateStr } = getTransferMeta(t);
                           return (
                         <div 
@@ -452,7 +577,11 @@ export default function Dashboard() {
                               </p>
                               <p className="text-xs text-muted-foreground mt-0.5">{dateStr}</p>
                             </div>
-                            <div className="w-full sm:w-auto flex justify-center sm:justify-end">
+                            <div className="w-full sm:w-auto flex justify-center sm:justify-end gap-2 items-center">
+                              <Badge variant="secondary" className="gap-1">
+                                <FileText className="w-3 h-3" />
+                                Factura
+                              </Badge>
                               {getStatusBadge(t.status)}
                             </div>
                           </div>
@@ -461,9 +590,36 @@ export default function Dashboard() {
                         })}
                       </div>
                     )}
+
+                    <div className="mt-6 flex items-center justify-between pt-2">
+                      <p className="text-xs text-muted-foreground">
+                        Página {overviewPage} de {overviewTotalPages}
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={overviewPage <= 1}
+                          onClick={() => setOverviewPage((p) => Math.max(1, p - 1))}
+                        >
+                          Anterior
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={overviewPage >= overviewTotalPages}
+                          onClick={() =>
+                            setOverviewPage((p) => Math.min(overviewTotalPages, p + 1))
+                          }
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </motion.div>
+              </div>
             </TabsContent>
 
             <TabsContent value="transactions">
@@ -545,19 +701,7 @@ export default function Dashboard() {
             </TabsContent>
 
             <TabsContent value="invoices">
-              <Card className="card-industrial">
-                <CardHeader>
-                  <CardTitle>Facturación Automática</CardTitle>
-                  <CardDescription>Gestión de facturas y comprobantes</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-center py-12 text-muted-foreground">
-                    <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>Sistema de facturación electrónica en desarrollo</p>
-                    <p className="text-sm mt-2">Compatible con SRI Ecuador</p>
-                  </div>
-                </CardContent>
-              </Card>
+              <InvoicesTabContent />
             </TabsContent>
           </Tabs>
         </div>

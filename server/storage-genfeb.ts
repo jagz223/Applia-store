@@ -16,6 +16,7 @@ import {
   type ProviderWithUser,
   type ServiceWithProvider,
 } from "@shared/schema";
+import { calcCommission, calcProviderNet } from "@shared/platform-commission";
 import { eq, and, like, desc } from "drizzle-orm";
 import type { IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage } from "./storage-contracts";
 const getDb = async () => (await import("./db")).db;
@@ -212,6 +213,23 @@ export interface IStorage
     processedByAdminId?: string;
     processedByAdminName?: string;
   }>; total: number }>;
+
+  // Calificaciones (valoración 1-5 tras completar reserva)
+  getPendingBookingRatings(userId: string): Promise<Array<{
+    bookingId: number;
+    rateeUserId: string;
+    rateeName: string;
+    roleRated: "professional" | "client";
+    serviceTitle?: string;
+    completedAt?: Date;
+  }>>;
+  submitBookingRating(
+    raterUserId: string,
+    bookingId: number,
+    ratedUserId: string,
+    roleRated: "professional" | "client",
+    stars: number
+  ): Promise<void>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -280,6 +298,8 @@ export class InMemoryStorage implements IStorage {
       wallet: user.wallet ?? 0,
       totalEarnings: user.totalEarnings ?? 0,
       pendingBalance: user.pendingBalance ?? 0,
+      rating: user.rating ?? 5,
+      ratingCount: user.ratingCount ?? 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -369,6 +389,8 @@ export class InMemoryStorage implements IStorage {
     }
     const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
     if (cost <= 0) throw new Error("Costo de reserva no definido");
+    const commission = calcCommission(cost);
+    const providerNet = calcProviderNet(cost);
     const client = this.users.find((u: { id?: string }) => u.id === booking.userId);
     if (!client) throw new Error("Usuario cliente no encontrado");
     const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
@@ -381,9 +403,19 @@ export class InMemoryStorage implements IStorage {
     const providerUser = this.users.find((u: { id?: string }) => u.id === providerUserId);
     if (!providerUser) throw new Error("Usuario del profesional no encontrado");
     const providerWallet = typeof (providerUser as { wallet?: number }).wallet === "number" ? (providerUser as { wallet: number }).wallet : 0;
+    const providerTotalEarnings = typeof (providerUser as { totalEarnings?: number }).totalEarnings === "number" ? (providerUser as { totalEarnings: number }).totalEarnings : 0;
+
+    const adminUser = this.users.find((u: { role?: string }) => u.role === "admin");
+    if (!adminUser) throw new Error("No existe usuario admin para registrar la comisión de plataforma");
+    const adminUserWallet = typeof (adminUser as { wallet?: number }).wallet === "number" ? (adminUser as { wallet: number }).wallet : 0;
+    const adminUserTotalEarnings =
+      typeof (adminUser as { totalEarnings?: number }).totalEarnings === "number" ? (adminUser as { totalEarnings: number }).totalEarnings : 0;
 
     (client as { pendingBalance: number }).pendingBalance = clientPending - cost;
-    (providerUser as { wallet: number }).wallet = providerWallet + cost;
+    (providerUser as { wallet: number }).wallet = providerWallet + providerNet;
+    (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + providerNet;
+    (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
+    (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
     (booking as { status: string }).status = "completed";
     (booking as { completedAt?: Date }).completedAt = new Date();
 
@@ -405,16 +437,29 @@ export class InMemoryStorage implements IStorage {
       id: this.walletTransferIdCounter++,
       userId: providerUserId,
       fromUserId: null,
-      amount: cost,
+      amount: providerNet,
       transferType: "service_payment",
       status: "completed",
-      description: "Pago por servicio completado",
+      description: "Pago por servicio completado (neto)",
+      referenceId: refId,
+      currency: "USD",
+      createdAt: now,
+    };
+    const commissionTransferRecord = {
+      id: this.walletTransferIdCounter++,
+      userId: adminUser.id,
+      fromUserId: null,
+      amount: commission,
+      transferType: "service_payment",
+      status: "completed",
+      description: "Comisión de plataforma por servicio",
       referenceId: refId,
       currency: "USD",
       createdAt: now,
     };
     this.walletTransfers.push(clientTransferRecord);
     this.walletTransfers.push(providerTransferRecord);
+    this.walletTransfers.push(commissionTransferRecord);
 
     return { ...booking, status: "completed" };
   }
@@ -442,6 +487,23 @@ export class InMemoryStorage implements IStorage {
     (client as { pendingBalance: number }).pendingBalance = clientPending - cost;
     (booking as { status: string }).status = "cancelled";
     (booking as { cancelledAt?: Date }).cancelledAt = new Date();
+
+    // Registrar movimiento en wallet_transfers para que el cliente vea el reembolso en "Movimientos".
+    const now = new Date();
+    const clientRefundTransferRecord = {
+      id: this.walletTransferIdCounter++,
+      userId: booking.userId,
+      fromUserId: null,
+      amount: cost,
+      transferType: "recharge",
+      status: "completed",
+      description: "Reembolso por cancelación de servicio",
+      referenceId: String(bookingId),
+      currency: "USD",
+      createdAt: now,
+    };
+    this.walletTransfers.push(clientRefundTransferRecord);
+
     return { ...booking, status: "cancelled" };
   }
 
@@ -1635,6 +1697,29 @@ export class InMemoryStorage implements IStorage {
       })
     );
     return { items, total };
+  }
+
+  // ==================== CALIFICACIONES (BOOKING RATINGS) ====================
+
+  async getPendingBookingRatings(_userId: string): Promise<Array<{
+    bookingId: number;
+    rateeUserId: string;
+    rateeName: string;
+    roleRated: "professional" | "client";
+    serviceTitle?: string;
+    completedAt?: Date;
+  }>> {
+    return [];
+  }
+
+  async submitBookingRating(
+    _raterUserId: string,
+    _bookingId: number,
+    _ratedUserId: string,
+    _roleRated: "professional" | "client",
+    _stars: number
+  ): Promise<void> {
+    // Stub: en memoria no persiste; Firestore implementa la lógica.
   }
 
   // ==================== RESEÑAS (MOCK) ====================

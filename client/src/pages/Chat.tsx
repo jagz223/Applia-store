@@ -39,6 +39,7 @@ export default function Chat() {
   const [mobileShowList, setMobileShowList] = useState(true);
   const isMobile = useIsMobile();
   const resolvedWithRef = useRef<string | null>(null);
+  const resolvedSupportRef = useRef<boolean>(false);
   /** Contexto de la conversación al abrir desde reserva/servicio (para mostrar recordatorio). */
   const [chatContext, setChatContext] = useState<{ bookingId: number | null; serviceId: number | null }>({ bookingId: null, serviceId: null });
 
@@ -67,7 +68,7 @@ export default function Chat() {
     queryFn: async () => {
       const res = await fetch(`/api/bookings/${bookingIdForContext}`);
       if (!res.ok) throw new Error("Booking not found");
-      return res.json() as Promise<{ id: number; serviceTitle?: string }>;
+      return res.json() as Promise<{ id: number; serviceTitle?: string; status?: string }>;
     },
     enabled: !!bookingIdForContext,
   });
@@ -83,8 +84,12 @@ export default function Chat() {
 
   const chatReminderText =
     selectedConversationId &&
-    (bookingContext?.serviceTitle != null
-      ? `Este chat es sobre la reserva #${bookingContext.id} — ${bookingContext.serviceTitle}. Ambos pueden ver este recordatorio.`
+    (bookingContext?.status === "pending" ||
+      bookingContext?.status === "confirmed" ||
+      bookingContext?.status === "in_progress"
+      ? bookingContext?.serviceTitle != null
+        ? `Este chat es sobre la reserva #${bookingContext.id} — ${bookingContext.serviceTitle}. Ambos pueden ver este recordatorio.`
+        : `Este chat es sobre la reserva #${bookingContext.id}. Ambos pueden ver este recordatorio.`
       : serviceContext?.title
         ? `Este chat es sobre el servicio: ${serviceContext.title}. Ambos pueden ver este recordatorio.`
         : null);
@@ -164,6 +169,60 @@ export default function Chat() {
       }
     );
   }, [isAuthenticated, conversationsQuery.isSuccess, conversations]);
+
+  // Resolver Centro de Ayuda: ?support=1 abre conversación con el administrador.
+  useEffect(() => {
+    if (!isAuthenticated || !conversationsQuery.isSuccess) return;
+    const params = new URLSearchParams(window.location.search);
+    const supportFlag = params.get("support");
+    if (supportFlag !== "1") return;
+    if (resolvedSupportRef.current) return;
+    resolvedSupportRef.current = true;
+
+    const openSupportAdminChat = async (adminId: string) => {
+      const existing = conversations.find(
+        (c) => c.otherParticipant?.id === adminId || c.participant1Id === adminId || c.participant2Id === adminId,
+      );
+      if (existing) {
+        setSelectedConversationId(existing.id);
+        setLocation("/chat", { replace: true });
+        return;
+      }
+      getOrCreateConversation.mutate(
+        { participantId: adminId },
+        {
+          onSuccess: (conversationId) => {
+            setSelectedConversationId(conversationId);
+            setLocation("/chat", { replace: true });
+          },
+        },
+      );
+    };
+
+    const run = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch("/api/support/admin", {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as { message?: string }).message ?? "No se pudo cargar el administrador");
+        }
+        const data = (await res.json()) as { adminId?: string };
+        if (!data.adminId) throw new Error("Administrador no disponible");
+        await openSupportAdminChat(data.adminId);
+      } catch (e) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: e instanceof Error ? e.message : "No se pudo abrir el chat",
+        });
+      }
+    };
+
+    void run();
+  }, [isAuthenticated, conversationsQuery.isSuccess, conversations, getOrCreateConversation, setLocation, toast]);
 
   const handleSelectConversationMobile = (id: number | null) => {
     setSelectedConversationId(id);

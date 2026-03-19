@@ -24,6 +24,7 @@ import type {
   ServiceWithProvider,
 } from "@shared/schema";
 import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
+import { calcCommission, calcProviderNet } from "@shared/platform-commission";
 
 /** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed); payment = client paid for a service (outflow from pending to provider). */
 export type WalletTransferType = "service_payment" | "recharge" | "withdrawal" | "payment";
@@ -73,6 +74,10 @@ interface User {
   accountNumber?: string;
   /** Fondos en proceso de retiro (escrow hasta que el admin procese el pago). Default 0. */
   withdrawingFunds?: number;
+  /** Calificación promedio (1-5). Por defecto 5. */
+  rating?: number;
+  /** Cantidad de valoraciones recibidas (para calcular promedio). */
+  ratingCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -202,6 +207,8 @@ class FirestoreStorageImpl implements IStorage {
       wallet: user.wallet ?? 0,
       totalEarnings: user.totalEarnings ?? 0,
       pendingBalance: user.pendingBalance ?? 0,
+      rating: user.rating ?? 5,
+      ratingCount: user.ratingCount ?? 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -218,18 +225,22 @@ class FirestoreStorageImpl implements IStorage {
 
     if (!doc.exists) return undefined;
 
-    // No permitir que actualizaciones genéricas (perfil, etc.) modifiquen campos financieros.
-    // Solo los métodos dedicados (createTransfer, requestWithdraw, confirmBookingByClient, etc.) deben alterarlos.
-    const { wallet, totalEarnings, pendingBalance, withdrawingFunds, ...safeData } = data as Partial<User> & {
+    // No permitir que actualizaciones genéricas (perfil, etc.) modifiquen campos financieros ni rating.
+    // Solo los métodos dedicados (createTransfer, applyUserRating, etc.) deben alterarlos.
+    const { wallet, totalEarnings, pendingBalance, withdrawingFunds, rating, ratingCount, ...safeData } = data as Partial<User> & {
       wallet?: number;
       totalEarnings?: number;
       pendingBalance?: number;
       withdrawingFunds?: number;
+      rating?: number;
+      ratingCount?: number;
     };
     void wallet;
     void totalEarnings;
     void pendingBalance;
     void withdrawingFunds;
+    void rating;
+    void ratingCount;
 
     await docRef.update({
       ...safeData,
@@ -748,9 +759,164 @@ class FirestoreStorageImpl implements IStorage {
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(id.toString());
     const doc = await docRef.get();
     if (!doc.exists) return undefined;
-    await docRef.update({ status });
+    const updates: Record<string, unknown> = { status };
+    if (status === "completed") updates.completedAt = new Date();
+    await docRef.update(updates);
     const updated = await docRef.get();
     return { id: parseInt(updated.id), ...updated.data() } as Booking;
+  }
+
+  /** Aplica una nueva valoración al promedio del usuario (1-5 estrellas). */
+  async applyUserRating(ratedUserId: string, newStars: number): Promise<void> {
+    if (!this.db) return;
+    const userRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(ratedUserId);
+    const snap = await userRef.get();
+    if (!snap.exists) return;
+    const data = snap.data() as { rating?: number; ratingCount?: number };
+    const currentRating = typeof data.rating === "number" ? data.rating : 5;
+    const currentCount = typeof data.ratingCount === "number" ? data.ratingCount : 0;
+    const stars = Math.min(5, Math.max(1, Math.round(newStars)));
+    const newCount = currentCount + 1;
+    const newAvg = (currentRating * currentCount + stars) / newCount;
+    await userRef.update({
+      rating: Math.round(newAvg * 100) / 100,
+      ratingCount: newCount,
+      updatedAt: new Date(),
+    });
+  }
+
+  /** Verifica si ya existe una valoración de un usuario para una reserva. */
+  private async hasBookingRating(bookingId: number, raterUserId: string): Promise<boolean> {
+    if (!this.db) return false;
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.BOOKING_RATINGS)
+      .where("bookingId", "==", bookingId)
+      .where("raterUserId", "==", raterUserId)
+      .limit(1)
+      .get();
+    return !snap.empty;
+  }
+
+  /** Registra una valoración de reserva y actualiza el promedio del usuario valorado. */
+  async submitBookingRating(
+    raterUserId: string,
+    bookingId: number,
+    ratedUserId: string,
+    roleRated: "professional" | "client",
+    stars: number
+  ): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const safeStars = Math.min(5, Math.max(1, Math.round(stars)));
+    const id = await this.getNextId("booking_ratings");
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKING_RATINGS).doc(String(id));
+    await docRef.set({
+      id,
+      bookingId,
+      raterUserId,
+      ratedUserId,
+      roleRated,
+      stars: safeStars,
+      createdAt: new Date(),
+    });
+    await this.applyUserRating(ratedUserId, safeStars);
+  }
+
+  /** Días tras los cuales se asigna 3 estrellas por defecto si no se valoró. */
+  private static readonly PENDING_RATING_DAYS_BEFORE_DEFAULT = 7;
+
+  /**
+   * Lista reservas completadas en las que el usuario aún no ha valorado a la otra parte.
+   * Si una reserva completada tiene más de PENDING_RATING_DAYS_BEFORE_DEFAULT días, se asigna 3 estrellas automáticamente.
+   */
+  async getPendingBookingRatings(userId: string): Promise<
+    Array<{
+      bookingId: number;
+      rateeUserId: string;
+      rateeName: string;
+      roleRated: "professional" | "client";
+      serviceTitle?: string;
+      completedAt?: Date;
+    }>
+  > {
+    if (!this.db) return [];
+    const result: Array<{
+      bookingId: number;
+      rateeUserId: string;
+      rateeName: string;
+      roleRated: "professional" | "client";
+      serviceTitle?: string;
+      completedAt?: Date;
+    }> = [];
+    const now = new Date();
+    const cutoffMs = now.getTime() - FirestoreStorageImpl.PENDING_RATING_DAYS_BEFORE_DEFAULT * 24 * 60 * 60 * 1000;
+
+    const provider = await this.getProviderByUserId(userId);
+    const providerId = provider?.id;
+
+    const bookingsSnap = await this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).where("status", "==", "completed").get();
+    const ratingsSnap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.BOOKING_RATINGS)
+      .where("raterUserId", "==", userId)
+      .get();
+    const ratedBookingIds = new Set(ratingsSnap.docs.map((d) => (d.data() as { bookingId: number }).bookingId));
+
+    for (const doc of bookingsSnap.docs) {
+      const b = doc.data() as { id?: string; userId?: string; providerId?: number; serviceId?: number; completedAt?: Date | { toDate?: () => Date }; status?: string };
+      const bookingId = parseInt(doc.id, 10);
+      if (Number.isNaN(bookingId)) continue;
+      const clientUserId = b.userId;
+      const provId = b.providerId;
+      if (!clientUserId || provId == null) continue;
+
+      const isClient = clientUserId === userId;
+      const isProvider = providerId != null && provId === providerId;
+      if (!isClient && !isProvider) continue;
+      if (ratedBookingIds.has(bookingId)) continue;
+
+      const completedAtRaw = b.completedAt;
+      let completedAt: Date | undefined;
+      if (completedAtRaw instanceof Date) completedAt = completedAtRaw;
+      else if (completedAtRaw && typeof (completedAtRaw as { toDate?: () => Date }).toDate === "function")
+        completedAt = (completedAtRaw as { toDate: () => Date }).toDate();
+      else if (completedAtRaw && typeof (completedAtRaw as { seconds?: number }).seconds === "number")
+        completedAt = new Date((completedAtRaw as { seconds: number }).seconds * 1000);
+
+      if (completedAt && completedAt.getTime() < cutoffMs) {
+        const rateeUserId = isClient ? (await this.getProvider(provId))?.userId : clientUserId;
+        if (rateeUserId) {
+          try {
+            await this.submitBookingRating(userId, bookingId, rateeUserId, isClient ? "professional" : "client", 3);
+            ratedBookingIds.add(bookingId);
+          } catch (_) {
+            // si falla el auto-3, lo incluimos en pendientes para que el usuario valore
+          }
+        }
+        continue;
+      }
+
+      const rateeUserId = isClient ? (await this.getProvider(provId))?.userId : clientUserId;
+      if (!rateeUserId) continue;
+      const rateeUser = await this.getUserById(rateeUserId);
+      const rateeName = rateeUser
+        ? [((rateeUser as User).name ?? (rateeUser as { firstName?: string }).firstName ?? ""), (rateeUser as { lastName?: string }).lastName ?? ""].filter(Boolean).join(" ").trim() || "Usuario"
+        : "Usuario";
+
+      let serviceTitle: string | undefined;
+      if (b.serviceId != null) {
+        const svc = await this.getService(Number(b.serviceId));
+        serviceTitle = svc?.title;
+      }
+
+      result.push({
+        bookingId,
+        rateeUserId,
+        rateeName,
+        roleRated: isClient ? "professional" : "client",
+        serviceTitle,
+        completedAt,
+      });
+    }
+    return result;
   }
 
   /**
@@ -762,6 +928,8 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) return undefined;
     const bookingsColl = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS);
     const usersColl = this.db.collection(FIRESTORE_COLLECTIONS.USERS);
+    const transfersColl = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
+    const transferId1 = await this.getNextId("wallet_transfers");
 
     return this.db.runTransaction(async (t) => {
       const bookingRef = bookingsColl.doc(bookingId.toString());
@@ -799,6 +967,21 @@ class FirestoreStorageImpl implements IStorage {
         updatedAt: now,
       });
 
+      // Registrar movimiento en "wallet_transfers" para que el cliente vea el reembolso.
+      const clientRefundTransferRecord = {
+        id: transferId1,
+        userId: clientUserId,
+        fromUserId: null,
+        amount: cost,
+        transferType: "recharge" as WalletTransferType,
+        status: "completed" as WalletTransferStatus,
+        description: "Reembolso por cancelación de servicio",
+        referenceId: String(bookingId),
+        currency: "USD",
+        createdAt: now,
+      };
+      t.set(transfersColl.doc(String(transferId1)), clientRefundTransferRecord);
+
       return { id: bookingId, ...data, status: "cancelled" } as Booking;
     });
   }
@@ -816,8 +999,18 @@ class FirestoreStorageImpl implements IStorage {
     const providersColl = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS);
     const transfersColl = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
 
+    // La comisión de plataforma se acredita al primer admin encontrado.
+    const adminSnap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.USERS)
+      .where("role", "==", "admin")
+      .limit(1)
+      .get();
+    if (adminSnap.empty) throw new Error("No existe usuario admin para registrar la comisión de plataforma");
+    const adminUserId = adminSnap.docs[0].id;
+
     const transferId1 = await this.getNextId("wallet_transfers");
     const transferId2 = await this.getNextId("wallet_transfers");
+    const transferId3 = await this.getNextId("wallet_transfers");
 
     return this.db.runTransaction(async (t) => {
       const bookingRef = bookingsColl.doc(bookingId.toString());
@@ -830,6 +1023,8 @@ class FirestoreStorageImpl implements IStorage {
       }
       const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
       if (cost <= 0) throw new Error("Costo de reserva no definido");
+      const commission = calcCommission(cost);
+      const providerNet = calcProviderNet(cost);
       const clientUserId = data.userId;
       const providerId = data.providerId;
       if (!clientUserId) throw new Error("Reserva sin cliente asociado");
@@ -852,11 +1047,25 @@ class FirestoreStorageImpl implements IStorage {
       const providerSnap2 = await t.get(providerUserRef);
       if (!providerSnap2.exists) throw new Error("Usuario del profesional no encontrado");
       const providerWallet = typeof (providerSnap2.data() as { wallet?: number }).wallet === "number" ? (providerSnap2.data() as { wallet: number }).wallet : 0;
+      const providerTotalEarnings =
+        typeof (providerSnap2.data() as { totalEarnings?: number }).totalEarnings === "number"
+          ? (providerSnap2.data() as { totalEarnings: number }).totalEarnings
+          : 0;
+
+      const adminUserRef = usersColl.doc(adminUserId);
+      const adminSnap2 = await t.get(adminUserRef);
+      if (!adminSnap2.exists) throw new Error("Admin no encontrado");
+      const adminWallet = typeof (adminSnap2.data() as { wallet?: number }).wallet === "number" ? (adminSnap2.data() as { wallet: number }).wallet : 0;
+      const adminTotalEarnings =
+        typeof (adminSnap2.data() as { totalEarnings?: number }).totalEarnings === "number"
+          ? (adminSnap2.data() as { totalEarnings: number }).totalEarnings
+          : 0;
 
       const now = new Date();
       t.update(bookingRef, { status: "completed", completedAt: now });
       t.update(clientRef, { pendingBalance: clientPending - cost, updatedAt: now });
-      t.update(providerUserRef, { wallet: providerWallet + cost, updatedAt: now });
+      t.update(providerUserRef, { wallet: providerWallet + providerNet, totalEarnings: providerTotalEarnings + providerNet, updatedAt: now });
+      t.update(adminUserRef, { wallet: adminWallet + commission, totalEarnings: adminTotalEarnings + commission, updatedAt: now });
 
       const clientTransferRecord = {
         id: transferId1,
@@ -874,16 +1083,31 @@ class FirestoreStorageImpl implements IStorage {
         id: transferId2,
         userId: providerUserId,
         fromUserId: null,
-        amount: cost,
+        amount: providerNet,
         transferType: "service_payment" as WalletTransferType,
         status: "completed" as WalletTransferStatus,
-        description: "Pago por servicio completado",
+        description: "Pago por servicio completado (neto)",
+        referenceId: String(bookingId),
+        currency: "USD",
+        createdAt: now,
+      };
+
+      // Tercera fila: comisión acreditada a la plataforma (admin).
+      const platformCommissionTransferRecord = {
+        id: transferId3,
+        userId: adminUserId,
+        fromUserId: null,
+        amount: commission,
+        transferType: "service_payment" as WalletTransferType,
+        status: "completed" as WalletTransferStatus,
+        description: "Comisión de plataforma por servicio",
         referenceId: String(bookingId),
         currency: "USD",
         createdAt: now,
       };
       t.set(transfersColl.doc(String(transferId1)), clientTransferRecord);
       t.set(transfersColl.doc(String(transferId2)), providerTransferRecord);
+      t.set(transfersColl.doc(String(transferId3)), platformCommissionTransferRecord);
 
       return { id: bookingId, ...data, status: "completed" } as Booking;
     });

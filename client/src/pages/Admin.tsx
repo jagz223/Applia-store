@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { 
   Users, DollarSign, FileText, Star, Settings, 
   BarChart3, Shield, Bell, Database, Layers,
   CheckCircle, XCircle, Clock, TrendingUp, UserPlus,
-  Search, ChevronLeft, ChevronRight, Loader2, Wallet, Banknote, History
+  Search, ChevronLeft, ChevronRight, Loader2, Wallet, Banknote, History, Inbox, PlayCircle
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { useAuth } from "@/hooks/use-auth";
 import { useAdminWalletTransfers, useUpdateTransferStatus, useAdminManualRecharge, useAdminWithdrawals, useProcessWithdrawal, useAdminWithdrawalHistory, type WithdrawalHistoryStatus, type WithdrawalHistoryItem } from "@/hooks/use-mango-data";
@@ -40,6 +41,20 @@ async function fetchWithAuth(url: string) {
   const token = localStorage.getItem("token");
   const res = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function patchWithAuth(url: string, body: unknown) {
+  const token = localStorage.getItem("token");
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -66,6 +81,32 @@ const mockProviders = [
   { id: 2, name: "Pedro Sánchez", service: "Plomería", rating: 4.6, bookings: 89, verified: true },
   { id: 3, name: "Laura Rodríguez", service: "Limpieza", rating: 4.9, bookings: 234, verified: false },
 ];
+
+type AdminProviderWithServices = {
+  providerId: number;
+  userId: string;
+  name: string;
+  email?: string | null;
+  profession?: string | null;
+  category?: string | null;
+  serviceCount: number;
+  bookingsCount: number;
+  rating: number;
+  ratingCount: number;
+  verified: boolean;
+};
+
+type AdminBookingItem = {
+  id: number;
+  status: string;
+  date: unknown;
+  createdAt?: unknown;
+  cost?: unknown;
+  confirmedByClient?: boolean;
+  notes?: string | null;
+  user?: { firstName?: string; lastName?: string; name?: string; email?: string | null };
+  service?: { title?: string; price?: string; provider?: { user?: { firstName?: string; lastName?: string; name?: string } } };
+};
 
 type TransferStatusFilter = "" | "pending_approval" | "completed" | "rejected";
 
@@ -265,6 +306,11 @@ function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; descriptio
   };
 
   const [withdrawalSubTab, setWithdrawalSubTab] = useState<"pending" | "history">("pending");
+  const [pendingWithdrawalsPage, setPendingWithdrawalsPage] = useState(1);
+
+  useEffect(() => {
+    if (withdrawalSubTab === "pending") setPendingWithdrawalsPage(1);
+  }, [withdrawalSubTab]);
 
   return (
     <>
@@ -310,7 +356,10 @@ function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; descriptio
                     </tr>
                   </thead>
                   <tbody>
-                    {(withdrawals as WithdrawalRequest[]).map((row) => (
+                    {(withdrawals as WithdrawalRequest[]).slice(
+                      (pendingWithdrawalsPage - 1) * USERS_PAGE_SIZE,
+                      pendingWithdrawalsPage * USERS_PAGE_SIZE,
+                    ).map((row) => (
                       <tr key={row.id} className="border-b border-border hover:bg-muted/30">
                         <td className="p-3">
                           <p className="font-medium">{[row.name, row.lastName].filter(Boolean).join(" ") || row.email || row.id}</p>
@@ -347,6 +396,31 @@ function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; descriptio
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {withdrawalSubTab === "pending" && withdrawals.length > USERS_PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-2 pt-4 border-t mt-4">
+                <p className="text-sm text-muted-foreground">
+                  Página {pendingWithdrawalsPage} de {Math.max(1, Math.ceil(withdrawals.length / USERS_PAGE_SIZE))}
+                </p>
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pendingWithdrawalsPage <= 1}
+                    onClick={() => setPendingWithdrawalsPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pendingWithdrawalsPage >= Math.max(1, Math.ceil(withdrawals.length / USERS_PAGE_SIZE))}
+                    onClick={() => setPendingWithdrawalsPage((p) => Math.min(Math.max(1, Math.ceil(withdrawals.length / USERS_PAGE_SIZE)), p + 1))}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             )}
           </TabsContent>
@@ -440,6 +514,7 @@ function useSaldoUserSearch(debouncedName: string) {
 export default function AdminPanel() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [location] = useLocation();
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== "undefined") {
@@ -452,6 +527,10 @@ export default function AdminPanel() {
     return "overview";
   });
   const [userPage, setUserPage] = useState(1);
+  const [providersPage, setProvidersPage] = useState(1);
+  const [overviewPendingProvidersPage, setOverviewPendingProvidersPage] = useState(1);
+  const [overviewRecentBookingsPage, setOverviewRecentBookingsPage] = useState(1);
+  const [adminTransfersPage, setAdminTransfersPage] = useState(1);
 
   // Abrir pestaña Recargas y leer highlight desde la URL o desde evento (clic en notificación)
   const [highlightedTransferId, setHighlightedTransferId] = useState<number | null>(null);
@@ -508,6 +587,9 @@ export default function AdminPanel() {
 
   const [userFilters, setUserFilters] = useState({ role: "", name: "", email: "", lastName: "" });
   const [transferStatusFilter, setTransferStatusFilter] = useState<TransferStatusFilter>("");
+  useEffect(() => {
+    setAdminTransfersPage(1);
+  }, [transferStatusFilter]);
 
   // Gestión de Saldo: selector de usuarios/roles y recarga manual
   const [selectedUsersSaldo, setSelectedUsersSaldo] = useState<UserOption[]>([]);
@@ -586,6 +668,37 @@ export default function AdminPanel() {
   const updateTransferStatus = useUpdateTransferStatus();
   const push = usePushNotifications();
 
+  const { data: adminProvidersData, isLoading: adminProvidersLoading } = useQuery({
+    queryKey: ["admin-providers-with-services"],
+    queryFn: () => fetchWithAuth("/api/admin/providers/with-services"),
+    enabled: user?.role === "admin" && activeTab === "providers",
+  });
+  const providersWithServices: AdminProviderWithServices[] = adminProvidersData?.providers ?? [];
+
+  const { data: adminBookingsData, isLoading: adminBookingsLoading } = useQuery({
+    queryKey: ["admin-bookings"],
+    queryFn: () => fetchWithAuth("/api/admin/bookings"),
+    enabled: user?.role === "admin" && activeTab === "bookings",
+  });
+  const adminBookings: AdminBookingItem[] = adminBookingsData?.bookings ?? [];
+  const [bookingSubTab, setBookingSubTab] = useState<"pending" | "in_progress" | "ready" | "history">("pending");
+  const [bookingPageBySubTab, setBookingPageBySubTab] = useState<Record<"pending" | "in_progress" | "ready" | "history", number>>({
+    pending: 1,
+    in_progress: 1,
+    ready: 1,
+    history: 1,
+  });
+  const [bookingEdits, setBookingEdits] = useState<Record<number, { cost?: string; scheduleDate?: string; scheduleTime?: string; status?: string }>>({});
+  const [pendingAdminChange, setPendingAdminChange] = useState<null | { bookingId: number; payload: Record<string, unknown>; summary: string }>(null);
+
+  const updateAdminBooking = useMutation({
+    mutationFn: async (args: { bookingId: number; payload: Record<string, unknown> }) =>
+      patchWithAuth(`/api/admin/bookings/${args.bookingId}`, args.payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-bookings"] });
+    },
+  });
+
   const handleConfirmRechargeAction = (approve: boolean) => {
     if (!transferToReview) return;
     const status = approve ? "completed" : "rejected";
@@ -657,52 +770,7 @@ export default function AdminPanel() {
       </div>
 
       <div className="container mx-auto py-4 sm:py-6 px-3 sm:px-4 overflow-x-hidden">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Usuarios Totales</CardTitle>
-              <Users className="h-4 w-4 text-gray-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{mockStats.totalUsers.toLocaleString()}</div>
-              <p className="text-xs text-green-500">+12% este mes</p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Proveedores Activos</CardTitle>
-              <Shield className="h-4 w-4 text-gray-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{mockStats.activeProviders}</div>
-              <p className="text-xs text-green-500">+5% este mes</p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Reservas Totales</CardTitle>
-              <FileText className="h-4 w-4 text-gray-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{mockStats.totalBookings.toLocaleString()}</div>
-              <p className="text-xs text-green-500">+23% este mes</p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Ingresos Totales</CardTitle>
-              <DollarSign className="h-4 w-4 text-gray-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${mockStats.totalRevenue.toLocaleString()}</div>
-              <p className="text-xs text-green-500">+18% este mes</p>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Stats Grid oculto por ahora (se verá en futuras iteraciones) */}
 
         {/* Tabs: en móvil scroll horizontal para evitar solapamientos */}
         <Tabs
@@ -741,32 +809,7 @@ export default function AdminPanel() {
           </div>
 
           <TabsContent value="overview">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Recent Bookings */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Reservas Recientes</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {mockRecentBookings.map((booking) => (
-                      <div key={booking.id} className="flex items-center justify-between p-3 border rounded-lg">
-                        <div>
-                          <p className="font-medium">{booking.service}</p>
-                          <p className="text-sm text-gray-500">{booking.client}</p>
-                        </div>
-                        <div className="text-right">
-                          <Badge variant={booking.status === "completed" ? "default" : booking.status === "pending" ? "secondary" : "outline"}>
-                            {booking.status}
-                          </Badge>
-                          <p className="text-sm font-medium mt-1">${booking.amount}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
+            <div className="grid grid-cols-1 gap-6">
               {/* Pending Approvals */}
               <Card>
                 <CardHeader>
@@ -775,29 +818,69 @@ export default function AdminPanel() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {mockProviders.filter(p => !p.verified).map((provider) => (
-                      <div key={provider.id} className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Avatar>
-                            <AvatarFallback>{provider.name[0]}</AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <p className="font-medium">{provider.name}</p>
-                            <p className="text-sm text-gray-500">{provider.service}</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="outline" className="text-green-600">
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Aprobar
-                          </Button>
-                          <Button size="sm" variant="outline" className="text-red-600">
-                            <XCircle className="h-4 w-4 mr-1" />
-                            Rechazar
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
+                    {(() => {
+                      const pageSize = USERS_PAGE_SIZE;
+                      const pendingList: any[] = (providersWithServices.length ? providersWithServices : mockProviders)
+                        .filter((p: any) => (p.verified ?? false) === false);
+                      const totalPages = Math.max(1, Math.ceil(pendingList.length / pageSize));
+                      const safePage = Math.min(totalPages, Math.max(1, overviewPendingProvidersPage));
+                      const start = (safePage - 1) * pageSize;
+                      const end = start + pageSize;
+                      const paged = pendingList.slice(start, end);
+
+                      return (
+                        <>
+                          {paged.map((provider: any) => (
+                            <div key={provider.providerId ?? provider.id} className="flex items-center justify-between p-3 border rounded-lg">
+                              <div className="flex items-center gap-3">
+                                <Avatar>
+                                  <AvatarFallback>{provider.name[0]}</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="font-medium">{provider.name}</p>
+                                  <p className="text-sm text-gray-500">{provider.profession ?? provider.service ?? "Profesional"}</p>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button size="sm" variant="outline" className="text-green-600">
+                                  <CheckCircle className="h-4 w-4 mr-1" />
+                                  Aprobar
+                                </Button>
+                                <Button size="sm" variant="outline" className="text-red-600">
+                                  <XCircle className="h-4 w-4 mr-1" />
+                                  Rechazar
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                          {totalPages > 1 && (
+                            <div className="flex items-center justify-between pt-2 border-t mt-2">
+                              <p className="text-sm text-muted-foreground">Página {safePage} de {totalPages}</p>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={safePage <= 1}
+                                  onClick={() => setOverviewPendingProvidersPage((p) => Math.max(1, safePage - 1))}
+                                >
+                                  <ChevronLeft className="h-4 w-4" />
+                                  Anterior
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={safePage >= totalPages}
+                                  onClick={() => setOverviewPendingProvidersPage((p) => Math.min(totalPages, safePage + 1))}
+                                >
+                                  Siguiente
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </CardContent>
               </Card>
@@ -922,33 +1005,93 @@ export default function AdminPanel() {
             <Card>
               <CardHeader>
                 <CardTitle>Proveedores</CardTitle>
-                <CardDescription>Gestiona proveedores de servicios</CardDescription>
+                <CardDescription>Profesionales con servicios publicados</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {mockProviders.map((provider) => (
-                    <div key={provider.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <Avatar>
-                          <AvatarFallback>{provider.name[0]}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium">{provider.name}</p>
-                          <p className="text-sm text-gray-500">{provider.service}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-1">
-                          <Star className="h-4 w-4 text-yellow-500" />
-                          <span>{provider.rating}</span>
-                        </div>
-                        <span className="text-sm text-gray-500">{provider.bookings} reservas</span>
-                        {provider.verified && <Badge>Verificado</Badge>}
-                        <Button size="sm" variant="outline">Ver Perfil</Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {adminProvidersLoading ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">Cargando proveedores…</div>
+                ) : providersWithServices.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay profesionales con servicios publicados.</div>
+                ) : (
+                  <div className="space-y-4">
+                    {(() => {
+                      const pageSize = USERS_PAGE_SIZE;
+                      const providerList: AdminProviderWithServices[] =
+                        providersWithServices.length > 0 ? providersWithServices : (mockProviders as any);
+                      const totalPages = Math.max(1, Math.ceil(providerList.length / pageSize));
+                      const safePage = Math.min(totalPages, Math.max(1, providersPage));
+                      const start = (safePage - 1) * pageSize;
+                      const end = start + pageSize;
+                      const paged = providerList.slice(start, end);
+
+                      return (
+                        <>
+                          <div className="space-y-4">
+                            {paged.map((p) => (
+                              <div key={p.providerId} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border rounded-lg bg-white">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <Avatar>
+                                    <AvatarFallback>{p.name?.[0] ?? "P"}</AvatarFallback>
+                                  </Avatar>
+                                  <div className="min-w-0">
+                                    <p className="font-medium truncate">{p.name}</p>
+                                    <p className="text-sm text-gray-500 truncate">
+                                      {(p.profession || p.category || "Profesional")} · {p.serviceCount} servicio(s)
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3 sm:gap-4 justify-between sm:justify-end">
+                                  <div className="flex items-center gap-1">
+                                    <Star className="h-4 w-4 text-yellow-500" />
+                                    <span className="text-sm font-medium">
+                                      {Number(p.rating ?? 5).toFixed(1)}
+                                    </span>
+                                    <span className="text-xs text-gray-500">({p.ratingCount ?? 0})</span>
+                                  </div>
+                                  <span className="text-sm text-gray-500">{p.bookingsCount} reservas</span>
+                                  <Badge variant={p.verified ? "default" : "secondary"}>
+                                    {p.verified ? "Verificado" : "No verificado"}
+                                  </Badge>
+                                  <Button size="sm" variant="outline" asChild>
+                                    <Link href={`/admin/users/${p.userId}/edit`}>Ver perfil</Link>
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {totalPages > 1 && (
+                            <div className="flex items-center justify-between pt-2 border-t mt-2">
+                              <p className="text-sm text-muted-foreground">
+                                Página {safePage} de {totalPages}
+                              </p>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={safePage <= 1}
+                                  onClick={() => setProvidersPage((p) => Math.max(1, safePage - 1))}
+                                >
+                                  <ChevronLeft className="h-4 w-4" />
+                                  Anterior
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={safePage >= totalPages}
+                                  onClick={() => setProvidersPage((p) => Math.min(totalPages, safePage + 1))}
+                                >
+                                  Siguiente
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -956,26 +1099,376 @@ export default function AdminPanel() {
           <TabsContent value="bookings">
             <Card>
               <CardHeader>
-                <CardTitle>Todas las Reservas</CardTitle>
+                <CardTitle>Gestión de reservas (Admin)</CardTitle>
+                <CardDescription>
+                  Vista global: solicitudes pendientes, en espera, listas e historial. Puedes corregir datos si hay problemas (se pedirá confirmación).
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {mockRecentBookings.map((booking) => (
-                    <div key={booking.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div>
-                        <p className="font-medium">{booking.service}</p>
-                        <p className="text-sm text-gray-500">Cliente: {booking.client} | Proveedor: {booking.provider}</p>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <Badge variant={booking.status === "completed" ? "default" : "secondary"}>
-                          {booking.status}
-                        </Badge>
-                        <span className="font-medium">${booking.amount}</span>
-                        <span className="text-sm text-gray-500">{booking.date}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {adminBookingsLoading ? (
+                  <div className="py-12 flex items-center justify-center text-muted-foreground gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="text-sm">Cargando reservas…</span>
+                  </div>
+                ) : (
+                  <>
+                    {(() => {
+                      const list = adminBookings ?? [];
+                      const pending = list.filter((b) => b.status === "pending");
+                      const ready = list.filter(
+                        (b) => (b.status === "confirmed" || b.status === "in_progress") && b.confirmedByClient === true,
+                      );
+                      const inProgress = list.filter(
+                        (b) => (b.status === "confirmed" || b.status === "in_progress") && b.confirmedByClient !== true,
+                      );
+                      const history = list.filter((b) => b.status === "completed" || b.status === "cancelled");
+
+                      const activeList =
+                        bookingSubTab === "pending"
+                          ? pending
+                          : bookingSubTab === "ready"
+                            ? ready
+                            : bookingSubTab === "in_progress"
+                              ? inProgress
+                              : history;
+
+                      const statusLabel = (s: string) =>
+                        s === "pending"
+                          ? "Pendiente"
+                          : s === "confirmed"
+                            ? "Confirmada"
+                            : s === "in_progress"
+                              ? "En proceso"
+                              : s === "completed"
+                                ? "Completada"
+                                : s === "cancelled"
+                                  ? "Cancelada"
+                                  : s;
+
+                      const renderEmpty = (msg: string) => (
+                        <div className="rounded-lg border border-dashed border-border bg-muted/30 py-12 text-center">
+                          <p className="text-muted-foreground">{msg}</p>
+                        </div>
+                      );
+
+                      const bookingRow = (b: AdminBookingItem) => {
+                        const id = Number(b.id);
+                        const date = toDate(b.date);
+                        const dateStr = isValidDate(date) ? format(date, "yyyy-MM-dd", { locale: es }) : "";
+                        const timeStr = isValidDate(date) ? format(date, "HH:mm", { locale: es }) : "";
+                        const clientName = b.user
+                          ? [b.user.firstName ?? b.user.name, b.user.lastName].filter(Boolean).join(" ") || "Cliente"
+                          : "Cliente";
+                        const providerUser = b.service?.provider?.user;
+                        const providerName = providerUser
+                          ? [providerUser.firstName ?? providerUser.name, providerUser.lastName].filter(Boolean).join(" ") || "Profesional"
+                          : "Profesional";
+                        const serviceTitle = b.service?.title ?? "Servicio";
+                        const savedCost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
+                        const refPrice = b.service?.price != null ? Number(b.service.price) : 0;
+                        const currentCost = savedCost > 0 ? savedCost : refPrice;
+                        const currentCostNum = Number(currentCost || 0);
+
+                        const edits = bookingEdits[id] ?? {};
+                        const costValue = edits.cost ?? String(currentCost || "");
+                        const costValueNum = Number(costValue);
+                        const costForCalc = Number.isFinite(costValueNum) ? costValueNum : currentCostNum;
+                        const commission = Math.round(costForCalc * 0.1 * 100) / 100;
+                        const providerNet = Math.round((costForCalc - commission) * 100) / 100;
+                        const schedDate = edits.scheduleDate ?? dateStr;
+                        const schedTime = edits.scheduleTime ?? timeStr;
+                        const statusValue = edits.status ?? String(b.status ?? "");
+
+                        const badgeVariant =
+                          b.status === "completed"
+                            ? "default"
+                            : b.status === "cancelled"
+                              ? "destructive"
+                              : "secondary";
+
+                        const scheduleIso = schedDate && schedTime ? new Date(`${schedDate}T${schedTime}:00`).toISOString() : undefined;
+
+                        return (
+                          <div key={id} className="rounded-xl border border-border bg-card p-4 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-semibold truncate">{serviceTitle}</p>
+                                <p className="text-sm text-muted-foreground truncate">
+                                  Cliente: {clientName} · Profesional: {providerName}
+                                </p>
+                              </div>
+                              <div className="flex flex-col items-end gap-1 shrink-0">
+                                <Badge variant={badgeVariant}>{statusLabel(String(b.status ?? ""))}</Badge>
+                                <span className="text-sm font-semibold tabular-nums">
+                                  {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(currentCost || 0)}
+                                </span>
+                                <p className="text-xs text-muted-foreground">
+                                  Comisión (10%):{" "}
+                                  {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(commission)} ·
+                                  Neto profesional:{" "}
+                                  {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(providerNet)}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Estado</Label>
+                                <Select
+                                  value={statusValue}
+                                  onValueChange={(v) =>
+                                    setBookingEdits((prev) => ({ ...prev, [id]: { ...prev[id], status: v } }))
+                                  }
+                                >
+                                  <SelectTrigger className="h-9">
+                                    <SelectValue placeholder="Estado" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {["pending", "confirmed", "in_progress", "completed", "cancelled"].map((s) => (
+                                      <SelectItem key={s} value={s}>
+                                        {statusLabel(s)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Costo (USD)</Label>
+                                <Input
+                                  className="h-9"
+                                  value={costValue}
+                                  onChange={(e) =>
+                                    setBookingEdits((prev) => ({ ...prev, [id]: { ...prev[id], cost: e.target.value } }))
+                                  }
+                                  inputMode="decimal"
+                                />
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Horario</Label>
+                                <div className="flex gap-2">
+                                  <Input
+                                    className="h-9"
+                                    type="date"
+                                    value={schedDate}
+                                    onChange={(e) =>
+                                      setBookingEdits((prev) => ({ ...prev, [id]: { ...prev[id], scheduleDate: e.target.value } }))
+                                    }
+                                  />
+                                  <Input
+                                    className="h-9"
+                                    type="time"
+                                    value={schedTime}
+                                    onChange={(e) =>
+                                      setBookingEdits((prev) => ({ ...prev, [id]: { ...prev[id], scheduleTime: e.target.value } }))
+                                    }
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      const next = String(statusValue || b.status || "");
+                                      if (!next) return;
+                                      setPendingAdminChange({
+                                        bookingId: id,
+                                        payload: { status: next },
+                                        summary: `Cambiar estado de la reserva #${id} a “${statusLabel(next)}”`,
+                                      });
+                                    }}
+                                  >
+                                    <Inbox className="h-4 w-4 mr-2" />
+                                    Cambiar estado
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Cambia el estado de la reserva. Se mostrará una confirmación antes de aplicar el cambio.
+                                </TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      const n = Number(costValue);
+                                      if (!Number.isFinite(n)) {
+                                        toast({ title: "Costo inválido", description: "Ingresa un número válido.", variant: "destructive" });
+                                        return;
+                                      }
+                                      setPendingAdminChange({
+                                        bookingId: id,
+                                        payload: { cost: n },
+                                        summary: `Actualizar costo de la reserva #${id} a $${n.toFixed(2)} USD`,
+                                      });
+                                    }}
+                                  >
+                                    <DollarSign className="h-4 w-4 mr-2" />
+                                    Guardar costo
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Actualiza el costo (USD) de la reserva. Requiere confirmación.</TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      if (!scheduleIso) return;
+                                      setPendingAdminChange({
+                                        bookingId: id,
+                                        payload: { scheduleIso },
+                                        summary: `Actualizar horario de la reserva #${id} a ${schedDate} ${schedTime}`,
+                                      });
+                                    }}
+                                  >
+                                    <Clock className="h-4 w-4 mr-2" />
+                                    Guardar horario
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Actualiza el horario de la reserva. Requiere confirmación.</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
+                        );
+                      };
+
+                      return (
+                        <div className="space-y-4">
+                          <Tabs value={bookingSubTab} onValueChange={(v) => setBookingSubTab(v as any)} className="w-full">
+                            <TabsList className="flex w-full flex-nowrap items-stretch gap-1 h-auto p-1 bg-muted/50 overflow-x-auto">
+                              <TabsTrigger value="pending" className="gap-2 py-2.5 data-[state=active]:bg-background">
+                                <Inbox className="h-4 w-4" />
+                                <span className="hidden sm:inline">Solicitudes pendientes</span>
+                                <Badge variant="secondary" className="ml-1">{pending.length}</Badge>
+                              </TabsTrigger>
+                              <TabsTrigger value="in_progress" className="gap-2 py-2.5 data-[state=active]:bg-background">
+                                <PlayCircle className="h-4 w-4" />
+                                <span className="hidden sm:inline">En espera</span>
+                                <Badge variant="secondary" className="ml-1">{inProgress.length}</Badge>
+                              </TabsTrigger>
+                              <TabsTrigger value="ready" className="gap-2 py-2.5 data-[state=active]:bg-background">
+                                <CheckCircle className="h-4 w-4" />
+                                <span className="hidden sm:inline">Listas</span>
+                                <Badge variant="secondary" className="ml-1">{ready.length}</Badge>
+                              </TabsTrigger>
+                              <TabsTrigger value="history" className="gap-2 py-2.5 data-[state=active]:bg-background">
+                                <History className="h-4 w-4" />
+                                <span className="hidden sm:inline">Historial</span>
+                                <Badge variant="secondary" className="ml-1">{history.length}</Badge>
+                              </TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+
+                          {(() => {
+                            const pageSize = USERS_PAGE_SIZE;
+                            const currentPage = bookingPageBySubTab[bookingSubTab] ?? 1;
+                            const totalPages = Math.max(1, Math.ceil(activeList.length / pageSize));
+                            const safePage = Math.min(totalPages, Math.max(1, currentPage));
+                            const start = (safePage - 1) * pageSize;
+                            const end = start + pageSize;
+                            const pagedList = activeList.slice(start, end);
+                            return activeList.length === 0 ? (
+                              renderEmpty("No hay reservas en esta sección.")
+                            ) : (
+                              <>
+                                <div className="space-y-4">{pagedList.map(bookingRow)}</div>
+                                {totalPages > 1 && (
+                                  <div className="flex items-center justify-between pt-4 border-t mt-4">
+                                    <p className="text-sm text-muted-foreground">
+                                      Página {safePage} de {totalPages}
+                                    </p>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={safePage <= 1}
+                                        onClick={() =>
+                                          setBookingPageBySubTab((prev) => ({
+                                            ...prev,
+                                            [bookingSubTab]: Math.max(1, safePage - 1),
+                                          }))
+                                        }
+                                      >
+                                        <ChevronLeft className="h-4 w-4" />
+                                        Anterior
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={safePage >= totalPages}
+                                        onClick={() =>
+                                          setBookingPageBySubTab((prev) => ({
+                                            ...prev,
+                                            [bookingSubTab]: Math.min(totalPages, safePage + 1),
+                                          }))
+                                        }
+                                      >
+                                        Siguiente
+                                        <ChevronRight className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })()}
+
+                    <Dialog open={pendingAdminChange != null} onOpenChange={(open) => !open && setPendingAdminChange(null)}>
+                      <DialogContent className="sm:max-w-md border-border bg-card">
+                        <DialogHeader>
+                          <DialogTitle>¿Seguro que quieres hacer estos cambios?</DialogTitle>
+                          <DialogDescription>
+                            {pendingAdminChange?.summary}
+                            <br />
+                            Esto puede afectar el flujo normal y balances (escrow/wallet) si cambias estados como “Completada” o “Cancelada”.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter className="gap-2 sm:gap-0">
+                          <Button variant="outline" onClick={() => setPendingAdminChange(null)}>
+                            Cancelar
+                          </Button>
+                          <Button
+                            onClick={async () => {
+                              if (!pendingAdminChange) return;
+                              try {
+                                await updateAdminBooking.mutateAsync({
+                                  bookingId: pendingAdminChange.bookingId,
+                                  payload: pendingAdminChange.payload,
+                                });
+                                toast({ title: "Actualizado", description: "La reserva fue modificada correctamente." });
+                              } catch (e) {
+                                toast({
+                                  title: "Error",
+                                  description: e instanceof Error ? e.message : "No se pudo actualizar la reserva",
+                                  variant: "destructive",
+                                });
+                              } finally {
+                                setPendingAdminChange(null);
+                              }
+                            }}
+                            disabled={updateAdminBooking.isPending}
+                          >
+                            {updateAdminBooking.isPending ? "Aplicando…" : "Sí, modificar"}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -1056,6 +1549,7 @@ export default function AdminPanel() {
                     No hay transferencias con el filtro seleccionado.
                   </p>
                 ) : (
+                  <>
                   <div className="overflow-x-auto rounded-lg border border-border">
                     <table className="w-full text-sm">
                       <thead>
@@ -1069,7 +1563,7 @@ export default function AdminPanel() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredTransfers.map((t: {
+                        {filteredTransfers.slice((adminTransfersPage - 1) * USERS_PAGE_SIZE, adminTransfersPage * USERS_PAGE_SIZE).map((t: {
                           id: number;
                           referenceId?: string;
                           description?: string;
@@ -1151,6 +1645,40 @@ export default function AdminPanel() {
                       </tbody>
                     </table>
                   </div>
+                  {Math.max(1, Math.ceil(filteredTransfers.length / USERS_PAGE_SIZE)) > 1 && (
+                    <div className="flex items-center justify-between pt-4 border-t">
+                      <p className="text-sm text-muted-foreground">
+                        Página {adminTransfersPage} de {Math.max(1, Math.ceil(filteredTransfers.length / USERS_PAGE_SIZE))}
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={adminTransfersPage <= 1}
+                          onClick={() => setAdminTransfersPage((p) => Math.max(1, p - 1))}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                          Anterior
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            adminTransfersPage >= Math.max(1, Math.ceil(filteredTransfers.length / USERS_PAGE_SIZE))
+                          }
+                          onClick={() =>
+                            setAdminTransfersPage((p) =>
+                              Math.min(Math.max(1, Math.ceil(filteredTransfers.length / USERS_PAGE_SIZE)), p + 1),
+                            )
+                          }
+                        >
+                          Siguiente
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -1460,7 +1988,7 @@ export default function AdminPanel() {
           </TabsContent>
 
           <TabsContent value="settings">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6">
               <Card>
                 <CardHeader>
                   <CardTitle>Configuración General</CardTitle>
@@ -1468,50 +1996,10 @@ export default function AdminPanel() {
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium">Registro de usuarios</p>
-                      <p className="text-sm text-gray-500">Permitir nuevos registros</p>
-                    </div>
-                    <Button variant="outline">Configurar</Button>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Verificación de proveedores</p>
-                      <p className="text-sm text-gray-500">Requiere aprobación manual</p>
-                    </div>
-                    <Button variant="outline">Configurar</Button>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
                       <p className="font-medium">Comisiones</p>
-                      <p className="text-sm text-gray-500">15% por transacción</p>
+                      <p className="text-sm text-gray-500">10% por transacción (90% para el profesional)</p>
                     </div>
                     <Button variant="outline">Configurar</Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Notificaciones</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Email de nuevas reservas</p>
-                    </div>
-                    <Button variant="outline">Activo</Button>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Alertas de pagos</p>
-                    </div>
-                    <Button variant="outline">Activo</Button>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Newsletter semanal</p>
-                    </div>
-                    <Button variant="outline">Inactivo</Button>
                   </div>
                 </CardContent>
               </Card>
