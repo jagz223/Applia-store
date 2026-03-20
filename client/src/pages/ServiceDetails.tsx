@@ -182,7 +182,7 @@ export default function ServiceDetails() {
           </div>
 
           <div className="border-t border-border/50 pt-8">
-            <h3 className="text-xl font-bold font-display mb-6">Acerca del profesional</h3>
+            <h3 className="text-xl font-bold font-display mb-6">Acerca del asociado</h3>
             <div className="flex items-start gap-4">
               <div className="h-16 w-16 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-2xl overflow-hidden">
                 {service.provider?.user?.profileImageUrl ? (
@@ -270,7 +270,7 @@ export default function ServiceDetails() {
                     <DialogHeader>
                       <DialogTitle>Reservar servicio</DialogTitle>
                       <DialogDescription>
-                        Selecciona una fecha para solicitar este servicio a {service.provider?.user?.firstName ?? "el profesional"}.
+                        Selecciona una fecha para solicitar este servicio a {service.provider?.user?.firstName ?? "el asociado"}.
                       </DialogDescription>
                     </DialogHeader>
                     <div className="py-4 space-y-4">
@@ -284,7 +284,7 @@ export default function ServiceDetails() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">Notas para el profesional</label>
+                        <label className="text-sm font-medium">Notas para el asociado</label>
                         <Textarea 
                           placeholder="Describe tus necesidades..."
                           value={notes} 

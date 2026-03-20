@@ -63,7 +63,7 @@ export default function HomePage() {
     {
       icon: MessageSquare,
       title: "Chat en Vivo",
-      description: "Comunicación en tiempo real entre clientes y profesionales.",
+      description: "Comunicación en tiempo real entre clientes y asociados.",
       color: "text-primary",
       bgColor: "bg-primary/10"
     },
@@ -92,7 +92,7 @@ export default function HomePage() {
 
   const stats = [
     { value: "10,000+", label: "Usuarios Activos" },
-    { value: "2,500+", label: "Profesionales" },
+    { value: "2,500+", label: "Asociados" },
     { value: "50,000+", label: "Servicios Realizados" },
     { value: "4.9", label: "Calificación Promedio" },
   ];
@@ -146,7 +146,7 @@ export default function HomePage() {
               </h1>
               
               <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-lg">
-                Conecta con profesionales verificados para servicios técnicos, legales, financieros y mantenimiento. 
+                Conecta con asociados verificados para servicios técnicos, legales, financieros y mantenimiento. 
                 Todo en un solo lugar con la garantía de GenFeb S.A.S.
               </p>
 
@@ -195,7 +195,7 @@ export default function HomePage() {
               <div className="flex flex-wrap items-center gap-6 pt-4">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <CheckCircle className="h-5 w-5 text-accent" />
-                  <span>Profesionales verificados</span>
+                  <span>Asociados verificados</span>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Shield className="h-5 w-5 text-accent" />
@@ -364,7 +364,7 @@ export default function HomePage() {
               Explora todos los servicios
             </h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Encuentra el profesional perfecto para cualquier necesidad
+              Encuentra el asociado perfecto para cualquier necesidad
             </p>
           </motion.div>
 
@@ -384,7 +384,7 @@ export default function HomePage() {
                         <category.icon className="w-8 h-8" />
                       </div>
                       <h3 className="text-lg font-bold mb-1">{category.name}</h3>
-                      <p className="text-sm text-muted-foreground">{category.count} profesionales</p>
+                      <p className="text-sm text-muted-foreground">{category.count} asociados</p>
                     </CardContent>
                   </Card>
                 </Link>
@@ -421,8 +421,8 @@ export default function HomePage() {
             <h2 className="text-3xl md:text-4xl font-display font-bold mb-4">
               ¿Listo para transformar tu negocio?
             </h2>
-            <p className="text-lg text-muted-foreground mb-8">
-              Únete a miles de profesionales y clientes que ya están usando GenFeb S.A.S.
+              <p className="text-lg text-muted-foreground mb-8">
+              Únete a miles de asociados y clientes que ya están usando GenFeb S.A.S.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/register">
@@ -435,7 +435,7 @@ export default function HomePage() {
                 <Link href="/become-pro">
                   <Button size="lg" variant="outline" className="h-14 px-8 rounded-full text-lg border-accent text-accent hover:bg-accent hover:text-white">
                     <Briefcase className="mr-2 h-5 w-5" />
-                    Convertirse en Profesional
+                    Convertirse en Asociado
                   </Button>
                 </Link>
               )}

@@ -67,7 +67,7 @@ export function RatingGate() {
             <div className="text-sm text-muted-foreground">
               {firstPending.roleRated === "professional" ? (
                 <p>
-                  Debes calificar al profesional <span className="font-medium text-foreground">{firstPending.rateeName}</span>
+                  Debes calificar al asociado <span className="font-medium text-foreground">{firstPending.rateeName}</span>
                   {firstPending.serviceTitle ? (
                     <>
                       {" "}

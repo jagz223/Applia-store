@@ -201,10 +201,55 @@ class NotificationService {
     recipientId: string | number;
     conversationId: number;
     preview: string;
+    senderId: string | number;
   }): Promise<void> {
+    const db = getFirestore();
+
+    const truncateText = (s: string, max: number) => {
+      const t = s.trim();
+      return t.length > max ? `${t.slice(0, max)}...` : t;
+    };
+
+    const getSenderDisplayName = async (): Promise<string> => {
+      if (!db) return "Usuario";
+      try {
+        const snap = await db.collection(FIRESTORE_COLLECTIONS.USERS).doc(String(params.senderId)).get();
+        if (!snap.exists) return "Usuario";
+        const u = snap.data() as { name?: string; lastName?: string; firstName?: string; email?: string } | undefined;
+        const fromConvRoute = [u?.name, u?.lastName].filter(Boolean).join(" ").trim();
+        if (fromConvRoute) return fromConvRoute;
+        const fromFirstLast = [u?.firstName, u?.lastName].filter(Boolean).join(" ").trim();
+        if (fromFirstLast) return fromFirstLast;
+        if (u?.email) return String(u.email);
+        return "Usuario";
+      } catch {
+        return "Usuario";
+      }
+    };
+
+    const senderName = await getSenderDisplayName();
+    const raw = typeof params.preview === "string" ? params.preview.trim() : "";
+    const lower = raw.toLowerCase();
+    const looksLikeLocation =
+      (lower.includes("lat") && lower.includes("lng")) ||
+      lower.includes("ubicacion") ||
+      lower.includes("location") ||
+      lower.includes("latitud") ||
+      lower.includes("longitud");
+
+    const title = `Nuevo mensaje de ${truncateText(senderName, 18)}`;
+
+    const body = looksLikeLocation
+      ? "Te ha compartido su ubicacion."
+      : (() => {
+          const truncated = raw.length > 90 ? `${raw.slice(0, 90)}...` : raw;
+          if (truncated) return `De ${senderName}: ${truncated}`;
+          return `De ${senderName}`;
+        })();
+
     await this.sendPushToUser(this.normalizeUserId(params.recipientId), {
-      title: "Nuevo mensaje",
-      body: params.preview,
+      title,
+      body,
       data: {
         type: "chat_message",
         conversationId: String(params.conversationId),

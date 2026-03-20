@@ -545,7 +545,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 )}
                 {costForCommission > 0 && (
                   <span className="text-xs text-muted-foreground">
-                    Neto profesional: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> (90%) · Comisión:{" "}
+                    Neto asociado: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> (90%) · Comisión:{" "}
                     <span className="font-medium text-foreground">${commission.toFixed(2)}</span> (10%)
                   </span>
                 )}
@@ -1584,15 +1584,15 @@ export default function ProfessionalDashboard() {
           <Card className="mb-6 border-2 border-mango-orange/50 bg-mango-orange/5">
             <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
               <div className="text-center sm:text-left">
-                <h2 className="text-lg font-semibold text-foreground mb-1">Completa tu perfil profesional</h2>
+                <h2 className="text-lg font-semibold text-foreground mb-1">Completa tu perfil de asociado</h2>
                 <p className="text-sm text-muted-foreground">
-                  Aún no has configurado tu perfil como profesional. Completa categoría, descripción y tarifa para publicar tu servicio y recibir reservas.
+                  Aún no has configurado tu perfil como asociado. Completa categoría, descripción y tarifa para publicar tu servicio y recibir reservas.
                 </p>
               </div>
               <Button asChild className="shrink-0">
                 <Link href="/become-pro">
                   <UserPlus className="h-4 w-4 mr-2" />
-                  Configurar como profesional
+                  Configurar como asociado
                 </Link>
               </Button>
             </CardContent>

@@ -106,8 +106,8 @@ export default function Bookings() {
             </div>
             <p className="text-sm text-muted-foreground">
               {booking.service?.provider?.user
-                ? `${booking.service.provider.user.firstName ?? ""} ${booking.service.provider.user.lastName ?? ""}`.trim() || "Profesional"
-                : "Profesional"}
+                ? `${booking.service.provider.user.firstName ?? ""} ${booking.service.provider.user.lastName ?? ""}`.trim() || "Asociado"
+                : "Asociado"}
             </p>
             {(cost > 0 || (booking.service?.price != null && Number(booking.service.price) > 0)) && (
               <p className="text-sm font-medium text-foreground mt-1">
@@ -123,7 +123,7 @@ export default function Bookings() {
                   Confirmar pago y retener fondos
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  El profesional ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago.
+                  El asociado ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago.
                   Se descontará <strong>${Number(cost).toFixed(2)} USD</strong> de tu billetera.
                 </p>
                 <div className="flex flex-wrap gap-2">

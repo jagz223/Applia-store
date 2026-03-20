@@ -237,12 +237,12 @@ export function Navigation() {
                  <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
                    <Link href="/professional-dashboard">
                      <Briefcase className="h-4 w-4" />
-                     <span>Panel profesional</span>
+                     <span>Panel Asociado</span>
                    </Link>
                  </Button>
               ) : showBecomePro ? (
                 <Button variant="outline" className="hidden sm:flex border-primary text-primary hover:bg-primary/10" asChild>
-                  <Link href="/become-pro">Convertirse en Profesional</Link>
+                  <Link href="/become-pro">Convertirse en Asociado</Link>
                 </Button>
               ) : (
                  <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
@@ -273,7 +273,7 @@ export function Navigation() {
                     <DropdownMenuItem asChild>
                       <Link href="/professional-dashboard" className="flex items-center">
                         <Briefcase className="mr-2 h-4 w-4" />
-                        Panel profesional
+                        Panel Asociado
                       </Link>
                     </DropdownMenuItem>
                   )}
@@ -399,7 +399,7 @@ export function Navigation() {
                 {isProfessional && (
                   <>
                     <Link href="/professional-dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                      Panel profesional
+                      Panel Asociado
                     </Link>
                     {SHOW_CREATE_SERVICE && (
                       <Link href="/create-service" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>

@@ -222,7 +222,7 @@ export function NotificationBell() {
 
   const getDescription = (type: string, data?: { amountFormatted?: string; dateFormatted?: string; message?: string; preview?: string; conversationId?: string | number; data?: any }) => {
     if (type === "booking" && data?.type === "new_booking") {
-      return "Tienes una nueva solicitud de reserva. Revisa el detalle en la pagina de notificaciones.";
+      return "Tienes una nueva solicitud de reserva. Revisa el detalle en tu Panel Asociado.";
     }
     if (type === "message") {
       const d = data ?? {};
@@ -274,7 +274,7 @@ export function NotificationBell() {
     }
     if (type === "booking" && data?.type === "booking_update") {
       const status = (data as any)?.booking?.status as string | undefined;
-      if (status === "in_progress") return "El profesional marco tu reserva como en proceso. Revisa tu lista de reservas.";
+      if (status === "in_progress") return "El asociado marco tu reserva como en proceso. Revisa tu lista de reservas.";
       if (status === "completed") return "El servicio fue completado. Puedes revisar la reserva y dejar tu calificacion cuando corresponda.";
       return "La reserva fue actualizada.";
     }
@@ -296,7 +296,7 @@ export function NotificationBell() {
     }
     if (type === "booking_cancelled_by_provider") {
       const message = data?.message ?? data?.data?.message;
-      return message ?? "El profesional cancelo el servicio. El monto fue devuelto a tu billetera.";
+      return message ?? "El asociado cancelo el servicio. El monto fue devuelto a tu billetera.";
     }
     if (type === "booking_cancelled") {
       const message = data?.message ?? data?.data?.message;
@@ -306,7 +306,7 @@ export function NotificationBell() {
       const name = data?.userName ?? data?.data?.userName;
       const amount = data?.amountFormatted ?? data?.data?.amountFormatted ?? data?.amount;
       if (name && amount) return `${name} solicito retirar $${amount} USD. Revisa Solicitudes de Retiro en el Panel de Administracion.`;
-      return "Un profesional solicito retirar fondos. Revisa la pestana Solicitudes de Retiro en el Panel de Administracion.";
+      return "Un asociado solicito retirar fondos. Revisa la pestana Solicitudes de Retiro en el Panel de Administracion.";
     }
     if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
       return data?.message ?? "El retiro fue procesado por otro administrador. Revisa Solicitudes de Retiro.";
@@ -330,7 +330,7 @@ export function NotificationBell() {
     if (type === "recharge_completed") return "Recarga aprobada";
     if (type === "recharge_rejected") return "Recarga rechazada";
     if (type === "balance_credited") return "Saldo acreditado";
-    if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el profesional";
+    if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el asociado";
     if (type === "booking_confirmed_by_client") return "Fondos agregados";
     if (type === "booking_cost_commission_reminder") return "Recordatorio de comision";
     if (type === "booking_cancelled") return "Reserva cancelada";

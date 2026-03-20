@@ -172,7 +172,7 @@ const translations: Record<Language, Translations> = {
     home: {
       hero: {
         title: "La plataforma de servicios más avanzada",
-        subtitle: "Conecta con profesionales verificados para servicios técnicos, legales, financieros y mantenimiento. Todo en un solo lugar con la garantía de GenFeb S.A.S.",
+        subtitle: "Conecta con asociados verificados para servicios técnicos, legales, financieros y mantenimiento. Todo en un solo lugar con la garantía de GenFeb S.A.S.",
         cta: "Explorar Servicios",
         ctaSecondary: "Reservar Ahora",
       },
@@ -182,7 +182,7 @@ const translations: Record<Language, Translations> = {
       },
       stats: {
         users: "Usuarios Activos",
-        professionals: "Profesionales",
+        professionals: "Asociados",
         services: "Servicios Realizados",
         rating: "Calificación Promedio",
       },
@@ -192,11 +192,11 @@ const translations: Record<Language, Translations> = {
       subtitle: "Reserva en 3 clics con confirmación inmediata",
       steps: {
         service: "Selecciona Servicio",
-        provider: "Selecciona Profesional",
+        provider: "Selecciona Asociado",
         confirm: "Confirma Reserva",
       },
       selectService: "Selecciona un Servicio",
-      selectProvider: "Selecciona un Profesional",
+      selectProvider: "Selecciona un Asociado",
       selectDate: "Selecciona Fecha y Hora",
       notes: "Notas adicionales",
       contact: "Datos de contacto",

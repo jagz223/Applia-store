@@ -138,7 +138,7 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
     if (status === "completed") return "Servicio completado";
     return "Reserva actualizada";
   }
-  if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el profesional";
+  if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el asociado";
   if (type === "booking_confirmed_by_client") return "Fondos agregados";
   if (type === "booking_cost_commission_reminder") return "Recordatorio de comisión";
   if (type === "booking_cancelled") return "Reserva cancelada";
@@ -171,12 +171,12 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
   // Booking update (Socket.io) con estado real
   if (type === "booking" && d.type === "booking_update") {
     const status = d.booking?.status as string | undefined;
-    if (status === "in_progress") return "El profesional marcó tu reserva como en proceso. Revisa tu lista de reservas.";
+    if (status === "in_progress") return "El asociado marcó tu reserva como en proceso. Revisa tu lista de reservas.";
     if (status === "completed") return "El servicio fue completado. Puedes revisar la reserva y dejar tu calificación cuando corresponda.";
     return "La reserva fue actualizada.";
   }
   if (type === "booking" && d.type === "new_booking") {
-    return "Tienes una nueva solicitud de reserva. Revisa el detalle en la pagina de notificaciones.";
+    return "Tienes una nueva solicitud de reserva. Revisa el detalle en tu Panel Asociado.";
   }
   // 1) Mensajes de reserva (comunes)
   if (type === "booking_confirmed_by_client") {
@@ -253,7 +253,7 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
       const name = d.userName ?? d.data?.userName;
       const amount = d.amountFormatted ?? d.data?.amountFormatted ?? d.amount ?? d.data?.amount;
       if (name && amount) return `${name} solicitó retirar $${amount} USD. Revisa Solicitudes de Retiro en el Panel de Administración.`;
-      return "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.";
+      return "Un asociado solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.";
     }
     if (d.type === "withdrawal_processed_by_other") {
       if (typeof d.message === "string") return d.message;
