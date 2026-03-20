@@ -19,7 +19,7 @@ export function Footer() {
               <span className="text-xl font-bold font-display text-primary">GENFEB</span>
             </Link>
             <p className="text-muted-foreground text-sm leading-relaxed max-w-xs">
-              Conectándote con los mejores profesionales y servicios técnicos de la ciudad. Simple, rápido y confiable.
+              Conectándote con los mejores asociados y servicios técnicos de la ciudad. Simple, rápido y confiable.
             </p>
             <div className="flex gap-4">
               <a href="#" className="text-muted-foreground hover:text-primary transition-colors"><Facebook className="h-5 w-5" /></a>
@@ -35,7 +35,7 @@ export function Footer() {
             <ul className="space-y-3 text-sm text-muted-foreground">
               <li><Link href="/explore" className="hover:text-primary transition-colors">Explorar Servicios</Link></li>
               <li><Link href="/categories" className="hover:text-primary transition-colors">Categorías</Link></li>
-              {showBecomePro && <li><Link href="/become-pro" className="hover:text-primary transition-colors">Conviértete en Profesional</Link></li>}
+              {showBecomePro && <li><Link href="/become-pro" className="hover:text-primary transition-colors">Conviértete en Asociado</Link></li>}
             </ul>
           </div>
 

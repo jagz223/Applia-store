@@ -113,9 +113,9 @@ export default function ServiceDetails() {
   if (!service) {
     return (
       <div className="container py-20 text-center">
-        <h1 className="text-2xl font-bold">Service not found</h1>
+        <h1 className="text-2xl font-bold">Servicio no encontrado</h1>
         <Link href="/explore">
-          <Button variant="link">Back to Explore</Button>
+          <Button variant="link">Volver a explorar</Button>
         </Link>
       </div>
     );
@@ -152,7 +152,7 @@ export default function ServiceDetails() {
       </AlertDialog>
 
       <Link href="/explore" className="inline-flex items-center text-muted-foreground hover:text-primary mb-6 transition-colors">
-        <ArrowLeft className="mr-2 h-4 w-4" /> Back to Services
+        <ArrowLeft className="mr-2 h-4 w-4" /> Volver a los servicios
       </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -182,7 +182,7 @@ export default function ServiceDetails() {
           </div>
 
           <div className="border-t border-border/50 pt-8">
-            <h3 className="text-xl font-bold font-display mb-6">About the Provider</h3>
+            <h3 className="text-xl font-bold font-display mb-6">Acerca del asociado</h3>
             <div className="flex items-start gap-4">
               <div className="h-16 w-16 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-2xl overflow-hidden">
                 {service.provider?.user?.profileImageUrl ? (
@@ -200,7 +200,7 @@ export default function ServiceDetails() {
                 <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
                   <span>{service.provider.profession}</span>
                   <span>•</span>
-                  <span>{service.provider.yearsExperience} years exp</span>
+                  <span>{service.provider.yearsExperience} años de experiencia</span>
                 </div>
                 <p className="text-muted-foreground">{service.provider.bio}</p>
               </div>
@@ -218,7 +218,7 @@ export default function ServiceDetails() {
               </div>
               {service.provider.isVerified && (
                 <div className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded-full text-xs font-bold">
-                  <ShieldCheck className="h-3 w-3" /> Verified
+                  <ShieldCheck className="h-3 w-3" /> Verificado
                 </div>
               )}
             </div>
@@ -227,8 +227,8 @@ export default function ServiceDetails() {
               <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
                 <Clock className="h-5 w-5 text-muted-foreground" />
                 <div>
-                  <p className="text-xs font-bold text-foreground">Response Time</p>
-                  <p className="text-xs text-muted-foreground">Usually responds in 1 hour</p>
+                  <p className="text-xs font-bold text-foreground">Tiempo de respuesta</p>
+                  <p className="text-xs text-muted-foreground">Suele responder en 1 hora</p>
                 </div>
               </div>
             </div>
@@ -263,14 +263,14 @@ export default function ServiceDetails() {
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                   <DialogTrigger asChild>
                     <Button className="w-full h-12 text-lg shadow-lg shadow-primary/20 hover:scale-105 transition-transform">
-                      Book Now
+                      Reservar ahora
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>
-                      <DialogTitle>Book Service</DialogTitle>
+                      <DialogTitle>Reservar servicio</DialogTitle>
                       <DialogDescription>
-                        Select a date to request this service from {service.provider?.user?.firstName ?? "el profesional"}.
+                        Selecciona una fecha para solicitar este servicio a {service.provider?.user?.firstName ?? "el asociado"}.
                       </DialogDescription>
                     </DialogHeader>
                     <div className="py-4 space-y-4">
@@ -284,9 +284,9 @@ export default function ServiceDetails() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">Notes for provider</label>
+                        <label className="text-sm font-medium">Notas para el asociado</label>
                         <Textarea 
-                          placeholder="Describe your needs..." 
+                          placeholder="Describe tus necesidades..."
                           value={notes} 
                           onChange={(e) => setNotes(e.target.value)}
                         />
@@ -294,7 +294,7 @@ export default function ServiceDetails() {
                     </div>
                     <DialogFooter>
                       <Button onClick={handleBooking} disabled={createBooking.isPending}>
-                        {createBooking.isPending ? "Booking..." : "Confirm Booking"}
+                        {createBooking.isPending ? "Reservando..." : "Confirmar reserva"}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -302,12 +302,12 @@ export default function ServiceDetails() {
                )
             ) : (
               <Button className="w-full h-12 text-lg" variant="outline" asChild>
-                <Link href="/login">Log in to Book</Link>
+                <Link href="/login">Inicia sesión para reservar</Link>
               </Button>
             )}
             
             <p className="text-xs text-center text-muted-foreground">
-              You won't be charged yet.
+              Todavía no se te cobrará.
             </p>
           </div>
         </div>

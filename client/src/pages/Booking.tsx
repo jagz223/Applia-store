@@ -70,11 +70,12 @@ function ProviderOptionCard({
       type="button"
       onClick={() => onSelect(provider.id, provider.firstServiceId)}
       className={`
-        w-full p-4 rounded-lg border text-left transition-all flex items-center justify-between
+        w-full p-4 rounded-lg border text-left transition-all flex flex-col items-start gap-3
+        sm:flex-row sm:items-center sm:justify-between
         ${selected ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}
       `}
     >
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3 w-full">
         <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden shrink-0">
           {provider.profileImageUrl ? (
             <img src={provider.profileImageUrl} alt="" className="w-full h-full object-cover" />
@@ -82,10 +83,10 @@ function ProviderOptionCard({
             <User className="w-6 h-6 text-primary" />
           )}
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="font-medium">{provider.name}</p>
           <p className="text-sm text-muted-foreground">{provider.profession}</p>
-          <div className="flex items-center gap-1 mt-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
             <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
             <span className="text-sm">{provider.rating > 0 ? provider.rating.toFixed(1) : "—"}</span>
             <span className="text-xs text-muted-foreground">({provider.reviewCount} reseñas)</span>
@@ -97,8 +98,8 @@ function ProviderOptionCard({
           </div>
         </div>
       </div>
-      <div className="text-right shrink-0">
-        <p className="font-bold text-lg">${Number(provider.price).toFixed(0)}</p>
+      <div className="w-full text-left sm:w-auto sm:text-right">
+        <p className="font-bold text-base sm:text-lg">${Number(provider.price).toFixed(0)}</p>
         <p className="text-xs text-muted-foreground">desde</p>
       </div>
     </button>
@@ -115,7 +116,7 @@ export default function Booking() {
   /** Dirección/ubicación del servicio (geolocalización); no confundir con useLocation de wouter. */
   const [userLocation, setUserLocation] = useState("");
   const [locationLoading, setLocationLoading] = useState(false);
-  const hasValidLocation = location.trim().length > 0;
+  const hasValidLocation = userLocation.trim().length > 0;
   const [notes, setNotes] = useState("");
   const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
   const { toast } = useToast();
@@ -172,8 +173,8 @@ export default function Booking() {
       const p = s.provider;
       if (!p?.id) continue;
       const name = p.user
-        ? [p.user.firstName, p.user.lastName].filter(Boolean).join(" ").trim() || (p.user as { name?: string }).name || "Profesional"
-        : "Profesional";
+        ? [p.user.firstName, p.user.lastName].filter(Boolean).join(" ").trim() || (p.user as { name?: string }).name || "Asociado"
+        : "Asociado";
       const price = typeof s.price === "string" ? Number(s.price) : Number(s.price);
       if (!byProvider.has(p.id)) {
         byProvider.set(p.id, {
@@ -277,7 +278,7 @@ export default function Booking() {
       toast({
         variant: "destructive",
         title: "Datos incompletos",
-        description: "Selecciona profesional y fecha.",
+        description: "Selecciona asociado y fecha.",
       });
       return;
     }
@@ -367,7 +368,7 @@ export default function Booking() {
               Reserva tu <span className="text-gradient-primary">Servicio</span>
             </h1>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Encuentra profesionales verificados, técnicos especializados y consultores. 
+              Encuentra asociados verificados, técnicos especializados y consultores.
               Reserva online con confirmación inmediata.
             </p>
           </motion.div>
@@ -450,7 +451,7 @@ export default function Booking() {
                             </Button>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            🎯 La ubicación nos permite mostrarte profesionales cercanos y fijar el punto del servicio
+                            🎯 La ubicacion nos permite mostrarte asociados cercanos y fijar el punto del servicio
                           </p>
                         </div>
 
@@ -510,21 +511,21 @@ export default function Booking() {
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                           <User className="w-5 h-5 text-primary" />
-                          Selecciona Profesional
+                          Selecciona Asociado
                         </CardTitle>
                         <CardDescription>
-                          Profesionales con servicios en la categoría elegida
+                          Asociados con servicios en la categoria elegida
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
                         {isLoadingServices ? (
                           <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
                             <Loader2 className="h-6 w-6 animate-spin" />
-                            <span>Cargando profesionales...</span>
+                            <span>Cargando asociados...</span>
                           </div>
                         ) : !providersInCategory.length ? (
                           <p className="text-center py-8 text-muted-foreground">
-                            No hay profesionales con servicios en esta categoría. Prueba otra categoría.
+                            No hay asociados con servicios en esta categoria. Prueba otra categoria.
                           </p>
                         ) : (
                           <div className="space-y-4">
@@ -624,7 +625,7 @@ export default function Booking() {
                               </span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-muted-foreground">Profesional:</span>
+                              <span className="text-muted-foreground">Asociado:</span>
                               <span>{providersInCategory.find((p) => String(p.id) === selectedProvider)?.name ?? "—"}</span>
                             </div>
                             <div className="flex justify-between">

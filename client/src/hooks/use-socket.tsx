@@ -182,7 +182,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
         debouncedRefetch(queryClient, ["/api/bookings"]);
         toast({
-          title: "Reserva confirmada por el profesional",
+          title: "Reserva confirmada por el asociado",
           description: "Confirma el pago en Mis Reservas para retener los fondos.",
         });
       }
@@ -214,7 +214,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           description:
             amountFormatted && providerNetFormatted && commissionFormatted
               ? `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (90%). Comisión: $${commissionFormatted} USD (10%).`
-              : "Recuerda que el profesional recibe el 90% del monto acordado.",
+              : "Recuerda que el asociado recibe el 90% del monto acordado.",
         });
       }
       if (type === "booking_cancelled") {
@@ -234,7 +234,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         const dateFormatted = notification?.data?.dateFormatted ?? notification?.data?.data?.dateFormatted;
         toast({
           title: "Se cambió la fecha del servicio",
-          description: dateFormatted ? `Nueva fecha y hora: ${dateFormatted}. Revisa tu reserva.` : "El profesional actualizó la fecha. Revisa Mis Reservas.",
+          description: dateFormatted ? `Nueva fecha y hora: ${dateFormatted}. Revisa tu reserva.` : "El asociado actualizó la fecha. Revisa Mis Reservas.",
         });
       }
       if (type === "booking_cost_changed") {
@@ -243,7 +243,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         const amount = notification?.data?.amountFormatted ?? notification?.data?.data?.amountFormatted ?? notification?.data?.amount;
         toast({
           title: "Se actualizó el monto del servicio",
-          description: amount != null ? `El nuevo monto es $${amount} USD. Revisa tu reserva.` : "El profesional actualizó el monto. Revisa Mis Reservas.",
+          description: amount != null ? `El nuevo monto es $${amount} USD. Revisa tu reserva.` : "El asociado actualizó el monto. Revisa Mis Reservas.",
         });
       }
       if (type === "withdrawal_approved") {
@@ -316,7 +316,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         if (status === "in_progress") {
           toast({
             title: "Servicio en proceso",
-            description: "El profesional marcó tu reserva como en proceso. Revisa tu lista de reservas.",
+            description: "El asociado marcó tu reserva como en proceso. Revisa tu lista de reservas.",
           });
         } else if (status === "completed") {
           toast({
@@ -360,7 +360,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_KEY]);
         toast({
           title: "Nueva solicitud de retiro",
-          description: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
+          description: "Un asociado solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
         });
       }
       // Otro admin ya procesó el retiro (aprobado o rechazado): actualizar lista Payouts para que desaparezca el usuario

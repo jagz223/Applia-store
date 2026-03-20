@@ -32,7 +32,7 @@ export function ExploreCategoryCards({
       <div className="text-center mb-8">
         <h2 className="text-2xl font-display font-bold text-foreground mb-2">Servicios por categoría</h2>
         <p className="text-muted-foreground text-sm">
-          Haz clic en una categoría para ver los servicios de sus profesionales
+          Haz clic en una categoría para ver los servicios de sus asociados
         </p>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-4 md:gap-6">
@@ -66,7 +66,7 @@ export function ExploreCategoryCards({
                   </div>
                   <h3 className="text-lg font-bold mb-1">{getCategoryDisplayName(cat)}</h3>
                   <p className="text-sm text-muted-foreground">
-                    {available ? "Disponible" : "Sin profesionales"}
+                    {available ? "Disponible" : "Sin asociados"}
                   </p>
                 </CardContent>
               </Card>

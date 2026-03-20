@@ -372,7 +372,7 @@ export default function Register() {
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="professional" id="professional" />
                           <Label htmlFor="professional" className="cursor-pointer">
-                            Profesional
+                            Asociado
                           </Label>
                         </div>
                       </RadioGroup>

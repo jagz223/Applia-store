@@ -115,7 +115,7 @@ type UserOption = { id: string; name: string; email: string; role?: string };
 const SALDO_DEBOUNCE_MS = 1000;
 const ROLE_LABELS: Record<string, string> = {
   client: "Cliente",
-  professional: "Profesional",
+  professional: "Asociado",
   admin: "Administrador",
 };
 
@@ -193,7 +193,7 @@ function WithdrawalHistorySection({ formatUsd }: { formatUsd: (n: number) => str
               <thead>
                 <tr className="border-b border-border bg-muted/50">
                   <th className="text-left p-3 font-medium">Fecha</th>
-                  <th className="text-left p-3 font-medium">Profesional</th>
+                  <th className="text-left p-3 font-medium">Asociado</th>
                   <th className="text-left p-3 font-medium">Monto</th>
                   <th className="text-left p-3 font-medium">Banco</th>
                   <th className="text-left p-3 font-medium">Número de cuenta</th>
@@ -294,7 +294,7 @@ function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; descriptio
           toast({
             title: pendingAction === "approve" ? "Pago aprobado" : "Retiro rechazado",
             description: pendingAction === "approve"
-              ? "El retiro fue registrado y el profesional será notificado."
+              ? "El retiro fue registrado y el asociado será notificado."
               : "Los fondos fueron devueltos a la billetera del usuario.",
           });
         },
@@ -348,7 +348,7 @@ function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; descriptio
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/50">
-                      <th className="text-left p-3 font-medium">Profesional</th>
+                      <th className="text-left p-3 font-medium">Asociado</th>
                       <th className="text-left p-3 font-medium">Monto a retirar</th>
                       <th className="text-left p-3 font-medium">Banco</th>
                       <th className="text-left p-3 font-medium">Número de cuenta</th>
@@ -439,7 +439,7 @@ function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; descriptio
           </DialogTitle>
           <DialogDescription>
             {pendingAction === "approve"
-              ? "Confirma que realizaste la transferencia bancaria al profesional. El usuario recibirá una notificación sin que se muestre tu nombre."
+              ? "Confirma que realizaste la transferencia bancaria al asociado. El usuario recibirá una notificación sin que se muestre tu nombre."
               : "Los fondos volverán a la billetera del usuario. Opcionalmente indica el motivo (ej. datos bancarios incorrectos, banco en mantenimiento)."}
           </DialogDescription>
         </DialogHeader>
@@ -838,7 +838,7 @@ export default function AdminPanel() {
                                 </Avatar>
                                 <div>
                                   <p className="font-medium">{provider.name}</p>
-                                  <p className="text-sm text-gray-500">{provider.profession ?? provider.service ?? "Profesional"}</p>
+                                  <p className="text-sm text-gray-500">{provider.profession ?? provider.service ?? "Asociado"}</p>
                                 </div>
                               </div>
                               <div className="flex gap-2">
@@ -1005,13 +1005,13 @@ export default function AdminPanel() {
             <Card>
               <CardHeader>
                 <CardTitle>Proveedores</CardTitle>
-                <CardDescription>Profesionales con servicios publicados</CardDescription>
+                <CardDescription>Asociados con servicios publicados</CardDescription>
               </CardHeader>
               <CardContent>
                 {adminProvidersLoading ? (
                   <div className="py-10 text-center text-sm text-muted-foreground">Cargando proveedores…</div>
                 ) : providersWithServices.length === 0 ? (
-                  <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay profesionales con servicios publicados.</div>
+                  <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay asociados con servicios publicados.</div>
                 ) : (
                   <div className="space-y-4">
                     {(() => {
@@ -1036,7 +1036,7 @@ export default function AdminPanel() {
                                   <div className="min-w-0">
                                     <p className="font-medium truncate">{p.name}</p>
                                     <p className="text-sm text-gray-500 truncate">
-                                      {(p.profession || p.category || "Profesional")} · {p.serviceCount} servicio(s)
+                                      {(p.profession || p.category || "Asociado")} · {p.serviceCount} servicio(s)
                                     </p>
                                   </div>
                                 </div>
@@ -1161,8 +1161,8 @@ export default function AdminPanel() {
                           : "Cliente";
                         const providerUser = b.service?.provider?.user;
                         const providerName = providerUser
-                          ? [providerUser.firstName ?? providerUser.name, providerUser.lastName].filter(Boolean).join(" ") || "Profesional"
-                          : "Profesional";
+                          ? [providerUser.firstName ?? providerUser.name, providerUser.lastName].filter(Boolean).join(" ") || "Asociado"
+                          : "Asociado";
                         const serviceTitle = b.service?.title ?? "Servicio";
                         const savedCost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
                         const refPrice = b.service?.price != null ? Number(b.service.price) : 0;
@@ -1194,7 +1194,7 @@ export default function AdminPanel() {
                               <div className="min-w-0">
                                 <p className="font-semibold truncate">{serviceTitle}</p>
                                 <p className="text-sm text-muted-foreground truncate">
-                                  Cliente: {clientName} · Profesional: {providerName}
+                                  Cliente: {clientName} · Asociado: {providerName}
                                 </p>
                               </div>
                               <div className="flex flex-col items-end gap-1 shrink-0">
@@ -1205,7 +1205,7 @@ export default function AdminPanel() {
                                 <p className="text-xs text-muted-foreground">
                                   Comisión (10%):{" "}
                                   {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(commission)} ·
-                                  Neto profesional:{" "}
+                                  Neto asociado:{" "}
                                   {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(providerNet)}
                                 </p>
                               </div>
@@ -1997,7 +1997,7 @@ export default function AdminPanel() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-medium">Comisiones</p>
-                      <p className="text-sm text-gray-500">10% por transacción (90% para el profesional)</p>
+                      <p className="text-sm text-gray-500">10% por transacción (90% para el asociado)</p>
                     </div>
                     <Button variant="outline">Configurar</Button>
                   </div>

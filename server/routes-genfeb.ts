@@ -165,8 +165,8 @@ export async function registerGenFebRoutes(
         // Push FCM para cuando el profesional no tiene la app abierta
         void notificationService
           .sendPushToUser(providerUserId, {
-            title: "Nueva reserva",
-            body: "Tienes una nueva reserva. Revisa tus reservas para ver el detalle.",
+            title: "Nueva solicitud de reserva",
+            body: "Tienes una nueva solicitud de reserva. Revisa el detalle en tu Panel Asociado.",
             data: {
               url: `/professional-dashboard?tab=bookings&highlight=${(booking as { id: number }).id}`,
               type: "booking",
@@ -310,7 +310,7 @@ export async function registerGenFebRoutes(
           }
           void notificationService.sendPushToUser(providerUserId, {
             title: "Reserva cancelada",
-            body: "Un cliente canceló una reserva. Revisa tus reservas para ver el detalle.",
+            body: "El cliente canceló la reserva.",
             data: { url: "/professional-dashboard?tab=bookings", type: "booking_cancelled", bookingId: String(bookingId) },
           });
         }
@@ -330,9 +330,9 @@ export async function registerGenFebRoutes(
 
           const message = refundHappened
             ? amountFormatted
-              ? `El profesional canceló el servicio. Se te devolvieron ${amountFormatted} a tu billetera.`
-              : "El profesional canceló el servicio. Se te devolvió el monto retenido a tu billetera."
-            : "El profesional canceló el servicio. No se realizó ningún cobro.";
+              ? `El asociado canceló el servicio. Se te devolvieron ${amountFormatted} a tu billetera.`
+              : "El asociado canceló el servicio. Se te devolvió el monto retenido a tu billetera."
+            : "El asociado canceló el servicio. No se realizó ningún cobro.";
 
           const notifData = { bookingId, message };
           try {
@@ -376,8 +376,8 @@ export async function registerGenFebRoutes(
             });
           }
           void notificationService.sendPushToUser(uid, {
-            title: "Reserva confirmada por el profesional",
-            body: "Confirma el pago en Mis Reservas para retener los fondos y que el profesional pueda completar el trabajo.",
+            title: "Reserva confirmada por el asociado",
+            body: "Confirma el pago para retener los fondos.",
             data: { url: "/bookings", type: "booking_confirmed_by_provider", bookingId: String(bookingId) },
           });
         }
@@ -490,9 +490,11 @@ export async function registerGenFebRoutes(
         }
         void notificationService.sendPushToUser(providerUserId, {
           title: "Fondos agregados",
-          body: amountFormatted
-            ? `Se han retenido $${amountFormatted} USD a tu favor. Recibirás $${providerNetFormatted} USD (90%) y la plataforma tomará $${commissionFormatted} USD (10%). Ya puedes completar el servicio.`
-            : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+          body: amountFormatted && providerNetFormatted && commissionFormatted
+            ? `Se te han retenido $${amountFormatted} USD. Recibirás $${providerNetFormatted} USD (90%) y la plataforma tomará $${commissionFormatted} USD (10%). Completa el servicio para liberar los fondos.`
+            : amountFormatted
+              ? `Se te han retenido $${amountFormatted} USD. Completa el servicio para liberar los fondos.`
+              : "El cliente confirmó el pago.",
           data: { url: "/professional-dashboard?tab=bookings", type: "booking_confirmed_by_client", bookingId: String(bookingId) },
         });
       }
@@ -547,7 +549,7 @@ export async function registerGenFebRoutes(
           if (io) sendNotificationToUser(io, clientUserId, { type: "booking_cost_changed", data: notifData });
           void notificationService.sendPushToUser(clientUserId, {
             title: "Se actualizó el monto del servicio",
-            body: `El profesional cambió el monto a $${amountFormatted} USD. Revisa tu reserva.`,
+            body: `Nuevo monto: $${amountFormatted} USD. Revisa tu reserva.`,
             data: { url: `/bookings?highlight=${bookingId}`, type: "booking_cost_changed", bookingId: String(bookingId) },
           }).catch((err: Error) => console.error("[push] Error notificando cambio de monto:", err));
         } catch (e) {
@@ -579,7 +581,7 @@ export async function registerGenFebRoutes(
         if (io) sendNotificationToUser(io, userId, { type: "booking_cost_commission_reminder", data: proNotifData });
         void notificationService.sendPushToUser(userId, {
           title: "Recordatorio de comisión",
-          body: `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (90%). La plataforma tomará $${commissionFormatted} USD (10%).`,
+          body: `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (90%). Comisión de plataforma: $${commissionFormatted} USD (10%).`,
           data: { url: `/professional-dashboard?tab=bookings&highlight=${bookingId}`, type: "booking_cost_commission_reminder", bookingId: String(bookingId) },
         }).catch((err: Error) => console.error("[push] Error notificando recordatorio de comisión:", err));
       } catch (e) {
@@ -631,7 +633,7 @@ export async function registerGenFebRoutes(
           if (io) sendNotificationToUser(io, clientUserId, { type: "booking_schedule_changed", data: notifData });
           void notificationService.sendPushToUser(clientUserId, {
             title: "Se cambió la fecha del servicio",
-            body: `La nueva fecha y hora es: ${dateFormatted}. Revisa tu reserva.`,
+            body: `Nueva fecha y hora: ${dateFormatted}.`,
             data: { url: `/bookings?highlight=${bookingId}`, type: "booking_schedule_changed", bookingId: String(bookingId) },
           }).catch((err: Error) => console.error("[push] Error notificando cambio de fecha:", err));
         } catch (e) {
@@ -889,7 +891,7 @@ export async function registerGenFebRoutes(
           if (!adminId) return;
           return notificationService.sendPushToUser(adminId, {
             title: "Nueva solicitud de retiro",
-            body: `${userName} solicitó retirar ${amountFormatted} USD. Revisa Solicitudes de Retiro en el panel.`,
+            body: `${userName} solicitó retirar $${amountFormatted} USD. Revisa Solicitudes de Retiro en el Panel de Administración.`,
             data: {
               url: "/admin?tab=payouts",
               type: "admin",
@@ -1483,6 +1485,7 @@ export async function registerGenFebRoutes(
         recipientId,
         conversationId: message.conversationId,
         preview: message.content.slice(0, 120),
+        senderId: userId,
       });
       res.status(201).json(message);
     } catch (error) {
