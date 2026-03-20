@@ -193,11 +193,28 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         debouncedRefetch(queryClient, ["/api/bookings"]);
         debouncedRefetch(queryClient, ["/api/wallet/me"]);
         const amount = notification?.data?.amountFormatted ?? notification?.data?.amount;
+        const providerNet = notification?.data?.providerNetFormatted ?? notification?.data?.providerNet;
+        const commission = notification?.data?.commissionFormatted ?? notification?.data?.commission;
         toast({
           title: "Fondos agregados",
-          description: amount
-            ? `Se te han agregado $${amount} USD (retenidos). Ya puedes completar el servicio.`
-            : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+          description:
+            amount && providerNet && commission
+              ? `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (90%) y la plataforma tomará $${commission} USD (10%). Ya puedes completar el servicio.`
+              : amount
+                ? `Se te han agregado $${amount} USD (retenidos). Ya puedes completar el servicio.`
+                : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+        });
+      }
+      if (type === "booking_cost_commission_reminder") {
+        const amountFormatted = notification?.data?.amountFormatted ?? notification?.data?.amount;
+        const providerNetFormatted = notification?.data?.providerNetFormatted ?? notification?.data?.providerNet;
+        const commissionFormatted = notification?.data?.commissionFormatted ?? notification?.data?.commission;
+        toast({
+          title: "Recordatorio de comisión",
+          description:
+            amountFormatted && providerNetFormatted && commissionFormatted
+              ? `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (90%). Comisión: $${commissionFormatted} USD (10%).`
+              : "Recuerda que el profesional recibe el 90% del monto acordado.",
         });
       }
       if (type === "booking_cancelled") {
@@ -292,6 +309,22 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       debouncedRefetch(queryClient, ["/api/bookings/provider"]);
       debouncedRefetch(queryClient, ["/api/bookings"]);
+
+      // Notificación/toast más precisa para cambios de estado (in_progress/completed)
+      if (notification?.type === "booking_update") {
+        const status = notification?.booking?.status as string | undefined;
+        if (status === "in_progress") {
+          toast({
+            title: "Servicio en proceso",
+            description: "El profesional marcó tu reserva como en proceso. Revisa tu lista de reservas.",
+          });
+        } else if (status === "completed") {
+          toast({
+            title: "Servicio completado",
+            description: "El servicio fue completado. Puedes revisar la reserva y dejar tu calificación cuando corresponda.",
+          });
+        }
+      }
     });
 
     newSocket.on("notification:admin", (notification: any) => {

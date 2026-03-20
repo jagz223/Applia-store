@@ -294,6 +294,10 @@ export const api = {
             pendingBalance: z.number(),
             /** Fondos en tránsito por solicitud de retiro; independiente de pendingBalance. */
             withdrawingFunds: z.number().optional().default(0),
+            /** Calificación promedio del usuario (1-5). */
+            rating: z.number().optional().default(5),
+            /** Número de valoraciones recibidas. */
+            ratingCount: z.number().optional().default(0),
           }),
         },
       },

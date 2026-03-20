@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { useCategories, useServices, useSubcategories } from "@/hooks/use-mango-data";
 import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
-import { ServiceCard } from "@/components/ServiceCard";
+import { ServiceListItem } from "@/components/ServiceListItem";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -313,15 +313,15 @@ export default function Explore() {
         ) : (
           <>
             <p className="text-muted-foreground mb-6">{services?.length} servicios encontrados</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className="flex flex-col gap-4">
               {services?.map((service, index) => (
                 <motion.div
                   key={service.id}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
+                  transition={{ delay: index * 0.03 }}
                 >
-                  <ServiceCard service={service} />
+                  <ServiceListItem service={service} />
                 </motion.div>
               ))}
             </div>

@@ -20,6 +20,7 @@
     "seed:wallet-fields": "tsx script/seed-wallet-fields.ts",
     "seed:wallet-balance": "tsx script/seed-wallet-balance.ts",
     "seed:pending-balance": "tsx script/seed-pending-balance.ts",
+    "seed:user-ratings": "tsx script/seed-user-ratings.ts",
     "prod": "npm run build && npm run start"
   },
   "dependencies": {
@@ -74,6 +75,7 @@
     "framer-motion": "^11.18.2",
     "input-otp": "^1.4.2",
     "jsonwebtoken": "^9.0.3",
+    "jspdf": "^4.2.1",
     "lucide-react": "^0.453.0",
     "memoizee": "^0.4.17",
     "memorystore": "^1.6.7",

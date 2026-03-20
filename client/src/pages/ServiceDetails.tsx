@@ -1,7 +1,7 @@
 import { useRoute, Link, useLocation } from "wouter";
-import { useService, useCreateBooking, useCurrentProvider, useBookings } from "@/hooks/use-mango-data";
+import { useService, useCreateBooking, useCurrentProvider, useBookings, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
-import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft, MessageSquare, Pencil } from "lucide-react";
+import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft, MessageSquare, Pencil, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -22,6 +22,16 @@ import { useToast } from "@/hooks/use-toast";
 import { api } from "@shared/routes";
 import { getCategoryDisplayName } from "@shared/default-categories";
 import { useSocketBookings } from "@/hooks/use-socket";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function ServiceDetails() {
   const [, params] = useRoute("/service/:id");
@@ -31,13 +41,21 @@ export default function ServiceDetails() {
   const { user, isAuthenticated } = useAuth();
   const { data: myProviderProfile } = useCurrentProvider();
   const { data: myBookings } = useBookings();
+  const { data: walletData, isLoading: walletLoading } = useWallet({ enabled: isAuthenticated });
+  const providerId = Number((service as any)?.providerId ?? (service as any)?.provider?.id);
+  const {
+    data: completedCount,
+    isLoading: completedCountLoading,
+  } = useProviderCompletedCount(Number.isFinite(providerId) ? providerId : undefined);
   
   const createBooking = useCreateBooking();
   const { notifyNewBooking } = useSocketBookings();
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [notes, setNotes] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
   const { toast } = useToast();
+  const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
 
   const handleBooking = () => {
     if (!date) return;
@@ -51,6 +69,20 @@ export default function ServiceDetails() {
       return;
     }
     
+    if (walletLoading) {
+      toast({
+        title: "Validando saldo",
+        description: "Estamos cargando tu saldo actual, intenta de nuevo en un momento.",
+      });
+      return;
+    }
+
+    const servicePrice = Number(service.price ?? 0);
+    if (Number.isFinite(servicePrice) && servicePrice > 0 && walletBalance < servicePrice) {
+      setInsufficientFundsOpen(true);
+      return;
+    }
+
     createBooking.mutate(
       {
         userId: user.id,
@@ -96,6 +128,29 @@ export default function ServiceDetails() {
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
+      <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Saldo insuficiente</AlertDialogTitle>
+            <AlertDialogDescription>
+              No tienes saldo suficiente en tu wallet para pedir este servicio. Recarga tu saldo para continuar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setInsufficientFundsOpen(false);
+                setDialogOpen(false);
+                setLocation("/recharge");
+              }}
+            >
+              Recargar saldo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Link href="/explore" className="inline-flex items-center text-muted-foreground hover:text-primary mb-6 transition-colors">
         <ArrowLeft className="mr-2 h-4 w-4" /> Back to Services
       </Link>
@@ -104,21 +159,18 @@ export default function ServiceDetails() {
         
         {/* LEFT COLUMN: Service Info */}
         <div className="lg:col-span-2 space-y-8">
-          <div className="rounded-3xl overflow-hidden shadow-xl">
-             {/* Unsplash placeholder image */}
-            <img 
-              src={service.imageUrl || "https://images.unsplash.com/photo-1581092921461-eab62e97a783?w=1000&h=600&fit=crop"} 
-              alt={service.title} 
-              className="w-full h-auto object-cover max-h-[500px]"
-            />
-          </div>
-          
+          {/* Nota: no mostramos foto del servicio. Solo mostramos foto del profesional en el círculo. */}
+
           <div>
             <div className="flex items-center gap-3 mb-4">
               <Badge className="bg-primary/10 text-primary hover:bg-primary/20">{getCategoryDisplayName(service.category)}</Badge>
               <div className="flex items-center text-amber-500 font-bold text-sm">
                 <Star className="h-4 w-4 fill-current mr-1" />
-                {Number(service.provider.rating).toFixed(1)} ({service.provider.reviewCount} reviews)
+                {Number((service.provider?.user as { rating?: number } | undefined)?.rating ?? 5).toFixed(1)} (
+                {Number((service.provider?.user as { ratingCount?: number } | undefined)?.ratingCount ?? 0)} reseñas)
+                <span className="font-normal text-xs text-muted-foreground ml-2">
+                  · {completedCountLoading ? "..." : `${completedCount ?? 0}`} servicios completados
+                </span>
               </div>
             </div>
             
@@ -132,8 +184,16 @@ export default function ServiceDetails() {
           <div className="border-t border-border/50 pt-8">
             <h3 className="text-xl font-bold font-display mb-6">About the Provider</h3>
             <div className="flex items-start gap-4">
-              <div className="h-16 w-16 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-2xl">
-                {service.provider?.user?.firstName?.[0] ?? service.provider?.user?.lastName?.[0] ?? "P"}
+              <div className="h-16 w-16 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-2xl overflow-hidden">
+                {service.provider?.user?.profileImageUrl ? (
+                  <img
+                    src={service.provider?.user?.profileImageUrl}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <User className="w-7 h-7" />
+                )}
               </div>
               <div>
                 <h4 className="font-bold text-lg">{service.provider?.user?.firstName ?? ""} {service.provider?.user?.lastName ?? ""}</h4>

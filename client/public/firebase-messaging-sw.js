@@ -31,13 +31,20 @@ self.addEventListener("push", function (event) {
   const title = notification.title || (data && data.title) || "Nuevo mensaje";
   const body = notification.body || (data && data.body) || "Tienes una nueva notificación";
   const url = (data && data.url) || "/";
+  // Usar tag dinámico para evitar que una notificación reemplace a otra
+  // (con un tag fijo se “pisan” las notificaciones cuando llegan varias).
+  const tagType =
+    (data && (data.type || data.withdrawalType || data.conversationId || data.transferId)) || "genfeb";
+  const tagId =
+    (data && (data.bookingId || data.messageId || data.transferId || data.conversationId)) || String(Date.now());
+  const tag = `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
 
   event.waitUntil(
     self.registration
       .showNotification(title, {
         body: body,
         icon: "/logo.png",
-        tag: "genfeb-chat",
+        tag: tag,
         renotify: true,
         data: { url: url },
       })

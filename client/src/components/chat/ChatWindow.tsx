@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { User, ArrowLeft, FileText, Calendar, MapPin, Bell, BellOff, Loader2, Info } from "lucide-react";
+import { User, ArrowLeft, MapPin, Bell, BellOff, Loader2, Info } from "lucide-react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { MessageList } from "./MessageList";
 import { MessageInput } from "./MessageInput";
@@ -118,21 +118,13 @@ export function ChatWindow({
       </header>
 
       <div className="px-4 py-2 border-b border-border flex flex-wrap gap-2 shrink-0 min-w-0 overflow-hidden">
-        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border shrink-0">
-          <Calendar className="w-3 h-3 mr-1" />
-          Agendar
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="text-xs h-7 border-border shrink-0">
-          <FileText className="w-3 h-3 mr-1" />
-          Compartir contrato
-        </Button>
         <Button
           type="button"
           variant="outline"
           size="sm"
           className="text-xs h-7 border-border shrink-0"
           onClick={onShareLocation}
-          disabled={isSending}
+          disabled={!onShareLocation || isSending}
         >
           <MapPin className="w-3 h-3 mr-1" />
           Ubicación

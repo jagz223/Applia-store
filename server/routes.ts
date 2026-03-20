@@ -71,6 +71,24 @@ export async function registerRoutes(
     res.json(service);
   });
 
+  // GET /api/providers/:providerId/completed-count - Cantidad de servicios completados por un proveedor
+  // (usado para mostrar prueba social en listas públicas)
+  app.get("/api/providers/:providerId/completed-count", async (req: any, res: any) => {
+    try {
+      const providerIdRaw = req.params.providerId;
+      const providerId = Number(providerIdRaw);
+      if (!Number.isFinite(providerId) || providerId <= 0) {
+        return res.status(400).json({ message: "providerId inválido" });
+      }
+      const bookings = await genFebStorage.getBookingsByProvider(providerId);
+      const completedCount = (bookings ?? []).filter((b: any) => b?.status === "completed").length;
+      res.json({ providerId, completedCount });
+    } catch (error) {
+      console.error("Error fetching provider completed count:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/me/services", authenticateJWT, async (req: any, res) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });

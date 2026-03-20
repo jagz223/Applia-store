@@ -30,6 +30,13 @@ import { motion } from "framer-motion";
 export default function HomePage() {
   const showBecomePro = useShowBecomePro();
   const { data: categories, isLoading } = useCategories();
+  // Oculta el panel de búsqueda en la home por ahora.
+  // Se reutilizará en una iteración futura.
+  const SHOW_HOME_SEARCH_PANEL = false;
+  // Oculta el panel de estadísticas (KPIs) en la home por ahora.
+  const SHOW_HOME_STATS_SECTION = false;
+  // Oculta links del footer (Acerca de / Términos / Privacidad / Contacto).
+  const SHOW_HOME_FOOTER_LINKS = false;
 
   const features = [
     {
@@ -144,29 +151,31 @@ export default function HomePage() {
               </p>
 
               {/* Quick Search */}
-              <div className="p-4 rounded-xl bg-card/80 backdrop-blur border border-border">
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
-                    <input 
-                      type="text"
-                      placeholder="¿Qué servicio necesitas?"
-                      className="w-full h-12 pl-10 pr-4 rounded-lg bg-background border border-border focus:border-primary focus:outline-none"
-                    />
+              {SHOW_HOME_SEARCH_PANEL && (
+                <div className="p-4 rounded-xl bg-card/80 backdrop-blur border border-border">
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
+                      <input
+                        type="text"
+                        placeholder="¿Qué servicio necesitas?"
+                        className="w-full h-12 pl-10 pr-4 rounded-lg bg-background border border-border focus:border-primary focus:outline-none"
+                      />
+                    </div>
+                    <div className="relative sm:w-48">
+                      <MapPin className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
+                      <input
+                        type="text"
+                        placeholder="Ubicación"
+                        className="w-full h-12 pl-10 pr-4 rounded-lg bg-background border border-border focus:border-primary focus:outline-none"
+                      />
+                    </div>
+                    <Button className="h-12 px-8 bg-primary hover:bg-primary/90">
+                      Buscar
+                    </Button>
                   </div>
-                  <div className="relative sm:w-48">
-                    <MapPin className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
-                    <input 
-                      type="text"
-                      placeholder="Ubicación"
-                      className="w-full h-12 pl-10 pr-4 rounded-lg bg-background border border-border focus:border-primary focus:outline-none"
-                    />
-                  </div>
-                  <Button className="h-12 px-8 bg-primary hover:bg-primary/90">
-                   Buscar
-                  </Button>
                 </div>
-              </div>
+              )}
 
               <div className="flex flex-col sm:flex-row gap-4">
                 <Link href="/explore">
@@ -271,27 +280,29 @@ export default function HomePage() {
       </section>
 
       {/* STATS SECTION */}
-      <section className="py-12 border-y border-border bg-card/50">
-        <div className="container px-4 mx-auto max-w-7xl">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {stats.map((stat, index) => (
-              <motion.div 
-                key={index}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-                viewport={{ once: true }}
-                className="text-center"
-              >
-                <p className="text-3xl md:text-4xl font-display font-bold text-gradient-primary">
-                  {stat.value}
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">{stat.label}</p>
-              </motion.div>
-            ))}
+      {SHOW_HOME_STATS_SECTION && (
+        <section className="py-12 border-y border-border bg-card/50">
+          <div className="container px-4 mx-auto max-w-7xl">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+              {stats.map((stat, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  viewport={{ once: true }}
+                  className="text-center"
+                >
+                  <p className="text-3xl md:text-4xl font-display font-bold text-gradient-primary">
+                    {stat.value}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">{stat.label}</p>
+                </motion.div>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* FEATURES SECTION */}
       <section className="py-20">
@@ -444,12 +455,14 @@ export default function HomePage() {
                 <p className="text-sm text-muted-foreground">Eje central del ecosistema GENFECORP</p>
               </div>
             </div>
-            <div className="flex gap-6 text-sm text-muted-foreground">
-              <Link href="/about" className="hover:text-foreground transition-colors">Acerca de</Link>
-              <Link href="/terms" className="hover:text-foreground transition-colors">Términos</Link>
-              <Link href="/privacy" className="hover:text-foreground transition-colors">Privacidad</Link>
-              <Link href="/contact" className="hover:text-foreground transition-colors">Contacto</Link>
-            </div>
+            {SHOW_HOME_FOOTER_LINKS && (
+              <div className="flex gap-6 text-sm text-muted-foreground">
+                <Link href="/about" className="hover:text-foreground transition-colors">Acerca de</Link>
+                <Link href="/terms" className="hover:text-foreground transition-colors">Términos</Link>
+                <Link href="/privacy" className="hover:text-foreground transition-colors">Privacidad</Link>
+                <Link href="/contact" className="hover:text-foreground transition-colors">Contacto</Link>
+              </div>
+            )}
           </div>
         </div>
       </section>

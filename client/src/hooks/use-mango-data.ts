@@ -578,7 +578,90 @@ export function useWallet(options?: { enabled?: boolean }) {
   });
 }
 
+// ==========================================
+// RATINGS (calificaciones post-servicio)
+// ==========================================
+
+export type PendingRating = {
+  bookingId: number;
+  rateeUserId: string;
+  rateeName: string;
+  roleRated: "professional" | "client";
+  serviceTitle?: string;
+  completedAt?: string | Date;
+};
+
+export function usePendingRatings(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["/api/ratings/pending"],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/ratings/pending", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Failed to fetch pending ratings");
+      const data = (await res.json()) as { pending: PendingRating[] };
+      return data;
+    },
+    enabled: options?.enabled !== false,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useSubmitRating() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: {
+      bookingId: number;
+      ratedUserId: string;
+      roleRated: "professional" | "client";
+      stars: number;
+    }) => {
+      const token = getToken();
+      const res = await fetch("/api/ratings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al enviar la calificación");
+      }
+      return res.json() as Promise<{ ok: true }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/ratings/pending"] });
+      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      debouncedRefetch(queryClient, ["/api/ratings/pending"]);
+      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+    },
+  });
+}
+
 const PROFESSIONAL_STATS_KEY = "/api/professional/stats";
+
+const PROVIDER_COMPLETED_COUNT_BASE = "/api/providers";
+
+/**
+ * Cantidad de servicios completados por un proveedor.
+ * Se usa como prueba social en listados públicos (Explore / Booking / ServiceDetails).
+ */
+export function useProviderCompletedCount(providerId: number | undefined) {
+  return useQuery({
+    queryKey: [PROVIDER_COMPLETED_COUNT_BASE, providerId],
+    enabled: providerId != null && Number.isFinite(providerId),
+    retry: false,
+    queryFn: async () => {
+      const res = await fetch(`${PROVIDER_COMPLETED_COUNT_BASE}/${providerId}/completed-count`);
+      if (!res.ok) throw new Error("Failed to fetch provider completed count");
+      const data = (await res.json()) as { providerId: number; completedCount: number };
+      return data.completedCount ?? 0;
+    },
+  });
+}
 
 /** Estadísticas del profesional: servicios completados, rechazados y ganancias totales. */
 export function useProfessionalStats(options?: { enabled?: boolean }) {

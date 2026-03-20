@@ -10,7 +10,6 @@ import {
   TrendingUp, 
   TrendingDown, 
   DollarSign, 
-  Users, 
   Calendar,
   FileText,
   CreditCard,
@@ -31,49 +30,12 @@ import {
   Banknote
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import { useWalletTransfers } from "@/hooks/use-mango-data";
+import { useAuth } from "@/hooks/use-auth";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-
-// Mock data for dashboard
-const kpiData = [
-  {
-    title: "Ingresos Totales",
-    value: "$45,280",
-    change: "+12.5%",
-    trend: "up",
-    icon: DollarSign,
-    color: "text-accent",
-    bgColor: "bg-accent/10",
-  },
-  {
-    title: "Servicios Completados",
-    value: "156",
-    change: "+8.2%",
-    trend: "up",
-    icon: CheckCircle,
-    color: "text-primary",
-    bgColor: "bg-primary/10",
-  },
-  {
-    title: "Clientes Activos",
-    value: "89",
-    change: "+15.3%",
-    trend: "up",
-    icon: Users,
-    color: "text-secondary",
-    bgColor: "bg-secondary/10",
-  },
-  {
-    title: "Pendientes",
-    value: "23",
-    change: "-5.1%",
-    trend: "down",
-    icon: Clock,
-    color: "text-warning",
-    bgColor: "bg-warning/10",
-  },
-];
+import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 
 const monthlyData = [
   { month: "Ene", income: 12400, expenses: 8200 },
@@ -94,12 +56,100 @@ const servicesByCategory = [
 export default function Dashboard() {
   const [timeRange, setTimeRange] = useState("6m");
   const [transactionsPage, setTransactionsPage] = useState(1);
+  const [overviewPage, setOverviewPage] = useState(1);
 
-  const { data: recentTransfersData, isLoading: recentLoading } = useWalletTransfers({
-    page: 1,
-    limit: 5,
+  const { user } = useAuth();
+
+  // Ocultar la sección KPI que se ve en la imagen (Ingresos Totales / Servicios Completados / Pendientes),
+  // para que no se muestre como "panel económico" al público.
+  const SHOW_DASHBOARD_KPI_CARDS = false;
+  const SHOW_DASHBOARD_HEADER_ACTIONS = false;
+
+  const {
+    data: kpis,
+    isLoading: kpisLoading,
+    isError: kpisError,
+  } = useQuery({
+    queryKey: ["/api/reports/kpis", String(user?.id ?? "")],
+    enabled: !!user?.id,
+    retry: false,
+    queryFn: async () => {
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/reports/kpis", {
+        headers: {
+          "x-user-id": String(user?.id ?? ""),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudieron cargar KPIs");
+      }
+      return res.json() as Promise<{
+        totalIncome: number;
+        totalExpenses: number;
+        completedServices: number;
+        pendingBookings: number;
+        activeClients?: number;
+        monthlyGrowth?: number;
+        averageRating?: number;
+      }>;
+    },
   });
-  const recentTransfers = recentTransfersData?.transfers ?? [];
+
+  const formattedIncome = (() => {
+    const n = Number(kpis?.totalIncome ?? 0);
+    return `$${Math.round(n).toLocaleString("en-US")}`;
+  })();
+
+  const monthlyGrowth = Number(kpis?.monthlyGrowth ?? 0);
+  const incomeChange =
+    Number.isFinite(monthlyGrowth) && monthlyGrowth !== 0
+      ? `${monthlyGrowth >= 0 ? "+" : ""}${monthlyGrowth.toFixed(1)}%`
+      : undefined;
+  const incomeTrend = monthlyGrowth >= 0 ? "up" : "down";
+
+  const kpiCards: Array<{
+    title: string;
+    value: string;
+    change?: string;
+    trend?: "up" | "down";
+    icon: typeof DollarSign;
+    color: string;
+    bgColor: string;
+  }> = [
+    {
+      title: "Ingresos Totales",
+      value: formattedIncome,
+      change: incomeChange,
+      trend: incomeTrend,
+      icon: DollarSign,
+      color: "text-accent",
+      bgColor: "bg-accent/10",
+    },
+    {
+      title: "Servicios Completados",
+      value: String(kpis?.completedServices ?? 0),
+      icon: CheckCircle,
+      color: "text-primary",
+      bgColor: "bg-primary/10",
+    },
+    {
+      title: "Pendientes",
+      value: String(kpis?.pendingBookings ?? 0),
+      icon: Clock,
+      color: "text-warning",
+      bgColor: "bg-warning/10",
+    },
+  ];
+
+  const { data: overviewTransfersData, isLoading: overviewLoading } = useWalletTransfers({
+    page: overviewPage,
+    limit: 10,
+  });
+  const overviewTransfers = overviewTransfersData?.transfers ?? [];
+  const overviewTotal = overviewTransfersData?.total ?? 0;
+  const overviewTotalPages = Math.max(1, Math.ceil(overviewTotal / 10));
 
   const { data: pagedTransfersData, isLoading: pagedLoading } = useWalletTransfers({
     page: transactionsPage,
@@ -126,6 +176,10 @@ export default function Dashboard() {
     switch (status) {
       case "completed":
         return <Badge className="badge-success"><CheckCircle className="w-3 h-3 mr-1" />Completado</Badge>;
+      case "pending_approval":
+        return <Badge className="badge-warning"><Clock className="w-3 h-3 mr-1" />Pendiente</Badge>;
+      case "rejected":
+        return <Badge className="badge-danger"><XCircle className="w-3 h-3 mr-1" />Rechazado</Badge>;
       case "pending":
         return <Badge className="badge-warning"><Clock className="w-3 h-3 mr-1" />Pendiente</Badge>;
       case "cancelled":
@@ -142,6 +196,145 @@ export default function Dashboard() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
+
+  function InvoicesTabContent() {
+    const [page, setPage] = useState(1);
+    const { data, isLoading } = useWalletTransfers({ page, limit: 10 });
+    const transfers = (data?.transfers ?? []) as Array<TransferForInvoice & { id: number; status?: string }>;
+    const total = data?.total ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / 10));
+
+    if (isLoading) {
+      return (
+        <Card className="card-industrial">
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Transacciones y descarga de facturas en PDF</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+            <Receipt className="w-8 h-8 opacity-60 animate-pulse" />
+            <p className="text-sm">Cargando transacciones…</p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (transfers.length === 0) {
+      return (
+        <Card className="card-industrial">
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Transacciones y descarga de facturas en PDF</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
+            <FileText className="w-8 h-8 opacity-60" />
+            <p className="text-sm">Aún no tienes transacciones para facturar.</p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <Card className="card-industrial">
+        <CardHeader className="p-4 sm:p-6">
+          <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
+          <CardDescription className="text-xs sm:text-sm">Descarga una factura en PDF por cada transacción</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 px-3 pb-4 sm:px-6 sm:pb-6">
+          {transfers.map((t) => {
+            const label = getTransferTypeLabel(t.transferType);
+            const parsedDate = parseTransferDate(t.createdAt);
+            const dateStr = parsedDate ? format(parsedDate, "dd MMM yyyy HH:mm", { locale: es }) : "—";
+            const status = t.status;
+            return (
+              <div
+                key={t.id}
+                className="flex flex-col gap-3 p-3 min-[380px]:p-4 border border-border rounded-lg bg-card min-w-0"
+              >
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <Receipt className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="min-w-0 space-y-1 flex-1">
+                    <p className="font-medium text-sm break-words">{label}</p>
+                    <p className="text-xs text-muted-foreground break-words">{t.description || "Sin descripción"}</p>
+                    <p className="text-xs text-muted-foreground break-all">{dateStr}</p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:items-center min-[400px]:justify-between border-t border-border/60 pt-3">
+                  <p className="font-semibold text-sm tabular-nums">{formatAmount(t.amount)}</p>
+                  <Badge
+                    variant={
+                      status === "completed"
+                        ? "default"
+                        : status === "rejected"
+                          ? "destructive"
+                          : "secondary"
+                    }
+                    className="w-fit"
+                  >
+                    {status === "pending_approval" ? "Pendiente" : status === "completed" ? "Completado" : "Rechazado"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full min-[400px]:w-auto shrink-0"
+                    onClick={() =>
+                      user &&
+                      downloadInvoicePdf(
+                        {
+                          id: t.id,
+                          amount: t.amount,
+                          transferType: t.transferType,
+                          description: t.description,
+                          createdAt: t.createdAt ?? null,
+                          status: t.status,
+                        },
+                        {
+                          firstName: user.firstName,
+                          lastName: user.lastName,
+                          name: (user as { name?: string }).name,
+                          email: user.email,
+                        }
+                      )
+                    }
+                    disabled={!user}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Generar factura
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="flex flex-col gap-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between pt-2">
+            <p className="text-xs text-muted-foreground text-center min-[400px]:text-left">
+              Página {page} de {totalPages}
+            </p>
+            <div className="flex gap-2 justify-center min-[400px]:justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Siguiente
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const getTransferMeta = (t: any) => {
     const type = t.transferType as "service_payment" | "recharge" | "withdrawal" | "payment" | undefined;
@@ -205,44 +398,49 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <section className="bg-gradient-to-r from-primary/20 via-background to-accent/20 border-b border-border">
-        <div className="container px-4 py-8 mx-auto max-w-7xl">
+        <div className="container px-3 min-[400px]:px-4 py-5 sm:py-8 mx-auto max-w-7xl">
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
           >
-            <div>
-              <h1 className="text-3xl font-display font-bold">
+            <div className="min-w-0">
+              <h1 className="text-xl min-[380px]:text-2xl sm:text-3xl font-display font-bold leading-tight">
                 Panel <span className="text-gradient-primary">Económico</span>
               </h1>
-              <p className="text-muted-foreground mt-1">
+              <p className="text-muted-foreground mt-1.5 text-sm sm:text-base leading-snug">
                 Bienvenido a tu centro de control financiero y gestión
               </p>
             </div>
             <div className="flex gap-3 justify-center md:justify-end flex-wrap">
-              <Button variant="outline" className="border-primary/50 text-primary">
-                <Download className="w-4 h-4 mr-2" />
-                Exportar Reporte
-              </Button>
-              <Button className="bg-accent hover:bg-accent/90">
-                <CreditCard className="w-4 h-4 mr-2" />
-                Gestionar Pagos
-              </Button>
+              {SHOW_DASHBOARD_HEADER_ACTIONS && (
+                <>
+                  <Button variant="outline" className="border-primary/50 text-primary">
+                    <Download className="w-4 h-4 mr-2" />
+                    Exportar Reporte
+                  </Button>
+                  <Button className="bg-accent hover:bg-accent/90">
+                    <CreditCard className="w-4 h-4 mr-2" />
+                    Gestionar Pagos
+                  </Button>
+                </>
+              )}
             </div>
           </motion.div>
         </div>
       </section>
 
       {/* KPI Cards */}
+      {SHOW_DASHBOARD_KPI_CARDS && (
       <section className="py-8">
         <div className="container px-4 mx-auto max-w-7xl">
           <motion.div 
             variants={containerVariants}
             initial="hidden"
             animate="visible"
-            className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6"
+            className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6"
           >
-            {kpiData.map((kpi, index) => (
+            {kpiCards.map((kpi, index) => (
               <motion.div key={index} variants={itemVariants}>
                 <Card className="card-industrial hover:border-primary/50 transition-all duration-300">
                   <CardContent className="p-6">
@@ -250,14 +448,23 @@ export default function Dashboard() {
                       <div className={`p-3 rounded-lg ${kpi.bgColor}`}>
                         <kpi.icon className={`w-6 h-6 ${kpi.color}`} />
                       </div>
-                      <Badge variant="outline" className={kpi.trend === "up" ? "border-accent/50 text-accent" : "border-warning/50 text-warning"}>
-                        {kpi.trend === "up" ? (
-                          <ArrowUpRight className="w-3 h-3 mr-1" />
-                        ) : (
-                          <ArrowDownRight className="w-3 h-3 mr-1" />
-                        )}
-                        {kpi.change}
-                      </Badge>
+                      {kpi.change ? (
+                        <Badge
+                          variant="outline"
+                          className={
+                            kpi.trend === "up"
+                              ? "border-accent/50 text-accent"
+                              : "border-warning/50 text-warning"
+                          }
+                        >
+                          {kpi.trend === "up" ? (
+                            <ArrowUpRight className="w-3 h-3 mr-1" />
+                          ) : (
+                            <ArrowDownRight className="w-3 h-3 mr-1" />
+                          )}
+                          {kpi.change}
+                        </Badge>
+                      ) : null}
                     </div>
                     <div className="mt-4">
                       <p className="text-3xl font-bold font-display">{kpi.value}</p>
@@ -270,32 +477,46 @@ export default function Dashboard() {
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* Main Content */}
-      <section className="py-6 pb-16">
-        <div className="container px-4 mx-auto max-w-7xl">
-          <Tabs defaultValue="overview" className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 max-w-full overflow-hidden">
-              <div className="w-full max-w-full overflow-x-auto md:overflow-visible [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
-                <TabsList className="bg-card border border-border inline-flex w-max flex-nowrap h-10 p-1">
-                  <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
-                    <BarChart3 className="w-4 h-4 mr-2" />
+      <section className="py-4 sm:py-6 pb-16">
+        <div className="container px-3 min-[400px]:px-4 mx-auto max-w-7xl min-w-0">
+          <Tabs defaultValue="overview" className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between max-w-full min-w-0">
+              <div
+                className="w-full min-w-0 -mx-0.5 px-0.5 pb-1 overflow-x-auto overscroll-x-contain touch-pan-x md:overflow-visible md:pb-0 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/40"
+                role="region"
+                aria-label="Pestañas del panel"
+              >
+                <TabsList className="bg-card border border-border inline-flex w-max max-w-none flex-nowrap h-auto min-h-10 p-1 gap-0.5">
+                  <TabsTrigger
+                    value="overview"
+                    className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-2.5 py-2 text-xs min-[380px]:text-sm sm:px-3"
+                  >
+                    <BarChart3 className="w-4 h-4 max-[420px]:hidden sm:mr-2" />
                     Resumen
                   </TabsTrigger>
-                  <TabsTrigger value="transactions" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
-                    <Receipt className="w-4 h-4 mr-2" />
+                  <TabsTrigger
+                    value="transactions"
+                    className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-2.5 py-2 text-xs min-[380px]:text-sm sm:px-3"
+                  >
+                    <Receipt className="w-4 h-4 max-[420px]:hidden sm:mr-2" />
                     Transacciones
                   </TabsTrigger>
-                  <TabsTrigger value="invoices" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Facturación
+                  <TabsTrigger
+                    value="invoices"
+                    className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-2.5 py-2 text-xs min-[380px]:text-sm sm:px-3"
+                  >
+                    <FileText className="w-4 h-4 max-[420px]:hidden sm:mr-2" />
+                    Facturas
                   </TabsTrigger>
                 </TabsList>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex w-full min-w-0 gap-2 md:w-auto md:shrink-0 md:justify-end">
                 <Select value={timeRange} onValueChange={setTimeRange}>
-                  <SelectTrigger className="w-[140px] input-industrial">
+                  <SelectTrigger className="min-w-0 flex-1 md:w-[168px] md:flex-initial input-industrial text-left text-xs sm:text-sm h-10">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -312,86 +533,8 @@ export default function Dashboard() {
             </div>
 
             <TabsContent value="overview" className="space-y-6">
-              {/* Charts Row */}
-              <div className="grid lg:grid-cols-3 gap-6">
-                {/* Income Chart */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
-                  className="lg:col-span-2"
-                >
-                  <Card className="card-industrial">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Activity className="w-5 h-5 text-primary" />
-                        Ingresos vs Gastos
-                      </CardTitle>
-                      <CardDescription>
-                        Evolución mensual de tu actividad financiera
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-[300px] flex items-end justify-between gap-2 px-4">
-                        {monthlyData.map((data, index) => (
-                          <div key={index} className="flex-1 flex flex-col items-center gap-2">
-                            <div className="w-full flex flex-col gap-1">
-                              <div 
-                                className="w-full bg-accent/60 rounded-t-sm transition-all hover:bg-accent"
-                                style={{ height: `${(data.income / 25000) * 200}px` }}
-                                title={`Ingresos: $${data.income.toLocaleString()}`}
-                              ></div>
-                              <div 
-                                className="w-full bg-primary/60 rounded-t-sm transition-all hover:bg-primary"
-                                style={{ height: `${(data.expenses / 25000) * 200}px` }}
-                                title={`Gastos: $${data.expenses.toLocaleString()}`}
-                              ></div>
-                            </div>
-                            <span className="text-xs text-muted-foreground">{data.month}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-center gap-6 mt-4 pt-4 border-t border-border">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-accent"></div>
-                          <span className="text-sm text-muted-foreground">Ingresos</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-primary"></div>
-                          <span className="text-sm text-muted-foreground">Gastos</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-
-                {/* Services by Category */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                >
-                  <Card className="card-industrial h-full">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <PieChart className="w-5 h-5 text-primary" />
-                        Servicios por Categoría
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                      {servicesByCategory.map((cat, index) => (
-                        <div key={index} className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span>{cat.category}</span>
-                            <span className="text-muted-foreground">{cat.count} ({cat.percentage}%)</span>
-                          </div>
-                          <Progress value={cat.percentage} className="h-2" />
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              </div>
+              {/* Ocultamos los gráficos de "Ingresos vs Gastos" y "Servicios por Categoría" */}
+              <div className="grid lg:grid-cols-1 gap-6">
 
               {/* Recent Transactions */}
               <motion.div 
@@ -400,60 +543,66 @@ export default function Dashboard() {
                 transition={{ delay: 0.3 }}
               >
                 <Card className="card-industrial overflow-hidden">
-                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-center sm:text-left">
-                    <div>
-                      <CardTitle className="flex items-center justify-center sm:justify-start gap-2">
-                        <Receipt className="w-5 h-5 text-primary shrink-0" />
-                        Transacciones Recientes
+                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-center sm:text-left p-4 sm:p-6 space-y-1.5">
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center justify-center sm:justify-start gap-2 text-base min-[380px]:text-lg sm:text-xl md:text-2xl font-semibold leading-snug">
+                        <Receipt className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+                        <span className="text-balance">Transacciones y facturas recientes</span>
                       </CardTitle>
-                      <CardDescription>
-                        Últimas 5 transacciones del período seleccionado
+                      <CardDescription className="text-xs sm:text-sm text-balance">
+                        Últimas 10 transacciones y facturas (ordenadas por fecha)
                       </CardDescription>
                     </div>
-                    <Button variant="ghost" size="sm" asChild className="shrink-0">
-                      <Link href="/payments">Ver todas</Link>
-                    </Button>
                   </CardHeader>
-                  <CardContent>
-                    {recentLoading ? (
+                  <CardContent className="px-3 pb-4 sm:px-6 sm:pb-6 pt-0">
+                    {overviewLoading ? (
                       <div className="flex flex-col items-center justify-center py-10 gap-3">
                         <Receipt className="w-8 h-8 text-muted-foreground animate-pulse" />
-                        <p className="text-sm text-muted-foreground">Cargando transacciones…</p>
+                        <p className="text-sm text-muted-foreground">Cargando transacciones y facturas…</p>
                       </div>
-                    ) : recentTransfers.length === 0 ? (
+                    ) : overviewTransfers.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
                         <Receipt className="w-8 h-8 opacity-60" />
-                        <p className="text-sm">Aún no tienes transacciones.</p>
+                        <p className="text-sm">Aún no tienes transacciones para mostrar.</p>
                       </div>
                     ) : (
                       <div className="space-y-5">
-                        {recentTransfers.map((t: any) => {
+                        {overviewTransfers.map((t: any) => {
                           const { amountColor, label, dateStr } = getTransferMeta(t);
                           return (
                         <div 
                             key={t.id}
-                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 sm:p-5 rounded-lg bg-background/50 border border-border hover:border-primary/30 transition-colors min-w-0"
+                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-3 min-[380px]:p-4 sm:p-5 rounded-lg bg-background/50 border border-border hover:border-primary/30 transition-colors min-w-0"
                         >
-                          <div className="flex items-start sm:items-center gap-4 min-w-0">
-                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
-                              <Banknote className="w-5 h-5 text-primary" />
+                          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                              <Banknote className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                             </div>
-                            <div className="min-w-0 space-y-1.5">
-                              <p className="font-medium truncate text-foreground">{label}</p>
-                              <p className="text-sm text-muted-foreground truncate">
+                            <div className="min-w-0 space-y-1 flex-1">
+                              <p className="font-medium text-sm sm:text-base text-foreground break-words">{label}</p>
+                              <p className="text-xs sm:text-sm text-muted-foreground break-words hyphens-auto">
                                 {t.description || "Sin descripción"}
                               </p>
                             </div>
                           </div>
-                          <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-4 gap-y-2 shrink-0 border-t border-border/60 pt-3 sm:border-0 sm:pt-0 sm:gap-4">
-                            <div className="text-right">
-                              <p className={`font-bold ${amountColor}`}>
+                          <div className="flex flex-col gap-3 w-full min-w-0 sm:w-auto sm:max-w-[50%] sm:items-end border-t border-border/60 pt-3 sm:border-0 sm:pt-0">
+                            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 sm:flex-col sm:items-end sm:text-right w-full sm:w-auto">
+                              <p className={`font-bold text-sm sm:text-base tabular-nums ${amountColor}`}>
                                 {formatAmount(t.amount)}
                               </p>
-                              <p className="text-xs text-muted-foreground mt-0.5">{dateStr}</p>
+                              <p className="text-[11px] sm:text-xs text-muted-foreground break-all sm:break-normal text-right">{dateStr}</p>
                             </div>
-                            <div className="w-full sm:w-auto flex justify-center sm:justify-end">
-                              {getStatusBadge(t.status)}
+                            <div className="flex flex-col w-full gap-2 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:justify-end sm:w-auto">
+                              <Badge
+                                variant="secondary"
+                                className="gap-1 justify-center py-1.5 sm:py-1 text-xs w-full min-[400px]:w-auto shrink-0"
+                              >
+                                <FileText className="w-3 h-3 shrink-0" />
+                                Factura
+                              </Badge>
+                              <div className="flex w-full min-[400px]:w-auto justify-center min-[400px]:justify-end">
+                                {getStatusBadge(t.status)}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -461,18 +610,45 @@ export default function Dashboard() {
                         })}
                       </div>
                     )}
+
+                    <div className="mt-6 flex flex-col gap-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between pt-2">
+                      <p className="text-xs text-muted-foreground text-center min-[400px]:text-left">
+                        Página {overviewPage} de {overviewTotalPages}
+                      </p>
+                      <div className="flex gap-2 justify-center min-[400px]:justify-end">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={overviewPage <= 1}
+                          onClick={() => setOverviewPage((p) => Math.max(1, p - 1))}
+                        >
+                          Anterior
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={overviewPage >= overviewTotalPages}
+                          onClick={() =>
+                            setOverviewPage((p) => Math.min(overviewTotalPages, p + 1))
+                          }
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </motion.div>
+              </div>
             </TabsContent>
 
             <TabsContent value="transactions">
               <Card className="card-industrial">
-                <CardHeader>
-                  <CardTitle>Todas las Transacciones</CardTitle>
-                  <CardDescription>Historial completo de transacciones</CardDescription>
+                <CardHeader className="p-4 sm:p-6">
+                  <CardTitle className="text-base min-[380px]:text-lg sm:text-2xl">Todas las transacciones</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">Historial completo de transacciones</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="px-3 pb-4 sm:px-6 sm:pb-6">
                   {pagedLoading ? (
                     <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
                       <Receipt className="w-8 h-8 animate-pulse" />
@@ -490,34 +666,36 @@ export default function Dashboard() {
                         return (
                           <div
                             key={t.id}
-                            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 border border-border rounded-lg bg-background/40"
+                            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 min-[380px]:p-4 border border-border rounded-lg bg-background/40 min-w-0"
                           >
-                            <div className="flex items-start gap-3 min-w-0">
+                            <div className="flex items-start gap-3 min-w-0 flex-1">
                               <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                                 <Banknote className="w-4 h-4 text-primary" />
                               </div>
-                              <div className="min-w-0 space-y-1">
-                                <p className="font-medium text-sm truncate">{label}</p>
-                                <p className="text-xs text-muted-foreground truncate">
+                              <div className="min-w-0 space-y-1 flex-1">
+                                <p className="font-medium text-sm break-words">{label}</p>
+                                <p className="text-xs text-muted-foreground break-words">
                                   {t.description || "Sin descripción"}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex flex-col items-end gap-1 shrink-0">
-                              <p className={`font-semibold text-sm ${amountColor}`}>
-                                {formatAmount(t.amount)}
-                              </p>
-                              <p className="text-xs text-muted-foreground">{dateStr}</p>
-                              <div>{getStatusBadge(t.status)}</div>
+                            <div className="flex flex-row flex-wrap items-center justify-between gap-2 sm:flex-col sm:items-end border-t border-border/50 pt-3 sm:border-0 sm:pt-0 shrink-0 w-full sm:w-auto">
+                              <div className="text-left sm:text-right min-w-0">
+                                <p className={`font-semibold text-sm tabular-nums ${amountColor}`}>
+                                  {formatAmount(t.amount)}
+                                </p>
+                                <p className="text-[11px] sm:text-xs text-muted-foreground break-all sm:break-normal">{dateStr}</p>
+                              </div>
+                              <div className="ml-auto sm:ml-0">{getStatusBadge(t.status)}</div>
                             </div>
                           </div>
                         );
                       })}
-                      <div className="flex items-center justify-between pt-2">
-                        <p className="text-xs text-muted-foreground">
+                      <div className="flex flex-col gap-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between pt-2">
+                        <p className="text-xs text-muted-foreground text-center min-[400px]:text-left">
                           Página {transactionsPage} de {pagedTotalPages}
                         </p>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 justify-center min-[400px]:justify-end">
                           <Button
                             variant="outline"
                             size="sm"
@@ -545,19 +723,7 @@ export default function Dashboard() {
             </TabsContent>
 
             <TabsContent value="invoices">
-              <Card className="card-industrial">
-                <CardHeader>
-                  <CardTitle>Facturación Automática</CardTitle>
-                  <CardDescription>Gestión de facturas y comprobantes</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-center py-12 text-muted-foreground">
-                    <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>Sistema de facturación electrónica en desarrollo</p>
-                    <p className="text-sm mt-2">Compatible con SRI Ecuador</p>
-                  </div>
-                </CardContent>
-              </Card>
+              <InvoicesTabContent />
             </TabsContent>
           </Tabs>
         </div>

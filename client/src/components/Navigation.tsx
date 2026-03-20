@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
-import { useCurrentProvider, useMyServices, useDeleteService, useWallet, useCategories } from "@/hooks/use-mango-data";
+import { useCurrentProvider, useMyServices, useWallet, useCategories } from "@/hooks/use-mango-data";
 import { getCategoryDisplayName } from "@shared/default-categories";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { 
@@ -25,11 +25,11 @@ import {
   ChevronDown,
   List,
   Pencil,
-  Trash2,
   Loader2,
   Wrench,
   PackageOpen,
   Wallet,
+  Star,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -44,16 +44,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useState } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
 
@@ -65,9 +55,12 @@ export function Navigation() {
   const showBecomePro = useShowBecomePro();
   const { data: providerProfile } = useCurrentProvider();
   const { data: myServices = [], isLoading: myServicesLoading } = useMyServices({ enabled: !!providerProfile || (user as { role?: string } | null)?.role === "professional" });
-  const deleteService = useDeleteService();
   const { data: walletData } = useWallet({ enabled: isAuthenticated });
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
+  const userRating =
+    typeof (walletData as { rating?: number } | undefined)?.rating === "number"
+      ? (walletData as { rating: number }).rating
+      : 5;
   const formatWallet = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
   const [location] = useLocation();
@@ -90,7 +83,6 @@ export function Navigation() {
   const exploreCategoryDisplayName = exploreCategoryFromContext ?? exploreCategoryFromUrl;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [myServicesOpen, setMyServicesOpen] = useState(false);
-  const [serviceToDelete, setServiceToDelete] = useState<number | null>(null);
 
   const isActive = (path: string) => location === path || location.startsWith(path + '/');
 
@@ -143,7 +135,7 @@ export function Navigation() {
               }}
             >
               <List className="h-4 w-4" />
-              <span>Mis servicios</span>
+              <span>Mi Servicio</span>
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
@@ -185,12 +177,12 @@ export function Navigation() {
   return (
     <>
     <nav className="sticky top-0 z-50 w-full border-b border-primary/20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="container flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 mx-auto">
+      <div className="container flex h-14 min-[400px]:h-16 max-w-7xl items-center justify-between gap-1 px-2 min-[400px]:px-4 sm:px-6 lg:px-8 mx-auto min-w-0">
         
         {/* Logo & Desktop Nav */}
         <div className="flex items-center gap-8">
-          <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-2">
-            <img src="/logo GenFeb.jpg" alt="GENFEB Logo" className="h-8 w-auto object-contain" />
+          <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-1.5 min-[400px]:gap-2 shrink-0">
+            <img src="/logo GenFeb.jpg" alt="GENFEB Logo" className="h-7 w-auto object-contain min-[400px]:h-8" />
             <span className="hidden text-xl font-bold font-display text-primary sm:inline-block tracking-wider">
               {exploreCategoryDisplayName ?? (
                 <>GENFEB<span className="text-accent">.S.A.S</span></>
@@ -203,7 +195,7 @@ export function Navigation() {
         </div>
 
         {/* Right Side Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 min-[400px]:gap-2 sm:gap-3 shrink-0 min-w-0">
           
           {/* Language Selector */}
           <Button variant="ghost" size="sm" className="hidden sm:flex items-center gap-2 text-muted-foreground hover:text-primary">
@@ -214,12 +206,17 @@ export function Navigation() {
           {/* Wallet balance - visible desktop y móvil (icono en header) */}
           {isAuthenticated && (
             <div
-              className="flex items-center gap-1.5 min-w-0 px-2.5 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary"
-              title="Saldo de tu wallet"
+              className="flex items-center gap-1 min-w-0 px-1.5 py-1 min-[400px]:gap-1.5 min-[400px]:px-2.5 min-[400px]:py-1.5 rounded-md min-[400px]:rounded-lg bg-primary/10 border border-primary/20 text-primary max-w-[100%]"
+              title="Saldo y valoración"
             >
-              <Wallet className="h-4 w-4 sm:h-4 w-4 shrink-0" aria-hidden />
-              <span className="text-sm font-semibold tabular-nums truncate max-w-[80px] sm:max-w-[100px]">
+              <Wallet className="h-3.5 w-3.5 min-[400px]:h-4 min-[400px]:w-4 shrink-0" aria-hidden />
+              <span className="text-xs min-[400px]:text-sm font-semibold tabular-nums truncate max-w-[4.5rem] min-[400px]:max-w-[6rem] sm:max-w-[7rem]">
                 {walletData === undefined ? "—" : formatWallet(walletBalance)}
+              </span>
+              <span className="mx-0.5 min-[400px]:mx-1 h-3 min-[400px]:h-4 w-px bg-primary/30 shrink-0 hidden min-[400px]:block" aria-hidden />
+              <span className="hidden min-[400px]:flex items-center gap-0.5 text-xs sm:text-sm font-semibold tabular-nums shrink-0">
+                <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-500 fill-amber-500" aria-hidden />
+                <span className="text-foreground">{Number(userRating).toFixed(1)}</span>
               </span>
             </div>
           )}
@@ -365,6 +362,11 @@ export function Navigation() {
                   <span className="text-base font-semibold text-primary tabular-nums">
                     {walletData === undefined ? "—" : formatWallet(walletBalance)}
                   </span>
+                  <span className="mx-1 h-5 w-px bg-primary/30" aria-hidden />
+                  <span className="flex items-center gap-1 text-base font-semibold tabular-nums">
+                    <Star className="h-5 w-5 text-amber-500 fill-amber-500" aria-hidden />
+                    <span className="text-foreground">{Number(userRating).toFixed(1)}</span>
+                  </span>
                 </div>
               )}
               <div className="flex flex-col gap-4 mt-4">
@@ -396,7 +398,7 @@ export function Navigation() {
                           setMyServicesOpen(true);
                         }}
                       >
-                        Mis servicios
+                        Mi Servicio
                       </button>
                     )}
                   </>
@@ -437,14 +439,14 @@ export function Navigation() {
       </div>
     </nav>
 
-    {/* Panel Mis servicios */}
+    {/* Panel Mi Servicio */}
     <Sheet open={myServicesOpen} onOpenChange={setMyServicesOpen}>
       <SheetContent
-        side="right"
-        className="w-full sm:max-w-md bg-white border-l border-border overflow-y-auto rounded-l-xl shadow-lg"
+        side="left"
+        className="w-[360px] max-w-[92vw] bg-white border-r border-border overflow-y-auto rounded-r-xl shadow-lg"
       >
         <div className="pb-4 border-b border-border/80">
-          <h2 className="text-xl font-bold text-foreground tracking-tight">Mis servicios</h2>
+          <h2 className="text-xl font-bold text-foreground tracking-tight">Mi Servicio</h2>
           <p className="text-sm text-muted-foreground mt-1">Gestiona y edita tus publicaciones</p>
         </div>
 
@@ -521,24 +523,6 @@ export function Navigation() {
                               </TooltipTrigger>
                               <TooltipContent>Editar</TooltipContent>
                             </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-transform hover:scale-110"
-                                  onClick={() => setServiceToDelete(s.id)}
-                                  disabled={deleteService.isPending}
-                                >
-                                  {deleteService.isPending && deleteService.variables === s.id ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="h-4 w-4" />
-                                  )}
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Eliminar</TooltipContent>
-                            </Tooltip>
                           </div>
                         </div>
                       </CardContent>
@@ -550,31 +534,6 @@ export function Navigation() {
         </div>
       </SheetContent>
     </Sheet>
-
-    <AlertDialog open={serviceToDelete != null} onOpenChange={(open) => !open && setServiceToDelete(null)}>
-      <AlertDialogContent className="rounded-xl border border-border bg-card shadow-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle>¿Eliminar este servicio?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Esta acción no se puede deshacer. El servicio dejará de estar visible para los clientes.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter className="gap-2 sm:gap-0">
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-          <AlertDialogAction
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            onClick={() => {
-              if (serviceToDelete != null) {
-                deleteService.mutate(serviceToDelete);
-                setServiceToDelete(null);
-              }
-            }}
-          >
-            Eliminar
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
     </>
   );
 }

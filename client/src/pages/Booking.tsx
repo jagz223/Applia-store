@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
@@ -22,7 +22,7 @@ import {
   Mail,
   Loader2
 } from "lucide-react";
-import { useCategories, useServices, useProviderCategoryAvailability, useCreateBooking } from "@/hooks/use-mango-data";
+import { useCategories, useServices, useProviderCategoryAvailability, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { useMemo } from "react";
@@ -32,6 +32,78 @@ import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
 import { isBeforeToday } from "@/lib/date-utils";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+type ProviderOption = {
+  id: number;
+  name: string;
+  profession: string;
+  rating: number;
+  reviewCount: number;
+  price: number;
+  firstServiceId: number;
+  profileImageUrl?: string | null;
+};
+
+function ProviderOptionCard({
+  provider,
+  selected,
+  onSelect,
+}: {
+  provider: ProviderOption;
+  selected: boolean;
+  onSelect: (providerId: number, firstServiceId: number) => void;
+}) {
+  const { data: completedCount, isLoading: completedCountLoading } = useProviderCompletedCount(provider.id);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(provider.id, provider.firstServiceId)}
+      className={`
+        w-full p-4 rounded-lg border text-left transition-all flex items-center justify-between
+        ${selected ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}
+      `}
+    >
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden shrink-0">
+          {provider.profileImageUrl ? (
+            <img src={provider.profileImageUrl} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <User className="w-6 h-6 text-primary" />
+          )}
+        </div>
+        <div>
+          <p className="font-medium">{provider.name}</p>
+          <p className="text-sm text-muted-foreground">{provider.profession}</p>
+          <div className="flex items-center gap-1 mt-1">
+            <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+            <span className="text-sm">{provider.rating > 0 ? provider.rating.toFixed(1) : "—"}</span>
+            <span className="text-xs text-muted-foreground">({provider.reviewCount} reseñas)</span>
+            {completedCountLoading ? (
+              <span className="text-xs text-muted-foreground">· ... completados</span>
+            ) : (
+              <span className="text-xs text-muted-foreground">· {completedCount ?? 0} servicios completados</span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="font-bold text-lg">${Number(provider.price).toFixed(0)}</p>
+        <p className="text-xs text-muted-foreground">desde</p>
+      </div>
+    </button>
+  );
+}
 
 export default function Booking() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
@@ -40,14 +112,18 @@ export default function Booking() {
   /** Id del servicio a reservar (uno del proveedor elegido en la categoría). */
   const [selectedBookingServiceId, setSelectedBookingServiceId] = useState<number | null>(null);
   const [step, setStep] = useState(1);
-  const [location, setLocation] = useState("");
+  /** Dirección/ubicación del servicio (geolocalización); no confundir con useLocation de wouter. */
+  const [userLocation, setUserLocation] = useState("");
   const [locationLoading, setLocationLoading] = useState(false);
   const hasValidLocation = location.trim().length > 0;
   const [notes, setNotes] = useState("");
+  const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
+  const [, navigate] = useLocation();
   const createBooking = useCreateBooking();
   const { notifyNewBooking } = useSocketBookings();
+  const { data: walletData, isLoading: walletLoading } = useWallet({ enabled: !!user?.id });
 
   const { data: categories } = useCategories();
   const { data: categoryAvailability } = useProviderCategoryAvailability();
@@ -64,6 +140,7 @@ export default function Booking() {
     { providerCategoryId: categoryIdNum },
     { enabled: !!selectedService }
   );
+  const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
 
   /** Proveedores únicos de la categoría seleccionada, con datos para la lista (nombre, profesión, rating, precio). */
   const providersInCategory = useMemo(() => {
@@ -136,10 +213,10 @@ export default function Booking() {
         const { latitude, longitude } = position.coords;
         const result = await reverseGeocode(latitude, longitude);
         if (result?.address) {
-          setLocation(result.address);
+          setUserLocation(result.address);
           toast({ title: "Ubicación obtenida", description: "Tu dirección se ha guardado para la reserva." });
         } else {
-          setLocation(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+          setUserLocation(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
           toast({ title: "Coordenadas guardadas", description: "No se pudo obtener la dirección exacta; se usan coordenadas." });
         }
       })
@@ -172,6 +249,12 @@ export default function Booking() {
     return d.toISOString();
   }, [selectedDate]);
 
+  const selectedServiceForBooking = useMemo(() => {
+    if (!selectedBookingServiceId) return null;
+    const list = services as Array<{ id: number; price?: string | number }>;
+    return list.find((s) => s.id === selectedBookingServiceId) ?? null;
+  }, [services, selectedBookingServiceId]);
+
   const handleBooking = () => {
     if (!user?.id) {
       toast({
@@ -196,6 +279,19 @@ export default function Booking() {
         title: "Datos incompletos",
         description: "Selecciona profesional y fecha.",
       });
+      return;
+    }
+    if (walletLoading) {
+      toast({
+        title: "Validando saldo",
+        description: "Estamos cargando tu saldo actual, intenta de nuevo en un momento.",
+      });
+      return;
+    }
+
+    const selectedServicePrice = Number(selectedServiceForBooking?.price ?? 0);
+    if (Number.isFinite(selectedServicePrice) && selectedServicePrice > 0 && walletBalance < selectedServicePrice) {
+      setInsufficientFundsOpen(true);
       return;
     }
     createBooking.mutate(
@@ -232,6 +328,28 @@ export default function Booking() {
 
   return (
     <div className="min-h-screen bg-background">
+      <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Saldo insuficiente</AlertDialogTitle>
+            <AlertDialogDescription>
+              No tienes saldo suficiente en tu wallet para pedir este servicio. Recarga tu saldo para continuar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setInsufficientFundsOpen(false);
+                navigate("/recharge");
+              }}
+            >
+              Recargar saldo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Hero Section */}
       <section className="relative overflow-hidden py-16 bg-gradient-to-br from-primary/10 via-background to-accent/10">
         <div className="absolute inset-0 grid-pattern opacity-50"></div>
@@ -311,7 +429,7 @@ export default function Booking() {
                                 readOnly
                                 placeholder="Presiona el botón para usar tu ubicación actual"
                                 className="input-industrial pl-10 bg-muted/50"
-                                value={location}
+                                value={userLocation}
                               />
                             </div>
                             <Button
@@ -411,42 +529,12 @@ export default function Booking() {
                         ) : (
                           <div className="space-y-4">
                             {providersInCategory.map((provider) => (
-                              <button
+                              <ProviderOptionCard
                                 key={provider.id}
-                                type="button"
-                                onClick={() => handleSelectProvider(provider.id, provider.firstServiceId)}
-                                className={`
-                                  w-full p-4 rounded-lg border text-left transition-all flex items-center justify-between
-                                  ${selectedProvider === String(provider.id)
-                                    ? "border-primary bg-primary/10"
-                                    : "border-border hover:border-primary/50"}
-                                `}
-                              >
-                                <div className="flex items-center gap-4">
-                                  <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden shrink-0">
-                                    {provider.profileImageUrl ? (
-                                      <img src={provider.profileImageUrl} alt="" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <User className="w-6 h-6 text-primary" />
-                                    )}
-                                  </div>
-                                  <div>
-                                    <p className="font-medium">{provider.name}</p>
-                                    <p className="text-sm text-muted-foreground">{provider.profession}</p>
-                                    <div className="flex items-center gap-1 mt-1">
-                                      <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                                      <span className="text-sm">{provider.rating > 0 ? provider.rating.toFixed(1) : "—"}</span>
-                                      <span className="text-xs text-muted-foreground">
-                                        ({provider.reviewCount} reseñas)
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <p className="font-bold text-lg">${Number(provider.price).toFixed(0)}</p>
-                                  <p className="text-xs text-muted-foreground">desde</p>
-                                </div>
-                              </button>
+                                provider={provider}
+                                selected={selectedProvider === String(provider.id)}
+                                onSelect={handleSelectProvider}
+                              />
                             ))}
                           </div>
                         )}
@@ -552,7 +640,7 @@ export default function Booking() {
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Ubicación:</span>
-                              <span>{location || "Por determinar"}</span>
+                              <span>{userLocation || "Por determinar"}</span>
                             </div>
                           </div>
                         </div>

@@ -172,4 +172,5 @@ export const FIRESTORE_COLLECTIONS = {
   USER_DEVICE_TOKENS: "user_device_tokens",
   WALLET_TRANSFERS: "wallet_transfers",
   WITHDRAWAL_REJECTIONS: "withdrawal_rejections",
+  BOOKING_RATINGS: "booking_ratings",
 } as const;
