@@ -115,6 +115,7 @@ export default function Booking() {
   /** Dirección/ubicación del servicio (geolocalización); no confundir con useLocation de wouter. */
   const [userLocation, setUserLocation] = useState("");
   const [locationLoading, setLocationLoading] = useState(false);
+  const hasValidLocation = location.trim().length > 0;
   const [notes, setNotes] = useState("");
   const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
   const { toast } = useToast();
@@ -261,6 +262,15 @@ export default function Booking() {
         title: "Inicia sesión",
         description: "Debes iniciar sesión para confirmar la reserva.",
       });
+      return;
+    }
+    if (!hasValidLocation) {
+      toast({
+        variant: "destructive",
+        title: "Dirección requerida",
+        description: "Debes seleccionar tu ubicación/dirección antes de confirmar la reserva.",
+      });
+      setStep(1);
       return;
     }
     if (selectedBookingServiceId == null || !bookingDateISO) {
@@ -484,7 +494,7 @@ export default function Booking() {
                           className="w-full" 
                           size="lg"
                           onClick={() => setStep(2)}
-                          disabled={!selectedService}
+                            disabled={!selectedService || !hasValidLocation || locationLoading}
                         >
                           Continuar <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>
@@ -582,7 +592,7 @@ export default function Booking() {
                           <Button 
                             className="flex-1"
                             onClick={() => setStep(3)}
-                            disabled={!selectedProvider || !selectedDate}
+                            disabled={!selectedProvider || !selectedDate || !hasValidLocation}
                           >
                             Continuar <ArrowRight className="ml-2 h-4 w-4" />
                           </Button>
