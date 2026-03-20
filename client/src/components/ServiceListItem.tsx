@@ -5,6 +5,7 @@ import { Star, ArrowRight, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { useProviderCompletedCount } from "@/hooks/use-mango-data";
+import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
 
 interface ServiceListItemProps {
   service: ServiceWithProvider;
@@ -26,7 +27,7 @@ export function ServiceListItem({ service }: ServiceListItemProps) {
     | undefined;
 
   const providerName = getProviderName(service);
-  const avatarUrl = providerUser?.profileImageUrl ?? null;
+  const avatarUrl = getProviderUserAvatarUrl(service.provider);
   const rating = Number(providerUser?.rating ?? 5);
   const reviewCount = Number(providerUser?.ratingCount ?? 0);
 
@@ -49,11 +50,14 @@ export function ServiceListItem({ service }: ServiceListItemProps) {
         <div className="w-full border border-border/60 rounded-3xl bg-white dark:bg-card shadow-sm hover:border-primary/40 transition-colors overflow-hidden cursor-pointer">
           <div className="flex items-start justify-between gap-4 p-5">
             <div className="flex items-start gap-4 min-w-0">
-              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+              <div
+                className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-muted/60 border border-border/50 flex items-center justify-center shrink-0 overflow-hidden"
+                aria-hidden
+              >
                 {avatarUrl ? (
                   <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  <User className="w-6 h-6 text-primary" />
+                  <User className="w-12 h-12 sm:w-14 sm:h-14 text-muted-foreground" strokeWidth={1.25} />
                 )}
               </div>
 

@@ -13,6 +13,13 @@ const FIRESTORE_METHODS = new Set([
   "getAllServices", "getService", "createService",
   "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getPendingBookingRatings", "submitBookingRating",
+  "getProfessionalVerificationByUserId", "upsertProfessionalVerificationImage", "upsertProfessionalVerificationPayment",
+  "getVerifyingStatusByUserId",
+  "upsertVerifyingStatusIdentificationPending",
+  "upsertVerifyingStatusTransactionPending",
+  "getPendingVerifyingStatuses",
+  "setVerifyingStatusIdentification",
+  "setVerifyingStatusTransaction",
   "getNotifications", "createNotification", "markNotificationAsRead",
 ]);
 
@@ -47,6 +54,34 @@ export class HybridStorage implements IStorage {
     return this.delegate("getAllServices", [categoryId, search, providerCategoryId, subcategoryId]);
   }
   getService(id: number) { return this.delegate("getService", [id]); }
+  getProfessionalVerificationByUserId(userId: string) { return this.delegate("getProfessionalVerificationByUserId", [userId]); }
+  upsertProfessionalVerificationImage(userId: string, imageUrl: string) {
+    return this.delegate("upsertProfessionalVerificationImage", [userId, imageUrl]);
+  }
+  upsertProfessionalVerificationPayment(
+    userId: string,
+    data: { transferReceiptCode: string; transferDate: string }
+  ) {
+    return this.delegate("upsertProfessionalVerificationPayment", [userId, data]);
+  }
+  getVerifyingStatusByUserId(userId: string) {
+    return this.delegate("getVerifyingStatusByUserId", [userId]);
+  }
+  upsertVerifyingStatusIdentificationPending(userId: string) {
+    return this.delegate("upsertVerifyingStatusIdentificationPending", [userId]);
+  }
+  upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string) {
+    return this.delegate("upsertVerifyingStatusTransactionPending", [userId, transactionDate]);
+  }
+  getPendingVerifyingStatuses() {
+    return this.delegate("getPendingVerifyingStatuses", []);
+  }
+  setVerifyingStatusIdentification(userId: string, status: any) {
+    return this.delegate("setVerifyingStatusIdentification", [userId, status]);
+  }
+  setVerifyingStatusTransaction(userId: string, status: any) {
+    return this.delegate("setVerifyingStatusTransaction", [userId, status]);
+  }
   createService(service: any) { return this.delegate("createService", [service]); }
   getBookingsByUser(userId: string, status?: string) { return this.delegate("getBookingsByUser", [userId, status]); }
   getBookingsByProvider(providerId: number) { return this.delegate("getBookingsByProvider", [providerId]); }
@@ -91,7 +126,7 @@ export class HybridStorage implements IStorage {
   createReview(review: any) { return this.memory.createReview(review); }
   replyToReview(reviewId: number, response: string, responderId: string, responderName: string) { return this.memory.replyToReview(reviewId, response, responderId, responderName); }
   markReviewHelpful(reviewId: number) { return this.memory.markReviewHelpful(reviewId); }
-  deleteReview(reviewId: number, userId: string) { return this.memory.deleteReview(reviewId, userId); }
+  deleteReview(reviewId: number, userId: string, actingUserRole?: string) { return this.memory.deleteReview(reviewId, userId, actingUserRole); }
   updateReviewStats(targetId: string, targetType: string) { return this.memory.updateReviewStats(targetId, targetType); }
   seedCategories() { return this.memory.seedCategories(); }
   getBookingStatuses() { return this.memory.getBookingStatuses(); }

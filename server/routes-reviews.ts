@@ -153,7 +153,7 @@ export async function registerReviewRoutes(
     try {
       const reviewId = parseInt(req.params.id);
       
-      await genFebStorage.deleteReview(reviewId, req.user.id);
+      await genFebStorage.deleteReview(reviewId, req.user.id, req.user.role);
       
       res.json({ message: "Reseña eliminada" });
     } catch (error) {

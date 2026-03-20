@@ -6,6 +6,7 @@
 import type { Express } from "express";
 import { z } from "zod";
 import { authenticateJWT } from "./routes-auth";
+import { requireStaffFromDb } from "./middleware-roles";
 import { roleService } from "./services";
 import type { NewRoleDefinition } from "./storage-genfeb";
 
@@ -23,12 +24,6 @@ const updateRoleSchema = z.object({
   sortOrder: z.number().int().min(0).optional(),
 });
 
-function requireAdmin(req: any, res: any, next: any) {
-  if (req.user?.role !== "admin") {
-    return res.status(403).json({ message: "Se requiere rol de administrador" });
-  }
-  next();
-}
 
 export function registerRoleRoutes(app: Express): void {
   app.get("/api/roles", authenticateJWT, async (_req, res) => {
@@ -52,7 +47,7 @@ export function registerRoleRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/roles", authenticateJWT, requireAdmin, async (req, res) => {
+  app.post("/api/roles", authenticateJWT, requireStaffFromDb, async (req, res) => {
     try {
       const data = createRoleSchema.parse(req.body);
       const role = await roleService.createRole(data as NewRoleDefinition);
@@ -69,7 +64,7 @@ export function registerRoleRoutes(app: Express): void {
     }
   });
 
-  app.patch("/api/roles/:code", authenticateJWT, requireAdmin, async (req, res) => {
+  app.patch("/api/roles/:code", authenticateJWT, requireStaffFromDb, async (req, res) => {
     try {
       const data = updateRoleSchema.parse(req.body);
       const role = await roleService.updateRole(req.params.code, data);
@@ -84,7 +79,7 @@ export function registerRoleRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/roles/:code", authenticateJWT, requireAdmin, async (req, res) => {
+  app.delete("/api/roles/:code", authenticateJWT, requireStaffFromDb, async (req, res) => {
     try {
       await roleService.deleteRole(req.params.code);
       res.status(204).send();

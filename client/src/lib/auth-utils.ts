@@ -1,20 +1,26 @@
+import { hasAdminPrivileges, isFullAdmin } from "@shared/roles";
 import { api } from "@shared/routes";
 
 /** Roles que no deben ver el CTA "Convertirse en Profesional" */
-export const ROLES_HIDING_BECOME_PRO_CTA = ["professional", "admin"] as const;
+export const ROLES_HIDING_BECOME_PRO_CTA = ["professional", "admin", "tiSupport"] as const;
 
 /**
  * Indica si debe mostrarse el CTA de "Convertirse en Profesional".
  * No se muestra para usuarios con rol professional o admin (SOLID: regla de negocio en un solo lugar).
  */
 export function shouldShowBecomeProCTA(user: { role?: string } | null): boolean {
-  if (!user) return true;
-  return !ROLES_HIDING_BECOME_PRO_CTA.includes(user.role as (typeof ROLES_HIDING_BECOME_PRO_CTA)[number]);
+  if (!user?.role) return true;
+  return !(ROLES_HIDING_BECOME_PRO_CTA as readonly string[]).includes(user.role);
 }
 
-/** Indica si el usuario tiene rol admin (para mostrar opciones de administración). */
+/** Indica si el usuario tiene privilegios de administración (admin o Soporte TI). */
 export function hasAdminRole(user: { role?: string } | null): boolean {
-  return user?.role === "admin";
+  return hasAdminPrivileges(user?.role);
+}
+
+/** Solo administrador (no Soporte TI): pestañas financieras y verificación de asociados. */
+export function hasFullAdminRole(user: { role?: string } | null): boolean {
+  return isFullAdmin(user?.role);
 }
 
 /**

@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useService, useUpdateService, useCurrentProvider } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
+import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -88,7 +89,7 @@ export default function EditService() {
     );
   }
 
-  if (!isOwner && user?.role !== "admin") {
+  if (!isOwner && !hasAdminRole(user)) {
     return (
       <div className="container max-w-md py-20 text-center">
         <p className="text-muted-foreground mb-4">Solo el dueño del servicio o un administrador puede editarlo.</p>

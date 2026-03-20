@@ -62,6 +62,17 @@ export const api = {
         200: z.object({ message: z.string() }),
       },
     },
+    /** Profesional: marca `acceptedProviderTermsOfUse` en true (Firestore / usuario). */
+    acceptProviderTermsOfUse: {
+      method: 'POST' as const,
+      path: '/api/auth/accept-provider-terms-of-use',
+      responses: {
+        200: z.object({
+          message: z.string(),
+          user: z.custom<User>(),
+        }),
+      },
+    },
     replit: {
       login: {
         method: 'GET' as const,

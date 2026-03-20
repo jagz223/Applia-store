@@ -8,17 +8,12 @@ import express, { type Express } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { authenticateJWT } from "./routes-auth";
+import { requireAdminStaff, requireFullAdmin, requireStaffFromDb } from "./middleware-roles";
 import { userService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
+import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
-
-function requireAdmin(req: any, res: any, next: any) {
-  if (req.user?.role !== "admin") {
-    return res.status(403).json({ message: "Se requiere rol de administrador" });
-  }
-  next();
-}
 
 const updateUserSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -51,6 +46,32 @@ export function registerAdminRoutes(app: Express): void {
 
   const adminUsersRouter = express.Router({ mergeParams: true });
 
+  /** GET /api/admin/users — Listado con paginación y filtros. (Antes que /:id para no capturar "users" como id.) */
+  adminUsersRouter.get("/", async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
+      const role = (req.query.role as string)?.trim() || undefined;
+      const name = (req.query.name as string)?.trim() || undefined;
+      const email = (req.query.email as string)?.trim() || undefined;
+      const lastName = (req.query.lastName as string)?.trim() || undefined;
+      const search = (req.query.search as string)?.trim() || undefined;
+      const result = await userService.getUsers({
+        role,
+        name,
+        email,
+        lastName,
+        search,
+        page,
+        limit,
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      console.error("Error listing users:", error);
+      return res.status(500).json({ message: "Error al listar usuarios" });
+    }
+  });
+
   /** GET /api/admin/users/:id — Un usuario por ID (sin contraseña). */
   adminUsersRouter.get("/:id", async (req, res) => {
     try {
@@ -80,7 +101,13 @@ export function registerAdminRoutes(app: Express): void {
       if (data.lastName !== undefined) update.lastName = data.lastName.trim();
       if (data.email !== undefined) update.email = data.email.trim();
       if (data.phone !== undefined) update.phone = data.phone?.trim() ?? null;
-      if (data.role !== undefined) update.role = data.role.trim();
+      if (data.role !== undefined) {
+        const newRole = data.role.trim();
+        update.role = newRole;
+        if (newRole === "professional" && existing.role !== "professional") {
+          update.acceptedProviderTermsOfUse = false;
+        }
+      }
       if (Object.keys(update).length > 0) {
         await userService.updateUser(id, update);
       }
@@ -99,40 +126,143 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  /** GET /api/admin/users — Listado con paginación y filtros. */
-  adminUsersRouter.get("/", async (req, res) => {
+  app.use("/api/admin/users", authenticateJWT, requireStaffFromDb, adminUsersRouter);
+
+  /**
+   * Si ambos pasos de verificación están en "verified",
+   * entonces marca al profesional como verificado (providers.isVerified = true).
+   */
+  async function maybeVerifyProfessional(userId: string): Promise<void> {
+    const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+    if (!st) return;
+
+    const bothApproved = st.identification_verified === "verified" && st.transacction_verified === "verified";
+    if (!bothApproved) return;
+
+    const provider = await genFebStorage.getProviderByUserId(userId);
+    if (!provider) return;
+
+    // ProviderUpdate (types) no incluye isVerified; en runtime la colección sí lo soporta.
+    await genFebStorage.updateProvider(provider.id, { isVerified: true } as any);
+  }
+
+  /**
+   * VERIFICACIÓN DE ASOCIADOS
+   * verificación_status/pending + aprobar/rechazar
+   */
+  app.get("/api/admin/verifying-status/pending", authenticateJWT, requireFullAdmin, async (_req, res) => {
     try {
-      const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
-      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
-      const role = (req.query.role as string)?.trim() || undefined;
-      const name = (req.query.name as string)?.trim() || undefined;
-      const email = (req.query.email as string)?.trim() || undefined;
-      const lastName = (req.query.lastName as string)?.trim() || undefined;
-      const search = (req.query.search as string)?.trim() || undefined;
-      const result = await userService.getUsers({
-        role,
-        name,
-        email,
-        lastName,
-        search,
-        page,
-        limit,
-      });
-      return res.status(200).json(result);
+      const pending = await genFebStorage.getPendingVerifyingStatuses();
+      const items: Array<{
+        userId: string;
+        name: string;
+        email?: string | null;
+        avatar?: string | null;
+        user_identification?: string | null;
+        identification_verified: "pending" | "verified" | "rejected";
+        transacction_date: string | null;
+        transacction_verified: "pending" | "verified" | "rejected";
+        transacction_code?: string | null;
+      }> = [];
+
+      for (const st of pending ?? []) {
+        const userId = String((st as any).user ?? "");
+        if (!userId) continue;
+
+        const user = (await genFebStorage.getUserById(userId)) as any;
+        const name =
+          (user?.name ?? [user?.firstName ?? "", user?.lastName ?? ""].filter(Boolean).join(" ").trim()) ||
+          user?.email ||
+          "Usuario";
+        const email = user?.email ?? null;
+        const avatar = user?.avatar ?? null;
+        const user_identification = user?.user_identification ?? null;
+
+        const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
+        const transacction_code = profVer?.transferReceiptCode ?? null;
+
+        items.push({
+          userId,
+          name,
+          email,
+          avatar,
+          user_identification,
+          identification_verified: (st.identification_verified as any) ?? "rejected",
+          transacction_date: st.transacction_date ?? null,
+          transacction_verified: (st.transacction_verified as any) ?? "rejected",
+          transacction_code,
+        });
+      }
+
+      return res.status(200).json({ items, total: items.length });
     } catch (error) {
-      console.error("Error listing users:", error);
-      return res.status(500).json({ message: "Error al listar usuarios" });
+      console.error("Error listing verifying_status pending:", error);
+      return res.status(500).json({ message: "Error al listar asociados" });
     }
   });
 
-  app.use("/api/admin/users", authenticateJWT, requireAdmin, adminUsersRouter);
+  const verifyingStatusActionSchema = z.object({
+    action: z.enum(["approve", "reject"]),
+  });
+
+  app.patch(
+    "/api/admin/verifying-status/:userId/identification",
+    authenticateJWT,
+    requireFullAdmin,
+    async (req: any, res) => {
+      try {
+        const userId = String(req.params.userId ?? "").trim();
+        if (!userId) return res.status(400).json({ message: "userId es requerido" });
+
+        const parsed = verifyingStatusActionSchema.parse(req.body);
+        const status = parsed.action === "approve" ? "verified" : "rejected";
+
+        const updated = await genFebStorage.setVerifyingStatusIdentification(userId, status as any);
+        if (status === "verified") {
+          await maybeVerifyProfessional(userId);
+        }
+
+        return res.status(200).json(updated);
+      } catch (error: any) {
+        const msg = error?.message || "Error";
+        const code = String(msg).toLowerCase().includes("pending") || String(msg).toLowerCase().includes("no está") ? 409 : 400;
+        return res.status(code).json({ message: msg });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/admin/verifying-status/:userId/transaction",
+    authenticateJWT,
+    requireFullAdmin,
+    async (req: any, res) => {
+      try {
+        const userId = String(req.params.userId ?? "").trim();
+        if (!userId) return res.status(400).json({ message: "userId es requerido" });
+
+        const parsed = verifyingStatusActionSchema.parse(req.body);
+        const status = parsed.action === "approve" ? "verified" : "rejected";
+
+        const updated = await genFebStorage.setVerifyingStatusTransaction(userId, status as any);
+        if (status === "verified") {
+          await maybeVerifyProfessional(userId);
+        }
+
+        return res.status(200).json(updated);
+      } catch (error: any) {
+        const msg = error?.message || "Error";
+        const code = String(msg).toLowerCase().includes("pending") || String(msg).toLowerCase().includes("no está") ? 409 : 400;
+        return res.status(code).json({ message: msg });
+      }
+    }
+  );
 
   /**
    * GET /api/admin/providers/with-services
    * Lista profesionales que tienen al menos un servicio (activo o no), con métricas para el admin panel.
    * Incluye rating (de user), estado de verificación (provider.isVerified) y conteo de reservas.
    */
-  app.get("/api/admin/providers/with-services", authenticateJWT, requireAdmin, async (_req, res) => {
+  app.get("/api/admin/providers/with-services", authenticateJWT, requireStaffFromDb, async (_req, res) => {
     try {
       // Usamos getAllServices y agrupamos por providerId para filtrar solo proveedores con servicios.
       const services = await genFebStorage.getAllServices();
@@ -204,7 +334,7 @@ export function registerAdminRoutes(app: Express): void {
    * Lista todas las reservas (admin), enriquecidas con service + provider + client (cuando el storage lo provee).
    * Estrategia: iterar todos los proveedores y unir sus bookings (cada booking pertenece a 1 providerId).
    */
-  app.get("/api/admin/bookings", authenticateJWT, requireAdmin, async (_req, res) => {
+  app.get("/api/admin/bookings", authenticateJWT, requireStaffFromDb, async (_req, res) => {
     try {
       const providers = await genFebStorage.getAllProviders();
       const map = new Map<number, any>();
@@ -241,7 +371,7 @@ export function registerAdminRoutes(app: Express): void {
    * PATCH /api/admin/bookings/:id
    * Permite al admin corregir status/costo/horario. Se recomienda usarlo solo en casos especiales.
    */
-  app.patch("/api/admin/bookings/:id", authenticateJWT, requireAdmin, async (req: any, res) => {
+  app.patch("/api/admin/bookings/:id", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
     try {
       const bookingId = Number(req.params.id);
       if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID inválido" });
@@ -289,7 +419,7 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   // GET /api/admin/withdrawals - Lista usuarios con withdrawingFunds > 0 (solo admin)
-  app.get("/api/admin/withdrawals", authenticateJWT, requireAdmin, async (_req, res) => {
+  app.get("/api/admin/withdrawals", authenticateJWT, requireFullAdmin, async (_req, res) => {
     try {
       const list = await genFebStorage.getUsersWithPendingWithdrawals();
       return res.status(200).json(list);
@@ -305,7 +435,7 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   // PATCH /api/admin/withdrawals/:userId - Aprobar o rechazar retiro (solo admin). Atómico + notificación al usuario. adminNote opcional.
-  app.patch("/api/admin/withdrawals/:userId", authenticateJWT, requireAdmin, async (req: any, res) => {
+  app.patch("/api/admin/withdrawals/:userId", authenticateJWT, requireFullAdmin, async (req: any, res) => {
     try {
       const userId = (req.params.userId as string)?.trim();
       if (!userId) return res.status(400).json({ message: "userId es requerido" });
@@ -355,7 +485,7 @@ export function registerAdminRoutes(app: Express): void {
         const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
         const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
           ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
-        const { users: allAdmins } = await genFebStorage.getUsers({ role: "admin", page: 1, limit: 100, name: "", email: "", lastName: "" });
+        const allAdmins = await getFullAdminUsers(genFebStorage);
         for (const admin of allAdmins ?? []) {
           const aid = (admin as { id?: string }).id;
           if (aid && aid !== adminUserId) {
@@ -442,7 +572,7 @@ export function registerAdminRoutes(app: Express): void {
         const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
         const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
           ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
-        const { users: allAdmins } = await genFebStorage.getUsers({ role: "admin", page: 1, limit: 100, name: "", email: "", lastName: "" });
+        const allAdmins = await getFullAdminUsers(genFebStorage);
         for (const admin of allAdmins ?? []) {
           const aid = (admin as { id?: string }).id;
           if (aid && aid !== adminUserId) {
@@ -497,7 +627,7 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   // GET /api/admin/withdrawals/history - Historial de retiros (aprobados/rechazados) con paginación y filtro
-  app.get("/api/admin/withdrawals/history", authenticateJWT, requireAdmin, async (req: any, res) => {
+  app.get("/api/admin/withdrawals/history", authenticateJWT, requireFullAdmin, async (req: any, res) => {
     try {
       const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
       const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 10));

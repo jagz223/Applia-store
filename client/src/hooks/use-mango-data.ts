@@ -1014,3 +1014,115 @@ export function useAdminWithdrawalHistory(params: {
     enabled: enabled !== false,
   });
 }
+
+// ========== Verificación de profesional ==========
+
+const PROFESSIONAL_VERIFICATION_ME = "/api/me/professional-verification";
+const VERIFICATION_STATUS_ME = "/api/me/verifying-status";
+
+export type ProfessionalVerificationDto = {
+  userId: string;
+  imageUrl: string | null;
+  imageVerified: boolean;
+  transferReceiptCode: string | null;
+  transferDate: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type VerifyingStatusMeDto = {
+  user: string;
+  identification_verified: "rejected" | "pending" | "verified";
+  transacction_date: string | null;
+  /** null = aún no hay intento de pago registrado */
+  transacction_verified: "rejected" | "pending" | "verified" | null;
+};
+
+export function useVerifyingStatusMe(enabled: boolean) {
+  return useQuery({
+    queryKey: [VERIFICATION_STATUS_ME],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(VERIFICATION_STATUS_ME, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("No se pudo cargar el estado de verificación");
+      return res.json() as Promise<VerifyingStatusMeDto>;
+    },
+    enabled,
+  });
+}
+
+export function useProfessionalVerification(enabled: boolean) {
+  return useQuery({
+    queryKey: [PROFESSIONAL_VERIFICATION_ME],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(PROFESSIONAL_VERIFICATION_ME, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (res.status === 403) return null;
+      if (!res.ok) throw new Error("No se pudo cargar el estado de verificación");
+
+      return (res.json() as Promise<ProfessionalVerificationDto | null>);
+    },
+    enabled,
+  });
+}
+
+export function usePatchProfessionalVerificationImage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (imageUrl: string) => {
+      const token = getToken();
+      const res = await fetch(`${PROFESSIONAL_VERIFICATION_ME}/image`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ imageUrl }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { message?: string }).message || "Error al guardar la imagen");
+      }
+
+      return data as ProfessionalVerificationDto;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
+      queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
+    },
+  });
+}
+
+export function usePatchProfessionalVerificationPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { transferReceiptCode: string; transferDate: string }) => {
+      const token = getToken();
+      const res = await fetch(`${PROFESSIONAL_VERIFICATION_ME}/payment`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { message?: string }).message || "Error al registrar el pago");
+      }
+
+      return data as ProfessionalVerificationDto;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
+      queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
+    },
+  });
+}

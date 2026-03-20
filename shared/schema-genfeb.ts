@@ -10,7 +10,7 @@ import { relations } from "drizzle-orm";
 export { bookings, services, categories } from "./schema";
 
 // === ROLES DE USUARIO ===
-export type UserRole = "admin" | "professional" | "client";
+export type UserRole = "admin" | "tiSupport" | "professional" | "client";
 
 export const userRoles = pgTable("user_roles", {
   id: serial("id").primaryKey(),

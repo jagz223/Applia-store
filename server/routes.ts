@@ -1,11 +1,16 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { z } from "zod";
+import { hasAdminPrivileges } from "@shared/roles";
 import { api } from "@shared/routes";
 import { insertProviderSchema, insertServiceSchema } from "@shared/schema";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
+import {
+  patchProfessionalVerificationImageBody,
+  patchProfessionalVerificationPaymentBody,
+} from "@shared/professional-verification";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerGenFebRoutes } from "./routes-genfeb";
 import { registerAuthRoutes as registerJwtAuthRoutes, authenticateJWT } from "./routes-auth";
@@ -29,6 +34,145 @@ export async function registerRoutes(
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const provider = await catalogService.getProviderByUserId(userId);
     res.json(provider ?? null);
+  });
+
+  // ============ Verificación de profesionales (1 doc por userId) ============
+
+  app.get("/api/me/professional-verification", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
+
+      const rawUser = await genFebStorage.getUserById(userId);
+      const rawIdent = (rawUser as any)?.user_identification ?? null;
+      let imageUrl: string | null = null;
+      if (typeof rawIdent === "string") {
+        imageUrl = rawIdent.trim() || null;
+      } else if (rawIdent && typeof rawIdent === "object" && typeof (rawIdent as any).imageUrl === "string") {
+        imageUrl = String((rawIdent as any).imageUrl).trim() || null;
+      }
+
+      const doc = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      res.json({
+        userId,
+        imageUrl,
+        imageVerified: doc?.imageVerified === true,
+        transferReceiptCode: doc?.transferReceiptCode ?? null,
+        transferDate: doc?.transferDate ?? null,
+        createdAt: doc?.createdAt ?? undefined,
+        updatedAt: doc?.updatedAt ?? undefined,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Error" });
+    }
+  });
+
+  // =================== verifying_status (para UI de pasos) ===================
+  app.get("/api/me/verifying-status", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
+
+      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      if (!st) {
+        return res.json({
+          user: userId,
+          identification_verified: "rejected",
+          transacction_date: null,
+          transacction_verified: null,
+        });
+      }
+
+      return res.json({
+        user: st.user ?? userId,
+        identification_verified: st.identification_verified,
+        transacction_date: st.transacction_date ?? null,
+        transacction_verified: st.transacction_verified,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Error" });
+    }
+  });
+
+  app.patch("/api/me/professional-verification/image", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
+
+      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      // Solo bloqueamos si el admin ya aprobó la identificación. En "pending" o "rejected"
+      // el usuario puede volver a enviar y se fusionan los datos nuevos.
+      if (st?.identification_verified === "verified") {
+        return res.status(409).json({ message: "La identificación ya fue verificada" });
+      }
+
+      const body = patchProfessionalVerificationImageBody.parse(req.body);
+
+      await genFebStorage.updateUser(userId, {
+        user_identification: body.imageUrl,
+      } as any);
+
+      // También guardamos el imageUrl en el documento de verificación para que el paso de pago
+      // pueda validar que primero existe el documento.
+      await genFebStorage.upsertProfessionalVerificationImage(userId, body.imageUrl);
+
+      // Cambiar estado en verifying_status → identification_verified = pending
+      await genFebStorage.upsertVerifyingStatusIdentificationPending(userId);
+
+      const doc = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      res.json({
+        userId,
+        imageUrl: body.imageUrl,
+        imageVerified: doc?.imageVerified === true,
+        transferReceiptCode: doc?.transferReceiptCode ?? null,
+        transferDate: doc?.transferDate ?? null,
+        createdAt: doc?.createdAt ?? undefined,
+        updatedAt: new Date(),
+      });
+    } catch (e: any) {
+      if (e?.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      const msg = e?.message || "Error al guardar";
+      const status = String(msg).includes("revisión") ? 409 : 400;
+      res.status(status).json({ message: msg });
+    }
+  });
+
+  app.patch("/api/me/professional-verification/payment", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
+
+      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      // Solo bloqueamos si el admin ya aprobó el pago. En "pending" o "rejected"
+      // puede reenviar comprobante/fecha y se actualizan los campos (merge en Firestore).
+      if (st?.transacction_verified === "verified") {
+        return res.status(409).json({ message: "El pago ya fue verificado" });
+      }
+
+      const body = patchProfessionalVerificationPaymentBody.parse(req.body);
+      const updated = await genFebStorage.upsertProfessionalVerificationPayment(userId, {
+        transferReceiptCode: body.transferReceiptCode,
+        transferDate: body.transferDate,
+      });
+
+      // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
+      await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate);
+
+      res.json(updated);
+    } catch (e: any) {
+      if (e?.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      const msg = e?.message || "Error al guardar";
+      const status = String(msg).includes("revisión") ? 409 : 400;
+      res.status(status).json({ message: msg });
+    }
   });
 
   // Catálogo público: registrar ANTES de GenFeb para que /api/provider-categories/availability y /api/services coincidan
@@ -153,7 +297,7 @@ export async function registerRoutes(
       const service = await catalogService.getService(id);
       if (!service) return res.status(404).json({ message: "Service not found" });
       const userId = req.user?.id;
-      const isAdmin = req.user?.role === "admin";
+      const isAdmin = hasAdminPrivileges(req.user?.role);
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const provider = await catalogService.getProviderByUserId(userId);
       const isOwner = provider && service.providerId === provider.id;
@@ -175,7 +319,7 @@ export async function registerRoutes(
       const service = await catalogService.getService(id);
       if (!service) return res.status(404).json({ message: "Service not found" });
       const userId = req.user?.id;
-      const isAdmin = req.user?.role === "admin";
+      const isAdmin = hasAdminPrivileges(req.user?.role);
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const provider = await catalogService.getProviderByUserId(userId);
       const isOwner = provider && service.providerId === provider.id;
@@ -222,7 +366,10 @@ export async function registerRoutes(
       const data = createProviderBodySchema.parse(req.body);
       const existing = await catalogService.getProviderByUserId(userId);
       if (existing) {
-        await genFebStorage.updateUser(userId, { role: "professional" } as any);
+        await genFebStorage.updateUser(userId, {
+          role: "professional",
+          acceptedProviderTermsOfUse: false,
+        } as any);
         return res.status(409).json({ message: "Ya tienes un perfil de proveedor" });
       }
       const provider = await catalogService.createProvider({
@@ -235,7 +382,10 @@ export async function registerRoutes(
         yearsExperience: data.yearsExperience ?? 0,
         hourlyRate: data.hourlyRate ?? null,
       } as any);
-      await genFebStorage.updateUser(userId, { role: "professional" } as any);
+      await genFebStorage.updateUser(userId, {
+        role: "professional",
+        acceptedProviderTermsOfUse: false,
+      } as any);
 
       // Un solo servicio por profesional: se crea desde los datos del proveedor (nombre = nombre del profesional, descripción = bio, precio = tarifa).
       const categoryId = (provider as { categoryId?: number }).categoryId;
@@ -271,7 +421,7 @@ export async function registerRoutes(
       const provider = await catalogService.getProvider(id);
       if (!provider) return res.status(404).json({ message: "Provider not found" });
       const userId = req.user?.id;
-      const isAdmin = req.user?.role === "admin";
+      const isAdmin = hasAdminPrivileges(req.user?.role);
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       if ((provider as any).userId !== userId && !isAdmin) return res.status(403).json({ message: "Solo el dueño o un admin puede editar este proveedor" });
       const data = updateProviderBodySchema.parse(req.body);
@@ -291,7 +441,7 @@ export async function registerRoutes(
       const provider = await catalogService.getProvider(id);
       if (!provider) return res.status(404).json({ message: "Provider not found" });
       const userId = req.user?.id;
-      const isAdmin = req.user?.role === "admin";
+      const isAdmin = hasAdminPrivileges(req.user?.role);
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       if ((provider as any).userId !== userId && !isAdmin) return res.status(403).json({ message: "Solo el dueño o un admin puede eliminar este proveedor" });
       const ok = await catalogService.deleteProvider(id);
