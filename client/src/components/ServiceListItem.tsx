@@ -15,9 +15,9 @@ function getProviderName(service: ServiceWithProvider) {
   const u = (service.provider as any)?.user as
     | { firstName?: string; lastName?: string; name?: string }
     | undefined;
-  if (!u) return "Profesional";
+  if (!u) return "Asociado";
   const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
-  return name || u.name || "Profesional";
+  return name || u.name || "Asociado";
 }
 
 export function ServiceListItem({ service }: ServiceListItemProps) {

@@ -42,6 +42,9 @@ import { ProviderTermsGate } from "@/components/ProviderTermsGate";
 import VerifyProfessional from "@/pages/VerifyProfessional";
 import VerifyProfessionalPayment from "@/pages/VerifyProfessionalPayment";
 
+// Oculta pagos temporalmente (se configurará en el futuro).
+const SHOW_PAYMENTS = false;
+
 function Router() {
   return (
     <Switch>
@@ -57,7 +60,7 @@ function Router() {
       <Route path="/edit-service/:id" component={EditService} />
       <Route path="/booking" component={Booking} />
       <Route path="/vault" component={Vault} />
-      <Route path="/payments" component={Payments} />
+      {SHOW_PAYMENTS && <Route path="/payments" component={Payments} />}
       <Route path="/chat" component={Chat} />
       <Route path="/admin" component={Admin} />
       <Route path="/admin/create-role" component={CreateRole} />

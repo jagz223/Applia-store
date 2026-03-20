@@ -89,6 +89,7 @@ export default function Bookings() {
     return (
       <motion.li
         key={booking.id}
+        data-booking-id={booking.id}
         {...listItemMotion}
         className={isHighlighted ? "notification-highlight" : ""}
       >
@@ -105,8 +106,8 @@ export default function Bookings() {
             </div>
             <p className="text-sm text-muted-foreground">
               {booking.service?.provider?.user
-                ? `${booking.service.provider.user.firstName ?? ""} ${booking.service.provider.user.lastName ?? ""}`.trim() || "Profesional"
-                : "Profesional"}
+                ? `${booking.service.provider.user.firstName ?? ""} ${booking.service.provider.user.lastName ?? ""}`.trim() || "Asociado"
+                : "Asociado"}
             </p>
             {(cost > 0 || (booking.service?.price != null && Number(booking.service.price) > 0)) && (
               <p className="text-sm font-medium text-foreground mt-1">
@@ -122,7 +123,7 @@ export default function Bookings() {
                   Confirmar pago y retener fondos
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  El profesional ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago.
+                  El asociado ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago.
                   Se descontará <strong>${Number(cost).toFixed(2)} USD</strong> de tu billetera.
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -245,6 +246,19 @@ export default function Bookings() {
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
+
+  // Al venir con highlight (desde notificaciones), movemos el viewport hacia la tarjeta resaltada.
+  useEffect(() => {
+    if (highlightedBookingId == null) return;
+    if (typeof window === "undefined") return;
+
+    const t = window.setTimeout(() => {
+      const el = document.querySelector(`[data-booking-id="${highlightedBookingId}"]`) as HTMLElement | null;
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+
+    return () => window.clearTimeout(t);
+  }, [highlightedBookingId]);
 
   if (authLoading) {
     return (
@@ -404,20 +418,29 @@ export default function Bookings() {
         ) : (
           <Tabs value={subTab} onValueChange={(v) => setSubTab(v as any)} className="w-full">
             <TabsList className="flex w-full flex-nowrap items-stretch gap-1 h-auto p-1 bg-muted/50 overflow-x-auto">
-              <TabsTrigger value="new" className="gap-2 py-2.5 min-w-[140px] data-[state=active]:bg-background data-[state=active]:shadow-sm">
+              <TabsTrigger
+                value="new"
+                className="gap-1 px-2 py-2 text-xs max-[360px]:gap-0.5 max-[360px]:px-2 max-[360px]:py-2 max-[360px]:min-w-[120px] max-[360px]:flex-col max-[360px]:whitespace-normal data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
                 <Clock className="h-4 w-4" />
-                <span>Servicios nuevos</span>
-                <Badge variant="secondary" className="ml-1">{newOnes.length}</Badge>
+                <span className="leading-tight max-[360px]:text-[11px] whitespace-normal">Servicios nuevos</span>
+                <Badge variant="secondary" className="ml-0 max-[360px]:px-1 max-[360px]:text-[12px] max-[360px]:w-auto">{newOnes.length}</Badge>
               </TabsTrigger>
-              <TabsTrigger value="pending" className="gap-2 py-2.5 min-w-[120px] data-[state=active]:bg-background data-[state=active]:shadow-sm">
+              <TabsTrigger
+                value="pending"
+                className="gap-1 px-2 py-2 text-xs max-[360px]:gap-1 max-[360px]:px-2 max-[360px]:py-2 min-w-[120px] max-[360px]:min-w-[100px] data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
                 <Package className="h-4 w-4" />
                 <span>Pendientes</span>
-                <Badge variant="secondary" className="ml-1">{pending.length}</Badge>
+                <Badge variant="secondary" className="ml-0 max-[360px]:px-1 max-[360px]:text-[12px]">{pending.length}</Badge>
               </TabsTrigger>
-              <TabsTrigger value="done" className="gap-2 py-2.5 min-w-[120px] data-[state=active]:bg-background data-[state=active]:shadow-sm">
+              <TabsTrigger
+                value="done"
+                className="gap-1 px-2 py-2 text-xs max-[360px]:gap-1 max-[360px]:px-2 max-[360px]:py-2 min-w-[120px] max-[360px]:min-w-[100px] data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
                 <CheckCircle className="h-4 w-4" />
                 <span>Finalizados</span>
-                <Badge variant="secondary" className="ml-1">{done.length}</Badge>
+                <Badge variant="secondary" className="ml-0 max-[360px]:px-1 max-[360px]:text-[12px]">{done.length}</Badge>
               </TabsTrigger>
             </TabsList>
 

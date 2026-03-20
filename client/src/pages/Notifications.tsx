@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, Link } from "wouter";
 import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocket } from "@/hooks/use-socket";
+import { useConversations } from "@/hooks/use-chat";
 
 const PAGE_SIZE = 10;
 
@@ -123,16 +124,21 @@ function getIcon(type: string) {
   }
 }
 
-function getTitle(type: string, data?: any): string {
+function truncateText(s: string, max: number) {
+  const t = s.trim();
+  return t.length > max ? `${t.slice(0, max)}...` : t;
+}
+
+function getTitle(type: string, data?: any, conversationSenderName?: string): string {
   const d = data ?? {};
-  if (type === "booking" && d.type === "new_booking") return "Nueva reserva";
+  if (type === "booking" && d.type === "new_booking") return "Nueva solicitud de reserva";
   if (type === "booking" && d.type === "booking_update") {
     const status = (d.booking?.status ?? d.booking?.status) as string | undefined;
     if (status === "in_progress") return "Servicio en proceso";
     if (status === "completed") return "Servicio completado";
     return "Reserva actualizada";
   }
-  if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el profesional";
+  if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el asociado";
   if (type === "booking_confirmed_by_client") return "Fondos agregados";
   if (type === "booking_cost_commission_reminder") return "Recordatorio de comisión";
   if (type === "booking_cancelled") return "Reserva cancelada";
@@ -156,18 +162,21 @@ function getTitle(type: string, data?: any): string {
     return "Notificación del administrador";
   }
 
-  if (type === "message") return "Nuevo mensaje";
+  if (type === "message") return conversationSenderName ? `Nuevo mensaje de ${truncateText(conversationSenderName, 18)}` : "Nuevo mensaje";
   return "Notificación";
 }
 
-function getDescription(type: string, data?: any): string | null {
+function getDescription(type: string, data?: any, conversationSenderName?: string): string | null {
   const d = data ?? {};
   // Booking update (Socket.io) con estado real
   if (type === "booking" && d.type === "booking_update") {
     const status = d.booking?.status as string | undefined;
-    if (status === "in_progress") return "El profesional marcó tu reserva como en proceso. Revisa tu lista de reservas.";
+    if (status === "in_progress") return "El asociado marcó tu reserva como en proceso. Revisa tu lista de reservas.";
     if (status === "completed") return "El servicio fue completado. Puedes revisar la reserva y dejar tu calificación cuando corresponda.";
     return "La reserva fue actualizada.";
+  }
+  if (type === "booking" && d.type === "new_booking") {
+    return "Tienes una nueva solicitud de reserva. Revisa el detalle en tu Panel Asociado.";
   }
   // 1) Mensajes de reserva (comunes)
   if (type === "booking_confirmed_by_client") {
@@ -219,13 +228,32 @@ function getDescription(type: string, data?: any): string | null {
   if (typeof d.message === "string" && d.message.trim()) return d.message;
   if (typeof d.data?.message === "string" && d.data.message.trim()) return d.data.message;
 
+  // 2.5) Mensaje (chat) en notificaciones
+  if (type === "message") {
+    const preview = (typeof d.preview === "string" ? d.preview : d.data?.preview) ?? null;
+    const raw = typeof preview === "string" ? preview.trim() : "";
+    const lower = raw.toLowerCase();
+    const looksLikeLocation =
+      (lower.includes("lat") && lower.includes("lng")) ||
+      lower.includes("ubicacion") ||
+      lower.includes("location") ||
+      lower.includes("latitud") ||
+      lower.includes("longitud");
+    if (looksLikeLocation) return "Te ha compartido su ubicacion.";
+
+    const truncated = raw.length > 90 ? `${raw.slice(0, 90)}...` : raw;
+    if (truncated) return conversationSenderName ? `De ${conversationSenderName}: ${truncated}` : truncated;
+    if (conversationSenderName) return `De ${conversationSenderName}`;
+    return null;
+  }
+
   // 4) Notificaciones de admin (p. ej. solicitudes de retiro)
   if (type === "admin") {
     if (d.type === "withdrawal_requested") {
       const name = d.userName ?? d.data?.userName;
       const amount = d.amountFormatted ?? d.data?.amountFormatted ?? d.amount ?? d.data?.amount;
       if (name && amount) return `${name} solicitó retirar $${amount} USD. Revisa Solicitudes de Retiro en el Panel de Administración.`;
-      return "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.";
+      return "Un asociado solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.";
     }
     if (d.type === "withdrawal_processed_by_other") {
       if (typeof d.message === "string") return d.message;
@@ -239,8 +267,15 @@ function getDescription(type: string, data?: any): string | null {
 
 export default function Notifications() {
   const { isAuthenticated } = useAuth();
-  const { notifications, markNotificationAsRead } = useSocket();
+  const { notifications, markNotificationAsRead, clearNotifications } = useSocket();
   const [, setLocation] = useLocation();
+
+  const { data: conversations } = useConversations(!!isAuthenticated);
+  const senderNameByConversationId = useMemo(() => {
+    const map = new Map<number, string>();
+    (conversations ?? []).forEach((c) => map.set(c.id, c.otherParticipant?.name ?? "Usuario"));
+    return map;
+  }, [conversations]);
 
   const [page, setPage] = useState(1);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -255,6 +290,15 @@ export default function Notifications() {
     return filtered.slice(start, end);
   }, [filtered, currentPage]);
 
+  // Cuando el usuario abre el historial, consideramos que ya las revisó:
+  // marcamos como leídas para que el badge de la campanita desaparezca.
+  useEffect(() => {
+    if (!notifications.length) return;
+    if (notifications.some((n) => !n.read)) {
+      clearNotifications();
+    }
+  }, [notifications, clearNotifications]);
+
   const handleClearFilter = () => {
     setUnreadOnly(false);
     setPage(1);
@@ -262,6 +306,10 @@ export default function Notifications() {
 
   const handleOpenNotification = (notification: any) => {
     markNotificationAsRead(notification.id);
+    if (typeof window !== "undefined") {
+      // Evita que el SPA conserve el scroll al navegar desde abajo.
+      window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+    }
     setLocation(getNotificationPath(notification));
   };
 
@@ -326,8 +374,15 @@ export default function Notifications() {
             <div className="space-y-2">
               {pageNotifications.map((notification: any) => {
                 const data = notification.data ?? {};
-                const title = getTitle(notification.type, data);
-                const detail = getDescription(notification.type, data) ?? undefined;
+                const conversationSenderName =
+                  (() => {
+                    const convId = data?.conversationId ?? data?.data?.conversationId;
+                    return convId != null && Number.isFinite(Number(convId))
+                      ? senderNameByConversationId.get(Number(convId))
+                      : undefined;
+                  })();
+                const title = getTitle(notification.type, data, conversationSenderName);
+                const detail = getDescription(notification.type, data, conversationSenderName) ?? undefined;
 
                 return (
                   <button

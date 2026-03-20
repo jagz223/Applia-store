@@ -74,7 +74,7 @@ export function ChatWindow({
           </div>
           <div>
             <p className="font-medium">{conversation.otherParticipant?.name ?? "Usuario"}</p>
-            <p className="text-xs text-muted-foreground">Chat</p>
+            <p className="text-xs text-muted-foreground">Mensajes</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

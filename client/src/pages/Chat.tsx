@@ -67,7 +67,7 @@ export default function Chat() {
     queryKey: ["booking", bookingIdForContext],
     queryFn: async () => {
       const res = await fetch(`/api/bookings/${bookingIdForContext}`);
-      if (!res.ok) throw new Error("Booking not found");
+      if (!res.ok) throw new Error("Reserva no encontrada");
       return res.json() as Promise<{ id: number; serviceTitle?: string; status?: string }>;
     },
     enabled: !!bookingIdForContext,
@@ -76,7 +76,7 @@ export default function Chat() {
     queryKey: ["service", serviceIdForContext],
     queryFn: async () => {
       const res = await fetch(`/api/services/${serviceIdForContext}`);
-      if (!res.ok) throw new Error("Service not found");
+      if (!res.ok) throw new Error("Servicio no encontrado");
       return res.json() as Promise<{ id: number; title?: string }>;
     },
     enabled: !!serviceIdForContext,
@@ -314,7 +314,7 @@ export default function Chat() {
                   Mensajes <span className="text-gradient-primary">en Vivo</span>
                 </h1>
                 <p className="text-muted-foreground text-sm">
-                  Chatea directamente con clientes y profesionales
+                  Chatea directamente con clientes y asociados
                 </p>
               </div>
             </div>
@@ -390,7 +390,7 @@ export default function Chat() {
                     Mensajes <span className="text-gradient-primary">en Vivo</span>
                   </h1>
                   <p className="text-muted-foreground text-sm">
-                    Chatea directamente con clientes y profesionales
+                    Chatea directamente con clientes y asociados
                   </p>
                 </div>
               </div>

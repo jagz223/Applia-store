@@ -172,7 +172,7 @@ export default function Explore() {
                   <Sparkles className="h-7 w-7 text-primary" />
                   Explorar Servicios
                 </h1>
-                <p className="text-muted-foreground mt-1">Encuentra el profesional perfecto para tu proyecto</p>
+                <p className="text-muted-foreground mt-1">Encuentra el asociado perfecto para tu proyecto</p>
               </div>
               <div className="relative w-full md:w-96">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />

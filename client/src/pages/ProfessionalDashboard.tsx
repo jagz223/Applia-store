@@ -336,6 +336,15 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
   const { notifyBookingUpdate } = useSocketBookings();
   const [costInputs, setCostInputs] = useState<Record<number, string>>({});
   const [scheduleInputs, setScheduleInputs] = useState<Record<number, { date: string; time: string }>>({});
+  const [pendingChange, setPendingChange] = useState<
+    | null
+    | {
+        bookingId: number;
+        kind: "cost" | "schedule";
+        costValue?: number;
+        scheduleValue?: { date: string; time: string };
+      }
+  >(null);
   const [subTab, setSubTab] = useState<BookingsSubTab>("pending");
   const PAGE_SIZE = 10;
   const [pageBySubTab, setPageBySubTab] = useState<Record<BookingsSubTab, number>>({
@@ -444,23 +453,16 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     const providerNet = costForCommission > 0 ? calcProviderNet(costForCommission) : 0;
     const hasValidCost = savedCost > 0;
     const scheduleDisplay = scheduleInputs[booking.id] ?? { date: dateStr, time: timeStr };
-    const handleCostBlur = () => {
+    const requestSaveCost = () => {
       const num = parseFloat(costDisplay.replace(",", "."));
       if (!Number.isFinite(num) || num < 0) return;
-      updateCost.mutate(
-        { id: booking.id, cost: num },
-        { onSuccess: () => setCostInputs((prev) => ({ ...prev, [booking.id]: String(num) })) }
-      );
+      setPendingChange({ bookingId: booking.id, kind: "cost", costValue: num });
     };
-    const handleSaveCost = () => handleCostBlur();
-    const handleSaveSchedule = () => {
+    const requestSaveSchedule = () => {
       const iso = `${scheduleDisplay.date}T${scheduleDisplay.time}:00`;
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) return;
-      updateSchedule.mutate(
-        { id: booking.id, date: d.toISOString() },
-        { onSuccess: () => setScheduleInputs((prev) => ({ ...prev, [booking.id]: scheduleDisplay })) }
-      );
+      setPendingChange({ bookingId: booking.id, kind: "schedule", scheduleValue: scheduleDisplay });
     };
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
 
@@ -481,10 +483,11 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     return (
       <motion.div
         key={booking.id}
+        data-booking-id={booking.id}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: "easeOut" }}
-        className={`flex flex-wrap items-start justify-between gap-4 p-4 border border-border rounded-lg bg-card ${isHighlighted ? "notification-highlight" : ""}`}
+        className={`flex flex-col sm:flex-row items-start sm:justify-between gap-4 p-4 border border-border rounded-lg bg-card ${isHighlighted ? "notification-highlight" : ""}`}
       >
         <div className="min-w-0 flex-1">
           <p className="font-medium text-foreground">{booking.service?.title ?? "Servicio"}</p>
@@ -506,7 +509,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 onChange={(e) => setScheduleInputs((prev) => ({ ...prev, [booking.id]: { ...scheduleDisplay, time: e.target.value } }))}
                 disabled={updateSchedule.isPending}
               />
-              <Button type="button" size="sm" variant="secondary" onClick={handleSaveSchedule} disabled={updateSchedule.isPending}>
+              <Button type="button" size="sm" variant="secondary" onClick={requestSaveSchedule} disabled={updateSchedule.isPending}>
                 {updateSchedule.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar fecha"}
               </Button>
               <span className="text-xs text-muted-foreground">Si acuerdan otro día con el cliente, actualiza aquí.</span>
@@ -526,14 +529,13 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                   className="w-28 h-9 text-sm font-medium border-primary/30 focus-visible:ring-primary"
                   value={costDisplay}
                   onChange={(e) => setCostInputs((prev) => ({ ...prev, [booking.id]: e.target.value }))}
-                  onBlur={handleCostBlur}
                   disabled={updateCost.isPending}
                 />
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
-                  onClick={handleSaveCost}
+                onClick={requestSaveCost}
                   disabled={updateCost.isPending}
                 >
                   {updateCost.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar costo"}
@@ -543,7 +545,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 )}
                 {costForCommission > 0 && (
                   <span className="text-xs text-muted-foreground">
-                    Neto profesional: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> (90%) · Comisión:{" "}
+                    Neto asociado: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> (90%) · Comisión:{" "}
                     <span className="font-medium text-foreground">${commission.toFixed(2)}</span> (10%)
                   </span>
                 )}
@@ -558,7 +560,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
           {booking.notes && (
             <p className="text-sm text-muted-foreground mt-2 line-clamp-2">Notas: {booking.notes}</p>
           )}
-          <div className="flex items-center gap-2 mt-3">
+          <div className="flex flex-wrap items-center gap-2 mt-3">
             <Button variant="outline" size="sm" className="gap-1.5" asChild>
               <Link href={booking.userId ? `/chat?with=${booking.userId}&bookingId=${booking.id}` : "/chat"}>
                 <MessageSquare className="h-4 w-4" />
@@ -570,7 +572,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
             </Button>
           </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 shrink-0 w-full sm:w-auto">
           <Badge variant={booking.status === "completed" ? "default" : booking.status === "cancelled" ? "destructive" : "secondary"}>
             {STATUS_OPTIONS.find((o) => o.value === booking.status)?.label ?? booking.status}
           </Badge>
@@ -578,7 +580,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="inline-block">
+                  <div className="inline-block w-full sm:w-auto">
                       <Select
                       value={booking.status}
                       onValueChange={(value) =>
@@ -598,7 +600,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                       }
                       disabled={updateStatus.isPending}
                     >
-                      <SelectTrigger className="w-[160px] bg-background border-border">
+                      <SelectTrigger className="w-full sm:w-[160px] bg-background border-border">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -641,24 +643,103 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     );
   }
 
+  const isConfirmSaving =
+    pendingChange?.kind === "cost"
+      ? updateCost.isPending
+      : pendingChange?.kind === "schedule"
+        ? updateSchedule.isPending
+        : false;
+
+  const handleConfirmChange = () => {
+    if (!pendingChange) return;
+
+    if (pendingChange.kind === "cost") {
+      const costValue = pendingChange.costValue;
+      if (costValue == null || !Number.isFinite(costValue) || costValue < 0) return;
+      updateCost.mutate(
+        { id: pendingChange.bookingId, cost: costValue },
+        {
+          onSuccess: () => {
+            setCostInputs((prev) => ({ ...prev, [pendingChange.bookingId]: String(costValue) }));
+            setPendingChange(null);
+          },
+        },
+      );
+      return;
+    }
+
+    const scheduleValue = pendingChange.scheduleValue;
+    if (!scheduleValue) return;
+    const iso = `${scheduleValue.date}T${scheduleValue.time}:00`;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return;
+
+    updateSchedule.mutate(
+      { id: pendingChange.bookingId, date: d.toISOString() },
+      {
+        onSuccess: () => {
+          setScheduleInputs((prev) => ({ ...prev, [pendingChange.bookingId]: scheduleValue }));
+          setPendingChange(null);
+        },
+      },
+    );
+  };
+
   return (
-    <Card className="border-border bg-card">
-      <CardHeader>
-        <CardTitle className="text-xl">Gestión de reservas</CardTitle>
-        <CardDescription>
-          Solicitudes de clientes: asigna precios, confirma reservas y actualiza el estado de cada servicio.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <Tabs value={subTab} onValueChange={(v) => setSubTab(v as BookingsSubTab)} className="w-full">
+    <>
+      <Dialog open={pendingChange != null} onOpenChange={(open) => (!open ? setPendingChange(null) : undefined)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>¿Estás seguro de este cambio?</DialogTitle>
+            <DialogDescription>
+              Si confirmas, se actualizará el servicio y se enviarán las notificaciones correspondientes.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="text-sm text-muted-foreground space-y-1">
+            {pendingChange?.kind === "cost" && pendingChange.costValue != null && (
+              <p>
+                Monto: <span className="font-medium text-foreground">${pendingChange.costValue.toFixed(2)} USD</span>
+              </p>
+            )}
+            {pendingChange?.kind === "schedule" && pendingChange.scheduleValue && (
+              <p>
+                Fecha y hora:{" "}
+                <span className="font-medium text-foreground">
+                  {pendingChange.scheduleValue.date} - {pendingChange.scheduleValue.time}
+                </span>
+              </p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPendingChange(null)} disabled={isConfirmSaving}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={handleConfirmChange} disabled={isConfirmSaving}>
+              {isConfirmSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirmar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-xl leading-tight">Gestión de reservas</CardTitle>
+          <CardDescription>
+            Solicitudes de clientes: asigna precios, confirma reservas y actualiza el estado de cada servicio.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <Tabs value={subTab} onValueChange={(v) => setSubTab(v as BookingsSubTab)} className="w-full">
           <TooltipProvider>
             <TabsList className="flex w-full flex-nowrap items-stretch gap-1 h-auto p-1 bg-muted/50 overflow-x-auto">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <TabsTrigger value="pending" className="gap-2 py-2.5 min-w-[64px] data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                    <Inbox className="h-4 w-4" />
+                      <TabsTrigger value="pending" className="flex-col gap-1.5 py-2.5 min-w-[64px] data-[state=active]:bg-background data-[state=active]:shadow-sm sm:flex-row sm:gap-2">
+                        <Inbox className="h-4 w-4 text-orange-500" />
                     <span className="hidden sm:inline">Solicitudes pendientes</span>
-                    <Badge variant="secondary" className="ml-1">{pending.length}</Badge>
+                        <Badge variant="secondary" className="ml-0 sm:ml-1 self-center">{pending.length}</Badge>
                   </TabsTrigger>
                 </TooltipTrigger>
                 <TooltipContent>Solicitudes pendientes</TooltipContent>
@@ -666,10 +747,10 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <TabsTrigger value="in_progress" className="gap-2 py-2.5 min-w-[64px] data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                    <PlayCircle className="h-4 w-4" />
+                      <TabsTrigger value="in_progress" className="flex-col gap-1.5 py-2.5 min-w-[64px] data-[state=active]:bg-background data-[state=active]:shadow-sm sm:flex-row sm:gap-2">
+                        <PlayCircle className="h-4 w-4 text-emerald-600" />
                     <span className="hidden sm:inline">En espera</span>
-                    <Badge variant="secondary" className="ml-1">{inProgress.length}</Badge>
+                        <Badge variant="secondary" className="ml-0 sm:ml-1 self-center">{inProgress.length}</Badge>
                   </TabsTrigger>
                 </TooltipTrigger>
                 <TooltipContent>Reservas en espera</TooltipContent>
@@ -677,10 +758,10 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <TabsTrigger value="ready" className="gap-2 py-2.5 min-w-[64px] data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                    <CheckCircle2 className="h-4 w-4" />
+                      <TabsTrigger value="ready" className="flex-col gap-1.5 py-2.5 min-w-[64px] data-[state=active]:bg-background data-[state=active]:shadow-sm sm:flex-row sm:gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
                     <span className="hidden sm:inline">Listas</span>
-                    <Badge variant="secondary" className="ml-1">{ready.length}</Badge>
+                        <Badge variant="secondary" className="ml-0 sm:ml-1 self-center">{ready.length}</Badge>
                   </TabsTrigger>
                 </TooltipTrigger>
                 <TooltipContent>Listas para completar</TooltipContent>
@@ -688,10 +769,10 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <TabsTrigger value="history" className="gap-2 py-2.5 min-w-[64px] data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                    <History className="h-4 w-4" />
+                      <TabsTrigger value="history" className="flex-col gap-1.5 py-2.5 min-w-[64px] data-[state=active]:bg-background data-[state=active]:shadow-sm sm:flex-row sm:gap-2">
+                        <History className="h-4 w-4 text-slate-600" />
                     <span className="hidden sm:inline">Historial</span>
-                    <Badge variant="secondary" className="ml-1">{history.length}</Badge>
+                        <Badge variant="secondary" className="ml-0 sm:ml-1 self-center">{history.length}</Badge>
                   </TabsTrigger>
                 </TooltipTrigger>
                 <TooltipContent>Historial</TooltipContent>
@@ -850,6 +931,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
         </Tabs>
       </CardContent>
     </Card>
+    </>
   );
 }
 
@@ -857,7 +939,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 function EconomicReportDialog({
   open,
   onOpenChange,
-  walletData,
+  walletData
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1139,6 +1221,39 @@ export default function ProfessionalDashboard() {
   };
   const [currentTab, setCurrentTabState] = useState(getTabFromUrl);
   const [highlightedBookingId, setHighlightedBookingId] = useState<number | null>(null);
+
+  // Si venimos con "highlight", movemos el viewport hacia la fila resaltada.
+  useEffect(() => {
+    if (highlightedBookingId == null) return;
+    if (currentTab !== "bookings") return;
+    if (typeof window === "undefined") return;
+
+    let cancelled = false;
+    const maxAttempts = 20; // ~3s
+    let attemptCount = 0;
+
+    const attemptScroll = () => {
+      if (cancelled) return;
+      attemptCount += 1;
+
+      const el = document.querySelector(`[data-booking-id="${highlightedBookingId}"]`) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+
+      if (attemptCount < maxAttempts) {
+        window.setTimeout(attemptScroll, 150);
+      }
+    };
+
+    // Un pequeño delay para que el estado/tab+paginación se reflejen y React renderice la fila.
+    window.setTimeout(attemptScroll, 120);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [highlightedBookingId, currentTab, location]);
 
   useEffect(() => {
     setCurrentTabState(getTabFromUrl());
@@ -1469,15 +1584,15 @@ export default function ProfessionalDashboard() {
           <Card className="mb-6 border-2 border-mango-orange/50 bg-mango-orange/5">
             <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
               <div className="text-center sm:text-left">
-                <h2 className="text-lg font-semibold text-foreground mb-1">Completa tu perfil profesional</h2>
+                <h2 className="text-lg font-semibold text-foreground mb-1">Completa tu perfil de asociado</h2>
                 <p className="text-sm text-muted-foreground">
-                  Aún no has configurado tu perfil como profesional. Completa categoría, descripción y tarifa para publicar tu servicio y recibir reservas.
+                  Aún no has configurado tu perfil como asociado. Completa categoría, descripción y tarifa para publicar tu servicio y recibir reservas.
                 </p>
               </div>
               <Button asChild className="shrink-0">
                 <Link href="/become-pro">
                   <UserPlus className="h-4 w-4 mr-2" />
-                  Configurar como profesional
+                  Configurar como asociado
                 </Link>
               </Button>
             </CardContent>
@@ -1616,10 +1731,10 @@ export default function ProfessionalDashboard() {
               {/* Booking Stats */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Estadísticas de Reservas</CardTitle>
+                  <CardTitle className="leading-tight text-xl sm:text-2xl">Estadísticas de Reservas</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-3 gap-4 text-center">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
                     <div className="p-4 bg-green-50 rounded-lg">
                       <div className="text-2xl font-bold text-green-600">{completedBookings.length}</div>
                       <div className="text-sm text-gray-500">Completadas</div>

@@ -87,7 +87,7 @@ export default function CreateService() {
             : "Debes ser proveedor para crear servicios."}
         </p>
         <Button asChild>
-          <Link href="/become-pro">Convertirse en profesional</Link>
+          <Link href="/become-pro">Convertirse en asociado</Link>
         </Button>
       </div>
     );
@@ -106,7 +106,7 @@ export default function CreateService() {
     <div className="container max-w-2xl py-12 px-4">
       <Card>
         <CardHeader>
-          <CardTitle>Add New Service</CardTitle>
+          <CardTitle>Agregar nuevo servicio</CardTitle>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -117,9 +117,9 @@ export default function CreateService() {
                 name="title"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Service Title</FormLabel>
+                    <FormLabel>Título del servicio</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. Full House Cleaning" {...field} />
+                      <Input placeholder="Ej: Limpieza completa de hogar" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -182,7 +182,7 @@ export default function CreateService() {
                   name="price"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Price ($)</FormLabel>
+                      <FormLabel>Precio ($)</FormLabel>
                       <FormControl>
                         <Input type="number" {...field} />
                       </FormControl>
@@ -197,9 +197,9 @@ export default function CreateService() {
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description</FormLabel>
+                    <FormLabel>Descripción</FormLabel>
                     <FormControl>
-                      <Textarea placeholder="What's included in this service?" className="h-32" {...field} />
+                      <Textarea placeholder="Qué incluye este servicio?" className="h-32" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -208,11 +208,11 @@ export default function CreateService() {
 
               {/*
                 Deshabilitado: no se configura foto del servicio.
-                La foto que se muestra es únicamente la del profesional en el círculo.
+                La foto que se muestra es únicamente la del asociado en el círculo.
               */}
 
               <Button type="submit" className="w-full" disabled={createService.isPending}>
-                {createService.isPending ? "Creating..." : "Create Service"}
+                {createService.isPending ? "Creando..." : "Crear servicio"}
               </Button>
             </form>
           </Form>

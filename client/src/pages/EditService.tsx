@@ -162,7 +162,7 @@ export default function EditService() {
 
               {/*
                 Deshabilitado: no se configura foto del servicio.
-                La foto que se muestra en el detalle es únicamente la del profesional.
+                La foto que se muestra en el detalle es únicamente la del asociado.
               */}
 
               <Button type="submit" className="w-full" disabled={updateService.isPending}>

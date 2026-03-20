@@ -23,7 +23,7 @@ export function useCategories() {
     queryKey: [api.categories.list.path],
     queryFn: async () => {
       const res = await fetch(api.categories.list.path);
-      if (!res.ok) throw new Error("Failed to fetch categories");
+      if (!res.ok) throw new Error("No se pudieron cargar las categorías");
       return api.categories.list.responses[200].parse(await res.json());
     },
   });
@@ -44,7 +44,7 @@ export function useSubcategories(categoryId: number | null | undefined) {
     queryKey: ["/api/subcategories", categoryId],
     queryFn: async () => {
       const res = await fetch(`/api/subcategories?categoryId=${categoryId}`);
-      if (!res.ok) throw new Error("Failed to fetch subcategories");
+      if (!res.ok) throw new Error("No se pudieron cargar las subcategorías");
       return res.json() as Promise<Subcategory[]>;
     },
     enabled: categoryId != null && !Number.isNaN(Number(categoryId)) && Number(categoryId) >= 1,
@@ -61,7 +61,7 @@ export function useProviderCategories() {
     queryKey: ["/api/provider-categories"],
     queryFn: async () => {
       const res = await fetch("/api/provider-categories");
-      if (!res.ok) throw new Error("Failed to fetch provider categories");
+      if (!res.ok) throw new Error("No se pudieron cargar las categorías de asociado");
       return res.json() as Promise<Array<{ code: string; label: string; professionLabel?: string }>>;
     },
   });
@@ -73,7 +73,7 @@ export function useProviderCategoryAvailability() {
     queryKey: ["/api/provider-categories/availability"],
     queryFn: async () => {
       const res = await fetch("/api/provider-categories/availability");
-      if (!res.ok) throw new Error("Failed to fetch provider category availability");
+      if (!res.ok) throw new Error("No se pudo cargar la disponibilidad por categoría");
       return res.json() as Promise<Record<string, boolean>>;
     },
   });
@@ -90,7 +90,7 @@ export function useProviders(params?: { profession?: string; category?: string }
       if (category) search.set("category", category);
       const url = `${api.providers.list.path}${search.toString() ? `?${search.toString()}` : ""}`;
       const res = await fetch(url);
-      if (!res.ok) throw new Error("Failed to fetch providers");
+      if (!res.ok) throw new Error("No se pudieron cargar los asociados");
       return api.providers.list.responses[200].parse(await res.json());
     },
   });
@@ -102,7 +102,7 @@ export function useProvider(id: number) {
     queryFn: async () => {
       const url = buildUrl(api.providers.get.path, { id });
       const res = await fetch(url);
-      if (!res.ok) throw new Error("Failed to fetch provider");
+      if (!res.ok) throw new Error("No se pudo cargar el perfil del asociado");
       return api.providers.get.responses[200].parse(await res.json());
     },
     enabled: !!id,
@@ -118,7 +118,7 @@ export function useCurrentProvider() {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (res.status === 401) return null;
-      if (!res.ok) throw new Error("Failed to fetch current provider profile");
+      if (!res.ok) throw new Error("No se pudo cargar tu perfil de asociado");
       return api.providers.me.responses[200].parse(await res.json());
     },
     retry: false,
@@ -142,7 +142,7 @@ export function useCreateProvider() {
       });
       if (!res.ok) {
         const error = await res.json();
-        throw new Error(error.message || "Failed to create provider profile");
+        throw new Error(error.message || "No se pudo crear el perfil de asociado");
       }
       return api.providers.create.responses[201].parse(await res.json());
     },
@@ -150,7 +150,7 @@ export function useCreateProvider() {
       queryClient.invalidateQueries({ queryKey: [api.providers.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
       queryClient.invalidateQueries({ queryKey: ["user"] });
-      toast({ title: "Welcome Pro!", description: "Your provider profile is now live." });
+      toast({ title: "¡Perfil de asociado listo!", description: "Tu perfil ya está publicado y visible para los clientes." });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -182,7 +182,7 @@ export function useServices(
         queryParams.append("subcategoryId", String(params.subcategoryId));
       const url = `${api.services.list.path}?${queryParams.toString()}`;
       const res = await fetch(url);
-      if (!res.ok) throw new Error("Failed to fetch services");
+      if (!res.ok) throw new Error("No se pudieron cargar los servicios");
       const parsed = api.services.list.responses[200].parse(await res.json());
       return parsed as ServiceWithProvider[];
     },
@@ -196,7 +196,7 @@ export function useService(id: number) {
     queryFn: async () => {
       const url = buildUrl(api.services.get.path, { id });
       const res = await fetch(url);
-      if (!res.ok) throw new Error("Failed to fetch service");
+      if (!res.ok) throw new Error("No se pudo cargar el servicio");
       return api.services.get.responses[200].parse(await res.json());
     },
     enabled: !!id,
@@ -218,7 +218,7 @@ export function useCreateService() {
         },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Failed to create service");
+      if (!res.ok) throw new Error("No se pudo crear el servicio");
       return api.services.create.responses[201].parse(await res.json());
     },
     onSuccess: () => {
@@ -226,7 +226,7 @@ export function useCreateService() {
       queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
       debouncedRefetch(queryClient, [api.services.list.path]);
       debouncedRefetch(queryClient, ["/api/me/services"]);
-      toast({ title: "Service Created", description: "Your service is now available for booking." });
+      toast({ title: "Servicio creado", description: "Tu servicio ya está disponible para reservas." });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -253,7 +253,7 @@ export function useMyServices(options?: { enabled?: boolean }) {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.status === 401) return [];
-      if (!res.ok) throw new Error("Failed to fetch my services");
+      if (!res.ok) throw new Error("No se pudieron cargar tus servicios");
       return res.json() as Promise<ServiceWithProvider[]>;
     },
     retry: false,
@@ -274,7 +274,7 @@ export function useDeleteService() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "Failed to delete service");
+        throw new Error(err.message || "No se pudo eliminar el servicio");
       }
     },
     onSuccess: () => {
@@ -338,7 +338,7 @@ export function useBookings(options?: { enabled?: boolean }) {
       const res = await fetch(api.bookings.list.path, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      if (!res.ok) throw new Error("Failed to fetch bookings");
+      if (!res.ok) throw new Error("No se pudieron cargar las reservas");
       const json = await res.json();
       try {
         return api.bookings.list.responses[200].parse(json);
@@ -364,7 +364,7 @@ export function useBookingsByProvider(params?: { status?: string }) {
       const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      if (!res.ok) throw new Error("Failed to fetch provider bookings");
+      if (!res.ok) throw new Error("No se pudieron cargar las reservas del asociado");
       return res.json();
     },
     staleTime: 30_000,
@@ -375,7 +375,7 @@ export function useBookingsByProvider(params?: { status?: string }) {
 /** Mensajes de feedback al crear una reserva (centralizados para consistencia y mantenibilidad). */
 const BOOKING_SUCCESS_TOAST = {
   title: "Reserva realizada con éxito",
-  description: "El profesional ha sido notificado. Puedes ver el estado de tu reserva en Mi Cuenta → Mis Reservas.",
+  description: "El asociado ha sido notificado. Puedes ver el estado de tu reserva en Mi Cuenta → Mis Reservas.",
 } as const;
 
 const BOOKING_ERROR_TOAST = {
@@ -397,7 +397,7 @@ export function useCreateBooking() {
         },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Failed to create booking");
+      if (!res.ok) throw new Error("No se pudo crear la reserva");
       return api.bookings.create.responses[201].parse(await res.json());
     },
     onSuccess: () => {
@@ -436,7 +436,7 @@ export function useUpdateBookingStatus() {
         },
         body: JSON.stringify({ status }),
       });
-      if (!res.ok) throw new Error("Failed to update status");
+      if (!res.ok) throw new Error("No se pudo actualizar el estado");
       return api.bookings.updateStatus.responses[200].parse(await res.json());
     },
     onSuccess: (_data, { status }) => {
@@ -550,7 +550,7 @@ export function useConfirmBookingByClient() {
       queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
       queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
       queryClient.refetchQueries({ queryKey: [api.genfeb.wallet.me.path] });
-      toast({ title: "Pago confirmado", description: "Los fondos se han retenido. El profesional podrá completar el trabajo." });
+      toast({ title: "Pago confirmado", description: "Los fondos se han retenido. El asociado podrá completar el trabajo." });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -571,7 +571,7 @@ export function useWallet(options?: { enabled?: boolean }) {
       const res = await fetch(api.genfeb.wallet.me.path, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!res.ok) throw new Error("Failed to fetch wallet");
+      if (!res.ok) throw new Error("No se pudo cargar la billetera");
       return api.genfeb.wallet.me.responses[200].parse(await res.json());
     },
     enabled: options?.enabled !== false,
@@ -599,7 +599,7 @@ export function usePendingRatings(options?: { enabled?: boolean }) {
       const res = await fetch("/api/ratings/pending", {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!res.ok) throw new Error("Failed to fetch pending ratings");
+      if (!res.ok) throw new Error("No se pudieron cargar las calificaciones pendientes");
       const data = (await res.json()) as { pending: PendingRating[] };
       return data;
     },
@@ -656,7 +656,7 @@ export function useProviderCompletedCount(providerId: number | undefined) {
     retry: false,
     queryFn: async () => {
       const res = await fetch(`${PROVIDER_COMPLETED_COUNT_BASE}/${providerId}/completed-count`);
-      if (!res.ok) throw new Error("Failed to fetch provider completed count");
+      if (!res.ok) throw new Error("No se pudo cargar la cantidad de servicios completados");
       const data = (await res.json()) as { providerId: number; completedCount: number };
       return data.completedCount ?? 0;
     },
@@ -672,7 +672,7 @@ export function useProfessionalStats(options?: { enabled?: boolean }) {
       const res = await fetch(PROFESSIONAL_STATS_KEY, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!res.ok) throw new Error("Failed to fetch professional stats");
+      if (!res.ok) throw new Error("No se pudieron cargar las estadísticas del asociado");
       const data = await res.json();
       return data as {
         completedCount: number;
@@ -741,7 +741,7 @@ export function useWalletTransfers(params?: WalletTransfersParams) {
       const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!res.ok) throw new Error("Failed to fetch transfers");
+      if (!res.ok) throw new Error("No se pudieron cargar los movimientos");
       return res.json() as Promise<{ transfers: any[]; total: number }>;
     },
     enabled: params?.enabled !== false,
