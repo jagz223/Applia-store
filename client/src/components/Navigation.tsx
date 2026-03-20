@@ -28,6 +28,9 @@ import {
   Loader2,
   Wrench,
   PackageOpen,
+  Package,
+  Store,
+  Car,
   Wallet,
   Star,
 } from "lucide-react";
@@ -93,6 +96,54 @@ export function Navigation() {
   /** Panel "Mis servicios" visible solo si tiene al menos un servicio activo (condición distinta a Crear servicio). */
   const activeServices = myServices.filter((s) => s.isActive !== false);
   const hasActiveServices = activeServices.length > 0;
+  const activeService = activeServices[0] ?? null;
+
+  const getServiceIcon = (service: any) => {
+    const iconName = service?.category?.icon ?? service?.category?.type ?? service?.category?.slug;
+    const name = String(iconName ?? "").toLowerCase();
+
+    // Preferimos `category.icon` si el backend lo trae (lucide name).
+    if (typeof iconName === "string") {
+      switch (iconName.toLowerCase()) {
+        case "wrench":
+          return <Wrench className="h-5 w-5" />;
+        case "home":
+          return <Home className="h-5 w-5" />;
+        case "briefcase":
+          return <Briefcase className="h-5 w-5" />;
+        case "package":
+          return <Package className="h-5 w-5" />;
+        case "store":
+          return <Store className="h-5 w-5" />;
+        case "car":
+          return <Car className="h-5 w-5" />;
+      }
+    }
+
+    // Fallback por slug/type si falta el icon.
+    switch (name) {
+      case "technical":
+        return <Wrench className="h-5 w-5" />;
+      case "maintenance":
+        return <Home className="h-5 w-5" />;
+      case "professional":
+        return <Briefcase className="h-5 w-5" />;
+      case "delivery":
+        return <Package className="h-5 w-5" />;
+      case "marketplace":
+        return <Store className="h-5 w-5" />;
+      case "transport":
+        return <Car className="h-5 w-5" />;
+      default:
+        return <Wrench className="h-5 w-5" />;
+    }
+  };
+
+  const getServiceBrand = (service: any) => {
+    const category = service?.category;
+    const brand = getCategoryDisplayName(category);
+    return brand || category?.name || "Servicio";
+  };
 
   const NavLinks = () => (
     <>
@@ -466,94 +517,109 @@ export function Navigation() {
     <Sheet open={myServicesOpen} onOpenChange={setMyServicesOpen}>
       <SheetContent
         side="left"
-        className="w-[360px] max-w-[92vw] bg-white border-r border-border overflow-y-auto rounded-r-xl shadow-lg"
+        // En móviles (ej. 344x) evita que el panel se vea “demasiado largo” (se queda fijo arriba).
+        className="w-[360px] max-w-[92vw] bg-white border-r border-border overflow-y-auto rounded-r-xl shadow-lg top-0 bottom-auto h-auto max-h-[calc(100vh-1rem)] p-0"
       >
-        <div className="pb-4 border-b border-border/80">
-          <h2 className="text-xl font-bold text-foreground tracking-tight">Mi Servicio</h2>
-          <p className="text-sm text-muted-foreground mt-1">Gestiona y edita tus publicaciones</p>
-        </div>
+        <div className="p-6">
+          <div className="pb-4 border-b border-border/80">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">Mi Servicio</h2>
+            <p className="text-sm text-muted-foreground mt-1">Tu publicación destacada</p>
+          </div>
 
-        <div className="mt-5 space-y-4">
-          {myServicesLoading ? (
-            <>
-              {[1, 2, 3].map((i) => (
-                <Card key={i} className="rounded-xl border border-border/60 bg-white shadow-sm overflow-hidden">
+          <div className="mt-5 space-y-4">
+            {myServicesLoading ? (
+              <Card className="rounded-xl border border-border/60 bg-white shadow-sm overflow-hidden">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-3">
+                    <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <Skeleton className="h-5 w-[75%]" />
+                      <Skeleton className="h-4 w-[50%]" />
+                      <Skeleton className="h-4 w-[90%] mt-3" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : activeService == null ? (
+              <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                <div className="rounded-full bg-muted/60 p-6 mb-4">
+                  <PackageOpen className="h-12 w-12 text-muted-foreground" />
+                </div>
+                <p className="text-base font-medium text-foreground mb-1">Aún no has creado servicios</p>
+                <p className="text-sm text-muted-foreground mb-6 max-w-[260px]">
+                  ¡Empieza ahora y publica tu primer servicio para que los clientes puedan reservarlo!
+                </p>
+                {SHOW_CREATE_SERVICE && (
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" asChild>
+                    <Link href="/create-service" onClick={() => setMyServicesOpen(false)}>
+                      <PlusCircle className="h-4 w-4 mr-2" />
+                      Crear servicio
+                    </Link>
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <TooltipProvider delayDuration={300}>
+                <Card className="rounded-xl border border-border/60 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
-                      <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <Skeleton className="h-5 w-[75%]" />
-                        <Skeleton className="h-4 w-20" />
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
+                        {getServiceIcon(activeService)}
                       </div>
+
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-bold text-base text-foreground truncate">{activeService.title ?? "—"}</h3>
+
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <Badge
+                            variant="outline"
+                            className="bg-amber-500/15 text-amber-700 dark:text-amber-400 dark:bg-amber-500/20 border-amber-500/30 font-semibold"
+                          >
+                            {activeService.price ?? "—"} USD/h
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">{getServiceBrand(activeService)}</span>
+                        </div>
+
+                        {activeService.subcategory?.name && (
+                          <div className="text-xs text-muted-foreground mt-1">Subcategoría: {activeService.subcategory.name}</div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                              asChild
+                            >
+                              <Link href={`/edit-service/${activeService.id}`} onClick={() => setMyServicesOpen(false)}>
+                                <Pencil className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Editar</TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 text-sm text-muted-foreground break-words leading-relaxed">
+                      {activeService.description ? activeService.description : "—"}
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={`/service/${activeService.id}`} onClick={() => setMyServicesOpen(false)}>
+                          Ver en el sitio
+                        </Link>
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </>
-          ) : myServices.filter((s) => s.isActive !== false).length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-              <div className="rounded-full bg-muted/60 p-6 mb-4">
-                <PackageOpen className="h-12 w-12 text-muted-foreground" />
-              </div>
-              <p className="text-base font-medium text-foreground mb-1">Aún no has creado servicios</p>
-              <p className="text-sm text-muted-foreground mb-6 max-w-[260px]">¡Empieza ahora y publica tu primer servicio para que los clientes puedan reservarlo!</p>
-              {SHOW_CREATE_SERVICE && (
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" asChild>
-                  <Link href="/create-service" onClick={() => setMyServicesOpen(false)}>
-                    <PlusCircle className="h-4 w-4 mr-2" />
-                    Crear servicio
-                  </Link>
-                </Button>
-              )}
-            </div>
-          ) : (
-            <TooltipProvider delayDuration={300}>
-              <ul className="space-y-4">
-                {myServices
-                  .filter((s) => s.isActive !== false)
-                  .map((s) => (
-                    <Card
-                      key={s.id}
-                      className="rounded-xl border border-border/60 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden"
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
-                            <Wrench className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <h3 className="font-bold text-base text-foreground truncate">{s.title}</h3>
-                            <Badge
-                              variant="outline"
-                              className="mt-2 bg-amber-500/15 text-amber-700 dark:text-amber-400 dark:bg-amber-500/20 border-amber-500/30 font-semibold"
-                            >
-                              {s.price ?? "—"}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                                  asChild
-                                >
-                                  <Link href={`/edit-service/${s.id}`} onClick={() => setMyServicesOpen(false)}>
-                                    <Pencil className="h-4 w-4" />
-                                  </Link>
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Editar</TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-              </ul>
-            </TooltipProvider>
-          )}
+              </TooltipProvider>
+            )}
+          </div>
         </div>
       </SheetContent>
     </Sheet>

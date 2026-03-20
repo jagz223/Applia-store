@@ -249,7 +249,61 @@ export default function Movimientos() {
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto rounded-lg border border-border">
+              {/* Movil muy angosto (344x): apilamos cada movimiento para evitar truncamientos/cortes. */}
+              <div className="space-y-3 sm:hidden">
+                {transfers.map((t: { id: number; createdAt: unknown; fromUserId?: string | null; description?: string; amount: number; status?: string }) => {
+                  const valid = isValidDate(t.createdAt);
+                  const date = toDate(t.createdAt);
+
+                  const dateText = valid ? format(date, "dd MMM yyyy", { locale: es }) : "—";
+                  const timeText = valid ? format(date, "HH:mm", { locale: es }) : "";
+
+                  return (
+                    <div
+                      key={t.id}
+                      className="rounded-lg border border-border bg-card p-3"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="font-medium text-foreground leading-tight">{dateText}</div>
+                          {valid && <div className="text-xs text-muted-foreground tabular-nums mt-0.5">{timeText}</div>}
+                        </div>
+                        <div className="text-xs text-muted-foreground whitespace-nowrap">
+                          {t.fromUserId ? "Admin" : "Sistema"}
+                        </div>
+                      </div>
+
+                      <div className="mt-2 text-xs text-muted-foreground break-words">
+                        {t.description || "—"}
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <div className="text-sm font-medium tabular-nums">
+                          {new Intl.NumberFormat("es-EC", {
+                            style: "currency",
+                            currency: "USD",
+                            minimumFractionDigits: 2,
+                          }).format(t.amount ?? 0)}
+                        </div>
+                        <span
+                          className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${
+                            t.status === "completed"
+                              ? "bg-green-500/15 text-green-700 dark:text-green-400"
+                              : t.status === "rejected"
+                                ? "bg-red-500/15 text-red-700 dark:text-red-400"
+                                : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                          }`}
+                        >
+                          {STATUS_LABELS[t.status ?? ""] ?? t.status ?? "—"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop / tablet: mantenemos tabla (overflow-x-auto para casos puntuales). */}
+              <div className="hidden sm:block overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/50">
@@ -304,7 +358,7 @@ export default function Movimientos() {
               </div>
 
               {totalPages > 1 && (
-                <div className="flex items-center justify-between gap-4 mt-4 pt-4 border-t border-border">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-4 pt-4 border-t border-border">
                   <p className="text-sm text-muted-foreground">
                     Página {page} de {totalPages}
                   </p>
