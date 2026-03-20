@@ -1,17 +1,17 @@
 import { type ServiceWithProvider } from "@shared/schema";
 import { getCategoryDisplayName } from "@shared/default-categories";
 import { Link } from "wouter";
-import { Star, ArrowRight, MapPin, User } from "lucide-react";
+import { Star, ArrowRight, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
+import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
 
 interface ServiceCardProps {
   service: ServiceWithProvider;
 }
 
 export function ServiceCard({ service }: ServiceCardProps) {
-  const hasServiceImage = Boolean(service.imageUrl);
-  const imageSrc = hasServiceImage ? service.imageUrl : "";
+  const avatarUrl = getProviderUserAvatarUrl(service.provider);
 
   return (
     <motion.div
@@ -22,17 +22,21 @@ export function ServiceCard({ service }: ServiceCardProps) {
     >
       <Link href={`/service/${service.id}`}>
         <div className="group relative flex flex-col overflow-hidden rounded-3xl bg-white dark:bg-card border border-border/30 shadow-lg shadow-black/5 transition-all duration-500 hover:shadow-2xl hover:shadow-primary/15 cursor-pointer h-full">
-          {/* Image Container */}
-          <div className="relative aspect-[4/3] overflow-hidden">
-            {hasServiceImage && (
+          {/* Avatar (no imagen del servicio) */}
+          <div className="relative aspect-[4/3] overflow-hidden bg-muted/40 flex items-center justify-center">
+            {avatarUrl ? (
               <img
-                src={imageSrc}
-                alt={service.title}
-                className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
+                src={avatarUrl}
+                alt=""
+                className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
               />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-muted/60">
+                <User className="h-24 w-24 text-muted-foreground" strokeWidth={1.1} />
+              </div>
             )}
             {/* Gradient overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
             
             {/* Category / subcategory badges */}
             <div className="absolute top-4 left-4 flex flex-wrap gap-1.5">
@@ -59,8 +63,8 @@ export function ServiceCard({ service }: ServiceCardProps) {
             {/* Provider info */}
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white font-bold text-sm shadow-lg overflow-hidden">
-                {service.provider?.user?.profileImageUrl ? (
-                  <img src={service.provider.user.profileImageUrl} alt="" className="w-full h-full object-cover" />
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
                 ) : (
                   <User className="w-5 h-5" />
                 )}

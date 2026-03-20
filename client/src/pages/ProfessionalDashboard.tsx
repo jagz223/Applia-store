@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import {
-  DollarSign, TrendingUp, Calendar, Users,
+import { 
+  DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
   CheckCircle2, XCircle, Banknote, Inbox, PlayCircle, History, UserPlus, Receipt
@@ -1371,7 +1371,7 @@ export default function ProfessionalDashboard() {
                     >
                       <CreditCard className="h-4 w-4 mr-2 shrink-0" />
                       <span className="truncate">Retirar Fondos</span>
-                    </Button>
+            </Button>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -1557,41 +1557,41 @@ export default function ProfessionalDashboard() {
           <TabsContent value="overview">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {SHOW_PRO_MONTHLY_EARNINGS && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Ingresos Mensuales</CardTitle>
-                    <CardDescription>Evolución de tus ingresos en los últimos 6 meses</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-64 flex items-end justify-between gap-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Ingresos Mensuales</CardTitle>
+                  <CardDescription>Evolución de tus ingresos en los últimos 6 meses</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-64 flex items-end justify-between gap-2">
                       {monthlyEarnings.map((data, index) => {
                         const heightPct = monthlyEarningsMax > 0 ? (data.earnings / monthlyEarningsMax) * 100 : 0;
                         return (
-                          <div key={index} className="flex-1 flex flex-col items-center gap-2">
-                            <div
-                              className="w-full bg-mango-orange rounded-t transition-all hover:bg-mango-orange/80"
-                              style={{
+                      <div key={index} className="flex-1 flex flex-col items-center gap-2">
+                        <div 
+                          className="w-full bg-mango-orange rounded-t transition-all hover:bg-mango-orange/80"
+                          style={{ 
                                 height: `${heightPct}%`,
                                 minHeight: "20px",
-                              }}
-                            />
-                            <span className="text-xs text-gray-500">{data.month}</span>
-                            <span className="text-xs font-medium">${data.earnings}</span>
-                          </div>
+                          }}
+                        />
+                        <span className="text-xs text-gray-500">{data.month}</span>
+                        <span className="text-xs font-medium">${data.earnings}</span>
+                      </div>
                         );
                       })}
-                    </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </CardContent>
+              </Card>
               )}
 
               {SHOW_PRO_RATING_BREAKDOWN && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Desglose de Calificaciones</CardTitle>
-                    <CardDescription>Distribución de tus reseñas</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Desglose de Calificaciones</CardTitle>
+                  <CardDescription>Distribución de tus reseñas</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
                     {[5, 4, 3, 2, 1].map((stars) => {
                       const count =
                         (ratingDistribution as any)?.[stars] ??
@@ -1600,17 +1600,17 @@ export default function ProfessionalDashboard() {
                       const pct = ratingStarsTotal > 0 ? Math.round((count / ratingStarsTotal) * 100) : 0;
                       return (
                         <div key={stars} className="flex items-center gap-4">
-                          <div className="flex items-center gap-1 w-20">
+                    <div className="flex items-center gap-1 w-20">
                             <span className="text-sm font-medium">{stars}</span>
-                            <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
-                          </div>
+                      <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+                    </div>
                           <Progress value={pct} className="flex-1" />
                           <span className="text-sm text-gray-500 w-12 text-right">{count}</span>
-                        </div>
+                  </div>
                       );
                     })}
-                  </CardContent>
-                </Card>
+                </CardContent>
+              </Card>
               )}
 
               {/* Booking Stats */}
@@ -1637,25 +1637,25 @@ export default function ProfessionalDashboard() {
               </Card>
 
               {SHOW_PRO_QUICK_ACTIONS && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Acciones Rápidas</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <Button variant="outline" className="w-full justify-start">
-                      <CreditCard className="h-4 w-4 mr-2" />
-                      Solicitar retiro de fondos
-                    </Button>
-                    <Button variant="outline" className="w-full justify-start">
-                      <FileText className="h-4 w-4 mr-2" />
-                      Descargar reporte de impuestos
-                    </Button>
-                    <Button variant="outline" className="w-full justify-start">
-                      <Calendar className="h-4 w-4 mr-2" />
-                      Ver calendario de pagos
-                    </Button>
-                  </CardContent>
-                </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Acciones Rápidas</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Button variant="outline" className="w-full justify-start">
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Solicitar retiro de fondos
+                  </Button>
+                  <Button variant="outline" className="w-full justify-start">
+                    <FileText className="h-4 w-4 mr-2" />
+                    Descargar reporte de impuestos
+                  </Button>
+                  <Button variant="outline" className="w-full justify-start">
+                    <Calendar className="h-4 w-4 mr-2" />
+                    Ver calendario de pagos
+                  </Button>
+                </CardContent>
+              </Card>
               )}
             </div>
           </TabsContent>

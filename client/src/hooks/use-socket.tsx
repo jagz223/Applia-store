@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, createContext, useContext } f
 import { io, Socket } from "socket.io-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
+import { hasFullAdminRole } from "@/lib/auth-utils";
 import { useToast } from "@/hooks/use-toast";
 import { fetchNotificationsFromServer, type ClientNotification } from "@/lib/notifications-api";
 import { debouncedRefetch } from "@/lib/refetch-utils";
@@ -343,7 +344,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       });
       // Si es solicitud de recarga y el usuario es admin: refrescar tabla e informar
       const isRechargePending = notification?.type === "recharge_pending";
-      if (isRechargePending && userRef.current?.role === "admin") {
+      if (isRechargePending && hasFullAdminRole(userRef.current)) {
         queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
         debouncedRefetch(queryClient, [ADMIN_WALLET_TRANSFERS_KEY]);
         toast({
@@ -355,7 +356,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
       // Si es solicitud de retiro (payout): refrescar Payouts para que aparezca el usuario al instante
       const isWithdrawalRequested = notification?.type === "withdrawal_requested";
-      if (isWithdrawalRequested && userRef.current?.role === "admin") {
+      if (isWithdrawalRequested && hasFullAdminRole(userRef.current)) {
         queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_KEY] });
         debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_KEY]);
         toast({
@@ -365,7 +366,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       }
       // Otro admin ya procesó el retiro (aprobado o rechazado): actualizar lista Payouts para que desaparezca el usuario
       const isWithdrawalProcessedByOther = notification?.type === "withdrawal_processed_by_other";
-      if (isWithdrawalProcessedByOther && userRef.current?.role === "admin") {
+      if (isWithdrawalProcessedByOther && hasFullAdminRole(userRef.current)) {
         queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_KEY] });
         debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_KEY]);
         const action = notification?.action === "approved" ? "aprobado" : "rechazado";

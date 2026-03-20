@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { 
-  Users, DollarSign, FileText, Star, Settings, 
+  Users, DollarSign, FileText, Star, Settings, Eye,
   BarChart3, Shield, Bell, Database, Layers,
   CheckCircle, XCircle, Clock, TrendingUp, UserPlus,
   Search, ChevronLeft, ChevronRight, Loader2, Wallet, Banknote, History, Inbox, PlayCircle
@@ -28,6 +28,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { useAuth } from "@/hooks/use-auth";
+import { hasAdminRole, hasFullAdminRole } from "@/lib/auth-utils";
 import { useAdminWalletTransfers, useUpdateTransferStatus, useAdminManualRecharge, useAdminWithdrawals, useProcessWithdrawal, useAdminWithdrawalHistory, type WithdrawalHistoryStatus, type WithdrawalHistoryItem } from "@/hooks/use-mango-data";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useToast } from "@/hooks/use-toast";
@@ -117,6 +118,7 @@ const ROLE_LABELS: Record<string, string> = {
   client: "Cliente",
   professional: "Profesional",
   admin: "Administrador",
+  tiSupport: "Soporte TI",
 };
 
 type WithdrawalRequest = {
@@ -137,14 +139,14 @@ const HISTORY_STATUS_OPTIONS: { value: WithdrawalHistoryStatus; label: string }[
   { value: "rejected", label: "Rechazadas" },
 ];
 
-function WithdrawalHistorySection({ formatUsd }: { formatUsd: (n: number) => string }) {
+function WithdrawalHistorySection({ formatUsd, enabled }: { formatUsd: (n: number) => string; enabled: boolean }) {
   const [historyPage, setHistoryPage] = useState(1);
   const [historyStatus, setHistoryStatus] = useState<WithdrawalHistoryStatus>("all");
   const { data, isLoading } = useAdminWithdrawalHistory({
     page: historyPage,
     limit: WITHDRAWAL_HISTORY_LIMIT,
     status: historyStatus,
-    enabled: true,
+    enabled,
   });
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -260,8 +262,14 @@ function WithdrawalHistorySection({ formatUsd }: { formatUsd: (n: number) => str
   );
 }
 
-function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; description?: string; variant?: "destructive" }) => void }) {
-  const { data: withdrawals = [], isLoading } = useAdminWithdrawals({ enabled: true });
+function AdminWithdrawalsTab({
+  toast,
+  enabled,
+}: {
+  toast: (p: { title: string; description?: string; variant?: "destructive" }) => void;
+  enabled: boolean;
+}) {
+  const { data: withdrawals = [], isLoading } = useAdminWithdrawals({ enabled });
   const processWithdrawal = useProcessWithdrawal();
   const [withdrawalDialogOpen, setWithdrawalDialogOpen] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
@@ -425,7 +433,7 @@ function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; descriptio
             )}
           </TabsContent>
           <TabsContent value="history" className="mt-0 overflow-x-auto">
-            <WithdrawalHistorySection formatUsd={formatUsd} />
+            <WithdrawalHistorySection formatUsd={formatUsd} enabled={enabled} />
           </TabsContent>
         </Tabs>
       </CardContent>
@@ -492,7 +500,7 @@ function AdminWithdrawalsTab({ toast }: { toast: (p: { title: string; descriptio
 }
 
 /** Búsqueda de usuarios por nombre (debounced 1s). Solo parámetro name, sin filtro por rol. */
-function useSaldoUserSearch(debouncedName: string) {
+function useSaldoUserSearch(debouncedName: string, queryEnabled = true) {
   return useQuery({
     queryKey: ["admin", "users", "saldo-search-by-name", debouncedName],
     queryFn: async () => {
@@ -506,13 +514,17 @@ function useSaldoUserSearch(debouncedName: string) {
       if (!res.ok) throw new Error("Error al buscar usuarios");
       return res.json();
     },
-    enabled: debouncedName.trim().length >= 2,
+    enabled: queryEnabled && debouncedName.trim().length >= 2,
     staleTime: 30_000,
   });
 }
 
+/** Pestañas solo para administrador (no Soporte TI). */
+const TI_FORBIDDEN_TABS = ["overview", "recargas", "saldo", "payouts"] as const;
+
 export default function AdminPanel() {
   const { user } = useAuth();
+  const fullAdmin = hasFullAdminRole(user);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [location] = useLocation();
@@ -557,9 +569,22 @@ export default function AdminPanel() {
     }
   }, [location]);
 
+  // Soporte TI no puede usar pestañas financieras / asociados: redirigir a Usuarios
+  useEffect(() => {
+    if (user?.role !== "tiSupport") return;
+    if (!(TI_FORBIDDEN_TABS as readonly string[]).includes(activeTab)) return;
+    setActiveTab("users");
+    if (typeof window !== "undefined" && window.history.replaceState) {
+      const u = new URL(window.location.href);
+      u.searchParams.set("tab", "users");
+      window.history.replaceState(null, "", u.pathname + u.search);
+    }
+  }, [user?.role, activeTab]);
+
   // Escuchar evento al hacer clic en notificación de recarga (incluso si ya estamos en /admin)
   useEffect(() => {
     const handler = (e: Event) => {
+      if (!hasFullAdminRole(user)) return;
       const detail = (e as CustomEvent<{ transferId?: number | null }>).detail;
       setActiveTab("recargas");
       if (detail?.transferId != null && !Number.isNaN(detail.transferId)) {
@@ -569,11 +594,12 @@ export default function AdminPanel() {
     };
     window.addEventListener("admin-open-recargas", handler);
     return () => window.removeEventListener("admin-open-recargas", handler);
-  }, []);
+  }, [user]);
 
   // Escuchar evento al hacer clic en notificación de solicitud de retiro (abrir pestaña Payouts)
   useEffect(() => {
     const handler = () => {
+      if (!hasFullAdminRole(user)) return;
       setActiveTab("payouts");
       if (typeof window !== "undefined" && window.history.replaceState) {
         const params = new URLSearchParams(window.location.search);
@@ -583,7 +609,7 @@ export default function AdminPanel() {
     };
     window.addEventListener("admin-open-payouts", handler);
     return () => window.removeEventListener("admin-open-payouts", handler);
-  }, []);
+  }, [user]);
 
   const [userFilters, setUserFilters] = useState({ role: "", name: "", email: "", lastName: "" });
   const [transferStatusFilter, setTransferStatusFilter] = useState<TransferStatusFilter>("");
@@ -612,7 +638,10 @@ export default function AdminPanel() {
     };
   }, [searchSaldoInput]);
 
-  const { data: saldoSearchData, isLoading: saldoSearchLoading } = useSaldoUserSearch(debouncedSearchSaldo);
+  const { data: saldoSearchData, isLoading: saldoSearchLoading } = useSaldoUserSearch(
+    debouncedSearchSaldo,
+    fullAdmin && activeTab === "saldo"
+  );
   const saldoSearchUsers = (saldoSearchData?.users ?? []) as any[];
   const saldoSearchList: UserOption[] = saldoSearchUsers.map((u: any) => ({
     id: u.id,
@@ -634,7 +663,7 @@ export default function AdminPanel() {
   const { data: rolesData } = useQuery({
     queryKey: ["roles"],
     queryFn: () => fetchWithAuth("/api/roles"),
-    enabled: user?.role === "admin",
+    enabled: hasAdminRole(user),
   });
   const roles = rolesData ?? [];
 
@@ -650,14 +679,14 @@ export default function AdminPanel() {
   const { data: usersData, isLoading: usersLoading } = useQuery({
     queryKey: ["admin-users", userPage, userFilters],
     queryFn: () => fetchWithAuth(`/api/admin/users?${usersQueryParams.toString()}`),
-    enabled: user?.role === "admin",
+    enabled: hasAdminRole(user),
   });
   const usersList = usersData?.users ?? [];
   const usersTotal = usersData?.total ?? 0;
   const usersTotalPages = Math.max(1, Math.ceil(usersTotal / USERS_PAGE_SIZE));
 
   const { data: adminTransfersData, isLoading: adminTransfersLoading } = useAdminWalletTransfers({
-    enabled: user?.role === "admin" && activeTab === "recargas",
+    enabled: fullAdmin && activeTab === "recargas",
   });
   const allTransfers = adminTransfersData?.transfers ?? [];
   const filteredTransfers =
@@ -671,14 +700,63 @@ export default function AdminPanel() {
   const { data: adminProvidersData, isLoading: adminProvidersLoading } = useQuery({
     queryKey: ["admin-providers-with-services"],
     queryFn: () => fetchWithAuth("/api/admin/providers/with-services"),
-    enabled: user?.role === "admin" && activeTab === "providers",
+    enabled: hasAdminRole(user) && activeTab === "providers",
   });
   const providersWithServices: AdminProviderWithServices[] = adminProvidersData?.providers ?? [];
+
+  type AdminVerifyingStatusItem = {
+    userId: string;
+    name: string;
+    email?: string | null;
+    avatar?: string | null;
+    user_identification?: string | null;
+    identification_verified: "pending" | "verified" | "rejected";
+    transacction_date: string | null;
+    transacction_verified: "pending" | "verified" | "rejected";
+    transacction_code?: string | null;
+  };
+
+  const { data: adminVerifyingStatusData, isLoading: adminVerifyingStatusLoading } = useQuery({
+    queryKey: ["admin-verifying-status-pending"],
+    queryFn: () => fetchWithAuth("/api/admin/verifying-status/pending"),
+    enabled: fullAdmin && activeTab === "overview",
+  });
+  const pendingAssociates: AdminVerifyingStatusItem[] = adminVerifyingStatusData?.items ?? [];
+
+  const updateVerifyingStatusMutation = useMutation({
+    mutationFn: async (args: {
+      userId: string;
+      step: "identification" | "transaction";
+      action: "approve" | "reject";
+    }) => {
+      return patchWithAuth(`/api/admin/verifying-status/${args.userId}/${args.step}`, { action: args.action });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-verifying-status-pending"] });
+      toast({
+        title: "Actualizado",
+        description: "El estado de verificación se actualizó correctamente.",
+      });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Error",
+        description: err.message || "No se pudo actualizar el estado.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const [assocImageDialog, setAssocImageDialog] = useState<{
+    open: boolean;
+    title: string;
+    src: string | null;
+  }>({ open: false, title: "", src: null });
 
   const { data: adminBookingsData, isLoading: adminBookingsLoading } = useQuery({
     queryKey: ["admin-bookings"],
     queryFn: () => fetchWithAuth("/api/admin/bookings"),
-    enabled: user?.role === "admin" && activeTab === "bookings",
+    enabled: hasAdminRole(user) && activeTab === "bookings",
   });
   const adminBookings: AdminBookingItem[] = adminBookingsData?.bookings ?? [];
   const [bookingSubTab, setBookingSubTab] = useState<"pending" | "in_progress" | "ready" | "history">("pending");
@@ -729,8 +807,8 @@ export default function AdminPanel() {
     setPendingRechargeAction(null);
   };
 
-  // Check if user is admin
-  if (user?.role !== "admin") {
+  // Check if user is admin o Soporte TI
+  if (!hasAdminRole(user)) {
     return (
       <div className="container mx-auto py-10 px-4">
         <Card className="max-w-md mx-auto">
@@ -787,21 +865,29 @@ export default function AdminPanel() {
           <div className="relative -mx-3 sm:mx-0 mb-4">
             <div className="overflow-x-auto overflow-y-hidden pb-1 scroll-smooth md:overflow-visible pr-2 md:pr-0">
               <TabsList className="inline-flex w-max min-w-full md:flex md:flex-wrap md:w-auto md:min-w-0 h-auto flex-nowrap gap-1 p-1 rounded-lg border border-transparent md:border-0">
-                <TabsTrigger value="overview" className="shrink-0">Resumen</TabsTrigger>
+                {fullAdmin && (
+                  <TabsTrigger value="overview" className="shrink-0">Gestión de asociados</TabsTrigger>
+                )}
                 <TabsTrigger value="users" className="shrink-0">Usuarios</TabsTrigger>
                 <TabsTrigger value="providers" className="shrink-0">Proveedores</TabsTrigger>
                 <TabsTrigger value="bookings" className="shrink-0">Reservas</TabsTrigger>
-                <TabsTrigger value="recargas" className="shrink-0">Recargas</TabsTrigger>
-                <TabsTrigger value="saldo" className="gap-1.5 shrink-0">
-                  <Wallet className="h-4 w-4 shrink-0" />
-                  <span className="hidden sm:inline">Gestión de Saldo</span>
-                  <span className="sm:hidden">Saldo</span>
-                </TabsTrigger>
-                <TabsTrigger value="payouts" className="gap-1.5 shrink-0">
-                  <Banknote className="h-4 w-4 shrink-0" />
-                  <span className="hidden sm:inline">Solicitudes de Retiro</span>
-                  <span className="sm:hidden">Retiros</span>
-                </TabsTrigger>
+                {fullAdmin && (
+                  <TabsTrigger value="recargas" className="shrink-0">Recargas</TabsTrigger>
+                )}
+                {fullAdmin && (
+                  <TabsTrigger value="saldo" className="gap-1.5 shrink-0">
+                    <Wallet className="h-4 w-4 shrink-0" />
+                    <span className="hidden sm:inline">Gestión de Saldo</span>
+                    <span className="sm:hidden">Saldo</span>
+                  </TabsTrigger>
+                )}
+                {fullAdmin && (
+                  <TabsTrigger value="payouts" className="gap-1.5 shrink-0">
+                    <Banknote className="h-4 w-4 shrink-0" />
+                    <span className="hidden sm:inline">Solicitudes de Retiro</span>
+                    <span className="sm:hidden">Retiros</span>
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="roles" className="shrink-0">Roles</TabsTrigger>
                 <TabsTrigger value="settings" className="shrink-0">Configuración</TabsTrigger>
               </TabsList>
@@ -813,74 +899,232 @@ export default function AdminPanel() {
               {/* Pending Approvals */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Aprobaciones Pendientes</CardTitle>
-                  <CardDescription>Proveedores esperando verificación</CardDescription>
+                  <CardTitle>Gestión de asociados</CardTitle>
+                  <CardDescription>Verificaciones pendientes de identificación y recarga</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {(() => {
-                      const pageSize = USERS_PAGE_SIZE;
-                      const pendingList: any[] = (providersWithServices.length ? providersWithServices : mockProviders)
-                        .filter((p: any) => (p.verified ?? false) === false);
-                      const totalPages = Math.max(1, Math.ceil(pendingList.length / pageSize));
-                      const safePage = Math.min(totalPages, Math.max(1, overviewPendingProvidersPage));
-                      const start = (safePage - 1) * pageSize;
-                      const end = start + pageSize;
-                      const paged = pendingList.slice(start, end);
+                    {adminVerifyingStatusLoading ? (
+                      <div className="py-10 text-center text-sm text-muted-foreground">Cargando asociados…</div>
+                    ) : pendingAssociates.length === 0 ? (
+                      <div className="py-10 text-center text-sm text-muted-foreground">No hay asociados con verificación pendiente.</div>
+                    ) : (
+                      (() => {
+                        const pageSize = USERS_PAGE_SIZE;
+                        const pendingList = pendingAssociates;
+                        const totalPages = Math.max(1, Math.ceil(pendingList.length / pageSize));
+                        const safePage = Math.min(totalPages, Math.max(1, overviewPendingProvidersPage));
+                        const start = (safePage - 1) * pageSize;
+                        const end = start + pageSize;
+                        const paged = pendingList.slice(start, end);
 
-                      return (
-                        <>
-                          {paged.map((provider: any) => (
-                            <div key={provider.providerId ?? provider.id} className="flex items-center justify-between p-3 border rounded-lg">
-                              <div className="flex items-center gap-3">
-                                <Avatar>
-                                  <AvatarFallback>{provider.name[0]}</AvatarFallback>
-                                </Avatar>
-                                <div>
-                                  <p className="font-medium">{provider.name}</p>
-                                  <p className="text-sm text-gray-500">{provider.profession ?? provider.service ?? "Profesional"}</p>
+                        const stateLabel = (s: "pending" | "verified" | "rejected") =>
+                          s === "pending" ? "Pendiente" : s === "verified" ? "Aprobado" : "Rechazado";
+
+                        return (
+                          <>
+                            {paged.map((assoc) => {
+                              const identEnabled = assoc.identification_verified === "pending";
+                              const txEnabled = assoc.transacction_verified === "pending";
+                              return (
+                                <div key={assoc.userId} className="flex flex-col gap-3 p-4 border rounded-lg bg-white">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <Avatar>
+                                        <AvatarFallback>{assoc.name?.[0] ?? "A"}</AvatarFallback>
+                                      </Avatar>
+                                      <div className="min-w-0">
+                                        <p className="font-medium truncate">{assoc.name}</p>
+                                        {assoc.email ? <p className="text-sm text-gray-500 truncate">{assoc.email}</p> : null}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div>
+                                        <p className="font-medium">Verificación de identificación</p>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          Estado: {stateLabel(assoc.identification_verified)}
+                                        </p>
+                                      </div>
+                                      <Badge
+                                        variant={
+                                          assoc.identification_verified === "pending"
+                                            ? "secondary"
+                                            : assoc.identification_verified === "verified"
+                                              ? "default"
+                                              : "destructive"
+                                        }
+                                      >
+                                        {stateLabel(assoc.identification_verified)}
+                                      </Badge>
+                                    </div>
+
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="flex items-center gap-2">
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          disabled={!assoc.avatar}
+                                          onClick={() =>
+                                            setAssocImageDialog({
+                                              open: true,
+                                              title: "Foto de perfil",
+                                              src: assoc.avatar ?? null,
+                                            })
+                                          }
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          disabled={!assoc.user_identification}
+                                          onClick={() =>
+                                            setAssocImageDialog({
+                                              open: true,
+                                              title: "Imagen de identificación",
+                                              src: assoc.user_identification ?? null,
+                                            })
+                                          }
+                                        >
+                                          <FileText className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+
+                                      <div className="flex gap-2">
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-green-600"
+                                          disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
+                                          onClick={() =>
+                                            updateVerifyingStatusMutation.mutate({
+                                              userId: assoc.userId,
+                                              step: "identification",
+                                              action: "approve",
+                                            })
+                                          }
+                                        >
+                                          <CheckCircle className="h-4 w-4 mr-1" />
+                                          Aprobar
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-red-600"
+                                          disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
+                                          onClick={() =>
+                                            updateVerifyingStatusMutation.mutate({
+                                              userId: assoc.userId,
+                                              step: "identification",
+                                              action: "reject",
+                                            })
+                                          }
+                                        >
+                                          <XCircle className="h-4 w-4 mr-1" />
+                                          Rechazar
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div>
+                                        <p className="font-medium">Recarga de 15$</p>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          Fecha:{" "}
+                                          {assoc.transacction_date
+                                            ? new Date(assoc.transacction_date).toLocaleDateString("es-EC")
+                                            : "—"}{" "}
+                                          · Código: {assoc.transacction_code ?? "—"}
+                                        </p>
+                                      </div>
+                                      <Badge
+                                        variant={
+                                          assoc.transacction_verified === "pending"
+                                            ? "secondary"
+                                            : assoc.transacction_verified === "verified"
+                                              ? "default"
+                                              : "destructive"
+                                        }
+                                      >
+                                        {stateLabel(assoc.transacction_verified)}
+                                      </Badge>
+                                    </div>
+
+                                    <div className="flex justify-end gap-2">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-green-600"
+                                        disabled={!txEnabled || updateVerifyingStatusMutation.isPending}
+                                        onClick={() =>
+                                          updateVerifyingStatusMutation.mutate({
+                                            userId: assoc.userId,
+                                            step: "transaction",
+                                            action: "approve",
+                                          })
+                                        }
+                                      >
+                                        <CheckCircle className="h-4 w-4 mr-1" />
+                                        Aprobar
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-red-600"
+                                        disabled={!txEnabled || updateVerifyingStatusMutation.isPending}
+                                        onClick={() =>
+                                          updateVerifyingStatusMutation.mutate({
+                                            userId: assoc.userId,
+                                            step: "transaction",
+                                            action: "reject",
+                                          })
+                                        }
+                                      >
+                                        <XCircle className="h-4 w-4 mr-1" />
+                                        Rechazar
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {totalPages > 1 && (
+                              <div className="flex items-center justify-between pt-2 border-t mt-2">
+                                <p className="text-sm text-muted-foreground">
+                                  Página {safePage} de {totalPages}
+                                </p>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={safePage <= 1}
+                                    onClick={() => setOverviewPendingProvidersPage((p) => Math.max(1, safePage - 1))}
+                                  >
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Anterior
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={safePage >= totalPages}
+                                    onClick={() => setOverviewPendingProvidersPage((p) => Math.min(totalPages, safePage + 1))}
+                                  >
+                                    Siguiente
+                                    <ChevronRight className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </div>
-                              <div className="flex gap-2">
-                                <Button size="sm" variant="outline" className="text-green-600">
-                                  <CheckCircle className="h-4 w-4 mr-1" />
-                                  Aprobar
-                                </Button>
-                                <Button size="sm" variant="outline" className="text-red-600">
-                                  <XCircle className="h-4 w-4 mr-1" />
-                                  Rechazar
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                          {totalPages > 1 && (
-                            <div className="flex items-center justify-between pt-2 border-t mt-2">
-                              <p className="text-sm text-muted-foreground">Página {safePage} de {totalPages}</p>
-                              <div className="flex gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={safePage <= 1}
-                                  onClick={() => setOverviewPendingProvidersPage((p) => Math.max(1, safePage - 1))}
-                                >
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Anterior
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={safePage >= totalPages}
-                                  onClick={() => setOverviewPendingProvidersPage((p) => Math.min(totalPages, safePage + 1))}
-                                >
-                                  Siguiente
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
+                            )}
+                          </>
+                        );
+                      })()
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -955,7 +1199,7 @@ export default function AdminPanel() {
                             </div>
                           </div>
                           <div className="flex items-center gap-4">
-                            <Badge variant={u.role === "admin" ? "default" : "secondary"}>
+                            <Badge variant={hasAdminRole({ role: u.role }) ? "default" : "secondary"}>
                               {u.role ?? "—"}
                             </Badge>
                             <p className="text-sm text-gray-500">
@@ -1965,7 +2209,7 @@ export default function AdminPanel() {
           </TabsContent>
 
           <TabsContent value="payouts">
-            <AdminWithdrawalsTab toast={toast} />
+            <AdminWithdrawalsTab toast={toast} enabled={fullAdmin} />
           </TabsContent>
 
           <TabsContent value="roles">
@@ -2006,6 +2250,33 @@ export default function AdminPanel() {
             </div>
           </TabsContent>
         </Tabs>
+
+        <Dialog
+          open={assocImageDialog.open}
+          onOpenChange={(o) => setAssocImageDialog((s) => ({ ...s, open: o }))}
+        >
+          <DialogContent className="sm:max-w-2xl border-border bg-card">
+            <DialogHeader>
+              <DialogTitle>{assocImageDialog.title}</DialogTitle>
+            </DialogHeader>
+            {assocImageDialog.src ? (
+              <div className="w-full">
+                <img
+                  src={assocImageDialog.src}
+                  alt={assocImageDialog.title}
+                  className="w-full max-h-[70vh] object-contain rounded-md border border-border bg-background"
+                />
+              </div>
+            ) : (
+              <div className="py-6 text-center text-sm text-muted-foreground">No hay imagen disponible.</div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAssocImageDialog((s) => ({ ...s, open: false }))}>
+                Cerrar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

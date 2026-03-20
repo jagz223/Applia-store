@@ -9,6 +9,14 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Shield,
   Lock,
   Folder,
@@ -42,6 +50,7 @@ import { useWalletTransfers } from "@/hooks/use-mango-data";
 import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { useToast } from "@/hooks/use-toast";
 
 const folders = [
   { id: 1, name: "Contratos", count: 12, icon: FileCheck },
@@ -88,6 +97,12 @@ export default function Vault() {
   const [transfersPage, setTransfersPage] = useState(1);
   const isMobile = useIsMobile();
   const { user } = useAuth();
+  const { toast } = useToast();
+  const [hasUserIdentification, setHasUserIdentification] = useState(false);
+
+  const [viewIdentificationOpen, setViewIdentificationOpen] = useState(false);
+  const [viewIdentificationLoading, setViewIdentificationLoading] = useState(false);
+  const [viewIdentificationImageUrl, setViewIdentificationImageUrl] = useState<string | null>(null);
   const { data: transfersData, isLoading: transfersLoading } = useWalletTransfers({
     page: transfersPage,
     limit: 10,
@@ -180,6 +195,71 @@ export default function Vault() {
     encrypted: Boolean(doc.encryptedPath),
     status: String(doc.status ?? "pending"),
   }));
+
+  const handleViewIdentification = async () => {
+    if (!user?.id) return;
+    try {
+      setViewIdentificationLoading(true);
+      setViewIdentificationImageUrl(null);
+
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/me/professional-verification", {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "No se pudo cargar la identificación");
+      }
+
+      const data = (await res.json()) as { imageUrl?: string | null };
+      setViewIdentificationImageUrl(data.imageUrl ?? null);
+      setViewIdentificationOpen(true);
+    } catch (e: unknown) {
+      toast({
+        title: "Error",
+        description: e instanceof Error ? e.message : "No se pudo cargar la identificación",
+        variant: "destructive",
+      });
+    } finally {
+      setViewIdentificationLoading(false);
+    }
+  };
+
+  // Mostrar la pestaña/filtro "Identificación" solo si existe user_identification
+  useEffect(() => {
+    const load = async () => {
+      if (!user?.id) return;
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch("/api/me/professional-verification", {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+
+        if (!res.ok) {
+          setHasUserIdentification(false);
+          return;
+        }
+
+        const data = (await res.json()) as { imageUrl?: string | null };
+        setHasUserIdentification(Boolean(data.imageUrl?.trim()));
+      } catch {
+        setHasUserIdentification(false);
+      }
+    };
+
+    load();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (selectedCategory === "identity" && !hasUserIdentification) {
+      setSelectedCategory("all");
+    }
+  }, [selectedCategory, hasUserIdentification]);
 
   const filteredDocs = vaultDocuments.filter((doc) => {
     const matchesSearch = doc.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -311,7 +391,7 @@ export default function Vault() {
                 {[
                   { id: "all", label: "Todos" },
                   { id: "invoice", label: "Facturas" },
-                  { id: "identity", label: "Identificación" },
+                  ...(hasUserIdentification ? [{ id: "identity", label: "Identificación" }] : []),
                 ].map((cat) => (
                   <Button
                     key={cat.id}
@@ -450,6 +530,34 @@ export default function Vault() {
                 <Card className="card-industrial min-w-0 overflow-hidden">
                   <CardContent className="p-0 min-w-0">
                     <div className="divide-y divide-border min-w-0">
+                      {selectedCategory === "identity" && hasUserIdentification && (
+                        <div className="flex items-center gap-3 sm:gap-4 p-4 hover:bg-primary/5 transition-colors min-w-0">
+                          <div className="p-2 rounded-lg bg-primary/10 shrink-0 self-start sm:self-center">
+                            <User className="w-5 h-5 text-secondary" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-foreground text-sm sm:text-base">Ver identificación</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Muestra la imagen que tienes registrada para verificación.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleViewIdentification}
+                              disabled={viewIdentificationLoading}
+                            >
+                              {viewIdentificationLoading ? (
+                                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                              ) : (
+                                <Eye className="w-4 h-4 mr-2" />
+                              )}
+                              ver identificación
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                       {filteredDocs.map((doc) => {
                           const infoBlock = (
                             <>
@@ -555,6 +663,44 @@ export default function Vault() {
                 </div>
               )}
             </TabsContent>
+
+            <Dialog open={viewIdentificationOpen} onOpenChange={setViewIdentificationOpen}>
+              <DialogContent className="sm:max-w-3xl border-border bg-card">
+                <DialogHeader>
+                  <DialogTitle>Identificación</DialogTitle>
+                  <DialogDescription>
+                    {viewIdentificationImageUrl
+                      ? "Tu documento registrado para verificación."
+                      : "Aún no tienes una identificación registrada."}
+                  </DialogDescription>
+                </DialogHeader>
+                {viewIdentificationImageUrl ? (
+                  <div className="w-full">
+                    <img
+                      src={viewIdentificationImageUrl}
+                      alt="Identificación"
+                      className="w-full max-h-[70vh] object-contain rounded-md border border-border bg-background"
+                    />
+                  </div>
+                ) : (
+                  <div className="py-6 text-sm text-muted-foreground text-center">
+                    No hay imagen disponible.
+                  </div>
+                )}
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button variant="outline" onClick={() => setViewIdentificationOpen(false)} disabled={viewIdentificationLoading}>
+                    Cerrar
+                  </Button>
+                  <Button
+                    asChild
+                    onClick={() => setViewIdentificationOpen(false)}
+                    disabled={viewIdentificationLoading}
+                  >
+                    <Link href="/professional/verify">Ir a verificar</Link>
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {SHOW_VAULT_FOLDERS_TAB && (
               <TabsContent value="folders">

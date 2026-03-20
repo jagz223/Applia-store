@@ -173,4 +173,8 @@ export const FIRESTORE_COLLECTIONS = {
   WALLET_TRANSFERS: "wallet_transfers",
   WITHDRAWAL_REJECTIONS: "withdrawal_rejections",
   BOOKING_RATINGS: "booking_ratings",
+  /** Verificación de profesionales (1 doc por userId). */
+  PROFESSIONAL_VERIFICATIONS: "professional_verifications",
+  /** Estado de verificación por profesional (1 doc por userId). */
+  VERIFYING_STATUS: "verifying_status",
 } as const;

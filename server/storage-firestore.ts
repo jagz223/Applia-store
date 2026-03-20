@@ -25,6 +25,9 @@ import type {
 } from "@shared/schema";
 import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
 import { calcCommission, calcProviderNet } from "@shared/platform-commission";
+import type { ProfessionalVerification, ProfessionalVerificationState } from "@shared/professional-verification";
+import type { VerifyingStatus } from "@shared/professional-verification";
+import { isProfessionalVerificationLocked } from "@shared/professional-verification";
 
 /** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed); payment = client paid for a service (outflow from pending to provider). */
 export type WalletTransferType = "service_payment" | "recharge" | "withdrawal" | "payment";
@@ -78,6 +81,11 @@ interface User {
   rating?: number;
   /** Cantidad de valoraciones recibidas (para calcular promedio). */
   ratingCount?: number;
+  /**
+   * Prestador ha aceptado el estatuto de condiciones de uso (campo en inglés en Firestore).
+   * Solo aplica a `role === "professional"`; por defecto false al volverse profesional.
+   */
+  acceptedProviderTermsOfUse?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -195,6 +203,7 @@ class FirestoreStorageImpl implements IStorage {
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc();
     const now = new Date();
     
+    const role = user.role || "client";
     const newUser: User = {
       id: docRef.id,
       email: user.email!,
@@ -202,13 +211,16 @@ class FirestoreStorageImpl implements IStorage {
       name: user.name!,
       lastName: user.lastName!,
       phone: user.phone,
-      role: user.role || "client",
+      role,
       avatar: user.avatar,
       wallet: user.wallet ?? 0,
       totalEarnings: user.totalEarnings ?? 0,
       pendingBalance: user.pendingBalance ?? 0,
       rating: user.rating ?? 5,
       ratingCount: user.ratingCount ?? 0,
+      ...(role === "professional"
+        ? { acceptedProviderTermsOfUse: user.acceptedProviderTermsOfUse ?? false }
+        : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -503,6 +515,8 @@ class FirestoreStorageImpl implements IStorage {
         ? await this.getProvider(service.providerId)
         : undefined;
       const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
+      // Solo mostramos servicios de proveedores verificados (isVerified = true).
+      if (!providerWithUser?.isVerified) continue;
       const category = allCategories.find((c) => c.id === service.categoryId);
       const subId = (service as { subcategoryId?: number | null }).subcategoryId;
       let subcategory: { id: number; name: string } | null = null;
@@ -563,6 +577,8 @@ class FirestoreStorageImpl implements IStorage {
       ? await this.getProvider(service.providerId)
       : undefined;
     const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
+    // Si el proveedor no está verificado, no exponemos el servicio.
+    if (!providerWithUser?.isVerified) return undefined;
     const allCategories = await this.getCategories();
     const category = allCategories.find((c) => c.id === service.categoryId) ?? (allCategories[0] as Category | undefined);
     const subId = (service as { subcategoryId?: number | null }).subcategoryId;
@@ -999,13 +1015,13 @@ class FirestoreStorageImpl implements IStorage {
     const providersColl = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS);
     const transfersColl = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
 
-    // La comisión de plataforma se acredita al primer admin encontrado.
+    // La comisión de plataforma se acredita al primer usuario con rol admin o Soporte TI.
     const adminSnap = await this.db
       .collection(FIRESTORE_COLLECTIONS.USERS)
-      .where("role", "==", "admin")
+      .where("role", "in", ["admin", "tiSupport"])
       .limit(1)
       .get();
-    if (adminSnap.empty) throw new Error("No existe usuario admin para registrar la comisión de plataforma");
+    if (adminSnap.empty) throw new Error("No existe usuario admin o soporte TI para registrar la comisión de plataforma");
     const adminUserId = adminSnap.docs[0].id;
 
     const transferId1 = await this.getNextId("wallet_transfers");
@@ -1987,11 +2003,16 @@ class FirestoreStorageImpl implements IStorage {
     await docRef.update({ helpfulCount: count });
     return { id: reviewId, ...doc.data(), helpfulCount: count };
   }
-  async deleteReview(reviewId: number, userId: string): Promise<void> {
+  async deleteReview(reviewId: number, userId: string, actingUserRole?: string): Promise<void> {
     if (!this.db) return;
+    const { hasAdminPrivileges } = await import("@shared/roles");
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.REVIEWS).doc(reviewId.toString());
     const doc = await docRef.get();
-    if (doc.exists && (doc.data() as any)?.reviewerId === userId) await docRef.delete();
+    if (!doc.exists) throw new Error("Review not found");
+    const reviewerId = (doc.data() as any)?.reviewerId;
+    const canDelete = reviewerId === userId || hasAdminPrivileges(actingUserRole);
+    if (!canDelete) throw new Error("Review not found or unauthorized");
+    await docRef.delete();
   }
   async updateReviewStats(_targetId: string, _targetType: string): Promise<void> {}
 
@@ -2274,18 +2295,237 @@ class FirestoreStorageImpl implements IStorage {
     await docRef.delete();
   }
 
+  // ============ VERIFICACIÓN DE PROFESIONALES (un doc por userId) ============
+
+  async getProfessionalVerificationByUserId(userId: string): Promise<ProfessionalVerification | null> {
+    if (!this.db) return null;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.PROFESSIONAL_VERIFICATIONS).doc(userId).get();
+    if (!doc.exists) return null;
+    const data = doc.data() as Record<string, unknown>;
+    return {
+      userId: String(data.userId ?? userId),
+      imageUrl: data.imageUrl != null ? String(data.imageUrl) : null,
+      imageVerified: data.imageVerified === true,
+      transferReceiptCode: data.transferReceiptCode != null ? String(data.transferReceiptCode) : null,
+      transferDate: data.transferDate != null ? String(data.transferDate) : null,
+      createdAt: data.createdAt as any,
+      updatedAt: data.updatedAt as any,
+    } as ProfessionalVerification;
+  }
+
+  async upsertProfessionalVerificationImage(userId: string, imageUrl: string): Promise<ProfessionalVerification> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.PROFESSIONAL_VERIFICATIONS).doc(userId);
+    const snap = await ref.get();
+    if (snap.exists) {
+      await ref.update({
+        imageUrl,
+        imageVerified: false,
+        updatedAt: new Date(),
+      });
+    } else {
+      await ref.set({
+        userId,
+        imageUrl,
+        imageVerified: false,
+        transferReceiptCode: null,
+        transferDate: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+    const out = await this.getProfessionalVerificationByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar la verificación");
+    return out;
+  }
+
+  async upsertProfessionalVerificationPayment(
+    userId: string,
+    data: { transferReceiptCode: string; transferDate: string }
+  ): Promise<ProfessionalVerification> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.PROFESSIONAL_VERIFICATIONS).doc(userId);
+    const snap = await ref.get();
+    const existing = snap.exists ? await this.getProfessionalVerificationByUserId(userId) : null;
+    const imageUrl = existing?.imageUrl ?? null;
+    const imageVerified = false; // siempre false por ahora
+    // No reescribir createdAt al actualizar: convertir Timestamp de Firestore con `new Date(...)`
+    // puede producir fechas inválidas y el error "Value for argument \"seconds\" is not a valid integer".
+    const payload: Record<string, unknown> = {
+      userId,
+      imageUrl,
+      imageVerified,
+      transferReceiptCode: data.transferReceiptCode.trim(),
+      transferDate: data.transferDate.trim(),
+      updatedAt: new Date(),
+    };
+    if (!snap.exists) {
+      payload.createdAt = new Date();
+    }
+
+    await ref.set(payload, { merge: true });
+
+    const out = await this.getProfessionalVerificationByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar el pago");
+    return out;
+  }
+
+  // ============ verifying_status (nueva colección) ============
+
+  async getVerifyingStatusByUserId(userId: string): Promise<VerifyingStatus | null> {
+    if (!this.db) return null;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).get();
+    if (!doc.exists) return null;
+    const data = doc.data() as Record<string, unknown>;
+    return {
+      user: String(data.user ?? userId),
+      identification_verified: (data.identification_verified as any) ?? "rejected",
+      transacction_date: data.transacction_date != null ? String(data.transacction_date) : null,
+      transacction_verified:
+        data.transacction_verified === undefined || data.transacction_verified === null
+          ? null
+          : (data.transacction_verified as any),
+      createdAt: data.createdAt as any,
+      updatedAt: data.updatedAt as any,
+    } as VerifyingStatus;
+  }
+
+  /**
+   * Solo marca identificación en pending. No modifica transacction_date ni transacction_verified
+   * (si no existían en el doc, siguen ausentes / null).
+   */
+  async upsertVerifyingStatusIdentificationPending(userId: string): Promise<VerifyingStatus> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId);
+    const snap = await ref.get();
+
+    if (snap.exists) {
+      await ref.update({
+        identification_verified: "pending",
+        updatedAt: new Date(),
+      });
+    } else {
+      await ref.set({
+        user: userId,
+        identification_verified: "pending",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    const out = await this.getVerifyingStatusByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar el estado");
+    return out;
+  }
+
+  async upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId);
+    const snap = await ref.get();
+
+    const existing = snap.exists ? await this.getVerifyingStatusByUserId(userId) : null;
+
+    await ref.set(
+      {
+        user: userId,
+        identification_verified: existing?.identification_verified ?? "rejected",
+        transacction_date: transactionDate,
+        transacction_verified: "pending",
+        createdAt: existing?.createdAt ?? new Date(),
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    const out = await this.getVerifyingStatusByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar el estado");
+    return out;
+  }
+
+  async getPendingVerifyingStatuses(): Promise<VerifyingStatus[]> {
+    if (!this.db) return [];
+    const makeFromData = (data: Record<string, unknown>): VerifyingStatus => ({
+      user: String(data.user ?? ""),
+      identification_verified: (data.identification_verified as any) ?? "rejected",
+      transacction_date: data.transacction_date != null ? String(data.transacction_date) : null,
+      transacction_verified:
+        data.transacction_verified === undefined || data.transacction_verified === null
+          ? null
+          : (data.transacction_verified as any),
+      createdAt: data.createdAt as any,
+      updatedAt: data.updatedAt as any,
+    });
+
+    const byUserId = new Map<string, VerifyingStatus>();
+
+    const [snapId, snapTx] = await Promise.all([
+      this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).where("identification_verified", "==", "pending").get(),
+      this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).where("transacction_verified", "==", "pending").get(),
+    ]);
+
+    for (const d of snapId.docs) {
+      const data = d.data() as Record<string, unknown>;
+      const v = makeFromData({ ...data, user: data.user ?? d.id });
+      byUserId.set(String(d.id), v);
+    }
+    for (const d of snapTx.docs) {
+      const data = d.data() as Record<string, unknown>;
+      const v = makeFromData({ ...data, user: data.user ?? d.id });
+      byUserId.set(String(d.id), v);
+    }
+
+    return Array.from(byUserId.values()).filter((v) => Boolean(v.user));
+  }
+
+  async setVerifyingStatusIdentification(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getVerifyingStatusByUserId(userId);
+    if (!existing) throw new Error("Verificación no encontrada");
+    if (existing.identification_verified !== "pending") throw new Error("La identificación ya no está en pending");
+
+    await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update({
+      identification_verified: status,
+      updatedAt: new Date(),
+    });
+
+    const out = await this.getVerifyingStatusByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar el estado");
+    return out;
+  }
+
+  async setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getVerifyingStatusByUserId(userId);
+    if (!existing) throw new Error("Verificación no encontrada");
+    if (existing.transacction_verified == null || existing.transacction_verified !== "pending") {
+      throw new Error("La transacción ya no está en pending");
+    }
+
+    await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update({
+      transacction_verified: status,
+      updatedAt: new Date(),
+    });
+
+    const out = await this.getVerifyingStatusByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar el estado");
+    return out;
+  }
+
   async seedRoles(): Promise<void> {
     if (!this.db) return;
-    const adminRef = this.db.collection(FIRESTORE_COLLECTIONS.ROLES).doc("admin");
-    const adminSnap = await adminRef.get();
-    if (adminSnap.exists) return;
     const defaults: RoleDefinition[] = [
       { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
       { code: "professional", name: "Profesional", description: "Proveedor de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
       { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
+      { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
     ];
+    const col = this.db.collection(FIRESTORE_COLLECTIONS.ROLES);
     for (const r of defaults) {
-      await this.db.collection(FIRESTORE_COLLECTIONS.ROLES).doc(r.code).set(r);
+      const ref = col.doc(r.code);
+      const snap = await ref.get();
+      if (!snap.exists) {
+        await ref.set(r);
+      }
     }
   }
 }

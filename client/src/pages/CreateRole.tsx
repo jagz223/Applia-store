@@ -10,6 +10,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { hasAdminRole } from "@/lib/auth-utils";
 
 const createRoleSchema = z.object({
   name: z.string().min(1, "El nombre es requerido").max(100),
@@ -44,7 +45,7 @@ export default function CreateRole() {
     },
   });
 
-  if (user?.role !== "admin") {
+  if (!hasAdminRole(user)) {
     return (
       <div className="container mx-auto py-10 px-4 max-w-md">
         <Card>

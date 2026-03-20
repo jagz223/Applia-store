@@ -2,6 +2,8 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage as genFebStorage } from "./storage-genfeb";
 import { authenticateJWT } from "./routes-auth";
+import { requireFullAdmin } from "./middleware-roles";
+import { getAdminAndSupportUsers, getFullAdminUsers } from "./staff-users";
 import { z } from "zod";
 import { notificationService } from "./services/notification.service";
 import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
@@ -754,11 +756,8 @@ export async function registerGenFebRoutes(
   // ---------- WALLET ----------
 
   // GET /api/wallet/platform-balance - Balance total de la plataforma (solo admin)
-  app.get("/api/wallet/platform-balance", authenticateJWT, async (req: any, res) => {
+  app.get("/api/wallet/platform-balance", authenticateJWT, requireFullAdmin, async (_req: any, res) => {
     try {
-      if (req.user?.role !== "admin") {
-        return res.status(403).json({ message: "Se requiere rol de administrador" });
-      }
       const total = await storage.getTotalPlatformBalance();
       res.json({ totalBalance: total });
     } catch (error) {
@@ -854,7 +853,7 @@ export async function registerGenFebRoutes(
         ?? ([((user as { firstName?: string }).firstName ?? ""), ((user as { lastName?: string }).lastName ?? "")].filter(Boolean).join(" ") || (user as { email?: string }).email || "Usuario");
 
       // Notificación persistente para cada admin (aparece en la campana al cargar o al conectarse)
-      const { users: adminUsers } = await storage.getUsers({ role: "admin", page: 1, limit: 100, name: "", email: "", lastName: "" });
+      const adminUsers = await getFullAdminUsers(storage);
       for (const admin of adminUsers ?? []) {
         const adminId = (admin as { id?: string }).id;
         if (adminId) {
@@ -1032,8 +1031,8 @@ export async function registerGenFebRoutes(
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
       const name = [user.name, (user as { lastName?: string }).lastName].filter(Boolean).join(" ").trim() || "Usuario";
       const description = `Recarga al usuario ${name}`;
-      const { users: adminUsers } = await storage.getUsers({ role: "admin", page: 1, limit: 1, name: "", email: "", lastName: "" });
-      const fromUserId = adminUsers?.length ? (adminUsers[0] as { id?: string }).id ?? null : null;
+      const staffForTransfer = await getFullAdminUsers(storage);
+      const fromUserId = staffForTransfer?.length ? (staffForTransfer[0] as { id?: string }).id ?? null : null;
       const transfer = await storage.createTransfer({
         userId,
         fromUserId,
@@ -1065,15 +1064,8 @@ export async function registerGenFebRoutes(
         console.warn("[recharge] getIO() es null: no se pudo enviar notificación en tiempo real a admins");
       }
 
-      // Notificar a todos los admins: nueva recarga pendiente de aprobación (FCM)
-      const { users: allAdmins } = await storage.getUsers({
-        role: "admin",
-        page: 1,
-        limit: 100,
-        name: "",
-        email: "",
-        lastName: "",
-      });
+      // Notificar a todo el staff (admin + Soporte TI): nueva recarga pendiente de aprobación (FCM)
+      const allAdmins = await getFullAdminUsers(storage);
       const amountStr = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(parsed.data.amount);
       const tid = (transfer as { id?: number }).id;
       const adminPushUrl = tid != null ? `/admin?tab=recargas&highlight=${tid}` : "/admin?tab=recargas";
@@ -1112,11 +1104,8 @@ export async function registerGenFebRoutes(
     referenceId: z.string().optional(),
     currency: z.string().optional(),
   });
-  app.post("/api/wallet/transfers", authenticateJWT, async (req: any, res) => {
+  app.post("/api/wallet/transfers", authenticateJWT, requireFullAdmin, async (req: any, res) => {
     try {
-      if (req.user?.role !== "admin") {
-        return res.status(403).json({ message: "Se requiere rol de administrador" });
-      }
       const parsed = createTransferSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
@@ -1167,11 +1156,8 @@ export async function registerGenFebRoutes(
   });
 
   // GET /api/admin/wallet/transfers - Listar todas las transferencias (solo admin)
-  app.get("/api/admin/wallet/transfers", authenticateJWT, async (req: any, res) => {
+  app.get("/api/admin/wallet/transfers", authenticateJWT, requireFullAdmin, async (_req: any, res) => {
     try {
-      if (req.user?.role !== "admin") {
-        return res.status(403).json({ message: "Se requiere rol de administrador" });
-      }
       const result = await storage.getAllTransfers();
       res.json(result);
     } catch (error) {
@@ -1186,11 +1172,8 @@ export async function registerGenFebRoutes(
       errorMap: () => ({ message: "status debe ser pending_approval, completed o rejected" }),
     }),
   });
-  app.patch("/api/admin/wallet/transfers/:id", authenticateJWT, async (req: any, res) => {
+  app.patch("/api/admin/wallet/transfers/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {
     try {
-      if (req.user?.role !== "admin") {
-        return res.status(403).json({ message: "Se requiere rol de administrador" });
-      }
       const transferId = req.params.id as string;
       if (!transferId?.trim()) {
         return res.status(400).json({ message: "ID de transferencia es requerido" });
@@ -1329,8 +1312,8 @@ export async function registerGenFebRoutes(
   // Nota: accesible solo a usuarios autenticados (Chat requiere autenticación).
   app.get("/api/support/admin", authenticateJWT, async (req: any, res) => {
     try {
-      const { users } = await storage.getUsers({ role: "admin", page: 1, limit: 1, name: "", email: "", lastName: "" });
-      const admin = Array.isArray(users) && users.length ? users[0] : null;
+      const staff = await getAdminAndSupportUsers(storage);
+      const admin = Array.isArray(staff) && staff.length ? staff[0] : null;
       const adminId = admin && typeof (admin as any).id === "string" ? (admin as any).id : (admin && (admin as any).id != null ? String((admin as any).id) : null);
       if (!adminId) {
         return res.status(404).json({ message: "No hay administrador disponible" });

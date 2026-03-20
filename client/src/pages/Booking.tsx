@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +30,7 @@ import { useToast } from "@/hooks/use-toast";
 import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
 import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
 import { isBeforeToday } from "@/lib/date-utils";
+import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
 import {
@@ -75,11 +76,11 @@ function ProviderOptionCard({
       `}
     >
       <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden shrink-0">
+        <div className="w-14 h-14 rounded-2xl border border-border/50 bg-muted/40 flex items-center justify-center overflow-hidden shrink-0">
           {provider.profileImageUrl ? (
             <img src={provider.profileImageUrl} alt="" className="w-full h-full object-cover" />
           ) : (
-            <User className="w-6 h-6 text-primary" />
+            <User className="w-7 h-7 text-muted-foreground" strokeWidth={1.25} />
           )}
         </div>
         <div>
@@ -115,7 +116,7 @@ export default function Booking() {
   /** Dirección/ubicación del servicio (geolocalización); no confundir con useLocation de wouter. */
   const [userLocation, setUserLocation] = useState("");
   const [locationLoading, setLocationLoading] = useState(false);
-  const hasValidLocation = location.trim().length > 0;
+  const hasValidLocation = userLocation.trim().length > 0;
   const [notes, setNotes] = useState("");
   const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
   const { toast } = useToast();
@@ -140,11 +141,28 @@ export default function Booking() {
     { providerCategoryId: categoryIdNum },
     { enabled: !!selectedService }
   );
+
+  // Defensivo: solo permitimos agendar con servicios de proveedores verificados.
+  const verifiedServices = useMemo(
+    () => (services ?? []).filter((s) => (s as any)?.provider?.isVerified === true),
+    [services]
+  );
+
+  useEffect(() => {
+    // Si el profesional/servicio seleccionado dejó de estar verificado, limpiamos selección.
+    if (selectedBookingServiceId == null) return;
+    const stillValid = verifiedServices.some((s) => s.id === selectedBookingServiceId);
+    if (!stillValid) {
+      setSelectedBookingServiceId(null);
+      setSelectedProvider(null);
+      setStep(1);
+    }
+  }, [selectedBookingServiceId, verifiedServices]);
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
 
   /** Proveedores únicos de la categoría seleccionada, con datos para la lista (nombre, profesión, rating, precio). */
   const providersInCategory = useMemo(() => {
-    if (!services?.length) return [];
+    if (!verifiedServices?.length) return [];
     const byProvider = new Map<
       number,
       {
@@ -158,7 +176,7 @@ export default function Booking() {
         profileImageUrl?: string | null;
       }
     >();
-    for (const s of services as Array<{
+    for (const s of verifiedServices as Array<{
       id: number;
       price: string | number;
       provider?: {
@@ -166,7 +184,14 @@ export default function Booking() {
         profession?: string;
         rating?: string | number;
         reviewCount?: number;
-        user?: { firstName?: string; lastName?: string; name?: string; profileImageUrl?: string | null };
+        user?: {
+          firstName?: string;
+          lastName?: string;
+          name?: string;
+          profileImageUrl?: string | null;
+          avatar?: string | null;
+          photoURL?: string | null;
+        };
       };
     }>) {
       const p = s.provider;
@@ -184,7 +209,7 @@ export default function Booking() {
           reviewCount: Number(p.reviewCount ?? 0),
           price,
           firstServiceId: s.id,
-          profileImageUrl: p.user?.profileImageUrl ?? null,
+          profileImageUrl: getProviderUserAvatarUrl(p),
         });
       } else {
         const existing = byProvider.get(p.id)!;
@@ -195,7 +220,7 @@ export default function Booking() {
       }
     }
     return Array.from(byProvider.values());
-  }, [services]);
+  }, [verifiedServices]);
 
   const handleUseMyLocation = () => {
     if (!navigator.geolocation) {
@@ -251,9 +276,9 @@ export default function Booking() {
 
   const selectedServiceForBooking = useMemo(() => {
     if (!selectedBookingServiceId) return null;
-    const list = services as Array<{ id: number; price?: string | number }>;
+    const list = verifiedServices as Array<{ id: number; price?: string | number }>;
     return list.find((s) => s.id === selectedBookingServiceId) ?? null;
-  }, [services, selectedBookingServiceId]);
+  }, [verifiedServices, selectedBookingServiceId]);
 
   const handleBooking = () => {
     if (!user?.id) {
@@ -623,9 +648,26 @@ export default function Booking() {
                                 {getCategoryDisplayName(categories?.find((c) => c.id != null && String(c.id) === selectedService)) || "—"}
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Profesional:</span>
-                              <span>{providersInCategory.find((p) => String(p.id) === selectedProvider)?.name ?? "—"}</span>
+                            <div className="flex justify-between items-start gap-3">
+                              <span className="text-muted-foreground shrink-0">Profesional:</span>
+                              <span className="flex items-center gap-2 text-right min-w-0">
+                                {(() => {
+                                  const sel = providersInCategory.find((p) => String(p.id) === selectedProvider);
+                                  const url = sel?.profileImageUrl;
+                                  return (
+                                    <>
+                                      <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/50 bg-muted/40">
+                                        {url ? (
+                                          <img src={url} alt="" className="h-full w-full object-cover" />
+                                        ) : (
+                                          <User className="h-5 w-5 text-muted-foreground" strokeWidth={1.25} />
+                                        )}
+                                      </span>
+                                      <span className="truncate">{sel?.name ?? "—"}</span>
+                                    </>
+                                  );
+                                })()}
+                              </span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Fecha:</span>

@@ -55,6 +55,33 @@ interface UserPayload {
 
 // ============== FUNCIONES AUXILIARES ==============
 
+/** Campo en Firestore/usuario: `acceptedProviderTermsOfUse` (inglés). Solo profesionales; el resto se considera aceptado. */
+function acceptedProviderTermsOfUseForApi(user: { role?: string; acceptedProviderTermsOfUse?: boolean }): boolean {
+  if (user.role !== "professional") return true;
+  return user.acceptedProviderTermsOfUse === true;
+}
+
+/** Cuerpo de usuario para login, registro, /me y aceptación de términos (sin password). */
+function buildAuthClientUser(
+  user: Record<string, unknown>,
+  provider: { id: number; [key: string]: unknown } | null
+) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    lastName: user.lastName,
+    role: user.role,
+    phone: user.phone,
+    avatar: user.avatar,
+    bankName: user.bankName,
+    accountNumber: user.accountNumber,
+    createdAt: user.createdAt,
+    acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
+    provider: provider ?? null,
+  };
+}
+
 // Generate JWT token
 function generateToken(user: UserPayload): string {
   return jwt.sign(user, effectiveSecret, { expiresIn: JWT_EXPIRES_IN as any });
@@ -141,6 +168,7 @@ export async function registerAuthRoutes(
           role: user.role,
           phone: user.phone,
           avatar: (user as { avatar?: string }).avatar,
+          acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
         },
       });
     } catch (error) {
@@ -201,6 +229,8 @@ export async function registerAuthRoutes(
           lastName: user.lastName,
           role: user.role,
           phone: user.phone,
+          avatar: (user as { avatar?: string }).avatar,
+          acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
           provider: provider ?? null,
         },
       });
@@ -225,19 +255,9 @@ export async function registerAuthRoutes(
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
       const provider = await genFebStorage.getProviderByUserId(req.user.id);
-      res.json({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        lastName: user.lastName,
-        role: user.role,
-        phone: user.phone,
-        avatar: user.avatar,
-        bankName: (user as { bankName?: string }).bankName,
-        accountNumber: (user as { accountNumber?: string }).accountNumber,
-        createdAt: user.createdAt,
-        provider: provider ?? null,
-      });
+      res.json(
+        buildAuthClientUser(user as Record<string, unknown>, provider as { id: number; [key: string]: unknown } | null)
+      );
     } catch (error) {
       console.error("Error obteniendo usuario:", error);
       res.status(500).json({ message: "Error interno del servidor" });
@@ -330,6 +350,33 @@ export async function registerAuthRoutes(
     }
   });
   
+  // POST /api/auth/accept-provider-terms-of-use — Profesional acepta el estatuto (campo `acceptedProviderTermsOfUse`).
+  app.post("/api/auth/accept-provider-terms-of-use", authenticateJWT, async (req: any, res) => {
+    try {
+      const full = await genFebStorage.getUserById(req.user.id);
+      if (!full) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+      if (full.role !== "professional") {
+        return res.status(403).json({ message: "Solo los profesionales deben aceptar estas condiciones" });
+      }
+      const updated = await genFebStorage.updateUser(req.user.id, { acceptedProviderTermsOfUse: true } as any);
+      if (!updated) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+      const provider = await genFebStorage.getProviderByUserId(req.user.id);
+      const { password: _p, ...safe } = updated as Record<string, unknown>;
+      void _p;
+      res.json({
+        message: "Condiciones de uso aceptadas",
+        user: buildAuthClientUser(safe, provider as { id: number; [key: string]: unknown } | null),
+      });
+    } catch (error) {
+      console.error("Error aceptando condiciones de prestador:", error);
+      res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
+
   // POST /api/auth/logout - Cerrar sesión (invalidar token en cliente)
   app.post("/api/auth/logout", authenticateJWT, async (req, res) => {
     // En una implementación robusta, blacklistearíamos el token

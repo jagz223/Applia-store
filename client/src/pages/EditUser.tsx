@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { hasAdminRole } from "@/lib/auth-utils";
 
 const editUserSchema = z.object({
   name: z.string().min(1, "El nombre es requerido").max(100),
@@ -88,7 +89,7 @@ export default function EditUser() {
     return () => { cancelled = true; };
   }, [id, form.reset, setLocation, toast]);
 
-  if (currentUser?.role !== "admin") {
+  if (!hasAdminRole(currentUser)) {
     return (
       <div className="container mx-auto py-10 px-4 max-w-md">
         <Card>

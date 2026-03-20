@@ -37,6 +37,10 @@ import Movimientos from "@/pages/Movimientos";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
 import Notifications from "@/pages/Notifications";
+import { ProfessionalVerificationBanner } from "@/components/ProfessionalVerificationBanner";
+import { ProviderTermsGate } from "@/components/ProviderTermsGate";
+import VerifyProfessional from "@/pages/VerifyProfessional";
+import VerifyProfessionalPayment from "@/pages/VerifyProfessionalPayment";
 
 function Router() {
   return (
@@ -66,6 +70,8 @@ function Router() {
       <Route path="/movimientos" component={Movimientos} />
       <Route path="/settings" component={Settings} />
       <Route path="/notifications" component={Notifications} />
+      <Route path="/professional/verify" component={VerifyProfessional} />
+      <Route path="/professional/verify/payment" component={VerifyProfessionalPayment} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -79,8 +85,10 @@ function App() {
           <ExploreCategoryProvider>
             <PushForegroundHandler />
             <RatingGate />
+            <ProviderTermsGate />
             <div className="flex flex-col min-h-screen bg-background font-sans">
               <Navigation />
+              <ProfessionalVerificationBanner />
               <main className="flex-grow">
                 <Router />
               </main>

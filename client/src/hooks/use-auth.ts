@@ -13,7 +13,12 @@ export interface AuthUserProvider {
 }
 
 /** Usuario tal como lo devuelve la API de auth (incluye role y provider si es proveedor). */
-export type AuthUser = User & { role?: string; provider?: AuthUserProvider | null };
+export type AuthUser = User & {
+  role?: string;
+  provider?: AuthUserProvider | null;
+  /** Campo Firestore `acceptedProviderTermsOfUse`; solo aplica a profesionales (true = ya aceptó). */
+  acceptedProviderTermsOfUse?: boolean;
+};
 
 async function fetchUser(): Promise<AuthUser | null> {
   const token = localStorage.getItem("token");

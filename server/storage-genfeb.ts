@@ -17,8 +17,11 @@ import {
   type ServiceWithProvider,
 } from "@shared/schema";
 import { calcCommission, calcProviderNet } from "@shared/platform-commission";
+import { hasAdminPrivileges } from "@shared/roles";
 import { eq, and, like, desc } from "drizzle-orm";
 import type { IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage } from "./storage-contracts";
+import type { ProfessionalVerification, VerifyingStatus, ProfessionalVerificationState } from "@shared/professional-verification";
+import { isProfessionalVerificationLocked } from "@shared/professional-verification";
 const getDb = async () => (await import("./db")).db;
 
 /**
@@ -93,7 +96,7 @@ export interface IStorage
   createReview(review: any): Promise<any>;
   replyToReview(reviewId: number, response: string, responderId: string, responderName: string): Promise<any>;
   markReviewHelpful(reviewId: number): Promise<any>;
-  deleteReview(reviewId: number, userId: string): Promise<void>;
+  deleteReview(reviewId: number, userId: string, actingUserRole?: string): Promise<void>;
   updateReviewStats(targetId: string, targetType: string): Promise<void>;
   
   // ==================== NUEVOS MÉTODOS (BookingDo) ====================
@@ -230,6 +233,22 @@ export interface IStorage
     roleRated: "professional" | "client",
     stars: number
   ): Promise<void>;
+
+  // ==================== VERIFICACIÓN DE PROFESIONALES ====================
+  getProfessionalVerificationByUserId(userId: string): Promise<ProfessionalVerification | null>;
+  upsertProfessionalVerificationImage(userId: string, imageUrl: string): Promise<ProfessionalVerification>;
+  upsertProfessionalVerificationPayment(
+    userId: string,
+    data: { transferReceiptCode: string; transferDate: string }
+  ): Promise<ProfessionalVerification>;
+
+  // ==================== verifying_status (nueva colección) ====================
+  getVerifyingStatusByUserId(userId: string): Promise<VerifyingStatus | null>;
+  getPendingVerifyingStatuses(): Promise<VerifyingStatus[]>;
+  upsertVerifyingStatusIdentificationPending(userId: string): Promise<VerifyingStatus>;
+  upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus>;
+  setVerifyingStatusIdentification(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
+  setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -292,9 +311,13 @@ export class InMemoryStorage implements IStorage {
       throw new Error("El usuario con este email ya existe");
     }
     
+    const role = user.role || "client";
     const newUser = {
       id: String(this.userIdCounter++),
       ...user,
+      ...(role === "professional"
+        ? { acceptedProviderTermsOfUse: user.acceptedProviderTermsOfUse ?? false }
+        : {}),
       wallet: user.wallet ?? 0,
       totalEarnings: user.totalEarnings ?? 0,
       pendingBalance: user.pendingBalance ?? 0,
@@ -405,8 +428,8 @@ export class InMemoryStorage implements IStorage {
     const providerWallet = typeof (providerUser as { wallet?: number }).wallet === "number" ? (providerUser as { wallet: number }).wallet : 0;
     const providerTotalEarnings = typeof (providerUser as { totalEarnings?: number }).totalEarnings === "number" ? (providerUser as { totalEarnings: number }).totalEarnings : 0;
 
-    const adminUser = this.users.find((u: { role?: string }) => u.role === "admin");
-    if (!adminUser) throw new Error("No existe usuario admin para registrar la comisión de plataforma");
+    const adminUser = this.users.find((u: { role?: string }) => hasAdminPrivileges(u.role));
+    if (!adminUser) throw new Error("No existe usuario admin o soporte TI para registrar la comisión de plataforma");
     const adminUserWallet = typeof (adminUser as { wallet?: number }).wallet === "number" ? (adminUser as { wallet: number }).wallet : 0;
     const adminUserTotalEarnings =
       typeof (adminUser as { totalEarnings?: number }).totalEarnings === "number" ? (adminUser as { totalEarnings: number }).totalEarnings : 0;
@@ -742,6 +765,7 @@ export class InMemoryStorage implements IStorage {
     { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
     { code: "professional", name: "Profesional", description: "Proveedor de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
     { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
+    { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
   ];
 
   async getRoles(): Promise<RoleDefinition[]> {
@@ -783,12 +807,19 @@ export class InMemoryStorage implements IStorage {
   }
 
   async seedRoles(): Promise<void> {
-    if (this.roleDefinitions.length >= 3) return;
-    this.roleDefinitions = [
+    const defaults: RoleDefinition[] = [
       { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
       { code: "professional", name: "Profesional", description: "Proveedor de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
       { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
+      { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
     ];
+    const existing = new Set(this.roleDefinitions.map((r) => r.code));
+    for (const r of defaults) {
+      if (!existing.has(r.code)) {
+        this.roleDefinitions.push({ ...r, createdAt: new Date(), updatedAt: new Date() });
+        existing.add(r.code);
+      }
+    }
   }
 
   // ============== REPORTES ==============
@@ -1722,10 +1753,123 @@ export class InMemoryStorage implements IStorage {
     // Stub: en memoria no persiste; Firestore implementa la lógica.
   }
 
+  // ==================== VERIFICACIÓN DE PROFESIONALES ====================
+
+  async getProfessionalVerificationByUserId(userId: string): Promise<ProfessionalVerification | null> {
+    return this.professionalVerifications.get(userId) ?? null;
+  }
+
+  async upsertProfessionalVerificationImage(userId: string, imageUrl: string): Promise<ProfessionalVerification> {
+    const cur = this.professionalVerifications.get(userId);
+    const next: ProfessionalVerification = {
+      userId,
+      imageUrl,
+      imageVerified: false, // siempre false por ahora (luego lo actualizará el admin)
+      transferReceiptCode: cur?.transferReceiptCode ?? null,
+      transferDate: cur?.transferDate ?? null,
+      createdAt: cur?.createdAt ? new Date(cur.createdAt as any) : new Date(),
+      updatedAt: new Date(),
+    };
+    this.professionalVerifications.set(userId, next);
+    return next;
+  }
+
+  async upsertProfessionalVerificationPayment(
+    userId: string,
+    data: { transferReceiptCode: string; transferDate: string }
+  ): Promise<ProfessionalVerification> {
+    const cur = this.professionalVerifications.get(userId);
+    const next: ProfessionalVerification = {
+      userId,
+      imageUrl: cur?.imageUrl ?? null,
+      imageVerified: false, // siempre false por ahora
+      transferReceiptCode: data.transferReceiptCode.trim(),
+      transferDate: data.transferDate.trim(),
+      createdAt: cur?.createdAt ? new Date(cur.createdAt as any) : new Date(),
+      updatedAt: new Date(),
+    };
+    this.professionalVerifications.set(userId, next);
+    return next;
+  }
+
+  // ==================== verifying_status (nueva colección) ====================
+
+  async getVerifyingStatusByUserId(userId: string): Promise<VerifyingStatus | null> {
+    return this.verifyingStatuses.get(userId) ?? null;
+  }
+
+  async upsertVerifyingStatusIdentificationPending(userId: string): Promise<VerifyingStatus> {
+    const cur = this.verifyingStatuses.get(userId);
+    const next: VerifyingStatus = {
+      user: userId,
+      identification_verified: "pending",
+      transacction_date: cur?.transacction_date ?? null,
+      // No tocar el estado del pago al subir identificación: null sigue null, pending sigue pending, etc.
+      transacction_verified: cur?.transacction_verified ?? null,
+      createdAt: cur?.createdAt ? (cur.createdAt as any) : new Date(),
+      updatedAt: new Date(),
+    };
+    this.verifyingStatuses.set(userId, next);
+    return next;
+  }
+
+  async upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus> {
+    const cur = this.verifyingStatuses.get(userId);
+    const next: VerifyingStatus = {
+      user: userId,
+      identification_verified: cur?.identification_verified ?? "rejected",
+      transacction_date: transactionDate,
+      transacction_verified: "pending",
+      createdAt: cur?.createdAt ? (cur.createdAt as any) : new Date(),
+      updatedAt: new Date(),
+    };
+    this.verifyingStatuses.set(userId, next);
+    return next;
+  }
+
+  async getPendingVerifyingStatuses(): Promise<VerifyingStatus[]> {
+    return Array.from(this.verifyingStatuses.values()).filter(
+      (s) => s.identification_verified === "pending" || s.transacction_verified === "pending"
+    );
+  }
+
+  async setVerifyingStatusIdentification(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus> {
+    const cur = this.verifyingStatuses.get(userId);
+    if (!cur) throw new Error("Verificación no encontrada");
+    if (cur.identification_verified !== "pending") {
+      throw new Error("La identificación ya no está en pending");
+    }
+    const next: VerifyingStatus = {
+      ...cur,
+      identification_verified: status,
+      updatedAt: new Date(),
+    };
+    this.verifyingStatuses.set(userId, next);
+    return next;
+  }
+
+  async setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus> {
+    const cur = this.verifyingStatuses.get(userId);
+    if (!cur) throw new Error("Verificación no encontrada");
+    if (cur.transacction_verified == null || cur.transacction_verified !== "pending") {
+      throw new Error("La transacción ya no está en pending");
+    }
+    const next: VerifyingStatus = {
+      ...cur,
+      transacction_verified: status,
+      updatedAt: new Date(),
+    };
+    this.verifyingStatuses.set(userId, next);
+    return next;
+  }
+
   // ==================== RESEÑAS (MOCK) ====================
 
   private reviews: any[] = [];
   private reviewIdCounter = 1;
+
+  private professionalVerifications = new Map<string, ProfessionalVerification>();
+  private verifyingStatuses = new Map<string, VerifyingStatus>();
 
   async getReviews(params: { targetId?: string; targetType?: string; limit?: number; offset?: number }): Promise<any[]> {
     let result = this.reviews;
@@ -1773,9 +1917,14 @@ export class InMemoryStorage implements IStorage {
     return review;
   }
 
-  async deleteReview(reviewId: number, userId: string): Promise<void> {
-    const index = this.reviews.findIndex(r => r.id === reviewId && r.reviewerId === userId);
-    if (index === -1) throw new Error("Review not found or unauthorized");
+  async deleteReview(reviewId: number, userId: string, actingUserRole?: string): Promise<void> {
+    const index = this.reviews.findIndex((r) => r.id === reviewId);
+    if (index === -1) throw new Error("Review not found");
+    const review = this.reviews[index];
+    const isAuthor = review.reviewerId === userId;
+    if (!isAuthor && !hasAdminPrivileges(actingUserRole)) {
+      throw new Error("Review not found or unauthorized");
+    }
     this.reviews.splice(index, 1);
   }
 

@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import type { Server } from "http";
+import { hasAdminPrivileges } from "@shared/roles";
 import { genFebStorage } from "./storage-genfeb";
 import { generateInvoice, createInvoiceFromBooking } from "./invoices";
 
@@ -146,8 +147,8 @@ export async function registerInvoiceRoutes(
 
         let invoices: any[] = [];
 
-        if (userRole === "admin" || userRole === "professional") {
-          // Admin y profesional pueden ver reservas
+        if (hasAdminPrivileges(userRole) || userRole === "professional") {
+          // Admin / Soporte TI y profesional pueden ver reservas
           const providers = await genFebStorage.getAllProviders();
           
           for (const provider of providers) {

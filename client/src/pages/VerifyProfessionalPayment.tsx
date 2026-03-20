@@ -14,44 +14,31 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { CalendarIcon, Wallet, ArrowLeft, Copy, Check, Loader2 } from "lucide-react";
+import { CalendarIcon, ArrowLeft, Copy, Check, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
-import { useRechargeRequest, useWallet } from "@/hooks/use-mango-data";
+import { usePatchProfessionalVerificationPayment } from "@/hooks/use-mango-data";
 import { useToast } from "@/hooks/use-toast";
 import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
 
 const BANK_ACCOUNT_NUMBER = "7700896747";
+const VERIFY_AMOUNT_USD = 15;
 
-const formatUsd = (n: number) =>
-  new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
-
-export default function Recharge() {
-  const { isAuthenticated } = useAuth();
+export default function VerifyProfessionalPayment() {
+  const { isAuthenticated, user } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const rechargeRequest = useRechargeRequest();
-  const { data: walletData } = useWallet({ enabled: isAuthenticated });
-  const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
-  const [amount, setAmount] = useState<string>("");
+  const paymentMutation = usePatchProfessionalVerificationPayment();
   const [transferDate, setTransferDate] = useState<Date | undefined>(undefined);
-  const [transferTime, setTransferTime] = useState<string>("");
   const [transferCode, setTransferCode] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 
   const isFormValid = useMemo(() => {
-    const amountNum = parseFloat(amount);
-    return (
-      Number.isFinite(amountNum) &&
-      amountNum > 0 &&
-      transferDate != null &&
-      transferTime.trim() !== "" &&
-      transferCode.trim() !== ""
-    );
-  }, [amount, transferDate, transferTime, transferCode]);
+    return transferDate != null && transferCode.trim() !== "";
+  }, [transferDate, transferCode]);
 
   const handleCopyAccount = () => {
     navigator.clipboard.writeText(BANK_ACCOUNT_NUMBER);
@@ -63,30 +50,27 @@ export default function Recharge() {
     setConfirmModalOpen(true);
   };
 
-  const handleConfirmNo = () => {
-    setConfirmModalOpen(false);
-  };
-
   const handleConfirmYes = () => {
-    const amountNum = parseFloat(amount);
-    if (!Number.isFinite(amountNum) || amountNum <= 0 || !transferDate) return;
+    if (!transferDate) return;
     const transferDateStr = format(transferDate, "yyyy-MM-dd");
-    rechargeRequest.mutate(
+    paymentMutation.mutate(
       {
-        amount: amountNum,
         transferDate: transferDateStr,
-        transferTime: transferTime.trim() || undefined,
-        transferCode: transferCode.trim() || undefined,
+        transferReceiptCode: transferCode.trim(),
       },
       {
         onSuccess: () => {
           setConfirmModalOpen(false);
-          setLocation("/recharge/confirm");
+          toast({
+            title: "Pago registrado",
+            description: "Tu solicitud está en revisión.",
+          });
+          setLocation("/professional/verify");
         },
         onError: (err: Error) => {
           toast({
             title: "Error",
-            description: err.message || "No se pudo enviar la solicitud de recarga.",
+            description: err.message || "No se pudo registrar el pago.",
             variant: "destructive",
           });
         },
@@ -94,14 +78,12 @@ export default function Recharge() {
     );
   };
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !user?.provider) {
     return (
       <div className="container max-w-4xl py-12 px-4">
-        <Card className="border-border bg-card">
+        <Card>
           <CardContent className="pt-6">
-            <p className="text-muted-foreground text-center mb-4">
-              Debes iniciar sesión para recargar tu wallet.
-            </p>
+            <p className="text-muted-foreground text-center mb-4">Debes ser profesional e iniciar sesión.</p>
             <Button asChild className="w-full sm:w-auto">
               <Link href="/login">Iniciar sesión</Link>
             </Button>
@@ -116,96 +98,58 @@ export default function Recharge() {
       <div className="container max-w-6xl py-8 sm:py-12 px-4">
         <div className="mb-6">
           <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-primary" asChild>
-            <Link href="/">
+            <Link href="/professional/verify">
               <ArrowLeft className="h-4 w-4" />
-              Volver
+              Volver a pasos
             </Link>
           </Button>
         </div>
 
         <div className="mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
-            <Wallet className="h-8 w-8 text-primary" />
-            Recargar wallet
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
+            Pago de verificación — {VERIFY_AMOUNT_USD} USD
           </h1>
           <p className="text-muted-foreground mt-1">
-            Realiza una transferencia bancaria y registra los datos para acreditar el saldo.
+            Realiza la transferencia por el monto indicado y registra la fecha (solo día) y el código de transferencia.
           </p>
         </div>
-
-        {/* Resumen de billetera: solo información de saldo disponible */}
-        <Card className="border-border bg-card shadow-sm mb-8">
-          <CardHeader>
-            <CardTitle className="text-lg">Tu billetera</CardTitle>
-            <CardDescription>
-              Saldo disponible en tu wallet para usar en tus pagos.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div>
-              <p className="text-sm text-muted-foreground">Saldo disponible</p>
-              <p className="text-2xl font-semibold tabular-nums text-foreground">{formatUsd(wallet)}</p>
-            </div>
-          </CardContent>
-        </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
           <Card className="border-border bg-card shadow-sm">
             <CardHeader>
-              <CardTitle className="text-lg">Datos de la recarga</CardTitle>
+              <CardTitle className="text-lg">Datos de la transferencia</CardTitle>
               <CardDescription>
-                Completa la información de tu transferencia para poder verificarla.
+                Monto fijo: <strong>{VERIFY_AMOUNT_USD} USD</strong>. Completa la información para verificar tu pago.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="amount">Cantidad a recargar (USD)</Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  min="1"
-                  step="0.01"
-                  placeholder="Ej: 50.00"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="bg-background border-border"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Fecha exacta de la recarga</Label>
-                <div className="flex flex-wrap gap-3 items-center">
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full sm:w-[240px] justify-start text-left font-normal border-border",
-                          !transferDate && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {transferDate ? format(transferDate, "PPP", { locale: es }) : "Elegir fecha"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0 bg-popover border-border" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={transferDate}
-                        onSelect={setTransferDate}
-                        locale={es}
-                        disabled={(date) => date > new Date()}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <Input
-                    type="time"
-                    value={transferTime}
-                    onChange={(e) => setTransferTime(e.target.value)}
-                    className="w-full sm:w-[120px] bg-background border-border"
-                  />
-                </div>
+                <Label>Fecha de la transferencia</Label>
+                <p className="text-xs text-muted-foreground">Solo fecha (día), sin hora.</p>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full sm:max-w-sm justify-start text-left font-normal border-border",
+                        !transferDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {transferDate ? format(transferDate, "PPP", { locale: es }) : "Elegir fecha"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 bg-popover border-border" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={transferDate}
+                      onSelect={setTransferDate}
+                      locale={es}
+                      disabled={(date) => date > new Date()}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="space-y-2">
@@ -223,13 +167,13 @@ export default function Recharge() {
               <Button
                 className="w-full mt-2"
                 size="lg"
-                disabled={!isFormValid || rechargeRequest.isPending}
+                disabled={!isFormValid || paymentMutation.isPending}
                 onClick={handleSubmit}
               >
-                {rechargeRequest.isPending ? (
+                {paymentMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
-                Enviar solicitud de recarga
+                Confirmo haber pagado los 15$
               </Button>
             </CardContent>
           </Card>
@@ -238,7 +182,7 @@ export default function Recharge() {
             <CardHeader>
               <CardTitle className="text-lg">Transferencia bancaria</CardTitle>
               <CardDescription>
-                Escanea el código QR o usa el número de cuenta para realizar la transferencia.
+                Escanea el código QR o usa el número de cuenta. Transfiere exactamente {VERIFY_AMOUNT_USD} USD.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col items-center">
@@ -278,18 +222,18 @@ export default function Recharge() {
       <Dialog open={confirmModalOpen} onOpenChange={setConfirmModalOpen}>
         <DialogContent className="sm:max-w-md border-border bg-card">
           <DialogHeader>
-            <DialogTitle>¿Ya realizó la transferencia?</DialogTitle>
+            <DialogTitle>¿Confirmas el pago?</DialogTitle>
             <DialogDescription>
-              Confirme si ya realizó la transferencia bancaria para enviar la solicitud de recarga a nuestro equipo.
+              Solo pulsa sí si ya realizaste la transferencia de {VERIFY_AMOUNT_USD} USD con los datos indicados.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={handleConfirmNo} disabled={rechargeRequest.isPending}>
+            <Button variant="outline" onClick={() => setConfirmModalOpen(false)} disabled={paymentMutation.isPending}>
               No
             </Button>
-            <Button onClick={handleConfirmYes} disabled={rechargeRequest.isPending}>
-              {rechargeRequest.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Sí
+            <Button onClick={handleConfirmYes} disabled={paymentMutation.isPending}>
+              {paymentMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Si, Confirmo
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -43,11 +43,23 @@ export default function Explore() {
     [categories]
   );
   const { data: subcategories = [] } = useSubcategories(selectedProviderCategoryId ?? null);
-  const { data: services, isLoading } = useServices({
+  const servicesQuery = useServices({
     search: search || undefined,
     providerCategoryId: selectedProviderCategoryId,
     subcategoryId: selectedSubcategoryId,
   });
+  const { data: services, isLoading, refetch } = servicesQuery;
+
+  useEffect(() => {
+    // En cada entrada a /explore queremos traer datos frescos (sin depender solo del caché).
+    // React Query ya refetchará con cambios de params, pero esto cubre el caso de volver a la vista.
+    refetch();
+  }, [refetch]);
+
+  const verifiedServices = useMemo(
+    () => (services ?? []).filter((s) => Boolean(s?.provider?.isVerified)),
+    [services]
+  );
 
   const selectedProviderCategoryData = providerCategories.find(
     (c) => c.id === selectedProviderCategoryId
@@ -283,7 +295,7 @@ export default function Explore() {
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
             <p className="text-muted-foreground">Cargando servicios...</p>
           </div>
-        ) : services?.length === 0 ? (
+        ) : verifiedServices.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -312,9 +324,9 @@ export default function Explore() {
           </motion.div>
         ) : (
           <>
-            <p className="text-muted-foreground mb-6">{services?.length} servicios encontrados</p>
+            <p className="text-muted-foreground mb-6">{verifiedServices.length} servicios encontrados</p>
             <div className="flex flex-col gap-4">
-              {services?.map((service, index) => (
+              {verifiedServices.map((service, index) => (
                 <motion.div
                   key={service.id}
                   initial={{ opacity: 0, y: 12 }}

@@ -1,6 +1,7 @@
 import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
+import { isFullAdmin } from "@shared/roles";
 
 const JWT_SECRET = process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024";
 
@@ -52,8 +53,8 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     // Join user's personal room
     socket.join(`user:${user.id}`);
 
-    // Admins join room "admin" to receive internal admin notifications (e.g. new recharge requests)
-    if (user.role === "admin") {
+    // Admin y Soporte TI entran al room "admin" (notificaciones internas: recargas, retiros, etc.)
+    if (isFullAdmin(user.role)) {
       socket.join("admin");
       console.log(`🔔 Admin joined room: ${user.email}`);
     }
