@@ -177,12 +177,12 @@ export function Navigation() {
   return (
     <>
     <nav className="sticky top-0 z-50 w-full border-b border-primary/20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="container flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 mx-auto">
+      <div className="container flex h-14 min-[400px]:h-16 max-w-7xl items-center justify-between gap-1 px-2 min-[400px]:px-4 sm:px-6 lg:px-8 mx-auto min-w-0">
         
         {/* Logo & Desktop Nav */}
         <div className="flex items-center gap-8">
-          <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-2">
-            <img src="/logo GenFeb.jpg" alt="GENFEB Logo" className="h-8 w-auto object-contain" />
+          <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-1.5 min-[400px]:gap-2 shrink-0">
+            <img src="/logo GenFeb.jpg" alt="GENFEB Logo" className="h-7 w-auto object-contain min-[400px]:h-8" />
             <span className="hidden text-xl font-bold font-display text-primary sm:inline-block tracking-wider">
               {exploreCategoryDisplayName ?? (
                 <>GENFEB<span className="text-accent">.S.A.S</span></>
@@ -195,7 +195,7 @@ export function Navigation() {
         </div>
 
         {/* Right Side Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 min-[400px]:gap-2 sm:gap-3 shrink-0 min-w-0">
           
           {/* Language Selector */}
           <Button variant="ghost" size="sm" className="hidden sm:flex items-center gap-2 text-muted-foreground hover:text-primary">
@@ -206,16 +206,16 @@ export function Navigation() {
           {/* Wallet balance - visible desktop y móvil (icono en header) */}
           {isAuthenticated && (
             <div
-              className="flex items-center gap-1.5 min-w-0 px-2.5 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary"
-              title="Saldo de tu wallet"
+              className="flex items-center gap-1 min-w-0 px-1.5 py-1 min-[400px]:gap-1.5 min-[400px]:px-2.5 min-[400px]:py-1.5 rounded-md min-[400px]:rounded-lg bg-primary/10 border border-primary/20 text-primary max-w-[100%]"
+              title="Saldo y valoración"
             >
-              <Wallet className="h-4 w-4 sm:h-4 w-4 shrink-0" aria-hidden />
-              <span className="text-sm font-semibold tabular-nums truncate max-w-[80px] sm:max-w-[100px]">
+              <Wallet className="h-3.5 w-3.5 min-[400px]:h-4 min-[400px]:w-4 shrink-0" aria-hidden />
+              <span className="text-xs min-[400px]:text-sm font-semibold tabular-nums truncate max-w-[4.5rem] min-[400px]:max-w-[6rem] sm:max-w-[7rem]">
                 {walletData === undefined ? "—" : formatWallet(walletBalance)}
               </span>
-              <span className="mx-1 h-4 w-px bg-primary/30" aria-hidden />
-              <span className="flex items-center gap-1 text-sm font-semibold tabular-nums">
-                <Star className="h-4 w-4 text-amber-500 fill-amber-500" aria-hidden />
+              <span className="mx-0.5 min-[400px]:mx-1 h-3 min-[400px]:h-4 w-px bg-primary/30 shrink-0 hidden min-[400px]:block" aria-hidden />
+              <span className="hidden min-[400px]:flex items-center gap-0.5 text-xs sm:text-sm font-semibold tabular-nums shrink-0">
+                <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-500 fill-amber-500" aria-hidden />
                 <span className="text-foreground">{Number(userRating).toFixed(1)}</span>
               </span>
             </div>

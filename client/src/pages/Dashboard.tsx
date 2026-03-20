@@ -207,9 +207,9 @@ export default function Dashboard() {
     if (isLoading) {
       return (
         <Card className="card-industrial">
-          <CardHeader>
-            <CardTitle>Facturas</CardTitle>
-            <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Transacciones y descarga de facturas en PDF</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
             <Receipt className="w-8 h-8 opacity-60 animate-pulse" />
@@ -222,9 +222,9 @@ export default function Dashboard() {
     if (transfers.length === 0) {
       return (
         <Card className="card-industrial">
-          <CardHeader>
-            <CardTitle>Facturas</CardTitle>
-            <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Transacciones y descarga de facturas en PDF</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
             <FileText className="w-8 h-8 opacity-60" />
@@ -236,11 +236,11 @@ export default function Dashboard() {
 
     return (
       <Card className="card-industrial">
-        <CardHeader>
-          <CardTitle>Facturas</CardTitle>
-          <CardDescription>Descarga una factura en PDF por cada transacción</CardDescription>
+        <CardHeader className="p-4 sm:p-6">
+          <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
+          <CardDescription className="text-xs sm:text-sm">Descarga una factura en PDF por cada transacción</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 px-3 pb-4 sm:px-6 sm:pb-6">
           {transfers.map((t) => {
             const label = getTransferTypeLabel(t.transferType);
             const parsedDate = parseTransferDate(t.createdAt);
@@ -249,20 +249,20 @@ export default function Dashboard() {
             return (
               <div
                 key={t.id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
+                className="flex flex-col gap-3 p-3 min-[380px]:p-4 border border-border rounded-lg bg-card min-w-0"
               >
                 <div className="flex items-start gap-3 min-w-0">
                   <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <Receipt className="w-4 h-4 text-primary" />
                   </div>
-                  <div className="min-w-0 space-y-1">
-                    <p className="font-medium text-sm">{label}</p>
-                    <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
-                    <p className="text-xs text-muted-foreground">{dateStr}</p>
+                  <div className="min-w-0 space-y-1 flex-1">
+                    <p className="font-medium text-sm break-words">{label}</p>
+                    <p className="text-xs text-muted-foreground break-words">{t.description || "Sin descripción"}</p>
+                    <p className="text-xs text-muted-foreground break-all">{dateStr}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <p className="font-semibold text-sm">{formatAmount(t.amount)}</p>
+                <div className="flex flex-col gap-2 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:items-center min-[400px]:justify-between border-t border-border/60 pt-3">
+                  <p className="font-semibold text-sm tabular-nums">{formatAmount(t.amount)}</p>
                   <Badge
                     variant={
                       status === "completed"
@@ -271,12 +271,14 @@ export default function Dashboard() {
                           ? "destructive"
                           : "secondary"
                     }
+                    className="w-fit"
                   >
                     {status === "pending_approval" ? "Pendiente" : status === "completed" ? "Completado" : "Rechazado"}
                   </Badge>
                   <Button
                     variant="outline"
                     size="sm"
+                    className="w-full min-[400px]:w-auto shrink-0"
                     onClick={() =>
                       user &&
                       downloadInvoicePdf(
@@ -306,11 +308,11 @@ export default function Dashboard() {
             );
           })}
 
-          <div className="flex items-center justify-between pt-2">
-            <p className="text-xs text-muted-foreground">
+          <div className="flex flex-col gap-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between pt-2">
+            <p className="text-xs text-muted-foreground text-center min-[400px]:text-left">
               Página {page} de {totalPages}
             </p>
-            <div className="flex gap-2">
+            <div className="flex gap-2 justify-center min-[400px]:justify-end">
               <Button
                 variant="outline"
                 size="sm"
@@ -396,17 +398,17 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <section className="bg-gradient-to-r from-primary/20 via-background to-accent/20 border-b border-border">
-        <div className="container px-4 py-8 mx-auto max-w-7xl">
+        <div className="container px-3 min-[400px]:px-4 py-5 sm:py-8 mx-auto max-w-7xl">
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
           >
-            <div>
-              <h1 className="text-3xl font-display font-bold">
+            <div className="min-w-0">
+              <h1 className="text-xl min-[380px]:text-2xl sm:text-3xl font-display font-bold leading-tight">
                 Panel <span className="text-gradient-primary">Económico</span>
               </h1>
-              <p className="text-muted-foreground mt-1">
+              <p className="text-muted-foreground mt-1.5 text-sm sm:text-base leading-snug">
                 Bienvenido a tu centro de control financiero y gestión
               </p>
             </div>
@@ -478,30 +480,43 @@ export default function Dashboard() {
       )}
 
       {/* Main Content */}
-      <section className="py-6 pb-16">
-        <div className="container px-4 mx-auto max-w-7xl">
-          <Tabs defaultValue="overview" className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 max-w-full overflow-hidden">
-              <div className="w-full max-w-full overflow-x-auto md:overflow-visible [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
-                <TabsList className="bg-card border border-border inline-flex w-max flex-nowrap h-10 p-1">
-                  <TabsTrigger value="overview" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
-                    <BarChart3 className="w-4 h-4 mr-2" />
+      <section className="py-4 sm:py-6 pb-16">
+        <div className="container px-3 min-[400px]:px-4 mx-auto max-w-7xl min-w-0">
+          <Tabs defaultValue="overview" className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between max-w-full min-w-0">
+              <div
+                className="w-full min-w-0 -mx-0.5 px-0.5 pb-1 overflow-x-auto overscroll-x-contain touch-pan-x md:overflow-visible md:pb-0 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/40"
+                role="region"
+                aria-label="Pestañas del panel"
+              >
+                <TabsList className="bg-card border border-border inline-flex w-max max-w-none flex-nowrap h-auto min-h-10 p-1 gap-0.5">
+                  <TabsTrigger
+                    value="overview"
+                    className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-2.5 py-2 text-xs min-[380px]:text-sm sm:px-3"
+                  >
+                    <BarChart3 className="w-4 h-4 max-[420px]:hidden sm:mr-2" />
                     Resumen
                   </TabsTrigger>
-                  <TabsTrigger value="transactions" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
-                    <Receipt className="w-4 h-4 mr-2" />
+                  <TabsTrigger
+                    value="transactions"
+                    className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-2.5 py-2 text-xs min-[380px]:text-sm sm:px-3"
+                  >
+                    <Receipt className="w-4 h-4 max-[420px]:hidden sm:mr-2" />
                     Transacciones
                   </TabsTrigger>
-                  <TabsTrigger value="invoices" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-3">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Facturación
+                  <TabsTrigger
+                    value="invoices"
+                    className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground shrink-0 px-2.5 py-2 text-xs min-[380px]:text-sm sm:px-3"
+                  >
+                    <FileText className="w-4 h-4 max-[420px]:hidden sm:mr-2" />
+                    Facturas
                   </TabsTrigger>
                 </TabsList>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex w-full min-w-0 gap-2 md:w-auto md:shrink-0 md:justify-end">
                 <Select value={timeRange} onValueChange={setTimeRange}>
-                  <SelectTrigger className="w-[140px] input-industrial">
+                  <SelectTrigger className="min-w-0 flex-1 md:w-[168px] md:flex-initial input-industrial text-left text-xs sm:text-sm h-10">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -528,18 +543,18 @@ export default function Dashboard() {
                 transition={{ delay: 0.3 }}
               >
                 <Card className="card-industrial overflow-hidden">
-                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-center sm:text-left">
-                    <div>
-                      <CardTitle className="flex items-center justify-center sm:justify-start gap-2">
-                        <Receipt className="w-5 h-5 text-primary shrink-0" />
-                        Transacciones y Facturas Recientes
+                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-center sm:text-left p-4 sm:p-6 space-y-1.5">
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center justify-center sm:justify-start gap-2 text-base min-[380px]:text-lg sm:text-xl md:text-2xl font-semibold leading-snug">
+                        <Receipt className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+                        <span className="text-balance">Transacciones y facturas recientes</span>
                       </CardTitle>
-                      <CardDescription>
+                      <CardDescription className="text-xs sm:text-sm text-balance">
                         Últimas 10 transacciones y facturas (ordenadas por fecha)
                       </CardDescription>
                     </div>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="px-3 pb-4 sm:px-6 sm:pb-6 pt-0">
                     {overviewLoading ? (
                       <div className="flex flex-col items-center justify-center py-10 gap-3">
                         <Receipt className="w-8 h-8 text-muted-foreground animate-pulse" />
@@ -557,32 +572,37 @@ export default function Dashboard() {
                           return (
                         <div 
                             key={t.id}
-                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 sm:p-5 rounded-lg bg-background/50 border border-border hover:border-primary/30 transition-colors min-w-0"
+                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-3 min-[380px]:p-4 sm:p-5 rounded-lg bg-background/50 border border-border hover:border-primary/30 transition-colors min-w-0"
                         >
-                          <div className="flex items-start sm:items-center gap-4 min-w-0">
-                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
-                              <Banknote className="w-5 h-5 text-primary" />
+                          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                              <Banknote className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
                             </div>
-                            <div className="min-w-0 space-y-1.5">
-                              <p className="font-medium truncate text-foreground">{label}</p>
-                              <p className="text-sm text-muted-foreground truncate">
+                            <div className="min-w-0 space-y-1 flex-1">
+                              <p className="font-medium text-sm sm:text-base text-foreground break-words">{label}</p>
+                              <p className="text-xs sm:text-sm text-muted-foreground break-words hyphens-auto">
                                 {t.description || "Sin descripción"}
                               </p>
                             </div>
                           </div>
-                          <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-4 gap-y-2 shrink-0 border-t border-border/60 pt-3 sm:border-0 sm:pt-0 sm:gap-4">
-                            <div className="text-right">
-                              <p className={`font-bold ${amountColor}`}>
+                          <div className="flex flex-col gap-3 w-full min-w-0 sm:w-auto sm:max-w-[50%] sm:items-end border-t border-border/60 pt-3 sm:border-0 sm:pt-0">
+                            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 sm:flex-col sm:items-end sm:text-right w-full sm:w-auto">
+                              <p className={`font-bold text-sm sm:text-base tabular-nums ${amountColor}`}>
                                 {formatAmount(t.amount)}
                               </p>
-                              <p className="text-xs text-muted-foreground mt-0.5">{dateStr}</p>
+                              <p className="text-[11px] sm:text-xs text-muted-foreground break-all sm:break-normal text-right">{dateStr}</p>
                             </div>
-                            <div className="w-full sm:w-auto flex justify-center sm:justify-end gap-2 items-center">
-                              <Badge variant="secondary" className="gap-1">
-                                <FileText className="w-3 h-3" />
+                            <div className="flex flex-col w-full gap-2 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:justify-end sm:w-auto">
+                              <Badge
+                                variant="secondary"
+                                className="gap-1 justify-center py-1.5 sm:py-1 text-xs w-full min-[400px]:w-auto shrink-0"
+                              >
+                                <FileText className="w-3 h-3 shrink-0" />
                                 Factura
                               </Badge>
-                              {getStatusBadge(t.status)}
+                              <div className="flex w-full min-[400px]:w-auto justify-center min-[400px]:justify-end">
+                                {getStatusBadge(t.status)}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -591,11 +611,11 @@ export default function Dashboard() {
                       </div>
                     )}
 
-                    <div className="mt-6 flex items-center justify-between pt-2">
-                      <p className="text-xs text-muted-foreground">
+                    <div className="mt-6 flex flex-col gap-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between pt-2">
+                      <p className="text-xs text-muted-foreground text-center min-[400px]:text-left">
                         Página {overviewPage} de {overviewTotalPages}
                       </p>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 justify-center min-[400px]:justify-end">
                         <Button
                           variant="outline"
                           size="sm"
@@ -624,11 +644,11 @@ export default function Dashboard() {
 
             <TabsContent value="transactions">
               <Card className="card-industrial">
-                <CardHeader>
-                  <CardTitle>Todas las Transacciones</CardTitle>
-                  <CardDescription>Historial completo de transacciones</CardDescription>
+                <CardHeader className="p-4 sm:p-6">
+                  <CardTitle className="text-base min-[380px]:text-lg sm:text-2xl">Todas las transacciones</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">Historial completo de transacciones</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="px-3 pb-4 sm:px-6 sm:pb-6">
                   {pagedLoading ? (
                     <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
                       <Receipt className="w-8 h-8 animate-pulse" />
@@ -646,34 +666,36 @@ export default function Dashboard() {
                         return (
                           <div
                             key={t.id}
-                            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 border border-border rounded-lg bg-background/40"
+                            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 min-[380px]:p-4 border border-border rounded-lg bg-background/40 min-w-0"
                           >
-                            <div className="flex items-start gap-3 min-w-0">
+                            <div className="flex items-start gap-3 min-w-0 flex-1">
                               <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                                 <Banknote className="w-4 h-4 text-primary" />
                               </div>
-                              <div className="min-w-0 space-y-1">
-                                <p className="font-medium text-sm truncate">{label}</p>
-                                <p className="text-xs text-muted-foreground truncate">
+                              <div className="min-w-0 space-y-1 flex-1">
+                                <p className="font-medium text-sm break-words">{label}</p>
+                                <p className="text-xs text-muted-foreground break-words">
                                   {t.description || "Sin descripción"}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex flex-col items-end gap-1 shrink-0">
-                              <p className={`font-semibold text-sm ${amountColor}`}>
-                                {formatAmount(t.amount)}
-                              </p>
-                              <p className="text-xs text-muted-foreground">{dateStr}</p>
-                              <div>{getStatusBadge(t.status)}</div>
+                            <div className="flex flex-row flex-wrap items-center justify-between gap-2 sm:flex-col sm:items-end border-t border-border/50 pt-3 sm:border-0 sm:pt-0 shrink-0 w-full sm:w-auto">
+                              <div className="text-left sm:text-right min-w-0">
+                                <p className={`font-semibold text-sm tabular-nums ${amountColor}`}>
+                                  {formatAmount(t.amount)}
+                                </p>
+                                <p className="text-[11px] sm:text-xs text-muted-foreground break-all sm:break-normal">{dateStr}</p>
+                              </div>
+                              <div className="ml-auto sm:ml-0">{getStatusBadge(t.status)}</div>
                             </div>
                           </div>
                         );
                       })}
-                      <div className="flex items-center justify-between pt-2">
-                        <p className="text-xs text-muted-foreground">
+                      <div className="flex flex-col gap-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between pt-2">
+                        <p className="text-xs text-muted-foreground text-center min-[400px]:text-left">
                           Página {transactionsPage} de {pagedTotalPages}
                         </p>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 justify-center min-[400px]:justify-end">
                           <Button
                             variant="outline"
                             size="sm"
