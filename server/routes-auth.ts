@@ -117,6 +117,7 @@ export async function registerAuthRoutes(
         role: data.role,
         rating: 5,
         ratingCount: 0,
+        avatar: data.avatar ? data.avatar : undefined,
       })) as any;
       
       // Generar token
