@@ -49,6 +49,8 @@ import { NotificationBell } from "@/components/NotificationBell";
 
 /** Oculta los enlaces/botones "Crear servicio" sin eliminar el código. Cambiar a true para mostrar de nuevo. */
 const SHOW_CREATE_SERVICE = false;
+/** Oculta el área de "Payments" (en un futuro se podrá configurar). */
+const SHOW_PAYMENTS = false;
 
 export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth();
@@ -212,11 +214,11 @@ export function Navigation() {
           {/* Wallet balance - visible desktop y móvil (icono en header) */}
           {isAuthenticated && (
             <div
-              className="flex items-center gap-1 min-w-0 px-1.5 py-1 min-[400px]:gap-1.5 min-[400px]:px-2.5 min-[400px]:py-1.5 rounded-md min-[400px]:rounded-lg bg-primary/10 border border-primary/20 text-primary max-w-[100%]"
+              className="flex items-center gap-1.5 min-w-0 px-2 py-1.5 min-[400px]:gap-2 min-[400px]:px-2.5 min-[400px]:py-1.5 rounded-md min-[400px]:rounded-lg bg-primary/10 border border-primary/20 text-primary max-w-[100%]"
               title="Saldo y valoración"
             >
-              <Wallet className="h-3.5 w-3.5 min-[400px]:h-4 min-[400px]:w-4 shrink-0" aria-hidden />
-              <span className="text-xs min-[400px]:text-sm font-semibold tabular-nums truncate max-w-[4.5rem] min-[400px]:max-w-[6rem] sm:max-w-[7rem]">
+              <Wallet className="h-4 w-4 min-[400px]:h-4 min-[400px]:w-4 shrink-0" aria-hidden />
+              <span className="text-sm min-[400px]:text-sm font-semibold tabular-nums truncate max-w-[5.5rem] min-[400px]:max-w-[7rem] sm:max-w-[8rem]">
                 {walletData === undefined ? "—" : formatWallet(walletBalance)}
               </span>
               <span className="mx-0.5 min-[400px]:mx-1 h-3 min-[400px]:h-4 w-px bg-primary/30 shrink-0 hidden min-[400px]:block" aria-hidden />
@@ -299,12 +301,14 @@ export function Navigation() {
                       Recargar wallet
                     </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/payments" className="flex items-center">
-                      <CreditCard className="mr-2 h-4 w-4" />
-                      Pagos
-                    </Link>
-                  </DropdownMenuItem>
+                  {SHOW_PAYMENTS && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/payments" className="flex items-center">
+                        <CreditCard className="mr-2 h-4 w-4" />
+                        Pagos
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem asChild>
                     <Link href="/chat" className="flex items-center">
                       <MessageSquare className="mr-2 h-4 w-4" />
@@ -383,9 +387,14 @@ export function Navigation() {
                   Explorar Servicios
                 </Link>
                 {isAuthenticated && (
-                  <Link href="/booking" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                    Reservas
-                  </Link>
+                  <>
+                    <Link href="/booking" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                      Reservar
+                    </Link>
+                    <Link href="/bookings" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                      Mis Reservas
+                    </Link>
+                  </>
                 )}
                 {isProfessional && (
                   <>
@@ -427,9 +436,11 @@ export function Navigation() {
                 <Link href="/dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mi Panel
                 </Link>
-                <Link href="/payments" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                  Pagos
-                </Link>
+                {SHOW_PAYMENTS && (
+                  <Link href="/payments" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                    Pagos
+                  </Link>
+                )}
                 <Link href="/chat" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mensajes
                 </Link>
