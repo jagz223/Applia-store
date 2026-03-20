@@ -301,11 +301,9 @@ export default function ServiceDetails() {
                 </Dialog>
                )
             ) : (
-              <a href={api.auth.replit.login.path}>
-                <Button className="w-full h-12 text-lg" variant="outline">
-                  Log in to Book
-                </Button>
-              </a>
+              <Button className="w-full h-12 text-lg" variant="outline" asChild>
+                <Link href="/login">Log in to Book</Link>
+              </Button>
             )}
             
             <p className="text-xs text-center text-muted-foreground">

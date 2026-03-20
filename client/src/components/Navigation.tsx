@@ -113,12 +113,14 @@ export function Navigation() {
               <span>Todos los Servicios</span>
             </Link>
           </DropdownMenuItem>
-          <DropdownMenuItem>
-            <Link href="/booking" className="flex items-center gap-2 w-full">
-              <Calendar className="h-4 w-4" />
-              <span>Reservas</span>
-            </Link>
-          </DropdownMenuItem>
+          {isAuthenticated && (
+            <DropdownMenuItem>
+              <Link href="/booking" className="flex items-center gap-2 w-full">
+                <Calendar className="h-4 w-4" />
+                <span>Reservas</span>
+              </Link>
+            </DropdownMenuItem>
+          )}
           {SHOW_CREATE_SERVICE && isProfessional && (
             <DropdownMenuItem>
               <Link href="/create-service" className="flex items-center gap-2 w-full">
@@ -147,30 +149,34 @@ export function Navigation() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Link href="/vault" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/vault') ? 'text-primary' : 'text-muted-foreground'}`}>
-        Bóveda
-      </Link>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive('/recharge') || isActive('/movimientos') ? 'text-primary' : 'text-muted-foreground'}`}>
-            Movimientos <ChevronDown className="h-4 w-4" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="bg-card border-border">
-          <DropdownMenuItem asChild>
-            <Link href="/recharge" className="flex items-center gap-2 w-full">
-              <Wallet className="h-4 w-4" />
-              <span>Recargar</span>
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/movimientos" className="flex items-center gap-2 w-full">
-              <CreditCard className="h-4 w-4" />
-              <span>Historial de movimientos</span>
-            </Link>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {isAuthenticated && (
+        <>
+          <Link href="/vault" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/vault') ? 'text-primary' : 'text-muted-foreground'}`}>
+            Bóveda
+          </Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive('/recharge') || isActive('/movimientos') ? 'text-primary' : 'text-muted-foreground'}`}>
+                Movimientos <ChevronDown className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="bg-card border-border">
+              <DropdownMenuItem asChild>
+                <Link href="/recharge" className="flex items-center gap-2 w-full">
+                  <Wallet className="h-4 w-4" />
+                  <span>Recargar</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/movimientos" className="flex items-center gap-2 w-full">
+                  <CreditCard className="h-4 w-4" />
+                  <span>Historial de movimientos</span>
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      )}
     </>
   );
 
@@ -376,9 +382,11 @@ export function Navigation() {
                 <Link href="/explore" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Explorar Servicios
                 </Link>
-                <Link href="/booking" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                  Reservas
-                </Link>
+                {isAuthenticated && (
+                  <Link href="/booking" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                    Reservas
+                  </Link>
+                )}
                 {isProfessional && (
                   <>
                     <Link href="/professional-dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
@@ -403,15 +411,19 @@ export function Navigation() {
                     )}
                   </>
                 )}
-                <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                  Bóveda Segura
-                </Link>
-                <Link href="/recharge" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                  Recargar wallet
-                </Link>
-                <Link href="/movimientos" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                  Historial de movimientos
-                </Link>
+                {isAuthenticated && (
+                  <>
+                    <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                      Bóveda Segura
+                    </Link>
+                    <Link href="/recharge" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                      Recargar wallet
+                    </Link>
+                    <Link href="/movimientos" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                      Historial de movimientos
+                    </Link>
+                  </>
+                )}
                 <Link href="/dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mi Panel
                 </Link>
