@@ -36,6 +36,7 @@ import {
   useWithdraw,
   useWalletTransfers,
   useCurrentProvider,
+  usePlatformCommissionRate,
 } from "@/hooks/use-mango-data";
 import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 import { useToast } from "@/hooks/use-toast";
@@ -44,7 +45,12 @@ import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
-import { calcCommission, calcProviderNet } from "@shared/platform-commission";
+import {
+  calcCommission,
+  calcProviderNet,
+  PLATFORM_COMMISSION_RATE,
+  commissionDisplayPercents,
+} from "@shared/platform-commission";
 
 const formatUsd = (n: number) =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
@@ -329,6 +335,9 @@ const BOOKINGS_SUB_TABS = ["pending", "in_progress", "ready", "history"] as cons
 type BookingsSubTab = (typeof BOOKINGS_SUB_TABS)[number];
 
 function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBookingId?: number | null }) {
+  const { data: commissionInfo } = usePlatformCommissionRate();
+  const commissionRate = commissionInfo?.commissionRate ?? PLATFORM_COMMISSION_RATE;
+  const { platformPercent: platUiPct, providerPercent: provUiPct } = commissionDisplayPercents(commissionRate);
   const { data: bookings, isLoading, isFetching } = useBookingsByProvider();
   const updateStatus = useUpdateBookingStatus();
   const updateCost = useUpdateBookingCost();
@@ -449,8 +458,8 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     const costDisplay = costInputs[booking.id] ?? String(currentCost);
     const parsedCostDisplay = parseFloat(String(costDisplay).replace(",", "."));
     const costForCommission = Number.isFinite(parsedCostDisplay) ? parsedCostDisplay : Number(currentCost || 0);
-    const commission = costForCommission > 0 ? calcCommission(costForCommission) : 0;
-    const providerNet = costForCommission > 0 ? calcProviderNet(costForCommission) : 0;
+    const commission = costForCommission > 0 ? calcCommission(costForCommission, commissionRate) : 0;
+    const providerNet = costForCommission > 0 ? calcProviderNet(costForCommission, commissionRate) : 0;
     const hasValidCost = savedCost > 0;
     const scheduleDisplay = scheduleInputs[booking.id] ?? { date: dateStr, time: timeStr };
     const requestSaveCost = () => {
@@ -545,8 +554,8 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 )}
                 {costForCommission > 0 && (
                   <span className="text-xs text-muted-foreground">
-                    Neto asociado: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> (90%) · Comisión:{" "}
-                    <span className="font-medium text-foreground">${commission.toFixed(2)}</span> (10%)
+                    Neto asociado: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> ({provUiPct}%) ·
+                    Comisión: <span className="font-medium text-foreground">${commission.toFixed(2)}</span> ({platUiPct}%)
                   </span>
                 )}
               </>
@@ -1192,6 +1201,8 @@ const DASHBOARD_TABS = ["overview", "bookings", "transactions", "invoices"] as c
 
 export default function ProfessionalDashboard() {
   const { user } = useAuth();
+  const { data: commissionRateInfo } = usePlatformCommissionRate();
+  const dashboardCommissionRate = commissionRateInfo?.commissionRate ?? PLATFORM_COMMISSION_RATE;
   const { data: providerProfile, isLoading: providerProfileLoading } = useCurrentProvider();
   const queryClient = useQueryClient();
   const { notifyBookingUpdate } = useSocketBookings();
@@ -1375,11 +1386,11 @@ export default function ProfessionalDashboard() {
         const completedAt = toDate((b as any).completedAt ?? (b as any).date);
         if (Number.isNaN(completedAt.getTime())) return sum;
         if (completedAt.getFullYear() !== year || completedAt.getMonth() !== month) return sum;
-        return sum + calcProviderNet(toCost((b as any).cost));
+        return sum + calcProviderNet(toCost((b as any).cost), dashboardCommissionRate);
       }, 0);
       return { month: computeMonthLabel(monthDate), earnings };
     });
-  }, [completedBookings, last6Months]);
+  }, [completedBookings, last6Months, dashboardCommissionRate]);
 
   const monthlyEarningsMax = useMemo(() => Math.max(...monthlyEarnings.map((m) => m.earnings), 0), [monthlyEarnings]);
 
@@ -1425,7 +1436,7 @@ export default function ProfessionalDashboard() {
         (b as any).serviceId?.toString?.() ||
         "Servicio";
       const prev = map.get(categoryName) ?? 0;
-      map.set(categoryName, prev + calcProviderNet(toCost((b as any).cost)));
+      map.set(categoryName, prev + calcProviderNet(toCost((b as any).cost), dashboardCommissionRate));
     }
 
     const total = Array.from(map.values()).reduce((sum, v) => sum + v, 0);
@@ -1437,7 +1448,7 @@ export default function ProfessionalDashboard() {
         value,
         percent: total > 0 ? Math.round((value / total) * 100) : 0,
       }));
-  }, [completedBookings]);
+  }, [completedBookings, dashboardCommissionRate]);
 
   const earningsTrendDelta =
     monthlyEarnings.length > 0 ? monthlyEarnings[monthlyEarnings.length - 1].earnings - monthlyEarnings[0].earnings : 0;

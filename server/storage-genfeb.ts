@@ -17,11 +17,13 @@ import {
   type ServiceWithProvider,
 } from "@shared/schema";
 import { calcCommission, calcProviderNet } from "@shared/platform-commission";
+import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { hasAdminPrivileges } from "@shared/roles";
 import { eq, and, like, desc } from "drizzle-orm";
 import type { IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage } from "./storage-contracts";
 import type { ProfessionalVerification, VerifyingStatus, ProfessionalVerificationState } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
+import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
 const getDb = async () => (await import("./db")).db;
 
 /**
@@ -249,6 +251,8 @@ export interface IStorage
   upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus>;
   setVerifyingStatusIdentification(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
   setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
+
+  getAdminDashboardStats(params: { from: Date; to: Date }): Promise<AdminDashboardStatsResult>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -412,8 +416,9 @@ export class InMemoryStorage implements IStorage {
     }
     const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
     if (cost <= 0) throw new Error("Costo de reserva no definido");
-    const commission = calcCommission(cost);
-    const providerNet = calcProviderNet(cost);
+    const commissionRate = await getPlatformCommissionRate();
+    const commission = calcCommission(cost, commissionRate);
+    const providerNet = calcProviderNet(cost, commissionRate);
     const client = this.users.find((u: { id?: string }) => u.id === booking.userId);
     if (!client) throw new Error("Usuario cliente no encontrado");
     const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
@@ -1454,6 +1459,23 @@ export class InMemoryStorage implements IStorage {
       (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
     return { transfers: list, total: list.length };
+  }
+
+  async getAdminDashboardStats(params: { from: Date; to: Date }): Promise<AdminDashboardStatsResult> {
+    const { transfers } = await this.getAllTransfers();
+    const pendingVerificationCount = (await this.getPendingVerifyingStatuses()).length;
+    const pendingWithdrawalRequestsCount = (await this.getUsersWithPendingWithdrawals()).length;
+    return aggregateAdminDashboardStats(
+      {
+        users: this.users,
+        bookings: this.bookings,
+        services: [],
+        transfers,
+        pendingVerificationCount,
+        pendingWithdrawalRequestsCount,
+      },
+      params
+    );
   }
 
   async updateTransferStatus(

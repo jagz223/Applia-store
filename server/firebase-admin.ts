@@ -177,4 +177,6 @@ export const FIRESTORE_COLLECTIONS = {
   PROFESSIONAL_VERIFICATIONS: "professional_verifications",
   /** Estado de verificación por profesional (1 doc por userId). */
   VERIFYING_STATUS: "verifying_status",
+  /** Ajustes globales (comisión, etc.): doc `global`. */
+  PLATFORM_SETTINGS: "platform_settings",
 } as const;

@@ -196,11 +196,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         const amount = notification?.data?.amountFormatted ?? notification?.data?.amount;
         const providerNet = notification?.data?.providerNetFormatted ?? notification?.data?.providerNet;
         const commission = notification?.data?.commissionFormatted ?? notification?.data?.commission;
+        const provPct = (notification?.data as any)?.providerPercent ?? 90;
+        const platPct = (notification?.data as any)?.platformPercent ?? 10;
         toast({
           title: "Fondos agregados",
           description:
             amount && providerNet && commission
-              ? `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (90%) y la plataforma tomará $${commission} USD (10%). Ya puedes completar el servicio.`
+              ? `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (${provPct}%) y la plataforma tomará $${commission} USD (${platPct}%). Ya puedes completar el servicio.`
               : amount
                 ? `Se te han agregado $${amount} USD (retenidos). Ya puedes completar el servicio.`
                 : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
@@ -210,12 +212,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         const amountFormatted = notification?.data?.amountFormatted ?? notification?.data?.amount;
         const providerNetFormatted = notification?.data?.providerNetFormatted ?? notification?.data?.providerNet;
         const commissionFormatted = notification?.data?.commissionFormatted ?? notification?.data?.commission;
+        const provPct = (notification?.data as any)?.providerPercent ?? 90;
+        const platPct = (notification?.data as any)?.platformPercent ?? 10;
         toast({
           title: "Recordatorio de comisión",
           description:
             amountFormatted && providerNetFormatted && commissionFormatted
-              ? `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (90%). Comisión: $${commissionFormatted} USD (10%).`
-              : "Recuerda que el asociado recibe el 90% del monto acordado.",
+              ? `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (${provPct}%). Comisión: $${commissionFormatted} USD (${platPct}%).`
+              : `Recuerda que el asociado recibe el ${provPct}% del monto acordado.`,
         });
       }
       if (type === "booking_cancelled") {

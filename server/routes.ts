@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { z } from "zod";
-import { hasAdminPrivileges } from "@shared/roles";
+import { hasAdminPrivileges, isFullAdmin } from "@shared/roles";
 import { api } from "@shared/routes";
 import { insertProviderSchema, insertServiceSchema } from "@shared/schema";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
@@ -364,12 +364,16 @@ export async function registerRoutes(
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const data = createProviderBodySchema.parse(req.body);
+      const keepAdminRole = isFullAdmin(req.user?.role);
       const existing = await catalogService.getProviderByUserId(userId);
       if (existing) {
-        await genFebStorage.updateUser(userId, {
-          role: "professional",
-          acceptedProviderTermsOfUse: false,
-        } as any);
+        // No degradar administrador a professional si ya tenía proveedor (409).
+        if (!keepAdminRole) {
+          await genFebStorage.updateUser(userId, {
+            role: "professional",
+            acceptedProviderTermsOfUse: false,
+          } as any);
+        }
         return res.status(409).json({ message: "Ya tienes un perfil de proveedor" });
       }
       const provider = await catalogService.createProvider({
@@ -382,10 +386,15 @@ export async function registerRoutes(
         yearsExperience: data.yearsExperience ?? 0,
         hourlyRate: data.hourlyRate ?? null,
       } as any);
-      await genFebStorage.updateUser(userId, {
-        role: "professional",
-        acceptedProviderTermsOfUse: false,
-      } as any);
+      if (keepAdminRole) {
+        // Admin como asociado: conserva rol admin y no requiere verificación de plataforma.
+        await catalogService.updateProvider((provider as { id: number }).id, { isVerified: true } as any);
+      } else {
+        await genFebStorage.updateUser(userId, {
+          role: "professional",
+          acceptedProviderTermsOfUse: false,
+        } as any);
+      }
 
       // Un solo servicio por profesional: se crea desde los datos del proveedor (nombre = nombre del profesional, descripción = bio, precio = tarifa).
       const categoryId = (provider as { categoryId?: number }).categoryId;

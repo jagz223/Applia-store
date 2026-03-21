@@ -399,7 +399,19 @@ export const api = {
         },
       },
     },
-  }
+  },
+  platform: {
+    commissionRate: {
+      get: {
+        method: 'GET' as const,
+        path: '/api/platform/commission-rate',
+      },
+      adminPatch: {
+        method: 'PATCH' as const,
+        path: '/api/admin/platform-commission-rate',
+      },
+    },
+  },
 };
 
 export function buildUrl(path: string, params?: Record<string, string | number>): string {

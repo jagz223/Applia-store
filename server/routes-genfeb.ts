@@ -7,7 +7,9 @@ import { getAdminAndSupportUsers, getFullAdminUsers } from "./staff-users";
 import { z } from "zod";
 import { notificationService } from "./services/notification.service";
 import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
-import { calcCommission, calcProviderNet } from "@shared/platform-commission";
+import { calcCommission, calcProviderNet, commissionDisplayPercents } from "@shared/platform-commission";
+import { getPlatformCommissionRate } from "./platform-commission-rate";
+import { isFullAdmin } from "@shared/roles";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
@@ -453,8 +455,10 @@ export async function registerGenFebRoutes(
       const updated = await storage.confirmBookingByClient(bookingId);
       const cost = typeof (updated as { cost?: number }).cost === "number" ? (updated as { cost: number }).cost : Number((updated as { cost?: unknown }).cost) || 0;
       const amountFormatted = cost > 0 ? cost.toFixed(2) : "";
-      const commission = calcCommission(cost);
-      const providerNet = calcProviderNet(cost);
+      const commissionRate = await getPlatformCommissionRate();
+      const { platformPercent, providerPercent } = commissionDisplayPercents(commissionRate);
+      const commission = calcCommission(cost, commissionRate);
+      const providerNet = calcProviderNet(cost, commissionRate);
       const commissionFormatted = commission > 0 ? commission.toFixed(2) : "";
       const providerNetFormatted = providerNet > 0 ? providerNet.toFixed(2) : "";
 
@@ -470,8 +474,10 @@ export async function registerGenFebRoutes(
           commissionFormatted,
           providerNet,
           providerNetFormatted,
+          platformPercent,
+          providerPercent,
           message: amountFormatted
-            ? `Se te han retenido $${amountFormatted} USD (retenidos). El cliente confirmó el pago. Recibirás $${providerNetFormatted} USD (90%) y la plataforma tomará $${commissionFormatted} USD (10%). Ya puedes completar el servicio.`
+            ? `Se te han retenido $${amountFormatted} USD (retenidos). El cliente confirmó el pago. Recibirás $${providerNetFormatted} USD (${providerPercent}%) y la plataforma tomará $${commissionFormatted} USD (${platformPercent}%). Ya puedes completar el servicio.`
             : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
         };
         try {
@@ -493,7 +499,7 @@ export async function registerGenFebRoutes(
         void notificationService.sendPushToUser(providerUserId, {
           title: "Fondos agregados",
           body: amountFormatted && providerNetFormatted && commissionFormatted
-            ? `Se te han retenido $${amountFormatted} USD. Recibirás $${providerNetFormatted} USD (90%) y la plataforma tomará $${commissionFormatted} USD (10%). Completa el servicio para liberar los fondos.`
+            ? `Se te han retenido $${amountFormatted} USD. Recibirás $${providerNetFormatted} USD (${providerPercent}%) y la plataforma tomará $${commissionFormatted} USD (${platformPercent}%). Completa el servicio para liberar los fondos.`
             : amountFormatted
               ? `Se te han retenido $${amountFormatted} USD. Completa el servicio para liberar los fondos.`
               : "El cliente confirmó el pago.",
@@ -560,8 +566,10 @@ export async function registerGenFebRoutes(
       }
 
       // Recordatorio para el profesional: comisión y neto al acordar este monto
-      const commission = calcCommission(body.cost);
-      const providerNet = calcProviderNet(body.cost);
+      const commissionRateCost = await getPlatformCommissionRate();
+      const { platformPercent: platPct, providerPercent: provPct } = commissionDisplayPercents(commissionRateCost);
+      const commission = calcCommission(body.cost, commissionRateCost);
+      const providerNet = calcProviderNet(body.cost, commissionRateCost);
       const commissionFormatted = commission.toFixed(2);
       const providerNetFormatted = providerNet.toFixed(2);
       const proNotifData = {
@@ -572,6 +580,8 @@ export async function registerGenFebRoutes(
         commissionFormatted,
         providerNet,
         providerNetFormatted,
+        platformPercent: platPct,
+        providerPercent: provPct,
       };
       try {
         await storage.createNotification({
@@ -583,7 +593,7 @@ export async function registerGenFebRoutes(
         if (io) sendNotificationToUser(io, userId, { type: "booking_cost_commission_reminder", data: proNotifData });
         void notificationService.sendPushToUser(userId, {
           title: "Recordatorio de comisión",
-          body: `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (90%). Comisión de plataforma: $${commissionFormatted} USD (10%).`,
+          body: `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (${provPct}%). Comisión de plataforma: $${commissionFormatted} USD (${platPct}%).`,
           data: { url: `/professional-dashboard?tab=bookings&highlight=${bookingId}`, type: "booking_cost_commission_reminder", bookingId: String(bookingId) },
         }).catch((err: Error) => console.error("[push] Error notificando recordatorio de comisión:", err));
       } catch (e) {
@@ -955,7 +965,8 @@ export async function registerGenFebRoutes(
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      if (req.user?.role !== "professional") return res.status(403).json({ message: "Se requiere rol de profesional" });
+      const canProStats = req.user?.role === "professional" || isFullAdmin(req.user?.role);
+      if (!canProStats) return res.status(403).json({ message: "Se requiere rol de profesional o administrador" });
       const provider = await storage.getProviderByUserId(userId);
       if (!provider) {
         return res.json({
@@ -968,13 +979,14 @@ export async function registerGenFebRoutes(
         });
       }
       const bookings = await storage.getBookingsByProvider((provider as { id: number }).id);
+      const statsCommissionRate = await getPlatformCommissionRate();
       const completed = bookings.filter((b: { status?: string }) => b.status === "completed");
       const rejected = bookings.filter((b: { status?: string }) => b.status === "rejected");
       const completedCount = completed.length;
       const rejectedCount = rejected.length;
       const totalEarnings = completed.reduce((sum: number, b: { cost?: number }) => {
         const cost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
-        return sum + calcProviderNet(cost);
+        return sum + calcProviderNet(cost, statsCommissionRate);
       }, 0);
       const now = new Date();
       const thisYear = now.getFullYear();
@@ -993,8 +1005,10 @@ export async function registerGenFebRoutes(
         const cost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
         const completedAt = toDate((b as { completedAt?: unknown }).completedAt);
         if (completedAt) {
-          if (completedAt.getFullYear() === thisYear && completedAt.getMonth() === thisMonth) earningsThisMonth += calcProviderNet(cost);
-          if (completedAt.getFullYear() === lastMonthYear && completedAt.getMonth() === lastMonth) earningsLastMonth += calcProviderNet(cost);
+          if (completedAt.getFullYear() === thisYear && completedAt.getMonth() === thisMonth)
+            earningsThisMonth += calcProviderNet(cost, statsCommissionRate);
+          if (completedAt.getFullYear() === lastMonthYear && completedAt.getMonth() === lastMonth)
+            earningsLastMonth += calcProviderNet(cost, statsCommissionRate);
         }
       }
       const pendingOrActiveCount = bookings.filter(

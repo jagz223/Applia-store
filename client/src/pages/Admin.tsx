@@ -24,17 +24,40 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Slider } from "@/components/ui/slider";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole, hasFullAdminRole } from "@/lib/auth-utils";
-import { useAdminWalletTransfers, useUpdateTransferStatus, useAdminManualRecharge, useAdminWithdrawals, useProcessWithdrawal, useAdminWithdrawalHistory, type WithdrawalHistoryStatus, type WithdrawalHistoryItem } from "@/hooks/use-mango-data";
+import {
+  useAdminWalletTransfers,
+  useUpdateTransferStatus,
+  useAdminManualRecharge,
+  useAdminWithdrawals,
+  useProcessWithdrawal,
+  useAdminWithdrawalHistory,
+  usePlatformCommissionRate,
+  usePatchPlatformCommissionRate,
+  type WithdrawalHistoryStatus,
+  type WithdrawalHistoryItem,
+} from "@/hooks/use-mango-data";
+import { calcCommission, calcProviderNet, PLATFORM_COMMISSION_RATE, commissionDisplayPercents } from "@shared/platform-commission";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate, isValidDate } from "@/lib/date-utils";
+import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 
 const USERS_PAGE_SIZE = 10;
 
@@ -60,22 +83,6 @@ async function patchWithAuth(url: string, body: unknown) {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
-
-// Mock data for admin dashboard
-const mockStats = {
-  totalUsers: 1250,
-  activeProviders: 342,
-  totalBookings: 5678,
-  totalRevenue: 456780,
-  pendingApprovals: 23,
-  averageRating: 4.7,
-};
-
-const mockRecentBookings = [
-  { id: 1, service: "Electricista", client: "Juan Pérez", provider: "Carlos M.", status: "completed", amount: 85, date: "2024-01-15" },
-  { id: 2, service: "Plomería", client: "María López", provider: "Pedro S.", status: "pending", amount: 120, date: "2024-01-15" },
-  { id: 3, service: "Limpieza", client: "Ana García", provider: "Laura R.", status: "in_progress", amount: 65, date: "2024-01-14" },
-];
 
 const mockProviders = [
   { id: 1, name: "Carlos Martínez", service: "Electricista", rating: 4.8, bookings: 156, verified: true },
@@ -520,18 +527,26 @@ function useSaldoUserSearch(debouncedName: string, queryEnabled = true) {
 }
 
 /** Pestañas solo para administrador (no Soporte TI). */
-const TI_FORBIDDEN_TABS = ["overview", "recargas", "saldo", "payouts"] as const;
+const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts"] as const;
 
 export default function AdminPanel() {
   const { user } = useAuth();
   const fullAdmin = hasFullAdminRole(user);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { data: platformCommission } = usePlatformCommissionRate();
+  const patchPlatformCommission = usePatchPlatformCommissionRate();
+  const platformCommissionRate = platformCommission?.commissionRate ?? PLATFORM_COMMISSION_RATE;
+  const [commissionEditOpen, setCommissionEditOpen] = useState(false);
+  const [commissionConfirmOpen, setCommissionConfirmOpen] = useState(false);
+  const [commissionDraftPercent, setCommissionDraftPercent] = useState(10);
+  const [commissionPendingPercent, setCommissionPendingPercent] = useState<number | null>(null);
   const [location] = useLocation();
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== "undefined") {
       const p = new URLSearchParams(window.location.search);
       const tab = p.get("tab");
+      if (tab === "estadisticas") return "estadisticas";
       if (tab === "recargas") return "recargas";
       if (tab === "saldo") return "saldo";
       if (tab === "payouts") return "payouts";
@@ -551,6 +566,7 @@ export default function AdminPanel() {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const q = new URLSearchParams(search);
     const tab = q.get("tab");
+    if (tab === "estadisticas") setActiveTab("estadisticas");
     if (tab === "recargas") setActiveTab("recargas");
     if (tab === "saldo") setActiveTab("saldo");
     if (tab === "payouts") setActiveTab("payouts");
@@ -866,6 +882,13 @@ export default function AdminPanel() {
             <div className="overflow-x-auto overflow-y-hidden pb-1 scroll-smooth md:overflow-visible pr-2 md:pr-0">
               <TabsList className="inline-flex w-max min-w-full md:flex md:flex-wrap md:w-auto md:min-w-0 h-auto flex-nowrap gap-1 p-1 rounded-lg border border-transparent md:border-0">
                 {fullAdmin && (
+                  <TabsTrigger value="estadisticas" className="shrink-0 gap-1">
+                    <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4 opacity-80" />
+                    <span className="hidden min-[380px]:inline">Estadísticas</span>
+                    <span className="min-[380px]:hidden">Stats</span>
+                  </TabsTrigger>
+                )}
+                {fullAdmin && (
                   <TabsTrigger value="overview" className="shrink-0">Gestión de asociados</TabsTrigger>
                 )}
                 <TabsTrigger value="users" className="shrink-0">Usuarios</TabsTrigger>
@@ -893,6 +916,10 @@ export default function AdminPanel() {
               </TabsList>
             </div>
           </div>
+
+          <TabsContent value="estadisticas" className="min-w-0">
+            <AdminStatisticsPanel enabled={fullAdmin} />
+          </TabsContent>
 
           <TabsContent value="overview">
             <div className="grid grid-cols-1 gap-6">
@@ -1417,8 +1444,9 @@ export default function AdminPanel() {
                         const costValue = edits.cost ?? String(currentCost || "");
                         const costValueNum = Number(costValue);
                         const costForCalc = Number.isFinite(costValueNum) ? costValueNum : currentCostNum;
-                        const commission = Math.round(costForCalc * 0.1 * 100) / 100;
-                        const providerNet = Math.round((costForCalc - commission) * 100) / 100;
+                        const commission = calcCommission(costForCalc, platformCommissionRate);
+                        const providerNet = calcProviderNet(costForCalc, platformCommissionRate);
+                        const { platformPercent: platPctRow } = commissionDisplayPercents(platformCommissionRate);
                         const schedDate = edits.scheduleDate ?? dateStr;
                         const schedTime = edits.scheduleTime ?? timeStr;
                         const statusValue = edits.status ?? String(b.status ?? "");
@@ -1447,7 +1475,7 @@ export default function AdminPanel() {
                                   {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(currentCost || 0)}
                                 </span>
                                 <p className="text-xs text-muted-foreground">
-                                  Comisión (10%):{" "}
+                                  Comisión ({platPctRow}%):{" "}
                                   {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(commission)} ·
                                   Neto asociado:{" "}
                                   {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(providerNet)}
@@ -2233,17 +2261,45 @@ export default function AdminPanel() {
 
           <TabsContent value="settings">
             <div className="grid grid-cols-1 gap-6">
-              <Card>
+              <Card className="border-border bg-card shadow-sm">
                 <CardHeader>
-                  <CardTitle>Configuración General</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <Settings className="h-5 w-5 text-primary" />
+                    Configuración general
+                  </CardTitle>
+                  <CardDescription>
+                    Parámetros globales que afectan cálculos y mensajes en toda la plataforma.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Comisiones</p>
-                      <p className="text-sm text-gray-500">10% por transacción (90% para el asociado)</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-xl border border-border bg-muted/30 p-4">
+                    <div className="space-y-1 min-w-0">
+                      <p className="font-semibold text-foreground">Comisión de plataforma</p>
+                      <p className="text-sm text-muted-foreground">
+                        {platformCommission ? (
+                          <>
+                            La plataforma retiene <strong>{platformCommission.platformPercent}%</strong> de cada servicio
+                            completado; el asociado recibe <strong>{platformCommission.providerPercent}%</strong>.
+                          </>
+                        ) : (
+                          "Cargando configuración…"
+                        )}
+                      </p>
                     </div>
-                    <Button variant="outline">Configurar</Button>
+                    {fullAdmin ? (
+                      <Button
+                        variant="default"
+                        className="shrink-0 bg-primary hover:bg-primary/90"
+                        onClick={() => {
+                          setCommissionDraftPercent(platformCommission?.platformPercent ?? 10);
+                          setCommissionEditOpen(true);
+                        }}
+                      >
+                        Configurar
+                      </Button>
+                    ) : (
+                      <p className="text-xs text-muted-foreground shrink-0">Solo administrador puede editar.</p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -2277,6 +2333,123 @@ export default function AdminPanel() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Dialog open={commissionEditOpen} onOpenChange={setCommissionEditOpen}>
+          <DialogContent className="sm:max-w-md border-border bg-card text-foreground">
+            <DialogHeader>
+              <DialogTitle>Comisión de plataforma</DialogTitle>
+              <DialogDescription>
+                Porcentaje que retiene GenFeb sobre el monto acordado cuando el cliente completa el pago y el servicio se marca como finalizado (entre 1% y 50%).
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-5 py-2">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="commission-slider" className="text-sm font-medium">
+                    Retención plataforma
+                  </Label>
+                  <span className="text-lg font-bold tabular-nums text-primary">{commissionDraftPercent}%</span>
+                </div>
+                <Slider
+                  id="commission-slider"
+                  min={1}
+                  max={50}
+                  step={1}
+                  value={[commissionDraftPercent]}
+                  onValueChange={(v) => setCommissionDraftPercent(v[0] ?? 10)}
+                  className="w-full"
+                />
+                <p className="text-sm text-muted-foreground">
+                  El asociado recibirá <strong className="text-foreground">{100 - commissionDraftPercent}%</strong> en cada
+                  liquidación (después de comisión).
+                </p>
+              </div>
+            </div>
+            <DialogFooter className="flex-col-reverse sm:flex-row gap-2 sm:gap-0">
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setCommissionEditOpen(false)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                className="w-full sm:w-auto bg-primary hover:bg-primary/90"
+                onClick={() => {
+                  const p = Math.min(50, Math.max(1, Math.round(commissionDraftPercent)));
+                  setCommissionPendingPercent(p);
+                  setCommissionEditOpen(false);
+                  setCommissionConfirmOpen(true);
+                }}
+              >
+                Revisar y confirmar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog
+          open={commissionConfirmOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              setCommissionConfirmOpen(false);
+              setCommissionPendingPercent(null);
+            }
+          }}
+        >
+          <AlertDialogContent className="border-border bg-card text-foreground">
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Aplicar el nuevo porcentaje?</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>
+                    La plataforma pasará a retener{" "}
+                    <strong className="text-foreground">{commissionPendingPercent ?? "—"}%</strong> y el asociado recibirá{" "}
+                    <strong className="text-foreground">
+                      {commissionPendingPercent != null ? 100 - commissionPendingPercent : "—"}%
+                    </strong>
+                    .
+                  </p>
+                  <p>
+                    Los movimientos y reservas ya liquidadas no se modifican; el cambio aplica a{" "}
+                    <span className="font-medium text-foreground">nuevas finalizaciones</span> de servicio.
+                  </p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="border-border">Volver</AlertDialogCancel>
+              <Button
+                className="bg-primary hover:bg-primary/90"
+                disabled={patchPlatformCommission.isPending || commissionPendingPercent == null}
+                onClick={async () => {
+                  if (commissionPendingPercent == null) return;
+                  try {
+                    await patchPlatformCommission.mutateAsync(commissionPendingPercent);
+                    toast({
+                      title: "Comisión actualizada",
+                      description: `Plataforma ${commissionPendingPercent}%, asociado ${100 - commissionPendingPercent}%.`,
+                    });
+                    setCommissionConfirmOpen(false);
+                    setCommissionPendingPercent(null);
+                  } catch (e) {
+                    toast({
+                      title: "No se pudo guardar",
+                      description: e instanceof Error ? e.message : "Intenta de nuevo.",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+              >
+                {patchPlatformCommission.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Guardando…
+                  </>
+                ) : (
+                  "Sí, aplicar"
+                )}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );
