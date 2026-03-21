@@ -183,8 +183,10 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     const amount = d.amountFormatted ?? d.data?.amountFormatted;
     const providerNet = d.providerNetFormatted ?? d.data?.providerNetFormatted;
     const commission = d.commissionFormatted ?? d.data?.commissionFormatted;
+    const provPct = (d as any).providerPercent ?? d.data?.providerPercent ?? 90;
+    const platPct = (d as any).platformPercent ?? d.data?.platformPercent ?? 10;
     if (amount && providerNet && commission) {
-      return `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (90%) y la plataforma tomará $${commission} USD (10%). Completa el servicio para liberar los fondos.`;
+      return `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (${provPct}%) y la plataforma tomará $${commission} USD (${platPct}%). Completa el servicio para liberar los fondos.`;
     }
     if (amount) return `Se te han retenido $${amount} USD. Completa el servicio para liberar los fondos.`;
   }
@@ -200,10 +202,12 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     const amountFormatted = d.amountFormatted ?? d.data?.amountFormatted;
     const providerNetFormatted = d.providerNetFormatted ?? d.data?.providerNetFormatted;
     const commissionFormatted = d.commissionFormatted ?? d.data?.commissionFormatted;
+    const provPct = (d as any).providerPercent ?? d.data?.providerPercent ?? 90;
+    const platPct = (d as any).platformPercent ?? d.data?.platformPercent ?? 10;
     if (amountFormatted && providerNetFormatted && commissionFormatted) {
-      return `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (90%). Comisión de plataforma: $${commissionFormatted} USD (10%).`;
+      return `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (${provPct}%). Comisión de plataforma: $${commissionFormatted} USD (${platPct}%).`;
     }
-    return "Recuerda que al confirmar el pago recibirás el 90% del monto acordado.";
+    return `Recuerda que al confirmar el pago recibirás el ${provPct}% del monto acordado.`;
   }
 
   // 2) Wallet / retiros / recargas

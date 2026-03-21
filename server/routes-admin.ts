@@ -14,6 +14,9 @@ import { genFebStorage } from "./storage-genfeb";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
+import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
+import { commissionDisplayPercents } from "@shared/platform-commission";
+import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
 
 const updateUserSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -39,10 +42,49 @@ function toPlainUser(obj: unknown): Record<string, unknown> {
   return out;
 }
 
+const platformCommissionPatchSchema = z.object({
+  /** Porcentaje que retiene la plataforma (1–50). */
+  platformPercent: z.number().min(1).max(50),
+});
+
 export function registerAdminRoutes(app: Express): void {
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, message: "API OK" });
   });
+
+  /** Lectura pública de la tasa actual (UI asociado / admin). */
+  app.get("/api/platform/commission-rate", async (_req, res) => {
+    try {
+      const commissionRate = await getPlatformCommissionRate();
+      const { platformPercent, providerPercent } = commissionDisplayPercents(commissionRate);
+      res.json({ commissionRate, platformPercent, providerPercent });
+    } catch (e) {
+      console.error("[platform-commission-rate] GET", e);
+      res.status(500).json({ message: "Error al leer comisión" });
+    }
+  });
+
+  /** Solo administrador completo: actualizar porcentaje de comisión de plataforma. */
+  app.patch(
+    "/api/admin/platform-commission-rate",
+    authenticateJWT,
+    requireFullAdmin,
+    async (req, res) => {
+      try {
+        const parsed = platformCommissionPatchSchema.safeParse(req.body);
+        if (!parsed.success) {
+          return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+        }
+        const rate = parsed.data.platformPercent / 100;
+        const commissionRate = await setPlatformCommissionRate(rate);
+        const { platformPercent, providerPercent } = commissionDisplayPercents(commissionRate);
+        res.json({ commissionRate, platformPercent, providerPercent });
+      } catch (e) {
+        console.error("[platform-commission-rate] PATCH", e);
+        res.status(500).json({ message: "Error al guardar comisión" });
+      }
+    },
+  );
 
   const adminUsersRouter = express.Router({ mergeParams: true });
 
@@ -642,5 +684,25 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  console.log("✅ Admin routes registered (GET/PATCH /api/admin/users/:id, GET /api/admin/users, GET/PATCH /api/admin/withdrawals, GET /api/admin/withdrawals/history)");
+  /** Estadísticas agregadas para el panel admin (filtro día / semana / mes / año). */
+  app.get("/api/admin/dashboard-stats", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const parsed = z
+        .enum(["day", "week", "month", "year"])
+        .safeParse(typeof req.query.period === "string" ? req.query.period : "week");
+      const preset = (parsed.success ? parsed.data : "week") as AdminDashboardStatsPreset;
+      const { from, to } = getDashboardStatsRange(preset);
+      const stats = await genFebStorage.getAdminDashboardStats({ from, to });
+      return res.status(200).json({
+        preset,
+        range: { from: from.toISOString(), to: to.toISOString() },
+        ...stats,
+      });
+    } catch (error) {
+      console.error("Error building admin dashboard stats:", error);
+      return res.status(500).json({ message: "Error al cargar estadísticas" });
+    }
+  });
+
+  console.log("✅ Admin routes registered (incl. GET /api/admin/dashboard-stats)");
 }

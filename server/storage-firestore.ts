@@ -25,9 +25,12 @@ import type {
 } from "@shared/schema";
 import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
 import { calcCommission, calcProviderNet } from "@shared/platform-commission";
+import { getPlatformCommissionRate } from "./platform-commission-rate";
+import { isFullAdmin } from "@shared/roles";
 import type { ProfessionalVerification, ProfessionalVerificationState } from "@shared/professional-verification";
 import type { VerifyingStatus } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
+import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
 
 /** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed); payment = client paid for a service (outflow from pending to provider). */
 export type WalletTransferType = "service_payment" | "recharge" | "withdrawal" | "payment";
@@ -418,7 +421,10 @@ class FirestoreStorageImpl implements IStorage {
           createdAt: new Date(),
           updatedAt: new Date(),
         };
-    return { ...provider, user } as ProviderWithUser;
+    // Administrador como asociado: visible y "verificado" en catálogo sin pasar por verificación de plataforma.
+    const ownerRole = raw ? (raw as { role?: string }).role : undefined;
+    const isVerified = provider.isVerified === true || isFullAdmin(ownerRole);
+    return { ...provider, isVerified, user } as ProviderWithUser;
   }
 
   async getProviderByUserId(userId: string): Promise<Provider | undefined> {
@@ -430,7 +436,12 @@ class FirestoreStorageImpl implements IStorage {
     if (snapshot.empty) return undefined;
     const doc = snapshot.docs[0];
     const provider = { id: parseInt(doc.id), ...doc.data() } as Provider;
-    return this.enrichProviderWithSubcategory(provider);
+    const enriched = await this.enrichProviderWithSubcategory(provider);
+    const rawUser = await this.getUserById(userId);
+    const isVerified =
+      (enriched as { isVerified?: boolean }).isVerified === true ||
+      isFullAdmin((rawUser as { role?: string } | null)?.role);
+    return { ...enriched, isVerified } as Provider;
   }
 
   /** Añade subcategory { id, name } al proveedor cuando tiene subcategoryId. */
@@ -1010,6 +1021,7 @@ class FirestoreStorageImpl implements IStorage {
    */
   async completeBookingAndReleaseEscrow(bookingId: number): Promise<Booking | undefined> {
     if (!this.db) return undefined;
+    const commissionRate = await getPlatformCommissionRate();
     const bookingsColl = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS);
     const usersColl = this.db.collection(FIRESTORE_COLLECTIONS.USERS);
     const providersColl = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS);
@@ -1039,8 +1051,8 @@ class FirestoreStorageImpl implements IStorage {
       }
       const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
       if (cost <= 0) throw new Error("Costo de reserva no definido");
-      const commission = calcCommission(cost);
-      const providerNet = calcProviderNet(cost);
+      const commission = calcCommission(cost, commissionRate);
+      const providerNet = calcProviderNet(cost, commissionRate);
       const clientUserId = data.userId;
       const providerId = data.providerId;
       if (!clientUserId) throw new Error("Reserva sin cliente asociado");
@@ -2509,6 +2521,50 @@ class FirestoreStorageImpl implements IStorage {
     const out = await this.getVerifyingStatusByUserId(userId);
     if (!out) throw new Error("No se pudo guardar el estado");
     return out;
+  }
+
+  async getAdminDashboardStats(params: { from: Date; to: Date }): Promise<AdminDashboardStatsResult> {
+    if (!this.db) {
+      return aggregateAdminDashboardStats(
+        {
+          users: [],
+          bookings: [],
+          services: [],
+          transfers: [],
+          pendingVerificationCount: 0,
+          pendingWithdrawalRequestsCount: 0,
+        },
+        params
+      );
+    }
+    const [usersSnap, bookingsSnap, servicesSnap, transfersResult, pendingVer, pendingWd] = await Promise.all([
+      this.db.collection(FIRESTORE_COLLECTIONS.USERS).get(),
+      this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).get(),
+      this.db.collection(FIRESTORE_COLLECTIONS.SERVICES).get(),
+      this.getAllTransfers(),
+      this.getPendingVerifyingStatuses(),
+      this.getUsersWithPendingWithdrawals(),
+    ]);
+    const users = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const bookings = bookingsSnap.docs.map((d) => {
+      const id = parseInt(d.id, 10);
+      return { id: Number.isFinite(id) ? id : d.id, ...d.data() };
+    });
+    const services = servicesSnap.docs.map((d) => {
+      const id = parseInt(d.id, 10);
+      return { id: Number.isFinite(id) ? id : d.id, ...d.data() };
+    });
+    return aggregateAdminDashboardStats(
+      {
+        users,
+        bookings,
+        services,
+        transfers: transfersResult.transfers,
+        pendingVerificationCount: pendingVer.length,
+        pendingWithdrawalRequestsCount: pendingWd.length,
+      },
+      params
+    );
   }
 
   async seedRoles(): Promise<void> {

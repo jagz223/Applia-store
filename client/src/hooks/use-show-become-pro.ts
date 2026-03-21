@@ -3,7 +3,7 @@ import { shouldShowBecomeProCTA } from "@/lib/auth-utils";
 
 /**
  * Hook que centraliza la visibilidad del CTA "Convertirse en Profesional".
- * Retorna true solo cuando el usuario NO es profesional ni admin.
+ * Admin puede verlo si aún no tiene perfil de proveedor.
  */
 export function useShowBecomePro(): boolean {
   const { user } = useAuth();

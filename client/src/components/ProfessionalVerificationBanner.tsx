@@ -1,15 +1,18 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { hasAdminRole } from "@/lib/auth-utils";
 import { AlertCircle } from "lucide-react";
 
 /**
  * Aviso global para profesionales cuyo proveedor aún no está verificado por la plataforma.
+ * Staff (admin / Soporte TI) no debe verlo aunque tenga fila de proveedor en BD.
  */
 export function ProfessionalVerificationBanner() {
   const { user, isAuthenticated, isLoading } = useAuth();
 
   if (isLoading || !isAuthenticated || !user) return null;
+  if (hasAdminRole(user)) return null;
 
   const provider = user.provider;
   const isPro = user.role === "professional" || provider != null;

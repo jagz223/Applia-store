@@ -1,15 +1,21 @@
 import { hasAdminPrivileges, isFullAdmin } from "@shared/roles";
 import { api } from "@shared/routes";
 
-/** Roles que no deben ver el CTA "Convertirse en Profesional" */
-export const ROLES_HIDING_BECOME_PRO_CTA = ["professional", "admin", "tiSupport"] as const;
+/** Roles que no deben ver el CTA "Convertirse en Profesional" (salvo reglas especiales por rol). */
+export const ROLES_HIDING_BECOME_PRO_CTA = ["professional", "tiSupport"] as const;
 
 /**
  * Indica si debe mostrarse el CTA de "Convertirse en Profesional".
- * No se muestra para usuarios con rol professional o admin (SOLID: regla de negocio en un solo lugar).
+ * - Profesional: no (ya es asociado).
+ * - Admin: sí si aún no tiene perfil proveedor; puede ser asociado sin perder rol admin.
+ * - Soporte TI: no (misma política que antes).
  */
-export function shouldShowBecomeProCTA(user: { role?: string } | null): boolean {
+export function shouldShowBecomeProCTA(user: { role?: string; provider?: unknown } | null): boolean {
   if (!user?.role) return true;
+  if (user.role === "professional") return false;
+  if (user.role === "admin") {
+    return user.provider == null;
+  }
   return !(ROLES_HIDING_BECOME_PRO_CTA as readonly string[]).includes(user.role);
 }
 

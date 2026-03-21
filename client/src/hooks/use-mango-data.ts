@@ -817,6 +817,65 @@ export function useWithdraw() {
 // ==========================================
 
 const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
+const ADMIN_DASHBOARD_STATS_KEY = "/api/admin/dashboard-stats";
+
+export type AdminDashboardPeriod = "day" | "week" | "month" | "year";
+
+export type AdminDashboardStatsResponse = {
+  preset: AdminDashboardPeriod;
+  range: { from: string; to: string };
+  snapshot: {
+    users: { professionals: number; clients: number; staff: number; total: number };
+    bookingsByStatus: {
+      pending: number;
+      confirmed: number;
+      in_progress: number;
+      completed: number;
+      cancelled: number;
+    };
+    services: { active: number; inactive: number; total: number };
+    pendingVerificationAssociates: number;
+    pendingRechargeRequests: number;
+    pendingWithdrawalRequests: number;
+  };
+  period: {
+    newUsersTotal: number;
+    newProfessionals: number;
+    newClients: number;
+    bookingsCreatedTotal: number;
+    bookingsCreatedByStatus: {
+      pending: number;
+      confirmed: number;
+      in_progress: number;
+      completed: number;
+      cancelled: number;
+    };
+    userRechargesCompleted: { count: number; totalUsd: number };
+    adminBalanceCredits: { count: number; totalUsd: number };
+    userRechargesRejected: number;
+    userRechargesPendingCreated: number;
+  };
+};
+
+/** Estadísticas del panel admin (solo administrador completo). */
+export function useAdminDashboardStats(period: AdminDashboardPeriod, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [ADMIN_DASHBOARD_STATS_KEY, period],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(`${ADMIN_DASHBOARD_STATS_KEY}?period=${encodeURIComponent(period)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "Error al cargar estadísticas");
+      }
+      return res.json() as Promise<AdminDashboardStatsResponse>;
+    },
+    enabled: options?.enabled !== false,
+    staleTime: 60_000,
+  });
+}
 
 /** Lista todas las transferencias de la plataforma (solo admin). */
 export function useAdminWalletTransfers(options?: { enabled?: boolean }) {
@@ -860,6 +919,7 @@ export function useUpdateTransferStatus() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ADMIN_DASHBOARD_STATS_KEY] });
       queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
       debouncedRefetch(queryClient, [ADMIN_WALLET_TRANSFERS_KEY]);
       debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
@@ -897,6 +957,7 @@ export function useAdminManualRecharge() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [ADMIN_WALLET_TRANSFERS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ADMIN_DASHBOARD_STATS_KEY] });
       queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
       debouncedRefetch(queryClient, [ADMIN_WALLET_TRANSFERS_KEY]);
       debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
@@ -1123,6 +1184,58 @@ export function usePatchProfessionalVerificationPayment() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
       queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
+    },
+  });
+}
+
+// ==========================================
+// COMISIÓN DE PLATAFORMA (configurable por admin)
+// ==========================================
+
+const PLATFORM_COMMISSION_QUERY_KEY = [api.platform.commissionRate.get.path] as const;
+
+export type PlatformCommissionRateDto = {
+  commissionRate: number;
+  platformPercent: number;
+  providerPercent: number;
+};
+
+/** Tasa vigente para textos y cálculos en UI (endpoint público de solo lectura). */
+export function usePlatformCommissionRate(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: PLATFORM_COMMISSION_QUERY_KEY,
+    queryFn: async () => {
+      const res = await fetch(api.platform.commissionRate.get.path);
+      if (!res.ok) throw new Error("No se pudo cargar la comisión");
+      return res.json() as Promise<PlatformCommissionRateDto>;
+    },
+    staleTime: 30_000,
+    enabled: options?.enabled !== false,
+  });
+}
+
+export function usePatchPlatformCommissionRate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (platformPercent: number) => {
+      const token = getToken();
+      const res = await fetch(api.platform.commissionRate.adminPatch.path, {
+        method: api.platform.commissionRate.adminPatch.method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ platformPercent }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { message?: string }).message ?? "Error al guardar la comisión");
+      }
+      return data as PlatformCommissionRateDto;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(PLATFORM_COMMISSION_QUERY_KEY, data);
+      void queryClient.invalidateQueries({ queryKey: PLATFORM_COMMISSION_QUERY_KEY });
     },
   });
 }

@@ -248,8 +248,10 @@ export function NotificationBell() {
       const amount = data?.amountFormatted ?? data?.data?.amountFormatted;
       const providerNet = (data as any)?.providerNetFormatted ?? (data as any)?.data?.providerNetFormatted;
       const commission = (data as any)?.commissionFormatted ?? (data as any)?.data?.commissionFormatted;
+      const provPct = (data as any)?.providerPercent ?? (data as any)?.data?.providerPercent ?? 90;
+      const platPct = (data as any)?.platformPercent ?? (data as any)?.data?.platformPercent ?? 10;
       if (amount && providerNet && commission) {
-        return `Se te han retenido $${amount} USD. Recibiras $${providerNet} USD (90%) y la plataforma tomara $${commission} USD (10%). Completa el servicio para liberar los fondos.`;
+        return `Se te han retenido $${amount} USD. Recibiras $${providerNet} USD (${provPct}%) y la plataforma tomara $${commission} USD (${platPct}%). Completa el servicio para liberar los fondos.`;
       }
       if (amount) return `Se te han retenido $${amount} USD. Completa el servicio para liberar los fondos.`;
     }
@@ -267,10 +269,12 @@ export function NotificationBell() {
       const amountFormatted = (data as any)?.amountFormatted ?? (data as any)?.data?.amountFormatted;
       const providerNetFormatted = (data as any)?.providerNetFormatted ?? (data as any)?.data?.providerNetFormatted;
       const commissionFormatted = (data as any)?.commissionFormatted ?? (data as any)?.data?.commissionFormatted;
+      const provPct = (data as any)?.providerPercent ?? (data as any)?.data?.providerPercent ?? 90;
+      const platPct = (data as any)?.platformPercent ?? (data as any)?.data?.platformPercent ?? 10;
       if (amountFormatted && providerNetFormatted && commissionFormatted) {
-        return `Al acordar ${"$"}${amountFormatted} USD, recibiras ${"$"}${providerNetFormatted} USD (90%). Comision de plataforma: ${"$"}${commissionFormatted} USD (10%).`;
+        return `Al acordar ${"$"}${amountFormatted} USD, recibiras ${"$"}${providerNetFormatted} USD (${provPct}%). Comision de plataforma: ${"$"}${commissionFormatted} USD (${platPct}%).`;
       }
-      return "Recuerda que al confirmar el pago recibiras el 90% del monto acordado.";
+      return `Recuerda que al confirmar el pago recibiras el ${provPct}% del monto acordado.`;
     }
     if (type === "booking" && data?.type === "booking_update") {
       const status = (data as any)?.booking?.status as string | undefined;

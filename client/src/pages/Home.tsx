@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { useCategories } from "@/hooks/use-mango-data";
 import { Button } from "@/components/ui/button";
@@ -26,8 +27,20 @@ import {
   Play
 } from "lucide-react";
 import { motion } from "framer-motion";
+import type { LucideIcon } from "lucide-react";
+
+type HomeFeature = {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  color: string;
+  bgColor: string;
+  /** Si true, no se muestra a usuarios sin sesión (vista pública). */
+  hideForGuests?: boolean;
+};
 
 export default function HomePage() {
+  const { isAuthenticated } = useAuth();
   const showBecomePro = useShowBecomePro();
   const { data: categories, isLoading } = useCategories();
   // Oculta el panel de búsqueda en la home por ahora.
@@ -38,7 +51,7 @@ export default function HomePage() {
   // Oculta links del footer (Acerca de / Términos / Privacidad / Contacto).
   const SHOW_HOME_FOOTER_LINKS = false;
 
-  const features = [
+  const features: HomeFeature[] = [
     {
       icon: Calendar,
       title: "Reserva Inteligente",
@@ -72,7 +85,8 @@ export default function HomePage() {
       title: "Panel Económico",
       description: "Dashboard avanzado con KPIs financieros y facturación automática.",
       color: "text-accent",
-      bgColor: "bg-accent/10"
+      bgColor: "bg-accent/10",
+      hideForGuests: true,
     },
     {
       icon: Shield,
@@ -109,6 +123,8 @@ export default function HomePage() {
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0 }
   };
+
+  const visibleFeatures = features.filter((f) => !f.hideForGuests || isAuthenticated);
 
   return (
     <div className="flex flex-col min-h-screen overflow-x-hidden">
@@ -331,8 +347,8 @@ export default function HomePage() {
             viewport={{ once: true }}
             className="grid md:grid-cols-2 lg:grid-cols-3 gap-6"
           >
-            {features.map((feature, index) => (
-              <motion.div key={index} variants={itemVariants}>
+            {visibleFeatures.map((feature, index) => (
+              <motion.div key={feature.title} variants={itemVariants}>
                 <Card className="card-industrial h-full group hover:border-primary/50 transition-all duration-300">
                   <CardContent className="p-6">
                     <div className={`p-3 rounded-xl ${feature.bgColor} w-fit mb-4 group-hover:scale-110 transition-transform`}>
