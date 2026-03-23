@@ -1,14 +1,12 @@
 import type { Express } from "express";
 
-/** Rutas públicas que interesan para SEO (sin áreas autenticadas ni admin). */
-const PUBLIC_SEO_PATHS = [
-  "/",
-  "/explore",
-  "/categories",
-  "/login",
-  "/register",
-  "/become-pro",
-] as const;
+/** Entradas del sitemap: sin /login ni /register (no suelen indexarse). */
+const SITEMAP_ENTRIES: readonly { path: string; changefreq: string; priority: string }[] = [
+  { path: "/", changefreq: "weekly", priority: "1.0" },
+  { path: "/explore", changefreq: "daily", priority: "0.9" },
+  { path: "/categories", changefreq: "weekly", priority: "0.9" },
+  { path: "/become-pro", changefreq: "monthly", priority: "0.5" },
+];
 
 /**
  * Origen canónico del sitio (sin barra final).
@@ -33,12 +31,11 @@ function escapeXml(s: string): string {
 export function registerSeoRoutes(app: Express): void {
   app.get("/sitemap.xml", (_req, res) => {
     const base = getPublicOrigin();
-    const body = PUBLIC_SEO_PATHS.map((p) => {
-      const loc = p === "/" ? base : `${base}${p}`;
-      const priority = p === "/" ? "1.0" : "0.8";
+    const body = SITEMAP_ENTRIES.map(({ path, changefreq, priority }) => {
+      const loc = path === "/" ? base : `${base}${path}`;
       return `  <url>
     <loc>${escapeXml(loc)}</loc>
-    <changefreq>weekly</changefreq>
+    <changefreq>${changefreq}</changefreq>
     <priority>${priority}</priority>
   </url>`;
     }).join("\n");
