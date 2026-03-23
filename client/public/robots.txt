@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://genfeb-zfr0.onrender.com/sitemap.xml

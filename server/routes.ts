@@ -18,11 +18,14 @@ import { registerInvoiceRoutes } from "./routes-invoices";
 import { registerPayPalRoutes } from "./routes-paypal";
 import { registerRoleRoutes } from "./routes-roles";
 import { registerAdminRoutes } from "./routes-admin";
+import { registerSeoRoutes } from "./seo";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  registerSeoRoutes(app);
+
   // Registrar PRIMERO las rutas /api (admin, roles, health) para que tengan prioridad
   // y no sean interceptadas por session/passport ni por Vite
   registerAdminRoutes(app);
