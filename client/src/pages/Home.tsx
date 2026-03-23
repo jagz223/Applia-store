@@ -158,7 +158,7 @@ export default function HomePage() {
               </motion.div>
               
               <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-display font-bold text-foreground leading-[1.1]">
-                La plataforma de <span className="text-gradient-primary">servicios</span> más avanzada
+                Genfeb: la plataforma de <span className="text-gradient-primary">servicios</span> más avanzada
               </h1>
               
               <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-lg">
