@@ -36,7 +36,46 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/**
+ * Digital Asset Links para la app TWA (Bubblewrap).
+ * Sin huella SHA-256 del keystore, Chrome muestra barra tipo navegador.
+ * En producción: TWA_SHA256_FINGERPRINTS (coma-separado, formato keytool con :).
+ * Opcional: TWA_PACKAGE_NAME (default com.genfeb.www.twa si coincide con tu Android).
+ * Obtener huella: keytool -list -v -keystore android.keystore
+ */
+export function registerAssetLinksRoute(app: Express): void {
+  app.get("/.well-known/assetlinks.json", (_req, res) => {
+    const packageName = process.env.TWA_PACKAGE_NAME?.trim() || "com.genfeb.www.twa";
+    const raw = process.env.TWA_SHA256_FINGERPRINTS?.trim();
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    if (!raw) {
+      res.json([]);
+      return;
+    }
+    const sha256_cert_fingerprints = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (sha256_cert_fingerprints.length === 0) {
+      res.json([]);
+      return;
+    }
+    res.json([
+      {
+        relation: ["delegate_permission/common.handle_all_urls"],
+        target: {
+          namespace: "android_app",
+          package_name: packageName,
+          sha256_cert_fingerprints,
+        },
+      },
+    ]);
+  });
+}
+
 export function registerSeoRoutes(app: Express): void {
+  registerAssetLinksRoute(app);
+
   app.get("/sitemap.xml", (_req, res) => {
     const base = getPublicOrigin();
     const body = SITEMAP_ENTRIES.map(({ path, changefreq, priority }) => {
