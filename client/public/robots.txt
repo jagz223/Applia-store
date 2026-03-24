@@ -1,4 +1,9 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://genfeb.com/sitemap.xml
+# Bloqueamos el rastreo de páginas de autenticación (no aportan SEO)
+Disallow: /login
+Disallow: /register
+
+# Indicamos la ruta de tu sitemap oficial
+Sitemap: https://www.genfeb.com/sitemap.xml
