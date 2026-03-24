@@ -1,5 +1,5 @@
 // GenFeb S.A.S. - Service Worker for PWA Offline Mode
-const CACHE_NAME = 'genfeb-v5';
+const CACHE_NAME = 'genfeb-v6';
 const OFFLINE_URL = '/offline.html';
 
 // Assets to cache on install
@@ -10,7 +10,7 @@ const PRECACHE_ASSETS = [
   '/manifest.json',
   '/manifest.webmanifest',
   '/favicon.png',
-  '/logo.png',
+  '/logo%20GenFeb.jpg',
 ];
 
 // Install event - cache essential assets
@@ -130,7 +130,7 @@ self.addEventListener('push', (event) => {
   const data = event.data.json();
   const options = {
     body: data.body || 'Nueva notificación de GenFeb',
-    icon: '/logo.png',
+    icon: '/logo%20GenFeb.jpg',
     badge: '/favicon.png',
     vibrate: [100, 50, 100],
     data: {
