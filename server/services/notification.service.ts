@@ -129,7 +129,7 @@ class NotificationService {
         notification: {
           title: payload.title,
           body: payload.body,
-          icon: "/logo.png",
+          icon: "/logo%20GenFeb.jpg",
         },
         fcmOptions: data.url ? { link: data.url } : undefined,
       },
