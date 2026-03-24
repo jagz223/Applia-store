@@ -1,5 +1,8 @@
 import type { Express } from "express";
 
+/** Dominio canónico (sitemap / robots). Sobrescribible con PUBLIC_SITE_URL en Render. */
+const CANONICAL_SITE_ORIGIN = "https://genfeb.com";
+
 /** Entradas del sitemap: sin /login ni /register (no suelen indexarse). */
 const SITEMAP_ENTRIES: readonly { path: string; changefreq: string; priority: string }[] = [
   { path: "/", changefreq: "weekly", priority: "1.0" },
@@ -10,12 +13,17 @@ const SITEMAP_ENTRIES: readonly { path: string; changefreq: string; priority: st
 
 /**
  * Origen canónico del sitio (sin barra final).
- * - En Render: suele bastar con RENDER_EXTERNAL_URL (lo inyecta Render).
- * - Con dominio propio: definí PUBLIC_SITE_URL=https://tudominio.com
+ * - Definí PUBLIC_SITE_URL si usás otro dominio o staging (p. ej. https://xxx.onrender.com).
+ * - En producción sin env, se usa CANONICAL_SITE_ORIGIN (genfeb.com).
+ * - En desarrollo: RENDER_EXTERNAL_URL si existe, si no localhost.
  */
 function getPublicOrigin(): string {
   const explicit = process.env.PUBLIC_SITE_URL?.trim();
   if (explicit) return explicit.replace(/\/$/, "");
+
+  if (process.env.NODE_ENV === "production") {
+    return CANONICAL_SITE_ORIGIN;
+  }
 
   const render = process.env.RENDER_EXTERNAL_URL?.trim();
   if (render) return render.replace(/\/$/, "");
