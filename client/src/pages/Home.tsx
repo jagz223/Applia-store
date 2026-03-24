@@ -1,7 +1,8 @@
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
-import { useCategories } from "@/hooks/use-mango-data";
+import { api } from "@shared/routes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,6 @@ import {
   ArrowRight, 
   Search, 
   Shield, 
-  Clock, 
   Users, 
   Star,
   CheckCircle,
@@ -20,11 +20,9 @@ import {
   Vault,
   Briefcase,
   Wrench,
-  Scale,
   TrendingUp,
   Home,
   ChevronRight,
-  Play
 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
@@ -42,7 +40,14 @@ type HomeFeature = {
 export default function HomePage() {
   const { isAuthenticated } = useAuth();
   const showBecomePro = useShowBecomePro();
-  const { data: categories, isLoading } = useCategories();
+  const { data: homeCounts, isLoading: homeCountsLoading, isError: homeCountsError } = useQuery({
+    queryKey: [api.categories.homeAssociateCounts.path],
+    queryFn: async () => {
+      const res = await fetch(api.categories.homeAssociateCounts.path);
+      if (!res.ok) throw new Error("No se pudieron cargar los conteos");
+      return api.categories.homeAssociateCounts.responses[200].parse(await res.json());
+    },
+  });
   // Oculta el panel de búsqueda en la home por ahora.
   // Se reutilizará en una iteración futura.
   const SHOW_HOME_SEARCH_PANEL = false;
@@ -98,10 +103,9 @@ export default function HomePage() {
   ];
 
   const serviceCategories = [
-    { name: "Fix Go", icon: Wrench, count: 245, color: "text-primary" },
-    { name: "Servicios Legales", icon: Scale, count: 128, color: "text-secondary" },
-    { name: "Consultoría Financiera", icon: TrendingUp, count: 96, color: "text-accent" },
-    { name: "Man Go", icon: Home, count: 187, color: "text-primary" },
+    { name: "Fix Go", icon: Wrench, countKey: "fixGo" as const, color: "text-primary" },
+    { name: "Pro Go", icon: Briefcase, countKey: "proGo" as const, color: "text-secondary" },
+    { name: "Man Go", icon: Home, countKey: "manGo" as const, color: "text-primary" },
   ];
 
   const stats = [
@@ -384,28 +388,39 @@ export default function HomePage() {
             </p>
           </motion.div>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {serviceCategories.map((category, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-                viewport={{ once: true }}
-              >
-                <Link href="/explore">
-                  <Card className="card-industrial cursor-pointer group hover:border-primary/50 transition-all duration-300">
-                    <CardContent className="p-6 text-center">
-                      <div className={`p-4 rounded-xl ${category.color} bg-primary/10 w-fit mx-auto mb-4 group-hover:scale-110 transition-transform`}>
-                        <category.icon className="w-8 h-8" />
-                      </div>
-                      <h3 className="text-lg font-bold mb-1">{category.name}</h3>
-                      <p className="text-sm text-muted-foreground">{category.count} asociados</p>
-                    </CardContent>
-                  </Card>
-                </Link>
-              </motion.div>
-            ))}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
+            {serviceCategories.map((category, index) => {
+              const n = homeCounts?.[category.countKey];
+              const c = n ?? 0;
+              const countLabel = homeCountsLoading
+                ? "…"
+                : homeCountsError
+                  ? "—"
+                  : c === 1
+                    ? "1 asociado"
+                    : `${c} asociados`;
+              return (
+                <motion.div
+                  key={category.countKey}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  viewport={{ once: true }}
+                >
+                  <Link href="/explore">
+                    <Card className="card-industrial cursor-pointer group hover:border-primary/50 transition-all duration-300">
+                      <CardContent className="p-6 text-center">
+                        <div className={`p-4 rounded-xl ${category.color} bg-primary/10 w-fit mx-auto mb-4 group-hover:scale-110 transition-transform`}>
+                          <category.icon className="w-8 h-8" />
+                        </div>
+                        <h3 className="text-lg font-bold mb-1">{category.name}</h3>
+                        <p className="text-sm text-muted-foreground">{countLabel}</p>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                </motion.div>
+              );
+            })}
           </div>
 
           <div className="text-center mt-10">
