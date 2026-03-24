@@ -195,6 +195,9 @@ export async function registerRoutes(
   app.get("/api/provider-categories/availability", async (_req, res) => {
     res.json(await catalogService.getProviderCategoryAvailability());
   });
+  app.get(api.categories.homeAssociateCounts.path, async (_req, res) => {
+    res.json(await catalogService.getHomeCategoryAssociateCounts());
+  });
   app.get(api.providers.list.path, async (req, res) => {
     const profession = (req.query.profession as string)?.trim() || undefined;
     const category = (req.query.category as string)?.trim() || undefined;

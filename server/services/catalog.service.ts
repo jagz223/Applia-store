@@ -70,6 +70,47 @@ export class CatalogService {
   }
 
   /**
+   * Conteos reales de asociados por marca (Fix Go / Pro Go / Man Go) para la home.
+   * Pro Go = suma de proveedores en subcategorías legal y financial (bajo categoría professional).
+   */
+  async getHomeCategoryAssociateCounts(): Promise<{ fixGo: number; proGo: number; manGo: number }> {
+    const categories = await this.storage.getCategories();
+    const bySlug = (slug: string) => categories.find((c) => (c as { slug?: string }).slug === slug);
+    const technical = bySlug("technical");
+    const professional = bySlug("professional");
+    const maintenance = bySlug("maintenance");
+
+    const [allProviders, subcategories] = await Promise.all([
+      this.storage.getAllProviders(),
+      professional ? this.storage.getSubcategories(Number(professional.id)) : Promise.resolve([]),
+    ]);
+
+    const legalSub = subcategories.find((s) => s.slug === "legal");
+    const financialSub = subcategories.find((s) => s.slug === "financial");
+
+    const countByCategoryId = (catId: number | undefined) => {
+      if (catId == null || Number.isNaN(Number(catId))) return 0;
+      return allProviders.filter((p) => (p as { categoryId?: number | null }).categoryId === catId).length;
+    };
+
+    const fixGo = countByCategoryId(technical?.id);
+    const manGo = countByCategoryId(maintenance?.id);
+
+    const legalId = legalSub?.id;
+    const financialId = financialSub?.id;
+    const proGo =
+      legalId == null && financialId == null
+        ? 0
+        : allProviders.filter((p) => {
+            const sid = (p as { subcategoryId?: number | null }).subcategoryId;
+            if (sid == null || Number.isNaN(Number(sid))) return false;
+            return sid === legalId || sid === financialId;
+          }).length;
+
+    return { fixGo, proGo, manGo };
+  }
+
+  /**
    * Indica qué categorías (por id) tienen al menos un servicio ofertado (proveedor con al menos un servicio).
    * Una categoría solo se considera "disponible" si existe al menos un servicio cuyo proveedor pertenece a esa categoría.
    */
