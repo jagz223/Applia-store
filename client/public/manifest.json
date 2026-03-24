@@ -1,13 +1,17 @@
 {
   "name": "GenFeb S.A.S.",
   "short_name": "GenFeb",
-  "description": "Plataforma de servicios técnicos, legales, financieros y mantenimiento. Eje central del ecosistema GENFECORP.",
+  "description": "Plataforma de servicios que conecta clientes con asociados verificados: técnicos, legales, financieros y mantenimiento. Reservas, pagos seguros y garantía GenFeb S.A.S.",
   "start_url": "/",
-  "display": "standalone",
-  "background_color": "#0E1013",
-  "theme_color": "#1A8ED1",
-  "orientation": "portrait-primary",
   "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0ea5e9",
+  "orientation": "portrait-primary",
+  "lang": "es-EC",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "finance"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/favicon.png",
@@ -25,23 +29,19 @@
       "src": "/logo.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "maskable any"
     }
   ],
-  "categories": ["business", "productivity", "finance"],
-  "lang": "es-EC",
-  "dir": "ltr",
-  "prefer_related_applications": false,
   "shortcuts": [
     {
-      "name": "Reservar Servicio",
+      "name": "Reservar servicio",
       "short_name": "Reservar",
       "description": "Reserva un nuevo servicio",
       "url": "/booking",
       "icons": [{ "src": "/favicon.png", "sizes": "96x96" }]
     },
     {
-      "name": "Mis Reservas",
+      "name": "Mis reservas",
       "short_name": "Reservas",
       "description": "Ver mis reservas",
       "url": "/dashboard",
