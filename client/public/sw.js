@@ -1,5 +1,5 @@
 // GenFeb S.A.S. - Service Worker for PWA Offline Mode
-const CACHE_NAME = 'genfeb-v6';
+const CACHE_NAME = 'genfeb-v7';
 const OFFLINE_URL = '/offline.html';
 
 // Assets to cache on install
