@@ -2,8 +2,8 @@
   "name": "GenFeb S.A.S.",
   "short_name": "GenFeb",
   "description": "Plataforma de servicios que conecta clientes con asociados verificados: técnicos, legales, financieros y mantenimiento. Reservas, pagos seguros y garantía GenFeb S.A.S.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "https://www.genfeb.com/",
+  "scope": "https://www.genfeb.com/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#0ea5e9",
@@ -14,31 +14,31 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/logo%20GenFeb.jpg",
+      "src": "https://www.genfeb.com/logo%20GenFeb.jpg",
       "sizes": "512x512",
       "type": "image/jpeg",
       "purpose": "any"
     },
     {
-      "src": "/logo%20GenFeb.jpg",
+      "src": "https://www.genfeb.com/logo%20GenFeb.jpg",
       "sizes": "512x512",
       "type": "image/jpeg",
       "purpose": "maskable"
     },
     {
-      "src": "/logo%20GenFeb.jpg",
+      "src": "https://www.genfeb.com/logo%20GenFeb.jpg",
       "sizes": "192x192",
       "type": "image/jpeg",
       "purpose": "any"
     },
     {
-      "src": "/logo%20GenFeb.jpg",
+      "src": "https://www.genfeb.com/logo%20GenFeb.jpg",
       "sizes": "192x192",
       "type": "image/jpeg",
       "purpose": "maskable"
     },
     {
-      "src": "/favicon.png",
+      "src": "https://www.genfeb.com/favicon.png",
       "sizes": "48x48",
       "type": "image/png",
       "purpose": "any"
@@ -49,22 +49,22 @@
       "name": "Reservar servicio",
       "short_name": "Reservar",
       "description": "Reserva un nuevo servicio",
-      "url": "/booking",
-      "icons": [{ "src": "/logo%20GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+      "url": "https://www.genfeb.com/booking",
+      "icons": [{ "src": "https://www.genfeb.com/logo%20GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
     },
     {
       "name": "Mis reservas",
       "short_name": "Reservas",
       "description": "Ver mis reservas",
-      "url": "/dashboard",
-      "icons": [{ "src": "/logo%20GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+      "url": "https://www.genfeb.com/dashboard",
+      "icons": [{ "src": "https://www.genfeb.com/logo%20GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
     },
     {
       "name": "Mensajes",
       "short_name": "Chat",
       "description": "Ver mensajes",
-      "url": "/chat",
-      "icons": [{ "src": "/logo%20GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+      "url": "https://www.genfeb.com/chat",
+      "icons": [{ "src": "https://www.genfeb.com/logo%20GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
     }
   ]
 }
