@@ -35,6 +35,7 @@ import Recharge from "@/pages/Recharge";
 import RechargeConfirm from "@/pages/RechargeConfirm";
 import Movimientos from "@/pages/Movimientos";
 import Settings from "@/pages/Settings";
+import Politics from "@/pages/Politics";
 import NotFound from "@/pages/not-found";
 import Notifications from "@/pages/Notifications";
 import { ProfessionalVerificationBanner } from "@/components/ProfessionalVerificationBanner";
@@ -75,6 +76,7 @@ function Router() {
       <Route path="/notifications" component={Notifications} />
       <Route path="/professional/verify" component={VerifyProfessional} />
       <Route path="/professional/verify/payment" component={VerifyProfessionalPayment} />
+      <Route path="/politics" component={Politics} />
       <Route component={NotFound} />
     </Switch>
   );

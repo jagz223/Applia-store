@@ -19,6 +19,9 @@ import { registerPayPalRoutes } from "./routes-paypal";
 import { registerRoleRoutes } from "./routes-roles";
 import { registerAdminRoutes } from "./routes-admin";
 import { registerSeoRoutes } from "./seo";
+import { getFullAdminUsers } from "./staff-users";
+import { getIO, sendNotificationToAdmins } from "./socket";
+import { notificationService } from "./services/notification.service";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -128,6 +131,43 @@ export async function registerRoutes(
       // Cambiar estado en verifying_status → identification_verified = pending
       await genFebStorage.upsertVerifyingStatusIdentificationPending(userId);
 
+      // --- Notificar a administradores ---
+      try {
+        const admins = await getFullAdminUsers(genFebStorage);
+        const user = (await genFebStorage.getUserById(userId)) as any;
+        const name = user ? ([user.firstName, user.lastName].filter(Boolean).join(" ").trim() || (user as any).name || (user as any).email || userId) : userId;
+        const msg = `El usuario ${name} ha enviado su identificación para ser Asociado.`;
+        const urlAdim = "/admin?tab=overview";
+
+        for (const admin of admins) {
+          const adminId = String(admin.id);
+          // 1. Notificación persistente
+          await genFebStorage.createNotification({
+            userId: adminId,
+            type: "admin_verification_request",
+            data: { userId, name, message: msg, url: urlAdim, step: "identification" }
+          });
+          // 2. Notificación Push
+          void notificationService.sendPushToUser(adminId, {
+            title: "Nueva solicitud de Asociado",
+            body: msg,
+            data: { url: urlAdim, type: "admin_verification_request", userId }
+          }).catch(err => console.error("[push-admin] Error:", err));
+        }
+
+        // 3. Notificación Real-time (Socket)
+        const io = getIO();
+        if (io) {
+          sendNotificationToAdmins(io, {
+            type: "admin_verification_request",
+            data: { userId, name, message: msg, url: urlAdim, step: "identification" }
+          });
+        }
+      } catch (err) {
+        console.error("Error notificando a admins (id):", err);
+      }
+      // ------------------------------------
+
       const doc = await genFebStorage.getProfessionalVerificationByUserId(userId);
       res.json({
         userId,
@@ -168,6 +208,43 @@ export async function registerRoutes(
 
       // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
       await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate);
+
+      // --- Notificar a administradores ---
+      try {
+        const admins = await getFullAdminUsers(genFebStorage);
+        const user = (await genFebStorage.getUserById(userId)) as any;
+        const name = user ? ([user.firstName, user.lastName].filter(Boolean).join(" ").trim() || (user as any).name || (user as any).email || userId) : userId;
+        const msg = `El usuario ${name} ha enviado el comprobante de pago para ser Asociado.`;
+        const urlAdmin = "/admin?tab=overview";
+
+        for (const admin of admins) {
+          const adminId = String(admin.id);
+          // 1. Notificación persistente
+          await genFebStorage.createNotification({
+            userId: adminId,
+            type: "admin_verification_request",
+            data: { userId, name, message: msg, url: urlAdmin, step: "payment" }
+          });
+          // 2. Notificación Push
+          void notificationService.sendPushToUser(adminId, {
+            title: "Comprobante de pago recibido",
+            body: msg,
+            data: { url: urlAdmin, type: "admin_verification_request", userId }
+          }).catch(err => console.error("[push-admin] Error:", err));
+        }
+
+        // 3. Notificación Real-time (Socket)
+        const io = getIO();
+        if (io) {
+          sendNotificationToAdmins(io, {
+            type: "admin_verification_request",
+            data: { userId, name, message: msg, url: urlAdmin, step: "payment" }
+          });
+        }
+      } catch (err) {
+        console.error("Error notificando a admins (pay):", err);
+      }
+      // ------------------------------------
 
       res.json(updated);
     } catch (e: any) {

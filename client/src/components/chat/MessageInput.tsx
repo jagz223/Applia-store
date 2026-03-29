@@ -8,6 +8,7 @@ interface MessageInputProps {
   onSend: () => void;
   disabled?: boolean;
   isSending?: boolean;
+  placeholder?: string;
 }
 
 export function MessageInput({
@@ -16,6 +17,7 @@ export function MessageInput({
   onSend,
   disabled,
   isSending,
+  placeholder,
 }: MessageInputProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -34,7 +36,7 @@ export function MessageInput({
           <Image className="w-5 h-5" />
         </Button>
         <Input
-          placeholder="Escribe un mensaje..."
+          placeholder={placeholder || "Escribe un mensaje..."}
           className="input-industrial flex-1"
           value={value}
           onChange={(e) => onChange(e.target.value)}

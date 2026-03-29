@@ -29,7 +29,9 @@ export function ConversationListItem({ conversation, isSelected, onSelect }: Con
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
-          <p className="font-medium truncate">{name}</p>
+          <p className={`font-medium truncate ${conversation.otherParticipant?.isDeleted ? "text-muted-foreground italic" : ""}`}>
+            {name}
+          </p>
           <span className="text-xs text-muted-foreground shrink-0 ml-1">
             {conversation.lastMessageAt ? formatListTime(conversation.lastMessageAt) : ""}
           </span>

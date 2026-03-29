@@ -120,6 +120,7 @@ export default function Booking() {
   const hasValidLocation = userLocation.trim().length > 0;
   const [notes, setNotes] = useState("");
   const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
+  const [paymentSelectionOpen, setPaymentSelectionOpen] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
   const [, navigate] = useLocation();
@@ -316,17 +317,30 @@ export default function Booking() {
     }
 
     const selectedServicePrice = Number(selectedServiceForBooking?.price ?? 0);
-    if (Number.isFinite(selectedServicePrice) && selectedServicePrice > 0 && walletBalance < selectedServicePrice) {
-      setInsufficientFundsOpen(true);
-      return;
+    
+    // Abrir el selector de método de pago
+    setPaymentSelectionOpen(true);
+  };
+
+  const confirmBookingWithMethod = (method: "wallet" | "cash") => {
+    setPaymentSelectionOpen(false);
+    
+    if (method === "wallet") {
+      const selectedServicePrice = Number(selectedServiceForBooking?.price ?? 0);
+      if (Number.isFinite(selectedServicePrice) && selectedServicePrice > 0 && walletBalance < selectedServicePrice) {
+        setInsufficientFundsOpen(true);
+        return;
+      }
     }
+
     createBooking.mutate(
       {
-        userId: user.id,
-        serviceId: selectedBookingServiceId,
-        date: bookingDateISO,
+        userId: user!.id,
+        serviceId: selectedBookingServiceId!,
+        date: bookingDateISO!,
         notes: notes.trim() || undefined,
-      },
+        paymentMethod: method,
+      } as any,
       {
         onSuccess: (data) => {
           const providerId = (data as { providerId?: number })?.providerId;
@@ -372,6 +386,43 @@ export default function Booking() {
             >
               Recargar saldo
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      
+      <AlertDialog open={paymentSelectionOpen} onOpenChange={setPaymentSelectionOpen}>
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-2xl font-bold text-center">Forma de Pago</AlertDialogTitle>
+            <AlertDialogDescription className="text-center text-base pt-2">
+              ¿Cómo deseas pagar este servicio?
+              <br />
+              <span className="text-sm text-muted-foreground">
+                (Wallet retiene el saldo de forma segura. Efectivo se paga directamente al asociado).
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid grid-cols-1 gap-4 py-6">
+            <Button 
+              size="lg" 
+              className="h-16 text-lg font-semibold flex flex-col gap-1"
+              onClick={() => confirmBookingWithMethod("wallet")}
+            >
+              <span>Usar Wallet</span>
+              <span className="text-xs font-normal opacity-80">Saldo disponible: ${walletBalance.toFixed(2)}</span>
+            </Button>
+            <Button 
+              variant="outline" 
+              size="lg" 
+              className="h-16 text-lg font-semibold hover:bg-accent/10 flex flex-col gap-1 border-primary/20"
+              onClick={() => confirmBookingWithMethod("cash")}
+            >
+              <span>Pagar en Efectivo</span>
+              <span className="text-xs font-normal text-muted-foreground">Pagas al finalizar el servicio</span>
+            </Button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="w-full sm:w-auto">Volver</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

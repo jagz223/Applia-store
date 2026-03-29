@@ -6,6 +6,7 @@
 export interface ChatParticipant {
   id: string;
   name: string;
+  isDeleted?: boolean;
 }
 
 export interface ConversationEnriched {

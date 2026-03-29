@@ -76,6 +76,8 @@ function buildAuthClientUser(
     avatar: user.avatar,
     bankName: user.bankName,
     accountNumber: user.accountNumber,
+    wallet: user.wallet ?? 0,
+    pendingBalance: user.pendingBalance ?? 0,
     createdAt: user.createdAt,
     acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
     provider: provider ?? null,
@@ -381,6 +383,21 @@ export async function registerAuthRoutes(
   app.post("/api/auth/logout", authenticateJWT, async (req, res) => {
     // En una implementación robusta, blacklistearíamos el token
     res.json({ message: "Sesión cerrada correctamente" });
+  });
+
+  // DELETE /api/auth/account - Eliminar cuenta de usuario
+  app.delete("/api/auth/account", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      
+      // Eliminar el usuario de storage
+      await genFebStorage.deleteUser(userId);
+      
+      res.json({ message: "Cuenta eliminada correctamente" });
+    } catch (error) {
+      console.error("Error eliminando cuenta:", error);
+      res.status(500).json({ message: "Error interno del servidor al eliminar la cuenta" });
+    }
   });
   
   // POST /api/auth/seed-admin - Crear usuario administrador (solo para desarrollo)
