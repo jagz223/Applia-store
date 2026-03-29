@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { User, ArrowLeft, MapPin, Bell, BellOff, Loader2, Info } from "lucide-react";
@@ -73,7 +74,16 @@ export function ChatWindow({
             <User className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <p className="font-medium">{conversation.otherParticipant?.name ?? "Usuario"}</p>
+            <div className="flex items-center gap-2">
+              <p className={`font-medium ${conversation.otherParticipant?.isDeleted ? "text-muted-foreground italic" : ""}`}>
+                {conversation.otherParticipant?.name ?? "Usuario"}
+              </p>
+              {conversation.otherParticipant?.isDeleted && (
+                <Badge variant="outline" className="text-[10px] h-4 px-1 text-muted-foreground border-muted-foreground">
+                  Deshabilitado
+                </Badge>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground">Mensajes</p>
           </div>
         </div>
@@ -145,6 +155,8 @@ export function ChatWindow({
         onChange={onMessageInputChange}
         onSend={onSendMessage}
         isSending={isSending}
+        disabled={isSending || !!conversation.otherParticipant?.isDeleted}
+        placeholder={conversation.otherParticipant?.isDeleted ? "No puedes enviar mensajes a un usuario deshabilitado" : undefined}
       />
     </div>
   );

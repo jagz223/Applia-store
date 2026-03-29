@@ -89,6 +89,8 @@ interface User {
    * Solo aplica a `role === "professional"`; por defecto false al volverse profesional.
    */
   acceptedProviderTermsOfUse?: boolean;
+  /** Timestamp of soft deletion (null if active). */
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -133,20 +135,22 @@ class FirestoreStorageImpl implements IStorage {
 
   // ============ USUARIOS ============
 
-  async getUserById(id: string): Promise<User | undefined> {
+  async getUserById(id: string, includeDeleted?: boolean): Promise<User | undefined> {
     if (!this.db) return undefined;
     
     const doc = await this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(id).get();
     if (!doc.exists) return undefined;
     
     const data = doc.data();
+    if (!includeDeleted && data?.deletedAt) return undefined;
+    
     return {
       id: doc.id,
       ...data,
     } as User;
   }
 
-  async getUserByEmail(email: string): Promise<User | undefined> {
+  async getUserByEmail(email: string, includeDeleted?: boolean): Promise<User | undefined> {
     if (!this.db) return undefined;
     
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.USERS)
@@ -157,9 +161,12 @@ class FirestoreStorageImpl implements IStorage {
     if (snapshot.empty) return undefined;
     
     const doc = snapshot.docs[0];
+    const data = doc.data();
+    if (!includeDeleted && data?.deletedAt) return undefined;
+
     return {
       id: doc.id,
-      ...doc.data(),
+      ...data,
     } as User;
   }
 
@@ -203,6 +210,35 @@ class FirestoreStorageImpl implements IStorage {
   async createUser(user: Partial<User>): Promise<User> {
     if (!this.db) throw new Error("Firestore no configurado");
     
+    // Buscar si el usuario ya existe (incluyendo eliminados)
+    const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.USERS)
+      .where("email", "==", user.email)
+      .limit(1)
+      .get();
+    
+    if (!snapshot.empty) {
+      const doc = snapshot.docs[0];
+      const existingData = doc.data();
+      
+      // Si el usuario existe y NO está eliminado, error
+      if (!existingData.deletedAt) {
+        throw new Error("El usuario con este email ya existe");
+      }
+      
+      // Si está eliminado, lo reactivamos
+      const now = new Date();
+      const reactivatedUser = {
+        ...existingData,
+        ...user, // Actualizar datos con lo nuevo (password, nombre, etc.)
+        deletedAt: null,
+        isActive: true,
+        updatedAt: now,
+      };
+      
+      await doc.ref.update(reactivatedUser);
+      return { id: doc.id, ...reactivatedUser } as User;
+    }
+
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc();
     const now = new Date();
     
@@ -224,6 +260,7 @@ class FirestoreStorageImpl implements IStorage {
       ...(role === "professional"
         ? { acceptedProviderTermsOfUse: user.acceptedProviderTermsOfUse ?? false }
         : {}),
+      deletedAt: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -271,6 +308,16 @@ class FirestoreStorageImpl implements IStorage {
     
     await this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(id).update({
       password,
+      updatedAt: new Date(),
+    });
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    if (!this.db) return;
+    // Realizar soft delete: marcar como inactivo y establecer fecha de eliminación
+    await this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc(id).update({
+      isActive: false,
+      deletedAt: new Date(),
       updatedAt: new Date(),
     });
   }
@@ -774,11 +821,12 @@ class FirestoreStorageImpl implements IStorage {
       notes: booking.notes ?? null,
       cost: costNum,
       confirmedByClient: false,
+      paymentMethod: (booking as any).paymentMethod ?? "wallet",
       status: "pending",
       createdAt: new Date(),
     };
     await docRef.set(newBooking);
-    return newBooking as Booking;
+    return newBooking as unknown as Booking;
   }
 
   async updateBookingStatus(id: number, status: string): Promise<Booking | undefined> {
@@ -1044,13 +1092,28 @@ class FirestoreStorageImpl implements IStorage {
       const bookingRef = bookingsColl.doc(bookingId.toString());
       const bookingSnap = await t.get(bookingRef);
       if (!bookingSnap.exists) return undefined;
-      const data = bookingSnap.data() as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean };
+      const data = bookingSnap.data() as { 
+        status?: string; 
+        userId?: string; 
+        providerId?: number; 
+        cost?: number; 
+        confirmedByClient?: boolean;
+        paymentMethod?: string;
+      };
+      
       if (data.status === "completed") return { id: bookingId, ...data } as Booking;
-      if (data.confirmedByClient !== true) {
-        throw new Error("El servicio requiere confirmación previa del cliente para procesar los fondos retenidos");
-      }
+      
+      const paymentMethod = data.paymentMethod || "wallet";
       const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
       if (cost <= 0) throw new Error("Costo de reserva no definido");
+      
+      // Validaciones específicas por método de pago
+      if (paymentMethod === "wallet") {
+        if (data.confirmedByClient !== true) {
+          throw new Error("El servicio requiere confirmación previa del cliente para procesar los fondos retenidos");
+        }
+      }
+
       const commission = calcCommission(cost, commissionRate);
       const providerNet = calcProviderNet(cost, commissionRate);
       const clientUserId = data.userId;
@@ -1058,13 +1121,18 @@ class FirestoreStorageImpl implements IStorage {
       if (!clientUserId) throw new Error("Reserva sin cliente asociado");
       if (providerId == null) throw new Error("Reserva sin profesional asociado");
 
+      // Datos del Cliente (solo necesarios para Wallet)
       const clientRef = usersColl.doc(clientUserId);
       const clientSnap = await t.get(clientRef);
       if (!clientSnap.exists) throw new Error("Usuario cliente no encontrado");
       const clientData = clientSnap.data() as { pendingBalance?: number };
       const clientPending = typeof clientData.pendingBalance === "number" ? clientData.pendingBalance : 0;
-      if (clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
+      
+      if (paymentMethod === "wallet") {
+        if (clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
+      }
 
+      // Datos del Profesional (usuario asociado al providerId)
       const providerRef = providersColl.doc(String(providerId));
       const providerSnap = await t.get(providerRef);
       if (!providerSnap.exists) throw new Error("Profesional no encontrado");
@@ -1072,72 +1140,72 @@ class FirestoreStorageImpl implements IStorage {
       if (!providerUserId) throw new Error("Profesional sin usuario asociado");
 
       const providerUserRef = usersColl.doc(providerUserId);
-      const providerSnap2 = await t.get(providerUserRef);
-      if (!providerSnap2.exists) throw new Error("Usuario del profesional no encontrado");
-      const providerWallet = typeof (providerSnap2.data() as { wallet?: number }).wallet === "number" ? (providerSnap2.data() as { wallet: number }).wallet : 0;
-      const providerTotalEarnings =
-        typeof (providerSnap2.data() as { totalEarnings?: number }).totalEarnings === "number"
-          ? (providerSnap2.data() as { totalEarnings: number }).totalEarnings
-          : 0;
+      const providerUserSnap = await t.get(providerUserRef);
+      if (!providerUserSnap.exists) throw new Error("Usuario del profesional no encontrado");
+      const providerWallet = typeof (providerUserSnap.data() as { wallet?: number }).wallet === "number" ? (providerUserSnap.data() as { wallet: number }).wallet : 0;
+      const providerTotalEarnings = typeof (providerUserSnap.data() as { totalEarnings?: number }).totalEarnings === "number" ? (providerUserSnap.data() as { totalEarnings: number }).totalEarnings : 0;
 
+      // Validación para Cash: el profesional debe tener saldo para la comisión
+      if (paymentMethod === "cash") {
+        if (providerWallet < commission) {
+          throw new Error("Saldo insuficiente en tu wallet para pagar la comisión del servicio ($" + commission.toFixed(2) + "). Por favor recarga.");
+        }
+      }
+
+      // Datos del Admin
       const adminUserRef = usersColl.doc(adminUserId);
       const adminSnap2 = await t.get(adminUserRef);
       if (!adminSnap2.exists) throw new Error("Admin no encontrado");
       const adminWallet = typeof (adminSnap2.data() as { wallet?: number }).wallet === "number" ? (adminSnap2.data() as { wallet: number }).wallet : 0;
-      const adminTotalEarnings =
-        typeof (adminSnap2.data() as { totalEarnings?: number }).totalEarnings === "number"
-          ? (adminSnap2.data() as { totalEarnings: number }).totalEarnings
-          : 0;
+      const adminTotalEarnings = typeof (adminSnap2.data() as { totalEarnings?: number }).totalEarnings === "number" ? (adminSnap2.data() as { totalEarnings: number }).totalEarnings : 0;
 
       const now = new Date();
       t.update(bookingRef, { status: "completed", completedAt: now });
-      t.update(clientRef, { pendingBalance: clientPending - cost, updatedAt: now });
-      t.update(providerUserRef, { wallet: providerWallet + providerNet, totalEarnings: providerTotalEarnings + providerNet, updatedAt: now });
+
+      if (paymentMethod === "wallet") {
+        // Lógica Wallet: Client Pending -> Provider Wallet
+        t.update(clientRef, { pendingBalance: clientPending - cost, updatedAt: now });
+        t.update(providerUserRef, { 
+          wallet: providerWallet + providerNet, 
+          totalEarnings: providerTotalEarnings + providerNet, 
+          updatedAt: now 
+        });
+        
+        // Registros de transferencia para Wallet
+        t.set(transfersColl.doc(String(transferId1)), {
+          id: transferId1, userId: clientUserId, fromUserId: null, amount: cost,
+          transferType: "payment", status: "completed", description: "Pago por servicio (Wallet)",
+          referenceId: String(bookingId), currency: "USD", createdAt: now,
+        });
+        t.set(transfersColl.doc(String(transferId2)), {
+          id: transferId2, userId: providerUserId, fromUserId: null, amount: providerNet,
+          transferType: "service_payment", status: "completed", description: "Pago por servicio completado (neto)",
+          referenceId: String(bookingId), currency: "USD", createdAt: now,
+        });
+      } else {
+        // Lógica Cash: Solo descontar comisión del profesional
+        t.update(providerUserRef, { 
+          wallet: providerWallet - commission, 
+          updatedAt: now 
+        });
+        
+        // Registro de transferencia para Cash (solo la comisión)
+        t.set(transfersColl.doc(String(transferId2)), {
+          id: transferId2, userId: providerUserId, fromUserId: null, amount: commission,
+          transferType: "service_payment", status: "completed", description: "Comisión de plataforma por servicio en efectivo",
+          referenceId: String(bookingId), currency: "USD", createdAt: now,
+        });
+      }
+
+      // Admin recibe la comisión en ambos casos
       t.update(adminUserRef, { wallet: adminWallet + commission, totalEarnings: adminTotalEarnings + commission, updatedAt: now });
+      t.set(transfersColl.doc(String(transferId3)), {
+        id: transferId3, userId: adminUserId, fromUserId: null, amount: commission,
+        transferType: "service_payment", status: "completed", description: `Comisión de plataforma por servicio (${paymentMethod})`,
+        referenceId: String(bookingId), currency: "USD", createdAt: now,
+      });
 
-      const clientTransferRecord = {
-        id: transferId1,
-        userId: clientUserId,
-        fromUserId: null,
-        amount: cost,
-        transferType: "payment" as WalletTransferType,
-        status: "completed" as WalletTransferStatus,
-        description: "Pago por servicio",
-        referenceId: String(bookingId),
-        currency: "USD",
-        createdAt: now,
-      };
-      const providerTransferRecord = {
-        id: transferId2,
-        userId: providerUserId,
-        fromUserId: null,
-        amount: providerNet,
-        transferType: "service_payment" as WalletTransferType,
-        status: "completed" as WalletTransferStatus,
-        description: "Pago por servicio completado (neto)",
-        referenceId: String(bookingId),
-        currency: "USD",
-        createdAt: now,
-      };
-
-      // Tercera fila: comisión acreditada a la plataforma (admin).
-      const platformCommissionTransferRecord = {
-        id: transferId3,
-        userId: adminUserId,
-        fromUserId: null,
-        amount: commission,
-        transferType: "service_payment" as WalletTransferType,
-        status: "completed" as WalletTransferStatus,
-        description: "Comisión de plataforma por servicio",
-        referenceId: String(bookingId),
-        currency: "USD",
-        createdAt: now,
-      };
-      t.set(transfersColl.doc(String(transferId1)), clientTransferRecord);
-      t.set(transfersColl.doc(String(transferId2)), providerTransferRecord);
-      t.set(transfersColl.doc(String(transferId3)), platformCommissionTransferRecord);
-
-      return { id: bookingId, ...data, status: "completed" } as Booking;
+      return { id: bookingId, ...data, status: "completed" } as unknown as Booking;
     });
   }
 

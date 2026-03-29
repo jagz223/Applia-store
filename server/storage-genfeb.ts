@@ -265,12 +265,16 @@ export class InMemoryStorage implements IStorage {
   
   // ==================== USUARIOS (AUTH JWT) ====================
   
-  async getUserById(id: string): Promise<any | undefined> {
-    return this.users.find(u => u.id === id);
+  async getUserById(id: string, includeDeleted?: boolean): Promise<any | undefined> {
+    const user = this.users.find(u => u.id === id);
+    if (!includeDeleted && user?.deletedAt) return undefined;
+    return user;
   }
   
-  async getUserByEmail(email: string): Promise<any | undefined> {
-    return this.users.find(u => u.email === email);
+  async getUserByEmail(email: string, includeDeleted?: boolean): Promise<any | undefined> {
+    const user = this.users.find(u => u.email === email);
+    if (!includeDeleted && user?.deletedAt) return undefined;
+    return user;
   }
 
   async getUsers(params: { role?: string; name?: string; email?: string; lastName?: string; search?: string; page: number; limit: number }): Promise<{ users: any[]; total: number }> {
@@ -312,7 +316,18 @@ export class InMemoryStorage implements IStorage {
     // Verificar si el email ya existe
     const existingUser = this.users.find(u => u.email === user.email);
     if (existingUser) {
-      throw new Error("El usuario con este email ya existe");
+      if (!existingUser.deletedAt) {
+        throw new Error("El usuario con este email ya existe");
+      }
+      
+      // Reactivar usuario eliminado
+      const now = new Date();
+      Object.assign(existingUser, user, {
+        deletedAt: null,
+        isActive: true,
+        updatedAt: now,
+      });
+      return existingUser;
     }
     
     const role = user.role || "client";
@@ -327,6 +342,7 @@ export class InMemoryStorage implements IStorage {
       pendingBalance: user.pendingBalance ?? 0,
       rating: user.rating ?? 5,
       ratingCount: user.ratingCount ?? 0,
+      deletedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -353,6 +369,15 @@ export class InMemoryStorage implements IStorage {
     const user = this.users.find(u => u.id === id);
     if (user) {
       user.password = password;
+      user.updatedAt = new Date();
+    }
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    const user = this.users.find(u => u.id === id);
+    if (user) {
+      user.isActive = false;
+      user.deletedAt = new Date();
       user.updatedAt = new Date();
     }
   }
@@ -411,7 +436,8 @@ export class InMemoryStorage implements IStorage {
     const booking = this.bookings.find(b => b.id === bookingId) as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean } | undefined;
     if (!booking) return undefined;
     if (booking.status === "completed") return booking;
-    if (booking.confirmedByClient !== true) {
+    const isCash = (booking as any).paymentMethod === "cash";
+    if (booking.confirmedByClient !== true && !isCash) {
       throw new Error("El servicio requiere confirmación previa del cliente para procesar los fondos retenidos");
     }
     const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
@@ -422,7 +448,7 @@ export class InMemoryStorage implements IStorage {
     const client = this.users.find((u: { id?: string }) => u.id === booking.userId);
     if (!client) throw new Error("Usuario cliente no encontrado");
     const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
-    if (clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
+    if (!isCash && clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
 
     const provider = this.providers.find((p: { id?: number }) => p.id === booking.providerId);
     if (!provider) throw new Error("Profesional no encontrado");
@@ -439,65 +465,73 @@ export class InMemoryStorage implements IStorage {
     const adminUserTotalEarnings =
       typeof (adminUser as { totalEarnings?: number }).totalEarnings === "number" ? (adminUser as { totalEarnings: number }).totalEarnings : 0;
 
-    (client as { pendingBalance: number }).pendingBalance = clientPending - cost;
-    (providerUser as { wallet: number }).wallet = providerWallet + providerNet;
-    (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + providerNet;
-    (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
-    (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
+    if (!isCash) {
+      (client as { pendingBalance: number }).pendingBalance = clientPending - cost;
+      (providerUser as { wallet: number }).wallet = providerWallet + providerNet;
+      (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + providerNet;
+      (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
+      (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
+    } else {
+      // Para efectivo, el profesional ya cobró físicamente. 
+      // La plataforma no retiene fondos ni cobra comisión por ahora.
+      (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + cost;
+    }
     (booking as { status: string }).status = "completed";
     (booking as { completedAt?: Date }).completedAt = new Date();
 
     const now = new Date();
-    const refId = String(bookingId);
-    const clientTransferRecord = {
-      id: this.walletTransferIdCounter++,
-      userId: booking.userId,
-      fromUserId: null,
-      amount: cost,
-      transferType: "payment",
-      status: "completed",
-      description: "Pago por servicio",
-      referenceId: refId,
-      currency: "USD",
-      createdAt: now,
-    };
-    const providerTransferRecord = {
-      id: this.walletTransferIdCounter++,
-      userId: providerUserId,
-      fromUserId: null,
-      amount: providerNet,
-      transferType: "service_payment",
-      status: "completed",
-      description: "Pago por servicio completado (neto)",
-      referenceId: refId,
-      currency: "USD",
-      createdAt: now,
-    };
-    const commissionTransferRecord = {
-      id: this.walletTransferIdCounter++,
-      userId: adminUser.id,
-      fromUserId: null,
-      amount: commission,
-      transferType: "service_payment",
-      status: "completed",
-      description: "Comisión de plataforma por servicio",
-      referenceId: refId,
-      currency: "USD",
-      createdAt: now,
-    };
-    this.walletTransfers.push(clientTransferRecord);
-    this.walletTransfers.push(providerTransferRecord);
-    this.walletTransfers.push(commissionTransferRecord);
+    if (!isCash) {
+      const refId = String(bookingId);
+      const clientTransferRecord = {
+        id: this.walletTransferIdCounter++,
+        userId: booking.userId,
+        fromUserId: null,
+        amount: cost,
+        transferType: "payment",
+        status: "completed",
+        description: "Pago por servicio",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      };
+      const providerTransferRecord = {
+        id: this.walletTransferIdCounter++,
+        userId: providerUserId,
+        fromUserId: null,
+        amount: providerNet,
+        transferType: "service_payment",
+        status: "completed",
+        description: "Pago por servicio completado (neto)",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      };
+      const commissionTransferRecord = {
+        id: this.walletTransferIdCounter++,
+        userId: adminUser.id,
+        fromUserId: null,
+        amount: commission,
+        transferType: "service_payment",
+        status: "completed",
+        description: "Comisión de plataforma por servicio",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      };
+      this.walletTransfers.push(clientTransferRecord);
+      this.walletTransfers.push(providerTransferRecord);
+      this.walletTransfers.push(commissionTransferRecord);
+    }
 
     return { ...booking, status: "completed" };
   }
 
   async cancelBookingAndRefundClientEscrow(bookingId: number): Promise<any | undefined> {
-    const booking = this.bookings.find(b => b.id === bookingId) as { status?: string; userId?: string; cost?: number; confirmedByClient?: boolean } | undefined;
+    const booking = this.bookings.find(b => b.id === bookingId) as any;
     if (!booking) return undefined;
 
-    // Si el cliente no confirmó el pago, solo marcar cancelado.
-    if (booking.confirmedByClient !== true) {
+    // Si el cliente no confirmó el pago o es pago en efectivo, solo marcar cancelado.
+    if (booking.confirmedByClient !== true || booking.paymentMethod === "cash") {
       (booking as { status: string }).status = "cancelled";
       (booking as { cancelledAt?: Date }).cancelledAt = new Date();
       return { ...booking, status: "cancelled" };

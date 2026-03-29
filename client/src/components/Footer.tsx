@@ -48,6 +48,11 @@ export function Footer() {
                   Centro de Ayuda
                 </Link>
               </li>
+              <li>
+                <Link href="/politics" className="hover:text-primary transition-colors">
+                  Términos y Condiciones
+                </Link>
+              </li>
             </ul>
           </div>
 

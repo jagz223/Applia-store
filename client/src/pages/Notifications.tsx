@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, Link } from "wouter";
-import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield } from "lucide-react";
+import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield, ShieldCheck, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -89,12 +89,17 @@ function getNotificationPath(notification: { type: string; data?: any }): string
     case "recharge_rejected":
     case "balance_credited":
       return "/movimientos";
+    case "admin_verification_request":
+      return data.url ?? "/admin?tab=overview";
+    case "verification_result":
+    case "verification_welcome":
+      return data.url ?? "/professional-dashboard";
     default:
       return "/dashboard";
   }
 }
 
-function getIcon(type: string) {
+function getIcon(type: string, data?: any) {
   switch (type) {
     case "message":
       return <MessageSquare className="h-4 w-4 text-blue-500" />;
@@ -119,6 +124,14 @@ function getIcon(type: string) {
     case "withdrawal_approved":
     case "withdrawal_rejected":
       return <Bell className="h-4 w-4 text-green-500" />;
+    case "admin_verification_request":
+      return <Shield className="h-4 w-4 text-primary" />;
+    case "verification_result":
+      return data?.status === "rejected" 
+        ? <ShieldAlert className="h-4 w-4 text-red-500" /> 
+        : <ShieldCheck className="h-4 w-4 text-green-500" />;
+    case "verification_welcome":
+      return <ShieldCheck className="h-4 w-4 text-primary animate-pulse" />;
     default:
       return <Bell className="h-4 w-4 text-gray-500" />;
   }
@@ -162,6 +175,18 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
     return "Notificación del administrador";
   }
 
+  if (type === "admin_verification_request") {
+    return data.step === "payment" ? "Comprobante de pago recibido" : "Nueva solicitud de Asociado";
+  }
+
+  if (type === "verification_result") {
+    if (d.step === "identification") return d.status === "verified" ? "Identificación aprobada" : "Identificación rechazada";
+    if (d.step === "transaction") return d.status === "verified" ? "Pago verificado" : "Pago rechazado";
+    return "Resultado de verificación";
+  }
+
+  if (type === "verification_welcome") return "¡Bienvenido Asociado!";
+
   if (type === "message") return conversationSenderName ? `Nuevo mensaje de ${truncateText(conversationSenderName, 18)}` : "Nuevo mensaje";
   return "Notificación";
 }
@@ -176,7 +201,8 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     return "La reserva fue actualizada.";
   }
   if (type === "booking" && d.type === "new_booking") {
-    return "Tienes una nueva solicitud de reserva. Revisa el detalle en tu Panel Asociado.";
+    const method = d.booking?.paymentMethod === "cash" ? "Efectivo" : "Billetera";
+    return `Tienes una nueva solicitud de reserva (Pago: ${method}). Revisa el detalle en tu Panel Asociado.`;
   }
   // 1) Mensajes de reserva (comunes)
   if (type === "booking_confirmed_by_client") {
@@ -264,6 +290,14 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
       if (typeof d.data?.message === "string") return d.data.message;
       return "El retiro fue procesado por otro administrador. Revisa Solicitudes de Retiro.";
     }
+  }
+
+  if (type === "admin_verification_request") {
+    return d.message ?? d.data?.message ?? "Se ha recibido una nueva solicitud de verificación de asociado.";
+  }
+
+  if (type === "verification_result" || type === "verification_welcome") {
+    return d.message ?? d.data?.message ?? "Tu estado de verificación ha sido actualizado.";
   }
 
   return null;
@@ -398,7 +432,7 @@ export default function Notifications() {
                     }`}
                   >
                     <div className="flex items-start gap-2">
-                      {getIcon(notification.type)}
+                      {getIcon(notification.type, data)}
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm">{title}</p>
                         {detail && <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>}

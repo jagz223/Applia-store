@@ -18,6 +18,19 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 /** Solo permite dígitos, espacios y guiones en número de cuenta. */
 function sanitizeAccountNumber(value: string): string {
@@ -40,9 +53,14 @@ const profileSchema = z.object({
 type ProfileForm = z.infer<typeof profileSchema>;
 
 export default function Settings() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
+  
+  const [showFirstConfirm, setShowFirstConfirm] = useState(false);
+  const [showSecondConfirm, setShowSecondConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const form = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -101,6 +119,40 @@ export default function Settings() {
         title: "Error",
         description: e instanceof Error ? e.message : "No se pudo actualizar el perfil.",
       });
+    }
+  };
+
+  const onDeleteAccount = async () => {
+    setIsDeleting(true);
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch("/api/auth/account", {
+        method: "DELETE",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Error al eliminar la cuenta");
+      }
+      
+      toast({ 
+        title: "Cuenta eliminada", 
+        description: "Tu cuenta ha sido eliminada. Te esperamos luego en GenFeb para que sigas recibiendo y brindando los mejores servicios." 
+      });
+      
+      // Cerrar sesión y redirigir
+      await logout();
+      setLocation("/");
+    } catch (e: unknown) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: e instanceof Error ? e.message : "No se pudo eliminar la cuenta.",
+      });
+      setIsDeleting(false);
     }
   };
 
@@ -263,6 +315,92 @@ export default function Settings() {
           </div>
         </form>
       </Form>
+
+      <Card className="mt-12 border-destructive/20 shadow-sm transition-all hover:shadow-md bg-destructive/5">
+        <CardHeader>
+          <CardTitle className="text-destructive flex items-center gap-2">
+            <Trash2 className="h-5 w-5" />
+            Zona de Peligro
+          </CardTitle>
+          <CardDescription>
+            Acciones permanentes sobre tu cuenta.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center">
+          <p className="text-sm text-muted-foreground mb-6 text-center leading-relaxed">
+            Al desactivar tu cuenta, tu perfil y servicios serán eliminados de la plataforma. 
+            Perderás el acceso inmediato a tu panel y balance.
+          </p>
+          <Button 
+            variant="destructive" 
+            onClick={() => setShowFirstConfirm(true)}
+            className="w-full sm:w-auto bg-destructive hover:bg-destructive/90 text-white font-medium px-8 h-12 rounded-lg shadow-lg shadow-destructive/20"
+          >
+            Eliminar mi cuenta
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Primer Pop-up de Confirmación */}
+      <AlertDialog open={showFirstConfirm} onOpenChange={setShowFirstConfirm}>
+        <AlertDialogContent className="rounded-xl border-destructive/10">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg font-bold">¿Eliminar cuenta?</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground leading-relaxed">
+              Al eliminar tu cuenta, tu perfil dejará de ser visible, se cerrará tu sesión automáticamente y perderás el acceso a tus servicios y balance actual.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-6">
+            <AlertDialogCancel className="rounded-lg">Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => {
+                setShowFirstConfirm(false);
+                setShowSecondConfirm(true);
+              }}
+              className="bg-destructive hover:bg-destructive/90 text-white rounded-lg px-6"
+            >
+              Continuar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Segundo Pop-up de Confirmación (Explícito) */}
+      <AlertDialog open={showSecondConfirm} onOpenChange={setShowSecondConfirm}>
+        <AlertDialogContent className="rounded-xl border-destructive/20 shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive text-lg font-bold">Confirmación Final</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground leading-relaxed">
+              {((user as any)?.wallet > 0 || (user as any)?.pendingBalance > 0) ? (
+                <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive font-medium text-sm">
+                  Aviso: Tienes un balance de ${(Number((user as any)?.wallet || 0) + Number((user as any)?.pendingBalance || 0)).toFixed(2)}. Este saldo quedará inaccesible de inmediato.
+                </div>
+              ) : null}
+              ¿Estás seguro de finalizar? Se cerrará tu sesión y se suspenderá tu cuenta y todo historial asociado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-6">
+            <AlertDialogCancel disabled={isDeleting} className="rounded-lg">Regresar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={(e) => {
+                e.preventDefault();
+                onDeleteAccount();
+              }}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90 text-white rounded-lg font-bold px-8 shadow-lg shadow-destructive/20"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Desactivando...
+                </>
+              ) : (
+                "Confirmar desactivación"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

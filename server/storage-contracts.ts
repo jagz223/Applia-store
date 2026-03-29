@@ -19,8 +19,8 @@ import type {
 
 /** Contrato para operaciones de usuarios (auth, listado, CRUD). */
 export interface IUserStorage {
-  getUserById(id: string): Promise<unknown | undefined>;
-  getUserByEmail(email: string): Promise<unknown | undefined>;
+  getUserById(id: string, includeDeleted?: boolean): Promise<unknown | undefined>;
+  getUserByEmail(email: string, includeDeleted?: boolean): Promise<unknown | undefined>;
   getUsers(params: {
     role?: string;
     name?: string;
@@ -33,6 +33,7 @@ export interface IUserStorage {
   createUser(user: unknown): Promise<unknown>;
   updateUser(id: string, data: unknown): Promise<unknown | undefined>;
   updateUserPassword(id: string, password: string): Promise<void>;
+  deleteUser(id: string): Promise<void>;
 }
 
 /** Contrato para definición de roles (catálogo de roles del sistema). */
@@ -89,7 +90,7 @@ export interface IBookingStorage {
   getBookingsByUser(userId: string, status?: string): Promise<(Booking & { service: ServiceWithProvider })[]>;
   getBookingsByProvider(providerId: number): Promise<(Booking & { service: ServiceWithProvider; user: unknown })[]>;
   getBooking(id: number): Promise<Booking | undefined>;
-  createBooking(booking: InsertBooking & { status: string; providerId?: number }): Promise<Booking>;
+  createBooking(booking: InsertBooking & { status: string; providerId?: number; paymentMethod?: string }): Promise<Booking>;
   updateBookingStatus(id: number, status: string): Promise<Booking | undefined>;
   /** Actualizar costo de la reserva (solo permitido cuando status es 'pending'). */
   updateBookingCost(id: number, cost: number): Promise<Booking | undefined>;

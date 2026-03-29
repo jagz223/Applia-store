@@ -1,7 +1,7 @@
 import { useRoute, Link, useLocation } from "wouter";
 import { useService, useCreateBooking, useCurrentProvider, useBookings, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
-import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft, MessageSquare, Pencil, User } from "lucide-react";
+import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft, MessageSquare, Pencil, User, Wallet, Banknote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,13 +32,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 
 export default function ServiceDetails() {
   const [, params] = useRoute("/service/:id");
   const [, setLocation] = useLocation();
   const id = parseInt(params?.id || "0");
-  const { data: service, isLoading } = useService(id);
+  const { data: serviceRaw, isLoading } = useService(id);
+  const service = serviceRaw as any; // Cast for easier access to nested provider/user
   const { user, isAuthenticated } = useAuth();
+  // ... rest of the component
   const { data: myProviderProfile } = useCurrentProvider();
   const { data: myBookings } = useBookings();
   const { data: walletData, isLoading: walletLoading } = useWallet({ enabled: isAuthenticated });
@@ -54,6 +58,7 @@ export default function ServiceDetails() {
   const [notes, setNotes] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"wallet" | "cash">("wallet");
   const { toast } = useToast();
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
 
@@ -77,8 +82,8 @@ export default function ServiceDetails() {
       return;
     }
 
-    const servicePrice = Number(service.price ?? 0);
-    if (Number.isFinite(servicePrice) && servicePrice > 0 && walletBalance < servicePrice) {
+    const servicePrice = Number(service?.price ?? 0);
+    if (service && paymentMethod === "wallet" && Number.isFinite(servicePrice) && servicePrice > 0 && walletBalance < servicePrice) {
       setInsufficientFundsOpen(true);
       return;
     }
@@ -87,12 +92,13 @@ export default function ServiceDetails() {
       {
         userId: user.id,
         serviceId: id,
-        date: date.toISOString(),
+        date: date.toISOString() as any,
         notes: notes,
+        paymentMethod: paymentMethod,
       },
       {
         onSuccess: (data) => {
-          const providerId = (service as { providerId?: number; provider?: { id: number } }).providerId ?? service?.provider?.id;
+          const providerId = (service as any).providerId ?? (service as any).provider?.id;
           if (providerId != null && notifyNewBooking) {
             notifyNewBooking(String(providerId), data);
           }
@@ -115,7 +121,7 @@ export default function ServiceDetails() {
       <div className="container py-20 text-center">
         <h1 className="text-2xl font-bold">Servicio no encontrado</h1>
         <Link href="/explore">
-          <Button variant="link">Volver a explorar</Button>
+          <Button variant="ghost">Volver a explorar</Button>
         </Link>
       </div>
     );
@@ -283,6 +289,45 @@ export default function ServiceDetails() {
                           disabled={isBeforeToday}
                         />
                       </div>
+
+                      <div className="space-y-3">
+                        <Label className="text-sm font-bold">Método de pago</Label>
+                        <RadioGroup 
+                          value={paymentMethod} 
+                          onValueChange={(val: any) => setPaymentMethod(val)}
+                          className="grid grid-cols-2 gap-4"
+                        >
+                          <div>
+                            <RadioGroupItem value="wallet" id="wallet" className="peer sr-only" />
+                            <Label
+                              htmlFor="wallet"
+                              className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all"
+                            >
+                              <Wallet className="mb-2 h-6 w-6" />
+                              <span className="text-xs font-medium">Billetera</span>
+                              <span className="text-[10px] text-muted-foreground mt-1">${walletBalance.toFixed(2)}</span>
+                            </Label>
+                          </div>
+                          <div>
+                            <RadioGroupItem value="cash" id="cash" className="peer sr-only" />
+                            <Label
+                              htmlFor="cash"
+                              className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all"
+                            >
+                              <Banknote className="mb-2 h-6 w-6" />
+                              <span className="text-xs font-medium">Efectivo</span>
+                              <span className="text-[10px] text-muted-foreground mt-1">Pago físico</span>
+                            </Label>
+                          </div>
+                        </RadioGroup>
+                        {paymentMethod === "wallet" && walletBalance < Number(service.price) && (
+                          <p className="text-[11px] text-red-500 font-medium">Saldo insuficiente para este método.</p>
+                        )}
+                        {paymentMethod === "cash" && (
+                          <p className="text-[11px] text-muted-foreground">Paga directamente al asociado al finalizar el servicio.</p>
+                        )}
+                      </div>
+
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Notas para el asociado</label>
                         <Textarea 

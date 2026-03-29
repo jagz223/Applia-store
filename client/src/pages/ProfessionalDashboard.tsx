@@ -5,7 +5,7 @@ import {
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
-  CheckCircle2, XCircle, Banknote, Inbox, PlayCircle, History, UserPlus, Receipt
+  CheckCircle2, XCircle, Banknote, Wallet, Inbox, PlayCircle, History, UserPlus, Receipt
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -329,6 +329,7 @@ type BookingItem = {
   user?: { firstName?: string; lastName?: string; name?: string };
   service?: { title: string; price?: string };
   userId?: string;
+  paymentMethod?: string;
 };
 
 const BOOKINGS_SUB_TABS = ["pending", "in_progress", "ready", "history"] as const;
@@ -499,7 +500,21 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
         className={`flex flex-col sm:flex-row items-start sm:justify-between gap-4 p-4 border border-border rounded-lg bg-card ${isHighlighted ? "notification-highlight" : ""}`}
       >
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-foreground">{booking.service?.title ?? "Servicio"}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-medium text-foreground">{booking.service?.title ?? "Servicio"}</p>
+            {booking.paymentMethod === "cash" && (
+              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
+                <Banknote className="h-3 w-3" />
+                EFECTIVO
+              </Badge>
+            )}
+            {booking.paymentMethod === "wallet" && (
+              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
+                <Wallet className="h-3 w-3" />
+                BILLETERA
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">Cliente: {clientName}</p>
           {isPending ? (
             <div className="flex flex-wrap items-center gap-2 mt-2">
@@ -576,7 +591,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 Chat
               </Link>
             </Button>
-            <Button variant="link" className="h-auto p-0 text-primary" asChild>
+            <Button variant="ghost" className="h-auto p-0 text-primary" asChild>
               <Link href={`/service/${booking.serviceId}`}>Ver servicio</Link>
             </Button>
           </div>

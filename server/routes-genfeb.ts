@@ -24,6 +24,7 @@ const createBookingBodySchema = z.object({
   serviceId: z.number({ required_error: "serviceId es requerido" }),
   date: z.string().min(1, "date es requerido"),
   notes: z.string().optional(),
+  paymentMethod: z.enum(["wallet", "cash"]).optional().default("wallet"),
 });
 
 const updateBookingStatusSchema = z.object({
@@ -149,6 +150,7 @@ export async function registerGenFebRoutes(
         notes: data.notes ?? undefined,
         status: "pending",
         providerId: Number(providerId),
+        paymentMethod: (data as any).paymentMethod,
       });
       const provider = await storage.getProvider(Number(providerId));
       const providerUserId = provider ? (provider as { userId?: string }).userId : undefined;
@@ -156,13 +158,30 @@ export async function registerGenFebRoutes(
         await storage.createNotification({
           userId: providerUserId,
           type: "booking",
-          data: { type: "new_booking", booking: { id: (booking as { id: number }).id, serviceId: data.serviceId, date, status: "pending", userId } },
+          data: { 
+            type: "new_booking", 
+            booking: { 
+              id: (booking as { id: number }).id, 
+              serviceId: data.serviceId, 
+              date, 
+              status: "pending", 
+              userId,
+              paymentMethod: (data as any).paymentMethod
+            } 
+          },
         });
         const io = getIO();
         if (io) {
           io.to(`user:${providerUserId}`).emit("notification:booking", {
             type: "new_booking",
-            booking: { id: (booking as { id: number }).id, serviceId: data.serviceId, date, status: "pending", userId },
+            booking: { 
+              id: (booking as { id: number }).id, 
+              serviceId: data.serviceId, 
+              date, 
+              status: "pending", 
+              userId,
+              paymentMethod: (data as any).paymentMethod
+            },
             timestamp: new Date(),
           });
         }
@@ -170,7 +189,7 @@ export async function registerGenFebRoutes(
         void notificationService
           .sendPushToUser(providerUserId, {
             title: "Nueva solicitud de reserva",
-            body: "Tienes una nueva solicitud de reserva. Revisa el detalle en tu Panel Asociado.",
+            body: `Tienes una nueva solicitud de reserva (Pago: ${(data as any).paymentMethod === "cash" ? "Efectivo" : "Billetera"}). Revisa el detalle en tu Panel Asociado.`,
             data: {
               url: `/professional-dashboard?tab=bookings&highlight=${(booking as { id: number }).id}`,
               type: "booking",
@@ -217,10 +236,18 @@ export async function registerGenFebRoutes(
       const currentBooking = await storage.getBooking(bookingId);
       if (!currentBooking) return res.status(404).json({ message: "Booking not found" });
 
-      const bid = currentBooking as { userId?: string; providerId?: number; confirmedByClient?: boolean; cost?: number };
+      const bid = currentBooking as unknown as { 
+        userId?: string; 
+        providerId?: number; 
+        confirmedByClient?: boolean; 
+        cost?: number | string; 
+        paymentMethod?: string 
+      };
       const isClient = bid.userId === userId;
       const provider = await storage.getProviderByUserId(userId);
       const isProvider = provider != null && (provider as { id?: number }).id === bid.providerId;
+
+      const isCash = bid.paymentMethod === "cash";
 
       // Solo el cliente o el profesional de la reserva pueden cambiar el estado
       if (!isClient && !isProvider) {
@@ -234,16 +261,16 @@ export async function registerGenFebRoutes(
         }
       } else {
         // Es el profesional
-        // FSM Guard: 'in_progress' inalcanzable si confirmedByClient es false
-        if (data.status === "in_progress") {
+        // FSM Guard: 'in_progress' inalcanzable si confirmedByClient es false (solo para Wallet)
+        if (data.status === "in_progress" && !isCash) {
           if (bid.confirmedByClient !== true) {
             return res.status(403).json({
               message: "Debes esperar a que el cliente confirme el pago antes de marcar como En proceso.",
             });
           }
         }
-        // FSM Guard: completed es inalcanzable si confirmedByClient es false
-        if (data.status === "completed") {
+        // FSM Guard: completed es inalcanzable si confirmedByClient es false (solo para Wallet)
+        if (data.status === "completed" && !isCash) {
           if (bid.confirmedByClient !== true) {
             return res.status(403).json({
               message: "El servicio requiere confirmación previa del cliente para procesar los fondos retenidos",
@@ -453,7 +480,7 @@ export async function registerGenFebRoutes(
       if (bid.userId !== userId) return res.status(403).json({ message: "Solo el cliente de la reserva puede confirmar el pago" });
 
       const updated = await storage.confirmBookingByClient(bookingId);
-      const cost = typeof (updated as { cost?: number }).cost === "number" ? (updated as { cost: number }).cost : Number((updated as { cost?: unknown }).cost) || 0;
+      const cost = typeof (updated as any).cost === "number" ? (updated as any).cost : Number((updated as any).cost) || 0;
       const amountFormatted = cost > 0 ? cost.toFixed(2) : "";
       const commissionRate = await getPlatformCommissionRate();
       const { platformPercent, providerPercent } = commissionDisplayPercents(commissionRate);
@@ -1353,7 +1380,7 @@ export async function registerGenFebRoutes(
       const enriched = await Promise.all(
         raw.map(async (c: any) => {
           const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
-          const otherUser = await storage.getUserById(otherId) as { id: string; name?: string; lastName?: string } | undefined;
+          const otherUser = await storage.getUserById(otherId, true) as { id: string; name?: string; lastName?: string; deletedAt?: any } | undefined;
           let lastMessageText: string | null = null;
           let unreadCount = 0;
           const convId = Number(c.id);
@@ -1369,10 +1396,19 @@ export async function registerGenFebRoutes(
               console.error("Error enriching conversation", c.id, err);
             }
           }
-          const name = otherUser ? [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" : "Usuario";
+          
+          const isDeleted = !!otherUser?.deletedAt;
+          const name = isDeleted 
+            ? "Usuario deshabilitado" 
+            : (otherUser ? [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" : "Usuario");
+            
           return {
             ...c,
-            otherParticipant: { id: String(otherUser?.id ?? otherId), name },
+            otherParticipant: { 
+              id: String(otherUser?.id ?? otherId), 
+              name,
+              isDeleted
+            },
             lastMessageText,
             unreadCount,
           };

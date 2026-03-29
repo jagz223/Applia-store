@@ -18,6 +18,7 @@ import { isGuest } from "@/lib/auth-utils";
 import { AlreadyAuthenticatedView } from "@/components/AlreadyAuthenticatedView";
 import { uploadProfileImage } from "@/lib/firebase-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { PhotoCapture } from "@/components/PhotoCapture";
 
 const registerSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
@@ -41,6 +42,7 @@ export default function Register() {
   const [isLoading, setIsLoading] = useState(false);
   const [profileImage, setProfileImage] = useState<File | null>(null);
   const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -62,6 +64,13 @@ export default function Register() {
     reader.onload = () => setProfileImagePreview(reader.result as string);
     reader.readAsDataURL(file);
     e.target.value = "";
+  };
+  
+  const handleCameraCapture = (file: File) => {
+    setProfileImage(file);
+    const reader = new FileReader();
+    reader.onload = () => setProfileImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
   };
 
   const removeImage = () => {
@@ -113,7 +122,7 @@ export default function Register() {
     try {
       const avatarUrl = hasFile
         ? await uploadProfileImage(profileImage!)
-        : data.avatar.trim();
+        : (data.avatar || "").trim();
 
       const response = await fetch(api.auth.register.path, {
         method: api.auth.register.method,
@@ -194,9 +203,9 @@ export default function Register() {
                       <AvatarFallback>Foto</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{profileImage.name}</p>
+                      <p className="text-sm font-medium truncate">{profileImage?.name || "Captura"}</p>
                       <p className="text-xs text-muted-foreground">
-                        {(profileImage.size / 1024).toFixed(1)} KB
+                        {profileImage ? (profileImage.size / 1024).toFixed(1) : "0"} KB
                       </p>
                     </div>
                     <Button type="button" variant="ghost" size="icon" onClick={removeImage} aria-label="Quitar foto">
@@ -221,10 +230,7 @@ export default function Register() {
                       type="button"
                       variant="outline"
                       className="flex-1"
-                      onClick={() => {
-                        fileInputRef.current?.setAttribute("capture", "user");
-                        fileInputRef.current?.click();
-                      }}
+                      onClick={() => setIsCameraOpen(true)}
                     >
                       <Camera className="h-4 w-4 mr-2" />
                       Tomar foto
@@ -408,6 +414,12 @@ export default function Register() {
           </form>
         </Form>
       </Card>
+      
+      <PhotoCapture 
+        isOpen={isCameraOpen} 
+        onOpenChange={setIsCameraOpen} 
+        onCapture={handleCameraCapture} 
+      />
     </div>
   );
 }

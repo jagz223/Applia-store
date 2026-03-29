@@ -146,7 +146,7 @@ export function registerAdminRoutes(app: Express): void {
       if (data.role !== undefined) {
         const newRole = data.role.trim();
         update.role = newRole;
-        if (newRole === "professional" && existing.role !== "professional") {
+        if (newRole === "professional" && (existing as any).role !== "professional") {
           update.acceptedProviderTermsOfUse = false;
         }
       }
@@ -186,6 +186,35 @@ export function registerAdminRoutes(app: Express): void {
 
     // ProviderUpdate (types) no incluye isVerified; en runtime la colección sí lo soporta.
     await genFebStorage.updateProvider(provider.id, { isVerified: true } as any);
+
+    // --- Notificar al usuario (Bienvenida) ---
+    try {
+      const msg = "¡Felicidades! Ahora eres un Asociado verificado de GenFeb. ¡Bienvenido!";
+      await genFebStorage.createNotification({
+        userId,
+        type: "verification_welcome",
+        data: { message: msg, url: "/professional-dashboard" }
+      });
+
+      const io = getIO();
+      if (io) {
+        io.to(`user:${userId}`).emit("notification", {
+          type: "verification_welcome",
+          title: "¡Bienvenido Asociado!",
+          body: msg,
+          data: { url: "/professional-dashboard" }
+        });
+      }
+
+      void notificationService.sendPushToUser(userId, {
+        title: "¡Bienvenido Asociado!",
+        body: msg,
+        data: { url: "/professional-dashboard" }
+      }).catch(err => console.error("[push-welcome] Error:", err));
+    } catch (err) {
+      console.error("Error notificando bienvenida:", err);
+    }
+    // -----------------------------------------
   }
 
   /**
@@ -264,6 +293,40 @@ export function registerAdminRoutes(app: Express): void {
           await maybeVerifyProfessional(userId);
         }
 
+        // --- Notificar al usuario ---
+        try {
+          const isApprove = status === "verified";
+          const title = isApprove ? "Identificación aprobada" : "Identificación rechazada";
+          const msg = isApprove
+            ? "Tu identificación ha sido aprobada correctamente."
+            : "Tu identificación ha sido rechazada. Por favor, intenta subir una imagen más clara de tu documento.";
+
+          await genFebStorage.createNotification({
+            userId,
+            type: "verification_result",
+            data: { step: "identification", status, message: msg, url: "/professional-dashboard" }
+          });
+
+          const io = getIO();
+          if (io) {
+            io.to(`user:${userId}`).emit("notification", {
+              type: "verification_result",
+              title,
+              body: msg,
+              data: { step: "identification", status, url: "/professional-dashboard" }
+            });
+          }
+
+          void notificationService.sendPushToUser(userId, {
+            title,
+            body: msg,
+            data: { step: "identification", status, url: "/professional-dashboard" }
+          }).catch(err => console.error("[push-id-res] Error:", err));
+        } catch (err) {
+          console.error("Error notificando resultado id:", err);
+        }
+        // ----------------------------
+
         return res.status(200).json(updated);
       } catch (error: any) {
         const msg = error?.message || "Error";
@@ -289,6 +352,40 @@ export function registerAdminRoutes(app: Express): void {
         if (status === "verified") {
           await maybeVerifyProfessional(userId);
         }
+
+        // --- Notificar al usuario ---
+        try {
+          const isApprove = status === "verified";
+          const title = isApprove ? "Pago verificado" : "Pago rechazado";
+          const msg = isApprove
+            ? "Tu comprobante de pago ha sido verificado correctamente."
+            : "Tu comprobante de pago ha sido rechazado. Por favor, verifica los datos de la transferencia e intenta nuevamente.";
+
+          await genFebStorage.createNotification({
+            userId,
+            type: "verification_result",
+            data: { step: "transaction", status, message: msg, url: "/professional-dashboard" }
+          });
+
+          const io = getIO();
+          if (io) {
+            io.to(`user:${userId}`).emit("notification", {
+              type: "verification_result",
+              title,
+              body: msg,
+              data: { step: "transaction", status, url: "/professional-dashboard" }
+            });
+          }
+
+          void notificationService.sendPushToUser(userId, {
+            title,
+            body: msg,
+            data: { step: "transaction", status, url: "/professional-dashboard" }
+          }).catch(err => console.error("[push-tx-res] Error:", err));
+        } catch (err) {
+          console.error("Error notificando resultado tx:", err);
+        }
+        // ----------------------------
 
         return res.status(200).json(updated);
       } catch (error: any) {
@@ -331,7 +428,7 @@ export function registerAdminRoutes(app: Express): void {
         verified: boolean;
       }> = [];
 
-      for (const [providerId, providerServices] of byProviderId.entries()) {
+      for (const [providerId, providerServices] of Array.from(byProviderId.entries())) {
         const provider = await genFebStorage.getProvider(providerId);
         if (!provider) continue;
         const userId = String((provider as { userId?: string }).userId ?? "");
