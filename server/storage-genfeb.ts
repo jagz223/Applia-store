@@ -473,15 +473,19 @@ export class InMemoryStorage implements IStorage {
       (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
     } else {
       // Para efectivo, el profesional ya cobró físicamente. 
-      // La plataforma no retiene fondos ni cobra comisión por ahora.
+      // Descontamos la comisión (10%) de su wallet (puede quedar en negativo).
+      (providerUser as { wallet: number }).wallet = providerWallet - commission;
       (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + cost;
+      (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
+      (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
     }
     (booking as { status: string }).status = "completed";
     (booking as { completedAt?: Date }).completedAt = new Date();
 
     const now = new Date();
+    const refId = String(bookingId);
+
     if (!isCash) {
-      const refId = String(bookingId);
       const clientTransferRecord = {
         id: this.walletTransferIdCounter++,
         userId: booking.userId,
@@ -494,34 +498,36 @@ export class InMemoryStorage implements IStorage {
         currency: "USD",
         createdAt: now,
       };
-      const providerTransferRecord = {
-        id: this.walletTransferIdCounter++,
-        userId: providerUserId,
-        fromUserId: null,
-        amount: providerNet,
-        transferType: "service_payment",
-        status: "completed",
-        description: "Pago por servicio completado (neto)",
-        referenceId: refId,
-        currency: "USD",
-        createdAt: now,
-      };
-      const commissionTransferRecord = {
-        id: this.walletTransferIdCounter++,
-        userId: adminUser.id,
-        fromUserId: null,
-        amount: commission,
-        transferType: "service_payment",
-        status: "completed",
-        description: "Comisión de plataforma por servicio",
-        referenceId: refId,
-        currency: "USD",
-        createdAt: now,
-      };
       this.walletTransfers.push(clientTransferRecord);
-      this.walletTransfers.push(providerTransferRecord);
-      this.walletTransfers.push(commissionTransferRecord);
     }
+
+    const providerTransferRecord = {
+      id: this.walletTransferIdCounter++,
+      userId: providerUserId,
+      fromUserId: null,
+      amount: isCash ? commission : providerNet,
+      transferType: "service_payment",
+      status: "completed",
+      description: isCash ? "Comisión de plataforma por servicio en efectivo" : "Pago por servicio completado (neto)",
+      referenceId: refId,
+      currency: "USD",
+      createdAt: now,
+    };
+    const commissionTransferRecord = {
+      id: this.walletTransferIdCounter++,
+      userId: adminUser.id,
+      fromUserId: null,
+      amount: commission,
+      transferType: "service_payment",
+      status: "completed",
+      description: `Comisión de plataforma por servicio (${isCash ? 'Efectivo' : 'Wallet'})`,
+      referenceId: refId,
+      currency: "USD",
+      createdAt: now,
+    };
+    
+    this.walletTransfers.push(providerTransferRecord);
+    this.walletTransfers.push(commissionTransferRecord);
 
     return { ...booking, status: "completed" };
   }
