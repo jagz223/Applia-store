@@ -1145,12 +1145,7 @@ class FirestoreStorageImpl implements IStorage {
       const providerWallet = typeof (providerUserSnap.data() as { wallet?: number }).wallet === "number" ? (providerUserSnap.data() as { wallet: number }).wallet : 0;
       const providerTotalEarnings = typeof (providerUserSnap.data() as { totalEarnings?: number }).totalEarnings === "number" ? (providerUserSnap.data() as { totalEarnings: number }).totalEarnings : 0;
 
-      // Validación para Cash: el profesional debe tener saldo para la comisión
-      if (paymentMethod === "cash") {
-        if (providerWallet < commission) {
-          throw new Error("Saldo insuficiente en tu wallet para pagar la comisión del servicio ($" + commission.toFixed(2) + "). Por favor recarga.");
-        }
-      }
+      // Para Cash, permitimos saldo negativo (se descuenta aunque no tenga fondos)
 
       // Datos del Admin
       const adminUserRef = usersColl.doc(adminUserId);

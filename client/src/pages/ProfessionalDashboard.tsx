@@ -5,7 +5,8 @@ import {
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
-  CheckCircle2, XCircle, Banknote, Wallet, Inbox, PlayCircle, History, UserPlus, Receipt
+  CheckCircle2, XCircle, Banknote, Wallet, Inbox, PlayCircle, History, UserPlus, Receipt,
+  AlertTriangle
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -355,6 +356,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
         scheduleValue?: { date: string; time: string };
       }
   >(null);
+  const [cashWarningBooking, setCashWarningBooking] = useState<BookingItem | null>(null);
   const [subTab, setSubTab] = useState<BookingsSubTab>("pending");
   const PAGE_SIZE = 10;
   const [pageBySubTab, setPageBySubTab] = useState<Record<BookingsSubTab, number>>({
@@ -444,6 +446,21 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     setPageBySubTab((prev) => ({ ...prev, [target]: nextPage }));
   }, [highlightedBookingId, list, pending, inProgress, ready, history]);
 
+  // Reglas de transición de estado:
+  const executeStatusUpdate = (id: number, status: string) => {
+    updateStatus.mutate(
+      { id, status },
+      {
+        onSuccess: (updated) => {
+          const b = list.find(x => x.id === id);
+          if (status !== "confirmed" && b?.userId && notifyBookingUpdate) {
+            notifyBookingUpdate(b.userId, updated ?? { ...b, status });
+          }
+        },
+      }
+    );
+  };
+
   function renderBookingRow(booking: BookingItem) {
     const date = toDate(booking.date);
     const dateStr = format(date, "yyyy-MM-dd");
@@ -476,7 +493,6 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     };
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
 
-    // Reglas de transición de estado:
     // pending -> confirmed -> in_progress -> completed, con "cancelled" siempre disponible.
     const nextStatusMap: Record<string, string | undefined> = {
       pending: "confirmed",
@@ -607,21 +623,13 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                   <div className="inline-block w-full sm:w-auto">
                       <Select
                       value={booking.status}
-                      onValueChange={(value) =>
-                        updateStatus.mutate(
-                          { id: booking.id, status: value },
-                          {
-                            onSuccess: (updated) => {
-                              // Para evitar notificaciones duplicadas en el cliente:
-                              // cuando el estado pasa a "confirmed" ya existe una notificación específica
-                              // "booking_confirmed_by_provider", así que no emitimos el genérico "booking_update".
-                              if (value !== "confirmed" && booking.userId && notifyBookingUpdate) {
-                                notifyBookingUpdate(booking.userId, updated ?? { ...booking, status: value });
-                              }
-                            },
-                          }
-                        )
-                      }
+                      onValueChange={(value) => {
+                        if (value === "in_progress" && booking.paymentMethod === "cash") {
+                          setCashWarningBooking(booking);
+                        } else {
+                          executeStatusUpdate(booking.id, value);
+                        }
+                      }}
                       disabled={updateStatus.isPending}
                     >
                       <SelectTrigger className="w-full sm:w-[160px] bg-background border-border">
@@ -711,6 +719,55 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 
   return (
     <>
+      <Dialog open={cashWarningBooking !== null} onOpenChange={(open) => (!open ? setCashWarningBooking(null) : undefined)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-2 text-amber-600 mb-2">
+              <AlertTriangle className="h-5 w-5" />
+              <DialogTitle>Servicio en Efectivo</DialogTitle>
+            </div>
+            <DialogDescription className="text-foreground">
+              Como este servicio se pagará en <strong>Efectivo</strong>, la plataforma descontará automáticamente una comisión del <strong>10%</strong> de tu wallet cuando finalices el trabajo.
+            </DialogDescription>
+          </DialogHeader>
+
+          {cashWarningBooking && (
+            <div className="bg-muted p-4 rounded-lg space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Costo del servicio:</span>
+                <span className="font-semibold">${Number(cashWarningBooking.cost || 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm text-amber-700 dark:text-amber-500">
+                <span>Comisión a descontar (10%):</span>
+                <span className="font-bold">-${(Number(cashWarningBooking.cost || 0) * 0.1).toFixed(2)}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-2 border-t pt-2">
+                * El descuento se aplicará a tu wallet al marcar el servicio como completado. Tu saldo puede quedar en negativo si no tienes fondos suficientes.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="mt-4">
+            <Button type="button" variant="outline" onClick={() => setCashWarningBooking(null)} disabled={updateStatus.isPending}>
+              Cancelar
+            </Button>
+            <Button 
+              type="button" 
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => {
+                if (cashWarningBooking) {
+                  executeStatusUpdate(cashWarningBooking.id, "in_progress");
+                  setCashWarningBooking(null);
+                }
+              }} 
+              disabled={updateStatus.isPending}
+            >
+              {updateStatus.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Entendido e iniciar servicio"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={pendingChange != null} onOpenChange={(open) => (!open ? setPendingChange(null) : undefined)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

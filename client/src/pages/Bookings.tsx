@@ -61,6 +61,7 @@ export default function Bookings() {
     confirmedByClient?: boolean;
     notes?: string | null;
     createdAt?: string | Date;
+    paymentMethod?: string;
     service?: { id: number; title: string; price?: string; provider?: { userId?: string; user?: { firstName?: string; lastName?: string } } };
   }>;
 
@@ -120,11 +121,14 @@ export default function Bookings() {
               <div className="rounded-lg bg-primary/10 border border-primary/20 p-4 space-y-3">
                 <p className="font-medium flex items-center gap-2 text-primary">
                   <ShieldCheck className="h-5 w-5" />
-                  Confirmar pago y retener fondos
+                  {booking.paymentMethod === "cash" 
+                    ? "Confirmar inicio de servicio (Efectivo)" 
+                    : "Confirmar pago y retener fondos"}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  El asociado ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago.
-                  Se descontará <strong>${Number(cost).toFixed(2)} USD</strong> de tu billetera.
+                  {booking.paymentMethod === "cash" 
+                    ? `El asociado ha confirmado esta reserva. Al confirmar, aceptas que el servicio se pagará en Efectivo ($${Number(cost).toFixed(2)} USD) directamente al profesional.`
+                    : `El asociado ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago. Se descontará $${Number(cost).toFixed(2)} USD de tu billetera.`}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -286,10 +290,15 @@ export default function Bookings() {
       <Dialog open={bookingToConfirm != null} onOpenChange={(open) => !open && setBookingToConfirm(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>¿El monto es el correcto?</DialogTitle>
+            <DialogTitle>
+              {bookingToConfirm?.paymentMethod === "cash" 
+                ? "¿Confirmar servicio en efectivo?" 
+                : "¿El monto es el correcto?"}
+            </DialogTitle>
             <DialogDescription>
-              Confirma solo si estás de acuerdo con que este sea el monto decidido para el trabajo acordado. Al confirmar,
-              se descontará el monto de tu billetera y se retendrán los fondos para este servicio.
+              {bookingToConfirm?.paymentMethod === "cash"
+                ? "Confirma si estás de acuerdo con iniciar este servicio. El pago se realizará en efectivo directamente al profesional al finalizar el trabajo."
+                : "Confirma solo si estás de acuerdo con que este sea el monto decidido para el trabajo acordado. Al confirmar, se descontará el monto de tu billetera y se retendrán los fondos para este servicio."}
             </DialogDescription>
           </DialogHeader>
           {bookingToConfirm && (
