@@ -33,6 +33,7 @@ import {
   Car,
   Wallet,
   Star,
+  Smartphone,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -47,8 +48,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { motion, AnimatePresence } from "framer-motion";
+import { Check } from "lucide-react";
 
 /** Oculta los enlaces/botones "Crear servicio" sin eliminar el código. Cambiar a true para mostrar de nuevo. */
 const SHOW_CREATE_SERVICE = false;
@@ -88,6 +91,18 @@ export function Navigation() {
   const exploreCategoryDisplayName = exploreCategoryFromContext ?? exploreCategoryFromUrl;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [myServicesOpen, setMyServicesOpen] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  useEffect(() => {
+    if (isDownloading) {
+      const timer = setTimeout(() => setIsDownloading(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isDownloading]);
+
+  const handleDownloadClick = () => {
+    setIsDownloading(true);
+  };
 
   const isActive = (path: string) => location === path || location.startsWith(path + '/');
 
@@ -281,6 +296,47 @@ export function Navigation() {
           )}
           
           {isAuthenticated && <NotificationBell />}
+          
+          <motion.div
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className={`hidden sm:flex items-center gap-2 transition-colors ${isDownloading ? 'text-green-500 bg-green-500/10' : 'text-mango-orange hover:bg-mango-orange/10'}`}
+              asChild
+              onClick={handleDownloadClick}
+            >
+              <a href="/Genfeb.apk" download="Genfeb.apk">
+                <AnimatePresence mode="wait">
+                  {isDownloading ? (
+                    <motion.div
+                      key="check"
+                      initial={{ scale: 0, rotate: -45 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      exit={{ scale: 0 }}
+                      className="flex items-center gap-2"
+                    >
+                      <Check className="h-4 w-4" />
+                      <span className="hidden md:inline">¡Listo!</span>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="phone"
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      exit={{ scale: 0 }}
+                      className="flex items-center gap-2"
+                    >
+                      <Smartphone className="h-4 w-4" />
+                      <span className="hidden md:inline">Descargar App</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </a>
+            </Button>
+          </motion.div>
           
           {isAuthenticated ? (
             <>
@@ -495,17 +551,65 @@ export function Navigation() {
                 <Link href="/chat" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mensajes
                 </Link>
-                <div className="border-t border-border my-4"></div>
                 {!isAuthenticated && (
-                  <>
-                    <Button variant="outline" asChild>
+                  <div className="flex flex-col gap-2 mt-2">
+                    <Button variant="outline" asChild className="w-full">
                       <Link href="/login" onClick={() => setMobileOpen(false)}>Iniciar Sesión</Link>
                     </Button>
-                    <Button asChild>
+                    <Button asChild className="w-full">
                       <Link href="/register" onClick={() => setMobileOpen(false)}>Registrarse</Link>
                     </Button>
-                  </>
+                  </div>
                 )}
+                
+                <motion.div 
+                  className="border-t border-border mt-6 pt-6"
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <a 
+                    href="/Genfeb.apk" 
+                    download="Genfeb.apk"
+                    className={`flex items-center gap-3 p-4 rounded-xl border transition-all duration-300 shadow-sm ${
+                      isDownloading 
+                        ? 'bg-green-500/10 text-green-600 border-green-500/30' 
+                        : 'bg-mango-orange/10 text-mango-orange border-mango-orange/20 hover:bg-mango-orange/20'
+                    }`}
+                    onClick={() => {
+                      handleDownloadClick();
+                      setTimeout(() => setMobileOpen(false), 1500);
+                    }}
+                  >
+                    <div className="flex shrink-0">
+                      <AnimatePresence mode="wait">
+                        {isDownloading ? (
+                          <motion.div
+                            key="check-mobile"
+                            initial={{ scale: 0, rotate: -45 }}
+                            animate={{ scale: 1, rotate: 0 }}
+                          >
+                            <Check className="h-6 w-6 text-green-500" />
+                          </motion.div>
+                        ) : (
+                          <motion.div
+                            key="smartphone-mobile"
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                          >
+                            <Smartphone className="h-6 w-6" />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-semibold opacity-70">
+                        {isDownloading ? 'Iniciando descarga...' : 'App para Android'}
+                      </span>
+                      <span className="font-bold text-lg">
+                        {isDownloading ? '¡Éxito!' : 'Descargar APK'}
+                      </span>
+                    </div>
+                  </a>
+                </motion.div>
               </div>
             </SheetContent>
           </Sheet>

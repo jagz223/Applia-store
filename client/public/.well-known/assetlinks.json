@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.genfeb.www.twa",
+      "sha256_cert_fingerprints": ["3C:90:79:B0:1E:E7:5C:9E:E5:60:8C:7D:3B:53:7A:B4:73:9D:69:17:84:8D:19:D4:6C:D7:96:A6:61:94:C0:79"]
+    }
+  }
+]

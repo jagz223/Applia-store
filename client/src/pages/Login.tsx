@@ -12,6 +12,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@shared/routes";
+import { Smartphone } from "lucide-react";
 
 const loginSchema = z.object({
   email: z.string().email("Email inválido"),
