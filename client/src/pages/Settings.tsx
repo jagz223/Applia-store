@@ -159,15 +159,48 @@ export default function Settings() {
   if (!isAuthenticated) {
     return (
       <div className="container max-w-lg mx-auto py-10 px-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Configuración</CardTitle>
-            <CardDescription>Inicia sesión para editar tu perfil.</CardDescription>
+        <Card className="border-none shadow-2xl bg-gradient-to-b from-background to-muted/20">
+          <CardHeader className="text-center pb-2">
+            <div className="mx-auto w-12 h-12 bg-mango-orange/10 rounded-full flex items-center justify-center mb-4">
+              <User className="h-6 w-6 text-mango-orange" />
+            </div>
+            <CardTitle className="text-2xl font-bold">Configuración</CardTitle>
+            <CardDescription className="text-base">
+              Inicia sesión para gestionar tu perfil y preferencias.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button asChild>
+          <CardContent className="space-y-6 pt-4">
+            <Button asChild className="w-full h-12 text-lg font-semibold shadow-mango-orange/20 shadow-lg">
               <Link href="/login">Iniciar sesión</Link>
             </Button>
+            
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-muted" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground font-medium">O otras acciones</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-destructive/5 border border-destructive/10 space-y-3">
+              <div className="flex items-center gap-2 text-destructive font-semibold">
+                <Trash2 className="h-4 w-4" />
+                <span>¿Deseas eliminar tu cuenta?</span>
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Si ya no tienes acceso a tu cuenta o deseas solicitar el borrado definitivo de tus datos personales, puedes escribirnos directamente:
+              </p>
+              <a 
+                href="mailto:thebiglion2528@gmail.com?subject=Solicitud de eliminación de cuenta GenFeb" 
+                className="block w-full p-3 text-center bg-white dark:bg-zinc-900 border border-destructive/20 rounded-lg text-destructive font-bold hover:bg-destructive/5 transition-all shadow-sm active:scale-95"
+              >
+                Solicitar por correo electrónico
+              </a>
+              <p className="text-[10px] text-center text-muted-foreground italic">
+                * Tu solicitud será procesada en un plazo máximo de 48 horas hábiles.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>
