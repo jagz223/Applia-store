@@ -455,6 +455,9 @@ export function Navigation() {
             </>
           ) : (
             <>
+              <Button variant="ghost" size="icon" className="hidden sm:flex text-muted-foreground hover:text-primary" title="Configuración" asChild>
+                <Link href="/settings"><Settings className="h-5 w-5" /></Link>
+              </Button>
               <Button variant="ghost" className="text-muted-foreground hover:text-primary" asChild>
                 <Link href="/login">Iniciar Sesión</Link>
               </Button>
@@ -552,14 +555,19 @@ export function Navigation() {
                   Mensajes
                 </Link>
                 {!isAuthenticated && (
-                  <div className="flex flex-col gap-2 mt-2">
-                    <Button variant="outline" asChild className="w-full">
-                      <Link href="/login" onClick={() => setMobileOpen(false)}>Iniciar Sesión</Link>
-                    </Button>
-                    <Button asChild className="w-full">
-                      <Link href="/register" onClick={() => setMobileOpen(false)}>Registrarse</Link>
-                    </Button>
-                  </div>
+                  <>
+                    <Link href="/settings" className="text-lg font-medium text-muted-foreground" onClick={() => setMobileOpen(false)}>
+                      Configuración
+                    </Link>
+                    <div className="flex flex-col gap-2 mt-4">
+                      <Button variant="outline" asChild className="w-full">
+                        <Link href="/login" onClick={() => setMobileOpen(false)}>Iniciar Sesión</Link>
+                      </Button>
+                      <Button asChild className="w-full">
+                        <Link href="/register" onClick={() => setMobileOpen(false)}>Registrarse</Link>
+                      </Button>
+                    </div>
+                  </>
                 )}
                 
                 <motion.div 
