@@ -186,19 +186,29 @@ export default function Settings() {
             <div className="p-4 rounded-xl bg-destructive/5 border border-destructive/10 space-y-3">
               <div className="flex items-center gap-2 text-destructive font-semibold">
                 <Trash2 className="h-4 w-4" />
-                <span>¿Deseas eliminar tu cuenta?</span>
+                <span>Eliminación de cuenta en GenFeb</span>
               </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Si ya no tienes acceso a tu cuenta o deseas solicitar el borrado definitivo de tus datos personales, puedes escribirnos directamente:
-              </p>
+              <div className="text-sm text-muted-foreground leading-relaxed space-y-2">
+                <p>
+                  Pasos para solicitar la eliminación permanente de tu cuenta sin iniciar sesión:
+                </p>
+                <ol className="list-decimal list-inside ml-1 text-xs space-y-1">
+                  <li>Haz clic en el botón de abajo.</li>
+                  <li>Envía el correo usando la misma dirección de email con la que te registraste.</li>
+                </ol>
+                <div className="text-xs bg-muted/50 p-2 rounded mt-2">
+                  <strong>Qué se borrará:</strong> Todo tu perfil, avatar, ubicación e historial de mensajes.<br/>
+                  <strong>Qué se conservará:</strong> Datos de facturas y reservas pasadas se mantienen por 12 meses para fines contables y prevención de fraude.
+                </div>
+              </div>
               <a 
                 href="mailto:thebiglion2528@gmail.com?subject=Solicitud de eliminación de cuenta GenFeb" 
-                className="block w-full p-3 text-center bg-white dark:bg-zinc-900 border border-destructive/20 rounded-lg text-destructive font-bold hover:bg-destructive/5 transition-all shadow-sm active:scale-95"
+                className="block w-full p-3 text-center bg-white dark:bg-zinc-900 border border-destructive/20 rounded-lg text-destructive font-bold hover:bg-destructive/5 transition-all shadow-sm active:scale-95 mt-4"
               >
                 Solicitar por correo electrónico
               </a>
               <p className="text-[10px] text-center text-muted-foreground italic">
-                * Tu solicitud será procesada en un plazo máximo de 48 horas hábiles.
+                * Tu solicitud de borrado será procesada en un plazo máximo de 48 horas hábiles.
               </p>
             </div>
           </CardContent>
@@ -360,10 +370,19 @@ export default function Settings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center">
-          <p className="text-sm text-muted-foreground mb-6 text-center leading-relaxed">
-            Al desactivar tu cuenta, tu perfil y servicios serán eliminados de la plataforma. 
-            Perderás el acceso inmediato a tu panel y balance.
-          </p>
+          <div className="text-sm text-muted-foreground mb-6 leading-relaxed space-y-3 w-full max-w-lg">
+            <p className="text-center font-medium">
+              Al desactivar tu cuenta, tu perfil y servicios serán eliminados de la plataforma. 
+              Perderás el acceso inmediato a tu panel y balance.
+            </p>
+            <div className="bg-destructive/10 p-3 rounded-lg border border-destructive/20 text-xs text-left">
+              <strong>Qué se borrará:</strong> Todo tu perfil, avatar, ubicación e historial de mensajes.<br/>
+              <strong className="mt-2 block">Qué se conservará:</strong> Datos de facturas y reservas pasadas se mantienen por 12 meses por obligaciones fiscales y prevención de fraude en Ecuador.
+            </div>
+            <p className="text-xs text-center text-destructive">
+              * Para proceder de forma permanente, haz clic en el botón inferior. La suspensión es inmediata.
+            </p>
+          </div>
           <Button 
             variant="destructive" 
             onClick={() => setShowFirstConfirm(true)}
@@ -378,9 +397,9 @@ export default function Settings() {
       <AlertDialog open={showFirstConfirm} onOpenChange={setShowFirstConfirm}>
         <AlertDialogContent className="rounded-xl border-destructive/10">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-lg font-bold">¿Eliminar cuenta?</AlertDialogTitle>
+            <AlertDialogTitle className="text-lg font-bold">Solicitud de borrado de cuenta</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground leading-relaxed">
-              Al eliminar tu cuenta, tu perfil dejará de ser visible, se cerrará tu sesión automáticamente y perderás el acceso a tus servicios y balance actual.
+              Recuerda que al proceder, tu perfil, fotos e historial de chats serán borrados permanentemente. Por normativas legales, los datos de facturas y reservas pasadas se conservarán temporalmente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-6">
@@ -409,7 +428,7 @@ export default function Settings() {
                   Aviso: Tienes un balance de ${(Number((user as any)?.wallet || 0) + Number((user as any)?.pendingBalance || 0)).toFixed(2)}. Este saldo quedará inaccesible de inmediato.
                 </div>
               ) : null}
-              ¿Estás seguro de finalizar? Se cerrará tu sesión y se suspenderá tu cuenta y todo historial asociado.
+              ¿Estás seguro de finalizar? Todo el proceso de borrado comenzará de forma inmediata y perderás el acceso permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-6">
