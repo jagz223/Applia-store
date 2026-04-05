@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { AlertCircle } from "lucide-react";
+import { useCurrentProvider } from "@/hooks/use-mango-data";
 
 /**
  * Aviso global para profesionales cuyo proveedor aún no está verificado por la plataforma.
@@ -11,10 +12,12 @@ import { AlertCircle } from "lucide-react";
 export function ProfessionalVerificationBanner() {
   const { user, isAuthenticated, isLoading } = useAuth();
 
+  const { data: currentProvider } = useCurrentProvider();
+  
   if (isLoading || !isAuthenticated || !user) return null;
   if (hasAdminRole(user)) return null;
 
-  const provider = user.provider;
+  const provider = currentProvider || user.provider;
   const isPro = user.role === "professional" || provider != null;
   if (!isPro || !provider) return null;
 
