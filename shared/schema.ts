@@ -42,6 +42,7 @@ export const services = pgTable("services", {
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   imageUrl: text("image_url").notNull(),
   isActive: boolean("is_active").default(true),
+  lastEditedAt: timestamp("last_edited_at"),
 });
 
 export const bookings = pgTable("bookings", {

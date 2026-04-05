@@ -1978,7 +1978,23 @@ class FirestoreStorageImpl implements IStorage {
   async getFinancialReports(userId: string, _period?: string): Promise<any[]> {
     if (!this.db) return [];
     const snap = await this.db.collection(FIRESTORE_COLLECTIONS.FINANCIAL_REPORTS).where("userId", "==", userId).get();
-    return snap.docs.map(d => ({ id: parseInt(d.id) || d.id, ...d.data() }));
+    return snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+  }
+  async createFinancialReport(data: any): Promise<any> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("financial_reports");
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.FINANCIAL_REPORTS).doc(id.toString());
+    const created = {
+      id,
+      ...data,
+      createdAt: data.createdAt || new Date(),
+    };
+    await docRef.set(created);
+    return created;
+  }
+  async updateFinancialReportStatus(id: number | string, status: string): Promise<void> {
+    if (!this.db) return;
+    await this.db.collection(FIRESTORE_COLLECTIONS.FINANCIAL_REPORTS).doc(id.toString()).update({ status, updatedAt: new Date() });
   }
   async getKPIs(_userId: string): Promise<any> {
     return { totalIncome: 0, totalExpenses: 0, completedServices: 0, activeClients: 0, pendingBookings: 0, monthlyGrowth: 0, averageRating: 0 };
@@ -1989,7 +2005,7 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) return [];
     let q = this.db.collection(FIRESTORE_COLLECTIONS.NOTIFICATIONS).where("userId", "==", userId) as any;
     const snap = await q.get();
-    let list = snap.docs.map(d => ({ id: parseInt(d.id) || d.id, ...d.data() }));
+    let list = snap.docs.map((d: any) => ({ id: parseInt(d.id) || d.id, ...d.data() }));
     if (unreadOnly) list = list.filter((n: any) => !n.read);
     const toMs = (x: any) => (x?.toMillis ? x.toMillis() : x ? new Date(x).getTime() : 0);
     return list.sort((a: any, b: any) => toMs(b.createdAt) - toMs(a.createdAt));
@@ -2041,7 +2057,7 @@ class FirestoreStorageImpl implements IStorage {
     if (params.targetId) q = q.where("targetId", "==", params.targetId);
     if (params.targetType) q = q.where("targetType", "==", params.targetType);
     const snap = await q.get();
-    let list = snap.docs.map(d => ({ id: parseInt(d.id) || d.id, ...d.data() }));
+    let list = snap.docs.map((d: any) => ({ id: parseInt(d.id) || d.id, ...d.data() }));
     const off = params.offset ?? 0;
     const lim = params.limit ?? 10;
     return list.slice(off, off + lim);

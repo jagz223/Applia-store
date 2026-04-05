@@ -81,6 +81,8 @@ export interface IStorage
 
   // Reportes Financieros
   getFinancialReports(userId: string, period?: string): Promise<any[]>;
+  createFinancialReport(data: any): Promise<any>;
+  updateFinancialReportStatus(id: number | string, status: string): Promise<void>;
   getKPIs(userId: string): Promise<any>;
   
   // Notificaciones
@@ -867,33 +869,33 @@ export class InMemoryStorage implements IStorage {
     }
   }
 
-  // ============== REPORTES ==============
-  
+  // ============== REPORTES FINANCIEROS ==============
+  private financialReports: any[] = [];
+  private financialReportIdCounter = 1;
+
   async getFinancialReports(userId: string, period?: string): Promise<any[]> {
-    // Mock data para reportes financieros
-    const now = new Date();
-    const reports = [];
-    
-    for (let i = 0; i < 6; i++) {
-      const date = new Date(now);
-      date.setMonth(date.getMonth() - i);
-      reports.push({
-        id: i + 1,
-        userId,
-        type: 'income',
-        period: period || 'monthly',
-        amount: Math.floor(Math.random() * 5000) + 1000,
-        currency: 'USD',
-        status: 'completed',
-        description: `Ingresos del mes ${date.toLocaleString('es', { month: 'long' })}`,
-        createdAt: date
-      });
-    }
-    
-    return reports;
+    return this.financialReports.filter(r => r.userId === userId);
   }
-  
-  async getKPIs(userId: string): Promise<any> {
+
+  async createFinancialReport(data: any): Promise<any> {
+    const report = {
+      id: this.financialReportIdCounter++,
+      ...data,
+      createdAt: data.createdAt || new Date(),
+    };
+    this.financialReports.push(report);
+    return report;
+  }
+
+  async updateFinancialReportStatus(id: number | string, status: string): Promise<void> {
+    // In memory id is number, but we convert because Firestore uses string
+    const report = this.financialReports.find(r => String(r.id) === String(id));
+    if (report) {
+      report.status = status;
+    }
+  }
+
+  async getKPIs(_userId: string): Promise<any> {
     return {
       totalIncome: 45280,
       totalExpenses: 12400,
