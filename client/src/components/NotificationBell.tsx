@@ -220,7 +220,7 @@ export function NotificationBell() {
     }
   };
 
-  const getDescription = (type: string, data?: { amountFormatted?: string; dateFormatted?: string; message?: string; preview?: string; conversationId?: string | number; data?: any }) => {
+  const getDescription = (type: string, data?: any) => {
     if (type === "booking" && data?.type === "new_booking") {
       return "Tienes una nueva solicitud de reserva. Revisa el detalle en tu Panel Asociado.";
     }
@@ -315,10 +315,16 @@ export function NotificationBell() {
     if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
       return data?.message ?? "El retiro fue procesado por otro administrador. Revisa Solicitudes de Retiro.";
     }
+    if (type === "verification_result" || type === "verification_welcome") {
+      return data?.message ?? (data as any)?.data?.message ?? "Tu estado de verificación ha sido actualizado.";
+    }
+    if (type === "admin_verification_request") {
+      return data?.message ?? (data as any)?.data?.message ?? "Se ha recibido una nueva solicitud de verificación de asociado.";
+    }
     return null;
   };
 
-  const getTitle = (type: string, data?: { type?: string }) => {
+  const getTitle = (type: string, data?: any) => {
     if (type === "booking" && data?.type === "new_booking") return "Nueva solicitud de reserva";
     if (type === "booking" && data?.type === "booking_update") {
       const status = (data as any)?.booking?.status as string | undefined;
@@ -343,6 +349,18 @@ export function NotificationBell() {
     if (type === "booking_cost_changed") return "Se actualizo el monto del servicio";
     if (type === "withdrawal_approved") return "Retiro procesado";
     if (type === "withdrawal_rejected") return "Retiro rechazado";
+    if (type === "verification_welcome") return "¡Bienvenido Asociado!";
+    if (type === "admin_verification_request") {
+      const step = (data as any)?.step ?? (data as any)?.data?.step;
+      return step === "payment" ? "Comprobante de pago recibido" : "Nueva solicitud de Asociado";
+    }
+    if (type === "verification_result") {
+      const step = (data as any)?.step ?? (data as any)?.data?.step;
+      const status = (data as any)?.status ?? (data as any)?.data?.status;
+      if (step === "identification") return status === "verified" ? "Identificación aprobada" : "Identificación rechazada";
+      if (step === "transaction") return status === "verified" ? "Pago verificado" : "Pago rechazado";
+      return "Resultado de verificación";
+    }
     if (type === "message") {
       const d = data ?? ({} as any);
       const convId = d.conversationId ?? d.data?.conversationId;
