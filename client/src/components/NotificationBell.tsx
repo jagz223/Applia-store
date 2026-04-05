@@ -94,6 +94,16 @@ function getNotificationPath(notification: { type: string; data?: any }): string
     case "recharge_rejected":
     case "balance_credited":
       return "/movimientos";
+    case "verification_welcome":
+      return "/professional-dashboard";
+    case "verification_result": {
+      const step = data.step ?? data.data?.step;
+      const status = data.status ?? data.data?.status;
+      if (step === "transaction" && status === "verified") {
+        return "/financial-dashboard"; // Or wherever invoices are
+      }
+      return "/professional-dashboard";
+    }
     default:
       return "/dashboard";
   }

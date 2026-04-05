@@ -147,6 +147,26 @@ export async function registerInvoiceRoutes(
 
         let invoices: any[] = [];
 
+        // Obtener reportes financieros (incluyendo cargos de verificación)
+        try {
+          const financialReports = await genFebStorage.getFinancialReports(userId);
+          const verificationFees = financialReports.filter(r => r.type === "verification_fee");
+          
+          for (const fee of verificationFees) {
+            invoices.push({
+              id: fee.id,
+              type: "verification",
+              invoiceNumber: `VER-${fee.id}`,
+              date: fee.createdAt,
+              service: "Cargo de Verificación de Identidad",
+              amount: fee.amount || 15,
+              status: fee.status, // pending o completed
+            });
+          }
+        } catch (err) {
+          console.error("Error obteniendo reportes financieros para facturas:", err);
+        }
+
         if (hasAdminPrivileges(userRole) || userRole === "professional") {
           // Admin / Soporte TI y profesional pueden ver reservas
           const providers = await genFebStorage.getAllProviders();

@@ -11,7 +11,19 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft, AlertTriangle } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useState } from "react";
 
 const editServiceSchema = z.object({
   title: z.string().min(1, "El nombre es obligatorio").max(500),
@@ -28,9 +40,16 @@ export default function EditService() {
   const [, setLocation] = useLocation();
   const id = parseInt(params?.id || "0", 10);
   const { data: service, isLoading: serviceLoading } = useService(id);
-  const { data: provider } = useCurrentProvider();
+  const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { user } = useAuth();
   const updateService = useUpdateService(id);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  
+  const isAdmin = hasAdminRole(user);
+  
+  // Cooldown calculation (removed upon user request)
+  // const lastEditedAt = (service as any)?.lastEditedAt ? new Date((service as any).lastEditedAt) : null;
+  const isBlocked = false;
 
   const form = useForm<EditServiceForm>({
     resolver: zodResolver(editServiceSchema),
@@ -55,14 +74,13 @@ export default function EditService() {
 
   const isOwner = provider && service && service.providerId === provider.id;
 
-  const onSubmit = (data: EditServiceForm) => {
+  const handleSaveConfirmed = () => {
     updateService.mutate(
       {
-        title: data.title,
-        description: data.description ?? "",
-        price: data.price,
-        // No permitimos configurar desde UI; se envía solo si ya existía en el servicio.
-        imageUrl: data.imageUrl || undefined,
+        title: form.getValues("title"),
+        description: form.getValues("description") ?? "",
+        price: form.getValues("price"),
+        imageUrl: form.getValues("imageUrl") || undefined,
       },
       {
         onSuccess: () => setLocation(`/service/${id}`),
@@ -70,7 +88,15 @@ export default function EditService() {
     );
   };
 
-  if (serviceLoading || !service) {
+  const onSubmit = () => {
+    if (isAdmin) {
+      handleSaveConfirmed(); // Admin doesn't get cooldown, so no warning needed, or warn anyway? Warn anyway is fine, but skip is better.
+    } else {
+      setConfirmOpen(true);
+    }
+  };
+
+  if (serviceLoading || providerLoading || !service) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="h-10 w-10 animate-spin text-primary" />
@@ -165,7 +191,7 @@ export default function EditService() {
                 La foto que se muestra en el detalle es únicamente la del asociado.
               */}
 
-              <Button type="submit" className="w-full" disabled={updateService.isPending}>
+              <Button type="submit" className="w-full" disabled={updateService.isPending || isBlocked}>
                 {updateService.isPending ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -179,6 +205,23 @@ export default function EditService() {
           </Form>
         </CardContent>
       </Card>
+      
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Guardar los cambios?</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás completamente seguro de que tu texto y tu precio son correctos? Revisa cuidadosamente antes de continuar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver a revisar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSaveConfirmed} className="bg-primary text-primary-foreground hover:bg-primary/90">
+              Sí, guardar cambios
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

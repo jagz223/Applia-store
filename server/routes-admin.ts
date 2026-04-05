@@ -351,6 +351,17 @@ export function registerAdminRoutes(app: Express): void {
         const updated = await genFebStorage.setVerifyingStatusTransaction(userId, status as any);
         if (status === "verified") {
           await maybeVerifyProfessional(userId);
+          
+          // Actualizar reporte financiero (factura) a completado
+          try {
+            const reports = await genFebStorage.getFinancialReports(userId);
+            const pendingFee = reports.find(r => r.type === "verification_fee" && r.status === "pending");
+            if (pendingFee) {
+              await genFebStorage.updateFinancialReportStatus(pendingFee.id, "completed");
+            }
+          } catch (err) {
+            console.error("Error actualizando reporte financiero:", err);
+          }
         }
 
         // --- Notificar al usuario ---

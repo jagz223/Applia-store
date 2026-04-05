@@ -209,6 +209,21 @@ export async function registerRoutes(
       // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
       await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate);
 
+      // Crear registro en reportes financieros (factura temporal)
+      try {
+        await genFebStorage.createFinancialReport({
+          userId,
+          type: "verification_fee",
+          amount: "15.00",
+          currency: "USD",
+          status: "pending",
+          description: `Pago por verificación de cuenta (Comprobante: ${body.transferReceiptCode})`,
+          createdAt: new Date(),
+        });
+      } catch (err) {
+        console.error("Error creando reporte financiero para verificación:", err);
+      }
+
       // --- Notificar a administradores ---
       try {
         const admins = await getFullAdminUsers(genFebStorage);
@@ -386,7 +401,9 @@ export async function registerRoutes(
       const isOwner = provider && service.providerId === provider.id;
       if (!isOwner && !isAdmin) return res.status(403).json({ message: "Solo el dueño del servicio o un admin puede editarlo" });
       const data = updateServiceBodySchema.parse(req.body);
-      const updated = await catalogService.updateService(id, data as any);
+      
+      const updatePayload = { ...data, lastEditedAt: new Date() };
+      const updated = await catalogService.updateService(id, updatePayload as any);
       if (!updated) return res.status(404).json({ message: "Service not found" });
       return res.json(updated);
     } catch (e: any) {
