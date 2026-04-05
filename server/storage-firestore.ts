@@ -1389,6 +1389,13 @@ class FirestoreStorageImpl implements IStorage {
     return { ...record };
   }
 
+  async getWalletTransfer(id: number | string): Promise<any | null> {
+    if (!this.db) return null;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS).doc(id.toString()).get();
+    if (!doc.exists) return null;
+    return { id: parseInt(doc.id, 10) || doc.id, ...doc.data() };
+  }
+
   async getTransfersByUser(
     userId: string,
     options?: {
@@ -1992,6 +1999,13 @@ class FirestoreStorageImpl implements IStorage {
     await docRef.set(created);
     return created;
   }
+  async getFinancialReport(id: number | string): Promise<any | null> {
+    if (!this.db) return null;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.FINANCIAL_REPORTS).doc(id.toString()).get();
+    if (!doc.exists) return null;
+    return { id: parseInt(doc.id, 10) || doc.id, ...doc.data() };
+  }
+
   async updateFinancialReportStatus(id: number | string, status: string): Promise<void> {
     if (!this.db) return;
     await this.db.collection(FIRESTORE_COLLECTIONS.FINANCIAL_REPORTS).doc(id.toString()).update({ status, updatedAt: new Date() });
