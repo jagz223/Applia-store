@@ -28,16 +28,16 @@ interface InvoiceData {
   tax: number;
   total: number;
   paymentMethod: string;
-  bookingId: string;
+  referenceId: string;
 }
 
 /**
- * Genera un PDF de factura para una reserva
+ * Genera un PDF de factura
  */
 export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 50 });
+      const doc = new PDFDocument({ margin: 50, size: "A4" });
       const chunks: Buffer[] = [];
 
       doc.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -48,7 +48,9 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
       doc
         .fontSize(24)
         .font("Helvetica-Bold")
+        .fillColor("#f59e0b") // Mango orange
         .text("GENFEB S.A.S.", 50, 50)
+        .fillColor("#000000")
         .fontSize(10)
         .font("Helvetica")
         .text("RUC: 1792345678001", 50, 80)
@@ -68,7 +70,7 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
         .text(`Vencimiento: ${formatDate(data.dueDate)}`, 400, 110, { align: "right" });
 
       // Divider
-      doc.moveTo(50, 150).lineTo(560, 150).stroke();
+      doc.moveTo(50, 150).lineTo(560, 150).strokeColor("#cccccc").stroke();
 
       // Client and Provider Info
       doc
@@ -109,20 +111,22 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
       doc
         .font("Helvetica")
         .text(data.service.name, 50, tableTop + 25)
-        .text(data.service.description || "", 50, tableTop + 40)
+        .text(data.service.description || "", 50, tableTop + 40, { width: 220 })
         .text(data.service.quantity.toString(), 280, tableTop + 25, { width: 60, align: "center" })
         .text(`$${data.service.unitPrice.toFixed(2)}`, 360, tableTop + 25, { width: 80, align: "right" })
         .text(`$${data.service.total.toFixed(2)}`, 460, tableTop + 25, { width: 80, align: "right" });
 
       // Totals
-      const totalsY = tableTop + 80;
+      const totalsY = Math.max(tableTop + 80, doc.y + 20);
       doc.moveTo(300, totalsY).lineTo(560, totalsY).stroke();
+
+      const taxPercent = data.subtotal > 0 ? (data.tax / data.subtotal * 100).toFixed(0) : "12";
 
       doc
         .font("Helvetica")
         .text("Subtotal:", 360, totalsY + 10, { width: 100, align: "right" })
         .text(`$${data.subtotal.toFixed(2)}`, 460, totalsY + 10, { width: 80, align: "right" })
-        .text(`Impuesto (${(data.tax / data.subtotal * 100).toFixed(0)}%):`, 360, totalsY + 25, { width: 100, align: "right" })
+        .text(`Impuesto (${taxPercent}%):`, 360, totalsY + 25, { width: 100, align: "right" })
         .text(`$${data.tax.toFixed(2)}`, 460, totalsY + 25, { width: 80, align: "right" });
 
       doc.moveTo(300, totalsY + 35).lineTo(560, totalsY + 35).stroke();
@@ -138,21 +142,22 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
         .fontSize(10)
         .font("Helvetica")
         .text(`Método de Pago: ${data.paymentMethod}`, 50, totalsY + 80)
-        .text(`Reserva ID: ${data.bookingId}`, 50, totalsY + 95);
+        .text(`Referencia ID: ${data.referenceId}`, 50, totalsY + 95);
 
       // Footer
       doc
         .fontSize(8)
+        .fillColor("#666666")
         .text(
           "Esta factura fue generada automáticamente por GenFeb S.A.S.",
           50,
-          700,
+          doc.page.height - 70,
           { align: "center" }
         )
         .text(
           "Gracias por confiar en nosotros - https://genfeb.com",
           50,
-          715,
+          doc.page.height - 55,
           { align: "center" }
         );
 
@@ -166,14 +171,14 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
 /**
  * Genera un número de factura secuencial
  */
-export function generateInvoiceNumber(): string {
+export function generateInvoiceNumber(prefix: string = "FAC"): string {
   const date = new Date();
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const random = Math.floor(Math.random() * 10000)
     .toString()
     .padStart(4, "0");
-  return `FAC-${year}${month}-${random}`;
+  return `${prefix}-${year}${month}-${random}`;
 }
 
 /**
@@ -197,36 +202,120 @@ export function createInvoiceFromBooking(
   service: any,
   paymentMethod: string
 ): InvoiceData {
-  const subtotal = service.price || 0;
+  const subtotal = Number(service.price) || 0;
   const taxRate = 0.12; // IVA 12% Ecuador
   const tax = subtotal * taxRate;
   const total = subtotal + tax;
 
   return {
-    invoiceNumber: generateInvoiceNumber(),
+    invoiceNumber: generateInvoiceNumber("SVC"),
     date: new Date(),
     dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
     client: {
-      name: `${client.name} ${client.lastName}`,
+      name: `${client.name || client.firstName} ${client.lastName || ""}`.trim(),
       email: client.email,
       phone: client.phone,
     },
     provider: {
-      name: `${provider.name} ${provider.lastName}`,
+      name: `${provider.name || provider.firstName} ${provider.lastName || ""}`.trim(),
       email: provider.email,
       address: provider.address,
     },
     service: {
-      name: service.name,
+      name: service.name || service.title,
       description: service.description,
       quantity: 1,
-      unitPrice: service.price,
+      unitPrice: Number(service.price) || 0,
       total: subtotal,
     },
     subtotal,
     tax,
     total,
     paymentMethod,
-    bookingId: booking.id.toString(),
+    referenceId: `BK-${booking.id}`,
+  };
+}
+
+/**
+ * Crea datos de factura desde una transferencia de billetera (Recarga)
+ */
+export function createInvoiceFromTransfer(
+  transfer: any,
+  user: any
+): InvoiceData {
+  const subtotal = Number(transfer.amount) || 0;
+  const taxRate = 0; // Las recargas suelen no tener IVA directo, o ya está incluido
+  const tax = subtotal * taxRate;
+  const total = subtotal + tax;
+
+  return {
+    invoiceNumber: generateInvoiceNumber("REC"),
+    date: transfer.createdAt ? new Date(transfer.createdAt) : new Date(),
+    dueDate: new Date(),
+    client: {
+      name: `${user.name || user.firstName} ${user.lastName || ""}`.trim(),
+      email: user.email,
+      phone: user.phone,
+    },
+    provider: {
+      name: "GENFEB S.A.S.",
+      email: "pagos@genfeb.com",
+      ruc: "1792345678001",
+      address: "Av. Principal 123, Quito, Ecuador",
+    },
+    service: {
+      name: "Recarga de Wallet GenFeb",
+      description: transfer.description || "Abono a billetera electrónica",
+      quantity: 1,
+      unitPrice: Number(transfer.amount) || 0,
+      total: subtotal,
+    },
+    subtotal,
+    tax,
+    total,
+    paymentMethod: transfer.transferType === "recharge" ? "Transferencia Bancaria" : "Saldo Wallet",
+    referenceId: `TR-${transfer.id}`,
+  };
+}
+
+/**
+ * Crea datos de factura desde un reporte financiero (Verificación)
+ */
+export function createInvoiceFromFinancialReport(
+  report: any,
+  user: any
+): InvoiceData {
+  const subtotal = Number(report.amount) || 0;
+  const taxRate = 0.12; 
+  const tax = subtotal * taxRate;
+  const total = subtotal + tax;
+
+  return {
+    invoiceNumber: generateInvoiceNumber("VER"),
+    date: report.createdAt ? new Date(report.createdAt) : new Date(),
+    dueDate: new Date(),
+    client: {
+      name: `${user.name || user.firstName} ${user.lastName || ""}`.trim(),
+      email: user.email,
+      phone: user.phone,
+    },
+    provider: {
+      name: "GENFEB S.A.S.",
+      email: "verificaciones@genfeb.com",
+      ruc: "1792345678001",
+      address: "Av. Principal 123, Quito, Ecuador",
+    },
+    service: {
+      name: "Verificación de Identidad Profesional",
+      description: "Servicio de validación y verificación de documentos de asociado",
+      quantity: 1,
+      unitPrice: Number(report.amount) || 0,
+      total: subtotal,
+    },
+    subtotal,
+    tax,
+    total,
+    paymentMethod: "Transferencia Bancaria",
+    referenceId: `VR-${report.id}`,
   };
 }

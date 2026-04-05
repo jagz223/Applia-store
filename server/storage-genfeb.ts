@@ -83,6 +83,7 @@ export interface IStorage
   getFinancialReports(userId: string, period?: string): Promise<any[]>;
   createFinancialReport(data: any): Promise<any>;
   updateFinancialReportStatus(id: number | string, status: string): Promise<void>;
+  getFinancialReport(id: number | string): Promise<any | null>;
   getKPIs(userId: string): Promise<any>;
   
   // Notificaciones
@@ -182,6 +183,7 @@ export interface IStorage
   getAllTransfers(): Promise<{ transfers: any[]; total: number }>;
   /** Actualizar estado de una transferencia; si es recarga y pasa a completed, acredita el saldo al usuario. */
   updateTransferStatus(transferId: string, status: "pending_approval" | "completed" | "rejected"): Promise<any>;
+  getWalletTransfer(id: number | string): Promise<any | null>;
   getTotalPlatformBalance(): Promise<number>;
   /**
    * Solicitar retiro (escrow solo para retiros): debita wallet y acredita withdrawingFunds. Atómico.
@@ -1399,6 +1401,12 @@ export class InMemoryStorage implements IStorage {
     return voucher;
   }
   
+  async getFinancialReport(id: number | string): Promise<any | null> {
+    const numericId = typeof id === "string" ? parseInt(id, 10) : id;
+    if (isNaN(numericId)) return null;
+    return this.financialReports.find(r => r.id === numericId) || null;
+  }
+
   async getPaymentVouchersByUser(userId: string): Promise<any[]> {
     return this.paymentVouchers.filter(v => v.userId === userId);
   }
@@ -1453,6 +1461,12 @@ export class InMemoryStorage implements IStorage {
     }
     user.updatedAt = new Date();
     return record;
+  }
+
+  async getWalletTransfer(id: number | string): Promise<any | null> {
+    const numericId = typeof id === "string" ? parseInt(id, 10) : id;
+    if (isNaN(numericId)) return null;
+    return this.walletTransfers.find(t => t.id === numericId) || null;
   }
 
   async getTransfersByUser(
