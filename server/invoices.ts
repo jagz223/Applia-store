@@ -49,7 +49,7 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
         .fontSize(24)
         .font("Helvetica-Bold")
         .fillColor("#f59e0b") // Mango orange
-        .text("GENFEB S.A.S.", 50, 50)
+        .text("GENFEB", 50, 50)
         .fillColor("#000000")
         .fontSize(10)
         .font("Helvetica")
@@ -149,7 +149,7 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
         .fontSize(8)
         .fillColor("#666666")
         .text(
-          "Esta factura fue generada automáticamente por GenFeb S.A.S.",
+          "Esta factura fue generada automáticamente por GenFeb.",
           50,
           doc.page.height - 70,
           { align: "center" }
@@ -237,7 +237,7 @@ export function createInvoiceFromBooking(
 }
 
 /**
- * Crea datos de factura desde una transferencia de billetera (Recarga)
+ * Crea datos de factura desde un abono a Saldo Genfeb (recarga)
  */
 export function createInvoiceFromTransfer(
   transfer: any,
@@ -258,14 +258,14 @@ export function createInvoiceFromTransfer(
       phone: user.phone,
     },
     provider: {
-      name: "GENFEB S.A.S.",
+      name: "GENFEB",
       email: "pagos@genfeb.com",
       ruc: "1792345678001",
       address: "Av. Principal 123, Quito, Ecuador",
     },
     service: {
-      name: "Recarga de Wallet GenFeb",
-      description: transfer.description || "Abono a billetera electrónica",
+      name: "Recarga de Saldo Genfeb",
+      description: transfer.description || "Abono a Saldo Genfeb en plataforma",
       quantity: 1,
       unitPrice: Number(transfer.amount) || 0,
       total: subtotal,
@@ -273,7 +273,7 @@ export function createInvoiceFromTransfer(
     subtotal,
     tax,
     total,
-    paymentMethod: transfer.transferType === "recharge" ? "Transferencia Bancaria" : "Saldo Wallet",
+    paymentMethod: transfer.transferType === "recharge" ? "Transferencia Bancaria" : "Saldo Genfeb",
     referenceId: `TR-${transfer.id}`,
   };
 }
@@ -300,7 +300,7 @@ export function createInvoiceFromFinancialReport(
       phone: user.phone,
     },
     provider: {
-      name: "GENFEB S.A.S.",
+      name: "GENFEB",
       email: "verificaciones@genfeb.com",
       ruc: "1792345678001",
       address: "Av. Principal 123, Quito, Ecuador",

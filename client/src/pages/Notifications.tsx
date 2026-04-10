@@ -201,7 +201,7 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     return "La reserva fue actualizada.";
   }
   if (type === "booking" && d.type === "new_booking") {
-    const method = d.booking?.paymentMethod === "cash" ? "Efectivo" : "Billetera";
+    const method = d.booking?.paymentMethod === "cash" ? "Efectivo" : "Saldo Genfeb";
     return `Tienes una nueva solicitud de reserva (Pago: ${method}). Revisa el detalle en tu Panel Asociado.`;
   }
   // 1) Mensajes de reserva (comunes)

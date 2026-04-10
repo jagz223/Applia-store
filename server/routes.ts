@@ -3,7 +3,8 @@ import type { Server } from "http";
 import { z } from "zod";
 import { hasAdminPrivileges, isFullAdmin } from "@shared/roles";
 import { api } from "@shared/routes";
-import { insertProviderSchema, insertServiceSchema } from "@shared/schema";
+import { insertProviderSchema, insertServiceSchema, professionalBioFieldSchema } from "@shared/schema";
+import { providerSkillsSchema } from "@shared/skills-schema";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
@@ -445,18 +446,24 @@ export async function registerRoutes(
   // Registrar rutas de PayPal
   await registerPayPalRoutes(httpServer, app);
 
-  const createProviderBodySchema = insertProviderSchema.extend({
-    category: providerCategorySchema.optional(),
-    categoryId: z.number().int().positive().optional(),
-    subcategoryId: z.number().int().positive().optional().nullable(),
-  });
+  const createProviderBodySchema = insertProviderSchema
+    .extend({
+      category: providerCategorySchema.optional(),
+      categoryId: z.number().int().positive().optional(),
+      subcategoryId: z.number().int().positive().optional().nullable(),
+    })
+    .extend({
+      bio: professionalBioFieldSchema,
+      skills: providerSkillsSchema,
+    });
   const updateProviderBodySchema = z.object({
     category: providerCategorySchema.optional(),
     categoryId: z.number().int().positive().optional(),
     profession: z.string().min(1).max(200).optional(),
-    bio: z.string().max(2000).optional(),
+    bio: professionalBioFieldSchema.optional(),
     yearsExperience: z.number().int().min(0).optional(),
     hourlyRate: z.string().optional(),
+    skills: providerSkillsSchema.optional(),
   });
 
   app.post(api.providers.create.path, authenticateJWT, async (req: any, res) => {
@@ -464,11 +471,14 @@ export async function registerRoutes(
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const data = createProviderBodySchema.parse(req.body);
-      const keepAdminRole = isFullAdmin(req.user?.role);
+      const dbUser = await genFebStorage.getUserById(userId);
+      const effectiveRole = (dbUser as { role?: string } | undefined)?.role ?? req.user?.role;
+      /** Admin o Soporte TI: no degradar a professional; misma regla que requireStaffFromDb (BD primero). */
+      const keepStaffRole = hasAdminPrivileges(effectiveRole);
       const existing = await catalogService.getProviderByUserId(userId);
       if (existing) {
-        // No degradar administrador a professional si ya tenía proveedor (409).
-        if (!keepAdminRole) {
+        // No degradar staff a professional si ya tenía proveedor (409).
+        if (!keepStaffRole) {
           await genFebStorage.updateUser(userId, {
             role: "professional",
             acceptedProviderTermsOfUse: false,
@@ -485,10 +495,13 @@ export async function registerRoutes(
         bio: data.bio ?? "",
         yearsExperience: data.yearsExperience ?? 0,
         hourlyRate: data.hourlyRate ?? null,
+        skills: data.skills ?? [],
       } as any);
-      if (keepAdminRole) {
-        // Admin como asociado: conserva rol admin y no requiere verificación de plataforma.
-        await catalogService.updateProvider((provider as { id: number }).id, { isVerified: true } as any);
+      if (keepStaffRole) {
+        // Solo administrador pleno: verificado en catálogo sin flujo de verificación de plataforma.
+        if (isFullAdmin(effectiveRole)) {
+          await catalogService.updateProvider((provider as { id: number }).id, { isVerified: true } as any);
+        }
       } else {
         await genFebStorage.updateUser(userId, {
           role: "professional",

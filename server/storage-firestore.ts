@@ -1,6 +1,6 @@
 /**
  * Implementación de almacenamiento con Firestore
- * GenFeb S.A.S.
+ * GenFeb
  * 
  * Este módulo proporciona una implementación de IStorage usando
  * Google Cloud Firestore como base de datos.
@@ -512,6 +512,7 @@ class FirestoreStorageImpl implements IStorage {
       isVerified: provider.isVerified ?? false,
       rating: provider.rating ?? "0",
       reviewCount: provider.reviewCount ?? 0,
+      skills: (provider as { skills?: string[] | null }).skills ?? [],
     };
     await docRef.set(newProvider);
     return newProvider as Provider;
@@ -1262,7 +1263,7 @@ class FirestoreStorageImpl implements IStorage {
       const clientWallet = typeof clientData.wallet === "number" ? clientData.wallet : 0;
       const clientPending = typeof clientData.pendingBalance === "number" ? clientData.pendingBalance : 0;
       if (clientWallet < cost) {
-        throw new Error("Saldo insuficiente. Recarga tu billetera para confirmar el pago.");
+        throw new Error("Saldo insuficiente. Añade saldo a tu Saldo Genfeb para confirmar el pago.");
       }
 
       const now = new Date();

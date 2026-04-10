@@ -1,7 +1,8 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { insertProviderSchema } from "@shared/schema";
+import { insertProviderSchema, professionalBioFieldSchema } from "@shared/schema";
+import { providerSkillsSchema } from "@shared/skills-schema";
 import { type InsertProvider } from "@shared/schema";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCreateProvider, useCurrentProvider, useCategories, useSubcategories } from "@/hooks/use-mango-data";
@@ -16,17 +17,23 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo } from "react";
+import { ProviderSkillsField } from "@/components/ProviderSkillsField";
 import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
 
 /** Solo categorías válidas para proveedor (excluye legal/financial, que son subcategorías). */
 const PROVIDER_CATEGORY_SLUGS = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
 const HIDDEN_SLUGS = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
 
-const becomeProFormSchema = insertProviderSchema.extend({
-  categoryId: z.number().int().positive({ message: "Selecciona una categoría para tu perfil y tu servicio." }),
-  category: z.string().optional(),
-  subcategoryId: z.number().int().positive().optional().nullable(),
-});
+const becomeProFormSchema = insertProviderSchema
+  .extend({
+    categoryId: z.number().int().positive({ message: "Selecciona una categoría para tu perfil y tu servicio." }),
+    category: z.string().optional(),
+    subcategoryId: z.number().int().positive().optional().nullable(),
+  })
+  .extend({
+    bio: professionalBioFieldSchema,
+    skills: providerSkillsSchema,
+  });
 type BecomeProForm = z.infer<typeof becomeProFormSchema>;
 
 export default function BecomePro() {
@@ -56,6 +63,7 @@ export default function BecomePro() {
       subcategoryId: undefined,
       profession: "",
       bio: "",
+      skills: [] as string[],
       yearsExperience: 0,
       hourlyRate: "50",
     },
@@ -243,19 +251,26 @@ export default function BecomePro() {
                 />
               </div>
 
+              <ProviderSkillsField control={form.control} name="skills" />
+
               <FormField
                 control={form.control}
                 name="bio"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Descripción y habilidades</FormLabel>
+                    <FormLabel>Biografía y enfoque profesional</FormLabel>
                     <FormControl>
-                      <Textarea 
-                        placeholder="Describe tu experiencia, certificaciones y qué ofreces. Esta descripción será la de tu servicio." 
-                        className="h-32"
-                        {...field} 
+                      <Textarea
+                        placeholder="Quién eres, tu especialidad, cómo trabajas y qué pueden esperar los clientes. Entre 50 y 700 caracteres."
+                        className="min-h-[140px] resize-y"
+                        maxLength={700}
+                        {...field}
                       />
                     </FormControl>
+                    <p className="text-xs text-muted-foreground flex justify-between gap-2">
+                      <span>Obligatorio: mínimo 50 caracteres, máximo 700.</span>
+                      <span className="tabular-nums shrink-0">{field.value?.length ?? 0}/700</span>
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

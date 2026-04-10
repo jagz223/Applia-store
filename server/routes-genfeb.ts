@@ -70,7 +70,7 @@ const updateUserRoleSchema = z.object({
   bio: z.string().optional(),
 });
 
-// ============== RUTAS DE GENFEB S.A.S. ==============
+// ============== RUTAS GENFEB ==============
 
 export async function registerGenFebRoutes(
   httpServer: Server,
@@ -189,7 +189,7 @@ export async function registerGenFebRoutes(
         void notificationService
           .sendPushToUser(providerUserId, {
             title: "Nueva solicitud de reserva",
-            body: `Tienes una nueva solicitud de reserva (Pago: ${(data as any).paymentMethod === "cash" ? "Efectivo" : "Billetera"}). Revisa el detalle en tu Panel Asociado.`,
+            body: `Tienes una nueva solicitud de reserva (Pago: ${(data as any).paymentMethod === "cash" ? "Efectivo" : "Saldo Genfeb"}). Revisa el detalle en tu Panel Asociado.`,
             data: {
               url: `/professional-dashboard?tab=bookings&highlight=${(booking as { id: number }).id}`,
               type: "booking",
@@ -361,8 +361,8 @@ export async function registerGenFebRoutes(
 
           const message = refundHappened
             ? amountFormatted
-              ? `El asociado canceló el servicio. Se te devolvieron ${amountFormatted} a tu billetera.`
-              : "El asociado canceló el servicio. Se te devolvió el monto retenido a tu billetera."
+              ? `El asociado canceló el servicio. Se te devolvieron ${amountFormatted} a tu Saldo Genfeb.`
+              : "El asociado canceló el servicio. Se te devolvió el monto retenido a tu Saldo Genfeb."
             : "El asociado canceló el servicio. No se realizó ningún cobro.";
 
           const notifData = { bookingId, message };
@@ -1700,7 +1700,7 @@ export async function registerGenFebRoutes(
     }
   });
   
-  console.log("✅ GenFeb S.A.S. routes registered");
+  console.log("✅ GenFeb routes registered");
   
   // =====================================================
   // NUEVAS RUTAS (Inspiradas en BookingDo SaaS)

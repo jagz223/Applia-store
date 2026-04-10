@@ -43,7 +43,7 @@ export interface RoleDefinition {
 export type NewRoleDefinition = Omit<RoleDefinition, "createdAt" | "updatedAt">;
 
 /**
- * Contrato de almacenamiento de dominio - GenFeb S.A.S.
+ * Contrato de almacenamiento de dominio - GenFeb
  * Implementa segregación de interfaces (SOLID): IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage
  * están en storage-contracts.ts; IStorage los compone y añade el resto del dominio.
  */
@@ -611,7 +611,7 @@ export class InMemoryStorage implements IStorage {
     if (!client) throw new Error("Usuario cliente no encontrado");
     const clientWallet = typeof (client as { wallet?: number }).wallet === "number" ? (client as { wallet: number }).wallet : 0;
     const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
-    if (clientWallet < cost) throw new Error("Saldo insuficiente. Recarga tu billetera para confirmar el pago.");
+    if (clientWallet < cost) throw new Error("Saldo insuficiente. Añade saldo a tu Saldo Genfeb para confirmar el pago.");
 
     (client as { wallet: number }).wallet = clientWallet - cost;
     (client as { pendingBalance: number }).pendingBalance = clientPending + cost;
@@ -1029,6 +1029,7 @@ export class InMemoryStorage implements IStorage {
       isVerified: false,
       rating: "0",
       reviewCount: 0,
+      skills: (insertProvider as { skills?: string[] }).skills ?? [],
       createdAt: new Date(),
     };
     this.providers.push(newProvider);

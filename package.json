@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",
-  "description": "GENFEB - Plataforma de Servicios para GenFeb S.A.S.",
+  "description": "GENFEB - Plataforma de Servicios GenFeb",
   "scripts": {
     "dev": "cross-env NODE_ENV=development npx tsx server/index.ts",
     "build": "tsx script/build.ts",

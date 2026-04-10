@@ -1,4 +1,4 @@
-# Guía de Despliegue GenFeb S.A.S. en Hostinger
+# Guía de Despliegue GenFeb en Hostinger
 
 ## Opciones de Despliegue en Hostinger
 

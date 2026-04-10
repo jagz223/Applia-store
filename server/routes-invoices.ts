@@ -178,7 +178,7 @@ export async function registerInvoiceRoutes(
                 type: "recharge",
                 invoiceNumber: `REC-${transfer.id}`,
                 date: transfer.createdAt,
-                service: "Recarga de Wallet",
+                service: "Recarga de Saldo Genfeb",
                 amount: transfer.amount,
                 status: transfer.status,
               });

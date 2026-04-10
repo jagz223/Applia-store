@@ -1,14 +1,14 @@
 {
   "name": "genfeb",
   "version": "1.0.0",
-  "description": "GenFeb S.A.S. - Plataforma de Servicios",
+  "description": "GenFeb - Plataforma de Servicios",
   "main": "dist/index.cjs",
   "scripts": {
     "start": "NODE_ENV=production node dist/index.cjs",
     "dev": "cross-env NODE_ENV=development npx tsx server/index.ts"
   },
   "keywords": ["genfeb", "services", "marketplace"],
-  "author": "GenFeb S.A.S.",
+  "author": "GenFeb",
   "license": "MIT",
   "dependencies": {
     "bcryptjs": "^2.4.3",

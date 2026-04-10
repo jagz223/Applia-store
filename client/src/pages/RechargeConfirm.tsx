@@ -1,10 +1,10 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock, ArrowLeft, Wallet } from "lucide-react";
+import { Clock, ArrowLeft, Home } from "lucide-react";
 
 const MESSAGE =
-  "Se notificó exitosamente a nuestro staff sobre la recarga, espere unos momentos y se le acreditará el saldo a su billetera.";
+  "Se notificó exitosamente a nuestro staff sobre tu solicitud; en breve podremos reflejar el monto en tu Saldo Genfeb.";
 
 export default function RechargeConfirm() {
   return (
@@ -23,12 +23,12 @@ export default function RechargeConfirm() {
           <Button variant="outline" className="w-full sm:w-auto gap-2" asChild>
             <Link href="/recharge">
               <ArrowLeft className="h-4 w-4" />
-              Volver a recargar
+              Volver a añadir saldo
             </Link>
           </Button>
           <Button className="w-full sm:w-auto gap-2" asChild>
             <Link href="/">
-              <Wallet className="h-4 w-4" />
+              <Home className="h-4 w-4" />
               Ir al inicio
             </Link>
           </Button>

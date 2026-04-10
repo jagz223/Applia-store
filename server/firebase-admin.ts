@@ -1,6 +1,6 @@
 /**
  * Configuración de Firebase Admin SDK
- * GenFeb S.A.S.
+ * GenFeb
  * 
  * Para conectar a Firebase:
  * 1. Crea un proyecto en Firebase Console (https://console.firebase.google.com)

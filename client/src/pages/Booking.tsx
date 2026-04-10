@@ -310,8 +310,8 @@ export default function Booking() {
     }
     if (walletLoading) {
       toast({
-        title: "Validando saldo",
-        description: "Estamos cargando tu saldo actual, intenta de nuevo en un momento.",
+        title: "Validando Saldo Genfeb",
+        description: "Estamos cargando tu Saldo Genfeb, intenta de nuevo en un momento.",
       });
       return;
     }
@@ -371,9 +371,9 @@ export default function Booking() {
       <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Saldo insuficiente</AlertDialogTitle>
+            <AlertDialogTitle>Saldo Genfeb insuficiente</AlertDialogTitle>
             <AlertDialogDescription>
-              No tienes saldo suficiente en tu wallet para pedir este servicio. Recarga tu saldo para continuar.
+              No tienes suficiente Saldo Genfeb para pedir este servicio. Añade saldo para continuar.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -384,7 +384,7 @@ export default function Booking() {
                 navigate("/recharge");
               }}
             >
-              Recargar saldo
+              Recargar Saldo Genfeb
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -398,7 +398,7 @@ export default function Booking() {
               ¿Cómo deseas pagar este servicio?
               <br />
               <span className="text-sm text-muted-foreground">
-                (Wallet retiene el saldo de forma segura. Efectivo se paga directamente al asociado).
+                (El pago con Saldo Genfeb queda reservado en la plataforma hasta confirmar el servicio. Efectivo se paga directamente al asociado).
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -408,8 +408,8 @@ export default function Booking() {
               className="h-16 text-lg font-semibold flex flex-col gap-1"
               onClick={() => confirmBookingWithMethod("wallet")}
             >
-              <span>Usar Wallet</span>
-              <span className="text-xs font-normal opacity-80">Saldo disponible: ${walletBalance.toFixed(2)}</span>
+              <span>Pagar con Saldo Genfeb</span>
+              <span className="text-xs font-normal opacity-80">Saldo Genfeb: ${walletBalance.toFixed(2)}</span>
             </Button>
             <Button 
               variant="outline" 

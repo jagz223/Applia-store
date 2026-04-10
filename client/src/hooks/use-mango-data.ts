@@ -158,6 +158,50 @@ export function useCreateProvider() {
   });
 }
 
+export type ProviderPatchPayload = {
+  profession?: string;
+  bio?: string;
+  yearsExperience?: number;
+  hourlyRate?: string;
+  categoryId?: number;
+  skills?: string[];
+};
+
+/** Actualizar perfil de proveedor (p. ej. biografía). No muestra toast en éxito; invalida caché. */
+export function useUpdateProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      providerId,
+      data,
+    }: {
+      providerId: number;
+      data: ProviderPatchPayload;
+    }) => {
+      const token = getToken();
+      const res = await fetch(`/api/providers/${providerId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "No se pudo actualizar el perfil de asociado");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+      queryClient.invalidateQueries({ queryKey: [api.providers.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.services.get.path] });
+      debouncedRefetch(queryClient, [api.providers.list.path]);
+    },
+  });
+}
+
 // ==========================================
 // SERVICES
 // ==========================================
@@ -571,7 +615,7 @@ export function useWallet(options?: { enabled?: boolean }) {
       const res = await fetch(api.genfeb.wallet.me.path, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!res.ok) throw new Error("No se pudo cargar la billetera");
+      if (!res.ok) throw new Error("No se pudo cargar el Saldo Genfeb");
       return api.genfeb.wallet.me.responses[200].parse(await res.json());
     },
     enabled: options?.enabled !== false,

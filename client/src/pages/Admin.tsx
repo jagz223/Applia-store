@@ -310,7 +310,7 @@ function AdminWithdrawalsTab({
             title: pendingAction === "approve" ? "Pago aprobado" : "Retiro rechazado",
             description: pendingAction === "approve"
               ? "El retiro fue registrado y el asociado será notificado."
-              : "Los fondos fueron devueltos a la billetera del usuario.",
+              : "Los fondos fueron devueltos al Saldo Genfeb del usuario.",
           });
         },
         onError: (err: Error) => {
@@ -455,7 +455,7 @@ function AdminWithdrawalsTab({
           <DialogDescription>
             {pendingAction === "approve"
               ? "Confirma que realizaste la transferencia bancaria al asociado. El usuario recibirá una notificación sin que se muestre tu nombre."
-              : "Los fondos volverán a la billetera del usuario. Opcionalmente indica el motivo (ej. datos bancarios incorrectos, banco en mantenimiento)."}
+              : "Los fondos volverán al Saldo Genfeb del usuario. Opcionalmente indica el motivo (ej. datos bancarios incorrectos, banco en mantenimiento)."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
@@ -849,7 +849,7 @@ export default function AdminPanel() {
             <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-mango-orange shrink-0" />
             <div className="min-w-0">
               <h1 className="text-lg sm:text-2xl font-bold truncate">Panel de Administración</h1>
-              <p className="text-gray-500 text-sm truncate">GenFeb S.A.S.</p>
+              <p className="text-gray-500 text-sm truncate">GenFeb</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">

@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { CalendarIcon, Wallet, ArrowLeft, Copy, Check, Loader2 } from "lucide-react";
+import { CalendarIcon, Banknote, ArrowLeft, Copy, Check, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -100,7 +100,7 @@ export default function Recharge() {
         <Card className="border-border bg-card">
           <CardContent className="pt-6">
             <p className="text-muted-foreground text-center mb-4">
-              Debes iniciar sesión para recargar tu wallet.
+              Debes iniciar sesión para recargar tu Saldo Genfeb.
             </p>
             <Button asChild className="w-full sm:w-auto">
               <Link href="/login">Iniciar sesión</Link>
@@ -125,25 +125,25 @@ export default function Recharge() {
 
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
-            <Wallet className="h-8 w-8 text-primary" />
-            Recargar wallet
+            <Banknote className="h-8 w-8 text-primary" />
+            Recargar Saldo Genfeb
           </h1>
           <p className="text-muted-foreground mt-1">
-            Realiza una transferencia bancaria y registra los datos para acreditar el saldo.
+            Realiza una transferencia bancaria y registra los datos para acreditar tu Saldo Genfeb.
           </p>
         </div>
 
-        {/* Resumen de billetera: solo información de saldo disponible */}
+        {/* Resumen: Saldo Genfeb */}
         <Card className="border-border bg-card shadow-sm mb-8">
           <CardHeader>
-            <CardTitle className="text-lg">Tu billetera</CardTitle>
+            <CardTitle className="text-lg">Saldo Genfeb</CardTitle>
             <CardDescription>
-              Saldo disponible en tu wallet para usar en tus pagos.
+              Monto disponible en tu cuenta de la plataforma para pagar servicios y reservas.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div>
-              <p className="text-sm text-muted-foreground">Saldo disponible</p>
+              <p className="text-sm text-muted-foreground">Disponible ahora</p>
               <p className="text-2xl font-semibold tabular-nums text-foreground">{formatUsd(wallet)}</p>
             </div>
           </CardContent>

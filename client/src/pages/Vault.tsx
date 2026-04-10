@@ -272,7 +272,7 @@ export default function Vault() {
     return matchesSearch && matchesCategory;
   });
 
-  // Bóveda Segura: ocultar pestañas/UI específicas (Carpetas/Compartidos/Buscar y subidas)
+  // Página de documentos/comprobantes: ocultar pestañas/UI específicas (Carpetas/Compartidos/Buscar y subidas)
   // y ocultar filtros/subpestañas: Contratos, Legales, Seguros.
   const SHOW_VAULT_DOCUMENTS_TAB = false;
   const SHOW_VAULT_FOLDERS_TAB = false;
@@ -306,19 +306,19 @@ export default function Vault() {
                   Cifrado AES-256
                 </Badge>
                 <h1 className="text-3xl font-display font-bold">
-                  Bóveda <span className="text-gradient-primary">Segura</span>
+                  Mis <span className="text-gradient-primary">documentos</span>
                 </h1>
               </div>
             </div>
             <p className="text-muted-foreground max-w-2xl">
-              Almacena y gestiona tus documentos y contratos de forma segura con cifrado de grado militar. 
-              Acceso protegido con autenticación de dos factores.
+              Consulta tus comprobantes y facturas de la plataforma, y mantén a mano la documentación que subas a tu cuenta.
+              La información sensible se trata con medidas de protección acordes al servicio.
             </p>
           </motion.div>
         </div>
       </section>
 
-      {/* Panel superior oculto en Bóveda Segura */}
+      {/* Panel superior oculto */}
       {false && (
         <section className="py-6 border-b border-border">
           <div className="container px-4 mx-auto max-w-7xl">

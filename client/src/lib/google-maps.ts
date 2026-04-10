@@ -1,4 +1,4 @@
-// Google Maps API utilities for GenFeb S.A.S.
+// Google Maps API utilities for GenFeb.
 // This module provides geolocation, geocoding, and places search functionality
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;

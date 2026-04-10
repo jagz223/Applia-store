@@ -1,8 +1,8 @@
-# GenFeb S.A.S. - Google Cloud Compute Engine Deployment Guide
+# GenFeb - Google Cloud Compute Engine Deployment Guide
 
 > **Version:** 1.0  
 > **Last Updated:** 2026-02-25  
-> **Project:** GenFeb S.A.S. - Plataforma de Servicios  
+> **Project:** GenFeb - Plataforma de Servicios  
 > **Stack:** React + Express.js + TypeScript + PostgreSQL + Drizzle ORM
 
 ---
@@ -549,7 +549,7 @@ Create `/var/www/genfeb/.env`:
 
 ```bash
 # ===========================================
-# GENFEB S.A.S. - PRODUCTION ENVIRONMENT
+# GENFEB - PRODUCTION ENVIRONMENT
 # ===========================================
 
 # Database - Cloud SQL
@@ -862,4 +862,4 @@ pm2 restart genfeb-server
 
 ---
 
-*Generated for GenFeb S.A.S. - GCP Compute Engine Deployment*
+*Generated for GenFeb - GCP Compute Engine Deployment*

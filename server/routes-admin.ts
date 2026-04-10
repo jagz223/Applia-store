@@ -694,7 +694,7 @@ export function registerAdminRoutes(app: Express): void {
         const professionalName = (user as { name?: string; firstName?: string; lastName?: string; email?: string }).name
           ?? ([((user as { firstName?: string }).firstName ?? ""), ((user as { lastName?: string }).lastName ?? "")].filter(Boolean).join(" ") || (user as { email?: string }).email || "Usuario");
 
-        const rejectedMessage = "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu billetera.";
+        const rejectedMessage = "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.";
         const rejectionData: Record<string, unknown> = { message: rejectedMessage };
         if (adminNote) rejectionData.adminNote = adminNote;
 
@@ -732,7 +732,7 @@ export function registerAdminRoutes(app: Express): void {
               data: {
                 type: "withdrawal_processed_by_other",
                 action: "rejected",
-                message: `El retiro de ${professionalName} fue rechazado por ${adminName}. Los fondos fueron devueltos a su billetera.`,
+                message: `El retiro de ${professionalName} fue rechazado por ${adminName}. Los fondos fueron devueltos a su Saldo Genfeb.`,
                 professionalUserId: userId,
                 professionalName,
                 processedByAdminId: adminUserId,
@@ -764,7 +764,7 @@ export function registerAdminRoutes(app: Express): void {
           });
         }
 
-        return res.status(200).json({ message: "Retiro rechazado; fondos devueltos a la billetera del usuario.", user: toPlainUser(user) });
+        return res.status(200).json({ message: "Retiro rechazado; fondos devueltos al Saldo Genfeb del usuario.", user: toPlainUser(user) });
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);

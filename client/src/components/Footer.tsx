@@ -15,7 +15,15 @@ export function Footer() {
           {/* Brand */}
           <div className="space-y-4">
             <Link href="/" className="flex items-center gap-2">
-              <img src="/logo GenFeb.jpg" alt="GENFEB" className="h-8 w-auto" />
+              <img
+                src="/favicon.png"
+                alt=""
+                className="h-8 w-8 shrink-0 bg-white object-contain"
+                width={32}
+                height={32}
+                decoding="async"
+                aria-hidden
+              />
               <span className="text-xl font-bold font-display text-primary">GENFEB</span>
             </Link>
             <p className="text-muted-foreground text-sm leading-relaxed max-w-xs">
@@ -61,7 +69,7 @@ export function Footer() {
         </div>
 
         <div className="mt-12 pt-8 border-t border-border/50 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
-          <p>&copy; {new Date().getFullYear()} GenFeb S.A.S. Todos los derechos reservados.</p>
+          <p>&copy; {new Date().getFullYear()} GenFeb. Todos los derechos reservados.</p>
           <div className="flex items-center gap-1">
             <span>Hecho con</span>
             <Heart className="h-4 w-4 text-red-500 fill-red-500" />

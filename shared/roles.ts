@@ -18,7 +18,7 @@ export function normalizeRoleCode(role: string | undefined | null): string | nul
   const t = role.trim();
   if (!t) return null;
   const lower = t.toLowerCase();
-  if (lower === "admin") return "admin";
+  if (lower === "admin" || lower === "administrador") return "admin";
   // tiSupport / Soporte TI / tisupport / ti_support / ti-support / "ti support"
   const compact = lower.replace(/[\s_-]/g, "");
   if (compact === "tisupport" || t === "Soporte TI") return "tiSupport";

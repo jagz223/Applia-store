@@ -3,7 +3,7 @@ import { useRoute, Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useService, useUpdateService, useCurrentProvider } from "@/hooks/use-mango-data";
+import { useService, useUpdateService, useCurrentProvider, useUpdateProvider } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useState } from "react";
+import { professionalBioFieldSchema } from "@shared/schema";
+import { providerSkillsSchema } from "@shared/skills-schema";
+import { ProviderSkillsField } from "@/components/ProviderSkillsField";
 
 const editServiceSchema = z.object({
   title: z.string().min(1, "El nombre es obligatorio").max(500),
@@ -31,6 +34,8 @@ const editServiceSchema = z.object({
   price: z.string().min(1, "El precio es obligatorio"),
   // imageUrl existe en el backend, pero ya no se configura desde la UI.
   imageUrl: z.string().url("URL no válida").optional().or(z.literal("")),
+  professionalBio: professionalBioFieldSchema,
+  skills: providerSkillsSchema,
 });
 
 type EditServiceForm = z.infer<typeof editServiceSchema>;
@@ -43,6 +48,7 @@ export default function EditService() {
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { user } = useAuth();
   const updateService = useUpdateService(id);
+  const updateProvider = useUpdateProvider();
   const [confirmOpen, setConfirmOpen] = useState(false);
   
   const isAdmin = hasAdminRole(user);
@@ -58,34 +64,46 @@ export default function EditService() {
       description: "",
       price: "0",
       imageUrl: "",
+      professionalBio: "",
+      skills: [] as string[],
     },
   });
 
   useEffect(() => {
     if (service) {
+      const p = service.provider as { bio?: string; skills?: string[] | null } | undefined;
       form.reset({
         title: service.title ?? "",
         description: service.description ?? "",
         price: String(service.price ?? "0"),
         imageUrl: service.imageUrl ?? "",
+        professionalBio: p?.bio ?? "",
+        skills: Array.isArray(p?.skills) ? [...p.skills] : [],
       });
     }
   }, [service, form]);
 
   const isOwner = provider && service && service.providerId === provider.id;
 
-  const handleSaveConfirmed = () => {
-    updateService.mutate(
-      {
-        title: form.getValues("title"),
-        description: form.getValues("description") ?? "",
-        price: form.getValues("price"),
-        imageUrl: form.getValues("imageUrl") || undefined,
-      },
-      {
-        onSuccess: () => setLocation(`/service/${id}`),
-      }
-    );
+  const handleSaveConfirmed = async () => {
+    const vals = form.getValues();
+    const providerId = service?.provider && "id" in service.provider ? (service.provider as { id: number }).id : undefined;
+    if (providerId == null) return;
+    try {
+      await updateProvider.mutateAsync({
+        providerId,
+        data: { bio: vals.professionalBio.trim(), skills: vals.skills },
+      });
+      await updateService.mutateAsync({
+        title: vals.title,
+        description: vals.description ?? "",
+        price: vals.price,
+        imageUrl: vals.imageUrl || undefined,
+      });
+      setLocation(`/service/${id}`);
+    } catch {
+      // Toasts desde mutaciones
+    }
   };
 
   const onSubmit = () => {
@@ -138,7 +156,7 @@ export default function EditService() {
         <CardHeader>
           <CardTitle>Editar servicio</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Modifica el nombre, la descripción o el precio de tu publicación.
+            Modifica tu publicación: datos del servicio y tu biografía profesional (50–700 caracteres).
           </p>
         </CardHeader>
         <CardContent>
@@ -177,10 +195,35 @@ export default function EditService() {
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Descripción</FormLabel>
+                    <FormLabel>Descripción del servicio</FormLabel>
                     <FormControl>
                       <Textarea placeholder="Qué incluye este servicio..." className="min-h-[120px]" {...field} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <ProviderSkillsField control={form.control} name="skills" />
+
+              <FormField
+                control={form.control}
+                name="professionalBio"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Biografía y enfoque profesional</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Quién eres, tu especialidad y cómo trabajas. Mínimo 50 caracteres, máximo 700."
+                        className="min-h-[140px] resize-y"
+                        maxLength={700}
+                        {...field}
+                      />
+                    </FormControl>
+                    <p className="text-xs text-muted-foreground flex justify-between gap-2">
+                      <span>Visible en tu perfil público. Obligatorio al guardar.</span>
+                      <span className="tabular-nums shrink-0">{field.value?.length ?? 0}/700</span>
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -191,8 +234,12 @@ export default function EditService() {
                 La foto que se muestra en el detalle es únicamente la del asociado.
               */}
 
-              <Button type="submit" className="w-full" disabled={updateService.isPending || isBlocked}>
-                {updateService.isPending ? (
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={updateService.isPending || updateProvider.isPending || isBlocked}
+              >
+                {updateService.isPending || updateProvider.isPending ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Guardando...

@@ -5,7 +5,7 @@ import {
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
-  CheckCircle2, XCircle, Banknote, Wallet, Inbox, PlayCircle, History, UserPlus, Receipt,
+  CheckCircle2, XCircle, Banknote, CircleDollarSign, Inbox, PlayCircle, History, UserPlus, Receipt,
   AlertTriangle
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -115,9 +115,9 @@ function getTransferMetaForProfessional(t: any) {
   }
 
   let label = "Transacción";
-  if (type === "recharge") label = "Recarga de saldo";
+  if (type === "recharge") label = "Recarga de Saldo Genfeb";
   if (type === "service_payment") label = "Ingreso por servicio";
-  if (type === "withdrawal") label = "Retiro de fondos";
+  if (type === "withdrawal") label = "Pago a tu cuenta";
 
   const createdAt = parseTransferDate(t.createdAt);
   const dateStr = createdAt
@@ -526,8 +526,8 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
             )}
             {booking.paymentMethod === "wallet" && (
               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
-                <Wallet className="h-3 w-3" />
-                BILLETERA
+                <CircleDollarSign className="h-3 w-3" />
+                SALDO GENFEB
               </Badge>
             )}
           </div>
@@ -727,7 +727,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
               <DialogTitle>Servicio en Efectivo</DialogTitle>
             </div>
             <DialogDescription className="text-foreground">
-              Como este servicio se pagará en <strong>Efectivo</strong>, la plataforma descontará automáticamente una comisión del <strong>10%</strong> de tu wallet cuando finalices el trabajo.
+              Como este servicio se pagará en <strong>Efectivo</strong>, la plataforma descontará automáticamente una comisión del <strong>10%</strong> de tu Saldo Genfeb cuando finalices el trabajo.
             </DialogDescription>
           </DialogHeader>
 
@@ -742,7 +742,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 <span className="font-bold">-${(Number(cashWarningBooking.cost || 0) * 0.1).toFixed(2)}</span>
               </div>
               <p className="text-[11px] text-muted-foreground mt-2 border-t pt-2">
-                * El descuento se aplicará a tu wallet al marcar el servicio como completado. Tu saldo puede quedar en negativo si no tienes fondos suficientes.
+                * El descuento se aplicará a tu Saldo Genfeb al marcar el servicio como completado. Puede quedar en negativo si no tienes saldo suficiente en tu Saldo Genfeb.
               </p>
             </div>
           )}
@@ -1016,7 +1016,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
   );
 }
 
-/** Dialog que muestra resumen económico y permite descargar reporte CSV (transferencias, ingresos, estado de retiros). */
+/** Dialog de resumen de actividad y export CSV (movimientos, ingresos, pagos solicitados). */
 function EconomicReportDialog({
   open,
   onOpenChange,
@@ -1045,8 +1045,8 @@ function EconomicReportDialog({
     const headers = ["Fecha", "Tipo", "Descripción", "Monto (USD)", "Estado"];
     const typeLabels: Record<string, string> = {
       service_payment: "Ingreso por servicio",
-      recharge: "Recarga",
-      withdrawal: "Retiro",
+      recharge: "Recarga Saldo Genfeb",
+      withdrawal: "Pago a cuenta",
     };
     const statusLabels: Record<string, string> = {
       pending_approval: "Pendiente aprobación",
@@ -1065,7 +1065,7 @@ function EconomicReportDialog({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `reporte-economico-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    a.download = `reporte-actividad-${format(new Date(), "yyyy-MM-dd")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1074,9 +1074,9 @@ function EconomicReportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Reporte Económico</DialogTitle>
+          <DialogTitle>Resumen de actividad</DialogTitle>
           <DialogDescription>
-            Resumen de ingresos, transferencias y estado de retiros. Puedes descargar el historial en CSV.
+            Ingresos, movimientos y estado de los pagos que solicitaste a tu cuenta. Puedes descargar el historial en CSV.
           </DialogDescription>
         </DialogHeader>
         {isLoading ? (
@@ -1091,20 +1091,20 @@ function EconomicReportDialog({
                 <p className="font-semibold text-lg">{formatUsd(totalEarnings)}</p>
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Retiros completados</p>
+                <p className="text-muted-foreground">Pagos completados</p>
                 <p className="font-semibold text-lg">{formatUsd(totalWithdrawn)}</p>
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Saldo disponible</p>
+                <p className="text-muted-foreground">Saldo Genfeb</p>
                 <p className="font-semibold text-lg">{formatUsd(wallet)}</p>
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Retiro pendiente</p>
+                <p className="text-muted-foreground">Pago en proceso</p>
                 <p className="font-semibold text-lg">{withdrawingFunds > 0 ? formatUsd(withdrawingFunds) : "—"}</p>
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Últimas {transfers.length} transferencias. Estado: Pendiente aprobación / Completado / Rechazado.
+              Últimos {transfers.length} movimientos. Estado: Pendiente aprobación / Completado / Rechazado.
             </p>
             <div className="max-h-48 overflow-y-auto rounded border text-sm">
               {transfers.length === 0 ? (
@@ -1154,7 +1154,7 @@ function InvoicesTabContent() {
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+          <CardDescription>Movimientos y descarga de facturas en PDF</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
@@ -1169,7 +1169,7 @@ function InvoicesTabContent() {
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+          <CardDescription>Movimientos y descarga de facturas en PDF</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <FileText className="h-8 w-8 opacity-60" />
@@ -1533,7 +1533,7 @@ export default function ProfessionalDashboard() {
 
   const avgEarnings6m = useMemo(() => (monthlyEarnings.length > 0 ? totalEarnings6m / monthlyEarnings.length : 0), [totalEarnings6m, monthlyEarnings]);
 
-  // Panel Económico (Bóveda Profesional): ocultar secciones específicas por UI.
+  // Panel del asociado (Mi actividad): ocultar secciones específicas por UI.
   const SHOW_PRO_MONTHLY_EARNINGS = false;
   const SHOW_PRO_RATING_BREAKDOWN = false;
   const SHOW_PRO_QUICK_ACTIONS = false;
@@ -1548,14 +1548,14 @@ export default function ProfessionalDashboard() {
               <BarChart3 className="h-6 w-6 text-mango-orange" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold">Panel Económico</h1>
-              <p className="text-gray-500 text-sm sm:text-base">Gestiona tus ingresos y estadísticas</p>
+              <h1 className="text-xl sm:text-2xl font-bold">Mi actividad</h1>
+              <p className="text-gray-500 text-sm sm:text-base">Resumen de servicios, ingresos y movimientos</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full sm:w-auto">
             <Button variant="outline" size="sm" className="flex-1 sm:flex-initial min-w-0" onClick={() => setReportDialogOpen(true)}>
               <FileText className="h-4 w-4 mr-2 shrink-0" />
-              <span className="truncate">Generar Reporte</span>
+              <span className="truncate">Exportar resumen</span>
             </Button>
             <TooltipProvider>
               <Tooltip>
@@ -1568,12 +1568,12 @@ export default function ProfessionalDashboard() {
                       onClick={() => !pendingWithdrawal && setWithdrawDialogOpen(true)}
                     >
                       <CreditCard className="h-4 w-4 mr-2 shrink-0" />
-                      <span className="truncate">Retirar Fondos</span>
+                      <span className="truncate">Cobrar ingresos</span>
             </Button>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {pendingWithdrawal ? "Solicitud en revisión por el administrador" : "Solicitar retiro de fondos a tu cuenta bancaria"}
+                  {pendingWithdrawal ? "Solicitud en revisión por el administrador" : "Solicitar que te abonen a la cuenta registrada en tu perfil"}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -1581,19 +1581,19 @@ export default function ProfessionalDashboard() {
         </div>
       </div>
 
-      {/* Dialog Retirar Fondos */}
+      {/* Dialog cobrar ingresos */}
       <Dialog open={withdrawDialogOpen} onOpenChange={setWithdrawDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Retirar Fondos</DialogTitle>
+            <DialogTitle>Cobrar ingresos</DialogTitle>
             <DialogDescription>
-              El monto se moverá a &quot;En proceso de retiro&quot; y aparecerás en Panel Admin → Payouts para que el administrador realice la transferencia a tu cuenta.
+              El monto quedará en &quot;Pago en proceso&quot; y el equipo revisará la solicitud en el panel de administración para abonarte a la cuenta que indicaste.
             </DialogDescription>
           </DialogHeader>
           {!hasBankData ? (
             <div className="space-y-4 py-2">
               <p className="text-sm text-amber-600 dark:text-amber-500">
-                Para retirar fondos debes completar los datos bancarios (nombre del banco y número de cuenta) en tu perfil.
+                Para cobrar tus ingresos debes completar los datos de la cuenta de destino (nombre del banco y número de cuenta) en tu perfil.
               </p>
               <Button asChild variant="outline">
                 <Link href="/settings" onClick={() => setWithdrawDialogOpen(false)}>Ir a Configuración</Link>
@@ -1601,9 +1601,9 @@ export default function ProfessionalDashboard() {
             </div>
           ) : (
             <div className="space-y-4 py-2">
-              <p className="text-sm text-muted-foreground">Saldo disponible: <strong>{formatUsd(wallet)}</strong></p>
+              <p className="text-sm text-muted-foreground">Saldo Genfeb: <strong>{formatUsd(wallet)}</strong></p>
               <div className="space-y-2">
-                <Label htmlFor="withdraw-amount">Monto a retirar (USD)</Label>
+                <Label htmlFor="withdraw-amount">Monto a cobrar (USD)</Label>
                 <Input
                   id="withdraw-amount"
                   type="number"
@@ -1634,7 +1634,7 @@ export default function ProfessionalDashboard() {
                         setWithdrawDialogOpen(false);
                         toast({
                           title: "Solicitud enviada",
-                          description: "Aparecerás en Panel Admin → Payouts. El administrador procesará la transferencia.",
+                          description: "Tu solicitud quedará en el panel de administración para que te abonen a tu cuenta.",
                         });
                       },
                       onError: (err: Error) => {
@@ -1649,7 +1649,7 @@ export default function ProfessionalDashboard() {
                       Procesando…
                     </>
                   ) : (
-                    "Solicitar retiro"
+                    "Solicitar pago"
                   )}
                 </Button>
               </DialogFooter>
@@ -1748,7 +1748,7 @@ export default function ProfessionalDashboard() {
           <TabsList className="w-full flex flex-nowrap justify-start sm:justify-center overflow-x-auto h-auto min-h-10 gap-1 p-2 sm:p-1 sm:flex-wrap sm:h-10 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
             <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
             <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>
-            <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Transacciones</TabsTrigger>
+            <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Movimientos</TabsTrigger>
             <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Facturas</TabsTrigger>
           </TabsList>
 
@@ -1842,7 +1842,7 @@ export default function ProfessionalDashboard() {
                 <CardContent className="space-y-2">
                   <Button variant="outline" className="w-full justify-start">
                     <CreditCard className="h-4 w-4 mr-2" />
-                    Solicitar retiro de fondos
+                    Solicitar pago a mi cuenta
                   </Button>
                   <Button variant="outline" className="w-full justify-start">
                     <FileText className="h-4 w-4 mr-2" />
@@ -1865,7 +1865,7 @@ export default function ProfessionalDashboard() {
           <TabsContent value="transactions">
             <Card>
               <CardHeader>
-                <CardTitle>Historial de Transacciones</CardTitle>
+                <CardTitle>Historial de movimientos</CardTitle>
                 <CardDescription>Todas tus transacciones y ganancias</CardDescription>
               </CardHeader>
               <CardContent>

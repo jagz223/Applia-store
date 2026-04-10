@@ -1,6 +1,6 @@
 # GENFEB - Plataforma de Servicios
 
-Plataforma de reservas de servicios profesionales desarrollada por **GenFeb S.A.S.**
+Plataforma de reservas de servicios profesionales desarrollada por **GenFeb**
 
 ## Descripción
 
@@ -87,7 +87,7 @@ mango-genfeb/
 
 ## Marca
 
-Desarrollado por **GenFeb S.A.S.**
+Desarrollado por **GenFeb**
 - Representante Legal: Econ. Daniel Ignacio Gómez Alvarado, Mgs.
 - Objeto Social: Desarrollo de software, consultoría, servicios integrales
 

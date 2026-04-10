@@ -304,13 +304,13 @@ export function NotificationBell() {
       return note ? `${message} Nota: ${note}` : message;
     }
     if (type === "withdrawal_rejected") {
-      const message = data?.message ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu billetera.";
+      const message = data?.message ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.";
       const note = data?.adminNote;
       return note ? `${message} Nota: ${note}` : message;
     }
     if (type === "booking_cancelled_by_provider") {
       const message = data?.message ?? data?.data?.message;
-      return message ?? "El asociado cancelo el servicio. El monto fue devuelto a tu billetera.";
+      return message ?? "El asociado cancelo el servicio. El monto fue devuelto a tu Saldo Genfeb.";
     }
     if (type === "booking_cancelled") {
       const message = data?.message ?? data?.data?.message;

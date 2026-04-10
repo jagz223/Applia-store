@@ -40,7 +40,7 @@ export default function Politics() {
               Términos y Condiciones de Uso
             </CardTitle>
             <CardDescription className="text-base mt-2">
-              Estatuto oficial de GenFeb S.A.S. - Última actualización: Marzo 2026
+              Estatuto oficial de GenFeb - Última actualización: Marzo 2026
             </CardDescription>
           </CardHeader>
           <CardContent className="px-6 py-10 sm:px-10">
@@ -51,7 +51,7 @@ export default function Politics() {
         </Card>
 
         <div className="mt-8 text-center text-sm text-muted-foreground">
-          <p>© {new Date().getFullYear()} GenFeb S.A.S. Todos los derechos reservados.</p>
+          <p>© {new Date().getFullYear()} GenFeb. Todos los derechos reservados.</p>
         </div>
       </div>
     </div>

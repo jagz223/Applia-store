@@ -31,7 +31,7 @@ import {
   Package,
   Store,
   Car,
-  Wallet,
+  Banknote,
   Star,
   Smartphone,
 } from "lucide-react";
@@ -220,7 +220,7 @@ export function Navigation() {
       {isAuthenticated && (
         <>
           <Link href="/vault" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/vault') ? 'text-primary' : 'text-muted-foreground'}`}>
-            Bóveda
+            Documentos
           </Link>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -231,8 +231,8 @@ export function Navigation() {
             <DropdownMenuContent className="bg-card border-border">
               <DropdownMenuItem asChild>
                 <Link href="/recharge" className="flex items-center gap-2 w-full">
-                  <Wallet className="h-4 w-4" />
-                  <span>Recargar</span>
+                  <Banknote className="h-4 w-4" />
+                  <span>Recargar Saldo Genfeb</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
@@ -256,11 +256,18 @@ export function Navigation() {
         {/* Logo & Desktop Nav */}
         <div className="flex items-center gap-8">
           <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-1.5 min-[400px]:gap-2 shrink-0">
-            <img src="/logo GenFeb.jpg" alt="GENFEB Logo" className="h-7 w-auto object-contain min-[400px]:h-8" />
+            <img
+              src="/favicon.png"
+              alt=""
+              className="h-7 w-7 min-[400px]:h-8 min-[400px]:w-8 shrink-0 bg-white object-contain"
+              width={32}
+              height={32}
+              decoding="async"
+              aria-hidden
+            />
+            <span className="sr-only">GenFeb, inicio</span>
             <span className="hidden text-xl font-bold font-display text-primary sm:inline-block tracking-wider">
-              {exploreCategoryDisplayName ?? (
-                <>GENFEB<span className="text-accent">.S.A.S</span></>
-              )}
+              {exploreCategoryDisplayName ?? <>GENFEB</>}
             </span>
           </Link>
           <div className="hidden lg:flex items-center gap-6">
@@ -277,13 +284,13 @@ export function Navigation() {
                 <span>ES</span>
               </Button>
 
-          {/* Wallet balance - visible desktop y móvil (icono en header) */}
+          {/* Saldo Genfeb en cabecera (importe + valoración) */}
           {isAuthenticated && (
             <div
               className="flex items-center gap-1.5 min-w-0 px-2 py-1.5 min-[400px]:gap-2 min-[400px]:px-2.5 min-[400px]:py-1.5 rounded-md min-[400px]:rounded-lg bg-primary/10 border border-primary/20 text-primary max-w-[100%]"
-              title="Saldo y valoración"
+              title="Saldo Genfeb y valoración"
             >
-              <Wallet className="h-4 w-4 min-[400px]:h-4 min-[400px]:w-4 shrink-0" aria-hidden />
+              <Banknote className="h-4 w-4 min-[400px]:h-4 min-[400px]:w-4 shrink-0" aria-hidden />
               <span className="text-sm min-[400px]:text-sm font-semibold tabular-nums truncate max-w-[5.5rem] min-[400px]:max-w-[7rem] sm:max-w-[8rem]">
                 {walletData === undefined ? "—" : formatWallet(walletBalance)}
               </span>
@@ -399,13 +406,13 @@ export function Navigation() {
                   <DropdownMenuItem asChild>
                     <Link href="/vault" className="flex items-center">
                       <Vault className="mr-2 h-4 w-4" />
-                      Bóveda Segura
+                      Mis documentos
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link href="/recharge" className="flex items-center">
-                      <Wallet className="mr-2 h-4 w-4" />
-                      Recargar wallet
+                      <Banknote className="mr-2 h-4 w-4" />
+                      Recargar Saldo Genfeb
                     </Link>
                   </DropdownMenuItem>
                   {SHOW_PAYMENTS && (
@@ -475,10 +482,10 @@ export function Navigation() {
               </Button>
             </SheetTrigger>
             <SheetContent side="right" className="w-[300px] bg-card border-l border-border">
-              {/* Wallet en menú móvil */}
+              {/* Saldo en menú móvil */}
               {isAuthenticated && (
                 <div className="flex items-center gap-2 mt-6 mb-2 px-1 py-3 rounded-xl bg-primary/10 border border-primary/20">
-                  <Wallet className="h-5 w-5 text-primary shrink-0" />
+                  <Banknote className="h-5 w-5 text-primary shrink-0" />
                   <span className="text-base font-semibold text-primary tabular-nums">
                     {walletData === undefined ? "—" : formatWallet(walletBalance)}
                   </span>
@@ -533,10 +540,10 @@ export function Navigation() {
                 {isAuthenticated && (
                   <>
                     <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                      Bóveda Segura
+                      Mis documentos
                     </Link>
                     <Link href="/recharge" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                      Recargar wallet
+                      Recargar Saldo Genfeb
                     </Link>
                     <Link href="/movimientos" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Historial de movimientos

@@ -425,7 +425,7 @@ export default function Settings() {
             <AlertDialogDescription className="text-muted-foreground leading-relaxed">
               {((user as any)?.wallet > 0 || (user as any)?.pendingBalance > 0) ? (
                 <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive font-medium text-sm">
-                  Aviso: Tienes un balance de ${(Number((user as any)?.wallet || 0) + Number((user as any)?.pendingBalance || 0)).toFixed(2)}. Este saldo quedará inaccesible de inmediato.
+                  Aviso: Tienes un total de ${(Number((user as any)?.wallet || 0) + Number((user as any)?.pendingBalance || 0)).toFixed(2)} entre Saldo Genfeb y montos en reserva. Quedará inaccesible de inmediato.
                 </div>
               ) : null}
               ¿Estás seguro de finalizar? Todo el proceso de borrado comenzará de forma inmediata y perderás el acceso permanentemente.

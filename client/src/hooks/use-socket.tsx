@@ -268,7 +268,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
         toast({
           title: "Retiro rechazado",
-          description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu billetera.",
+          description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.",
           variant: "destructive",
         });
       }
