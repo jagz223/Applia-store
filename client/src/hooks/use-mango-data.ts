@@ -139,6 +139,15 @@ export function useCurrentProvider() {
       return api.providers.me.responses[200].parse(await res.json());
     },
     retry: false,
+    // El default global usa staleTime: Infinity; hace falta refresco para isVerified y nav "Mi servicio".
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchInterval: (query) => {
+      const d = query.state.data as { isVerified?: boolean } | null | undefined;
+      if (d == null) return false;
+      return d.isVerified === true ? false : 20_000;
+    },
   });
 }
 
@@ -319,6 +328,14 @@ export function useMyServices(options?: { enabled?: boolean }) {
     },
     retry: false,
     enabled: options?.enabled !== false,
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    /** Tras alta/verificación, la lista puede tardar; reintentamos si sigue vacía. */
+    refetchInterval: (query) => {
+      const data = query.state.data as ServiceWithProvider[] | undefined;
+      if (data === undefined) return false;
+      return data.length === 0 ? 20_000 : false;
+    },
   });
 }
 
@@ -1174,6 +1191,10 @@ export function useVerifyingStatusMe(enabled: boolean) {
       return res.json() as Promise<VerifyingStatusMeDto>;
     },
     enabled,
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
+    /** Mientras el asociado sigue en flujo de verificación, el admin actualiza el servidor sin avisar al cliente. */
+    refetchInterval: enabled ? 15_000 : false,
   });
 }
 

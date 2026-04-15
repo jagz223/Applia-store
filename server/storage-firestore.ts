@@ -38,6 +38,13 @@ export type WalletTransferType = "service_payment" | "recharge" | "withdrawal" |
 /** Transfer status: only "completed" recharge adds to wallet; "pending_approval" waits for staff. */
 export type WalletTransferStatus = "pending_approval" | "completed" | "rejected";
 
+/** IDs de proveedor en documentos de servicio pueden ser number o string según origen del dato. */
+function parseServiceProviderId(id: unknown): number | null {
+  if (id == null || id === "") return null;
+  const n = typeof id === "number" ? id : Number(id);
+  return Number.isFinite(n) && !Number.isNaN(n) && n > 0 ? Math.trunc(n) : null;
+}
+
 export interface WalletTransfer {
   id: number;
   /** Quien recibe el dinero (beneficiario). */
@@ -557,7 +564,8 @@ class FirestoreStorageImpl implements IStorage {
     categoryId?: number,
     search?: string,
     providerCategoryId?: number,
-    subcategoryId?: number
+    subcategoryId?: number,
+    includeUnverifiedForAdmin?: boolean
   ): Promise<ServiceWithProvider[]> {
     if (!this.db) return [];
     let query = this.db.collection(FIRESTORE_COLLECTIONS.SERVICES);
@@ -570,19 +578,16 @@ class FirestoreStorageImpl implements IStorage {
       ...doc.data(),
     } as Service));
 
-    const providerIdValid = (id: unknown): id is number =>
-      id != null && typeof id === "number" && !Number.isNaN(id);
-
     const allCategories = await this.getCategories();
     const subcategoryCache = new Map<number, { id: number; name: string }>();
     let servicesWithProviders: ServiceWithProvider[] = [];
     for (const service of services) {
-      const provider = providerIdValid(service.providerId)
-        ? await this.getProvider(service.providerId)
-        : undefined;
+      const pid = parseServiceProviderId(service.providerId);
+      const provider = pid != null ? await this.getProvider(pid) : undefined;
       const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
-      // Solo mostramos servicios de proveedores verificados (isVerified = true).
-      if (!providerWithUser?.isVerified) continue;
+      // Catálogo público: solo proveedores verificados. Panel admin: incluir todos para gestionar marcas y cuentas (p. ej. admin con servicio).
+      if (!includeUnverifiedForAdmin && !providerWithUser?.isVerified) continue;
+      if (includeUnverifiedForAdmin && !providerWithUser) continue;
       const category = allCategories.find((c) => c.id === service.categoryId);
       const subId = (service as { subcategoryId?: number | null }).subcategoryId;
       let subcategory: { id: number; name: string } | null = null;
@@ -603,8 +608,12 @@ class FirestoreStorageImpl implements IStorage {
 
     if (providerCategoryId != null && !Number.isNaN(providerCategoryId)) {
       servicesWithProviders = servicesWithProviders.filter((s) => {
-        const p = s.provider as { categoryId?: number } | undefined;
-        return p?.categoryId === providerCategoryId;
+        const p = s.provider as { categoryId?: number; category?: string } | undefined;
+        if (p?.categoryId != null && Number(p.categoryId) === providerCategoryId) return true;
+        const cat = allCategories.find((c) => Number(c.id) === providerCategoryId);
+        const slug = cat?.slug != null ? String(cat.slug).trim() : "";
+        if (slug && typeof p?.category === "string" && p.category.trim() === slug) return true;
+        return false;
       });
     }
     if (subcategoryId != null && !Number.isNaN(subcategoryId)) {
@@ -637,11 +646,8 @@ class FirestoreStorageImpl implements IStorage {
       ...doc.data(),
     } as Service;
 
-    const providerIdValid = (id: unknown): id is number =>
-      id != null && typeof id === "number" && !Number.isNaN(id);
-    const provider = providerIdValid(service.providerId)
-      ? await this.getProvider(service.providerId)
-      : undefined;
+    const pid = parseServiceProviderId(service.providerId);
+    const provider = pid != null ? await this.getProvider(pid) : undefined;
     const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
     // Si el proveedor no está verificado, no exponemos el servicio.
     if (!providerWithUser?.isVerified) return undefined;

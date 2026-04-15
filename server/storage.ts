@@ -31,7 +31,13 @@ export interface IStorage {
   getProvider(id: number): Promise<Provider | undefined>;
   getProviderByUserId(userId: string): Promise<Provider | undefined>;
   createProvider(provider: InsertProvider): Promise<Provider>;
-  getAllServices(categoryId?: number, search?: string): Promise<ServiceWithProvider[]>;
+  getAllServices(
+    categoryId?: number,
+    search?: string,
+    providerCategoryId?: number,
+    subcategoryId?: number,
+    includeUnverifiedForAdmin?: boolean
+  ): Promise<ServiceWithProvider[]>;
   getService(id: number): Promise<ServiceWithProvider | undefined>;
   createService(service: InsertService): Promise<Service>;
   getBookingsByUser(userId: string): Promise<(Booking & { service: Service })[]>;
@@ -80,7 +86,13 @@ export class DatabaseStorage implements IStorage {
     return provider;
   }
 
-  async getAllServices(categoryId?: number, search?: string): Promise<ServiceWithProvider[]> {
+  async getAllServices(
+    categoryId?: number,
+    search?: string,
+    _providerCategoryId?: number,
+    _subcategoryId?: number,
+    _includeUnverifiedForAdmin?: boolean
+  ): Promise<ServiceWithProvider[]> {
     const db = await getDb();
     const query = db.query.services.findMany({
       where: (services, { eq, and, ilike }) => {
@@ -248,7 +260,13 @@ class MemoryStorage implements IStorage {
     return provider;
   }
 
-  async getAllServices(categoryId?: number, search?: string): Promise<ServiceWithProvider[]> {
+  async getAllServices(
+    categoryId?: number,
+    search?: string,
+    _providerCategoryId?: number,
+    _subcategoryId?: number,
+    _includeUnverifiedForAdmin?: boolean
+  ): Promise<ServiceWithProvider[]> {
     let list = this._services;
     if (categoryId !== undefined) {
       list = list.filter((s) => s.categoryId === categoryId);

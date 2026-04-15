@@ -79,7 +79,16 @@ export interface ICatalogStorage {
   createProvider(provider: InsertProvider): Promise<Provider>;
   updateProvider(id: number, data: ProviderUpdate): Promise<Provider | undefined>;
   deleteProvider(id: number): Promise<boolean>;
-  getAllServices(categoryId?: number, search?: string, providerCategoryId?: number, subcategoryId?: number): Promise<ServiceWithProvider[]>;
+  /**
+   * @param includeUnverifiedForAdmin Si es true (solo panel admin), incluye servicios aunque el proveedor no esté verificado en plataforma.
+   */
+  getAllServices(
+    categoryId?: number,
+    search?: string,
+    providerCategoryId?: number,
+    subcategoryId?: number,
+    includeUnverifiedForAdmin?: boolean
+  ): Promise<ServiceWithProvider[]>;
   getService(id: number): Promise<ServiceWithProvider | undefined>;
   createService(service: InsertService): Promise<Service>;
   updateService(id: number, data: ServiceUpdate): Promise<Service | undefined>;
