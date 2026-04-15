@@ -23,7 +23,11 @@ import { PhotoCapture } from "@/components/PhotoCapture";
 const registerSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
-  email: z.string().email("Email inválido"),
+  email: z
+    .string()
+    .min(1, "El correo es obligatorio")
+    .email("Email inválido")
+    .transform((s) => s.trim().toLowerCase()),
   phone: z.string().optional(),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
   confirmPassword: z.string(),
@@ -47,6 +51,94 @@ export default function Register() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user, isLoading: authLoading, setUser } = useAuth();
+
+  const form = useForm<RegisterForm>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      name: "",
+      lastName: "",
+      email: "",
+      phone: "",
+      password: "",
+      confirmPassword: "",
+      role: "client",
+      avatar: "",
+    },
+  });
+
+  const onSubmit = async (data: RegisterForm) => {
+    const hasFile = profileImage != null;
+    const hasUrl = typeof data.avatar === "string" && data.avatar.trim().length > 0;
+    if (!hasFile && !hasUrl) {
+      toast({
+        variant: "destructive",
+        title: "Avatar requerido",
+        description: "Debes subir una foto o pegar una URL de imagen de perfil.",
+      });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const avatarUrl = hasFile
+        ? await uploadProfileImage(profileImage!)
+        : (data.avatar || "").trim();
+
+      const response = await fetch(api.auth.register.path, {
+        method: api.auth.register.method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...data, avatar: avatarUrl }),
+      });
+
+      const text = await response.text();
+
+      let result;
+      try {
+        result = JSON.parse(text);
+      } catch {
+        throw new Error(`Error del servidor: ${text.substring(0, 100)}`);
+      }
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          const msg =
+            result.message ||
+            "Este correo electrónico ya está registrado. Inicia sesión si ya tienes cuenta.";
+          form.setError("email", { type: "manual", message: msg });
+          toast({
+            variant: "destructive",
+            title: "Correo ya registrado",
+            description: msg,
+          });
+          return;
+        }
+        throw new Error(result.message || "Error al registrar usuario");
+      }
+
+      localStorage.setItem("token", result.token);
+      setUser(result.user);
+
+      toast({
+        title: "Cuenta creada",
+        description: `Bienvenido ${result.user.name}, tu cuenta ha sido creada correctamente.`,
+      });
+
+      if (data.role === "professional") {
+        setLocation("/become-pro");
+      } else {
+        setLocation("/dashboard");
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Error al crear la cuenta",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -92,82 +184,6 @@ export default function Register() {
   if (!isGuest(user)) {
     return <AlreadyAuthenticatedView />;
   }
-
-  const form = useForm<RegisterForm>({
-    resolver: zodResolver(registerSchema),
-    defaultValues: {
-      name: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      password: "",
-      confirmPassword: "",
-      role: "client",
-      avatar: "",
-    },
-  });
-
-  const onSubmit = async (data: RegisterForm) => {
-    const hasFile = profileImage != null;
-    const hasUrl = typeof data.avatar === "string" && data.avatar.trim().length > 0;
-    if (!hasFile && !hasUrl) {
-      toast({
-        variant: "destructive",
-        title: "Avatar requerido",
-        description: "Debes subir una foto o pegar una URL de imagen de perfil.",
-      });
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const avatarUrl = hasFile
-        ? await uploadProfileImage(profileImage!)
-        : (data.avatar || "").trim();
-
-      const response = await fetch(api.auth.register.path, {
-        method: api.auth.register.method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ...data, avatar: avatarUrl }),
-      });
-
-      const text = await response.text();
-      
-      let result;
-      try {
-        result = JSON.parse(text);
-      } catch {
-        throw new Error(`Error del servidor: ${text.substring(0, 100)}`);
-      }
-
-      if (!response.ok) {
-        throw new Error(result.message || "Error al registrar usuario");
-      }
-
-      localStorage.setItem("token", result.token);
-      setUser(result.user);
-
-      toast({
-        title: "Cuenta creada",
-        description: `Bienvenido ${result.user.name}, tu cuenta ha sido creada correctamente.`,
-      });
-
-      if (data.role === "professional") {
-        setLocation("/become-pro");
-      } else {
-        setLocation("/dashboard");
-      }
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: error.message || "Error al crear la cuenta",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-mango-orange/20 via-background to-mango-green/20 p-4">

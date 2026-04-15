@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
-import { useCategories, useServices, useSubcategories } from "@/hooks/use-mango-data";
-import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
+import { useCategories, useCategoryVisibility, useServices, useSubcategories } from "@/hooks/use-mango-data";
+import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { ServiceListItem } from "@/components/ServiceListItem";
+import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp, Bookmark, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,10 +13,10 @@ import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
 
 const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-const hiddenSlugs = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
 
 export default function Explore() {
   const [, setLocation] = useLocation();
+  const { isAuthenticated } = useAuth();
   const { setExploreCategoryDisplayName } = useExploreCategoryDisplayName();
   const [search, setSearch] = useState("");
   const params = new URLSearchParams(window.location.search);
@@ -49,6 +50,14 @@ export default function Explore() {
   }, []);
 
   const { data: categories = [] } = useCategories();
+  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
+  const hiddenSlugs = useMemo(
+    () =>
+      new Set(
+        effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined)
+      ),
+    [isAuthenticated, visibility]
+  );
   const providerCategories = useMemo(
     () =>
       categories.filter(
@@ -57,7 +66,7 @@ export default function Explore() {
           return slug && providerSlugs.has(slug) && !hiddenSlugs.has(slug);
         }
       ),
-    [categories]
+    [categories, hiddenSlugs]
   );
   const { data: subcategories = [] } = useSubcategories(selectedProviderCategoryId ?? null);
   const servicesQuery = useServices({

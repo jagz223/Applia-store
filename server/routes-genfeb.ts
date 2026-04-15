@@ -1073,7 +1073,7 @@ export async function registerGenFebRoutes(
       const user = await storage.getUserById(userId);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
       const name = [user.name, (user as { lastName?: string }).lastName].filter(Boolean).join(" ").trim() || "Usuario";
-      const description = `Recarga al usuario ${name}`;
+      const description = `Abono de saldo — ${name}`;
       const staffForTransfer = await getFullAdminUsers(storage);
       const fromUserId = staffForTransfer?.length ? (staffForTransfer[0] as { id?: string }).id ?? null : null;
       const transfer = await storage.createTransfer({
@@ -1255,17 +1255,17 @@ export async function registerGenFebRoutes(
           if (newStatus === "completed") {
             void notificationService
               .sendPushToUser(uid, {
-                title: "¡Recarga Aprobada!",
-                body: `Se han acreditado $${amountFormatted} USD a tu saldo. Ya puedes usar tu dinero en la plataforma.`,
-                data: { type: "recharge_completed", url: "/movimientos" },
+                title: "Abono de saldo confirmado",
+                body: `Se acreditaron $${amountFormatted} USD a tu saldo GenFeb. Puedes descargar el comprobante en Mi actividad → Facturas.`,
+                data: { type: "recharge_completed", url: "/dashboard" },
               })
               .catch((err) => console.error("[push] Error notificando recarga aprobada:", err));
           } else {
             void notificationService
               .sendPushToUser(uid, {
-                title: "Solicitud de Recarga Rechazada",
-                body: `Tu solicitud por $${amountFormatted} USD no pudo ser procesada. Por favor, verifica los datos del comprobante o contacta a soporte.`,
-                data: { type: "recharge_rejected", url: "/movimientos" },
+                title: "No pudimos confirmar tu abono",
+                body: `Tu solicitud por $${amountFormatted} USD no pudo completarse. Revisa el comprobante o contacta a soporte.`,
+                data: { type: "recharge_rejected", url: "/dashboard" },
               })
               .catch((err) => console.error("[push] Error notificando recarga rechazada:", err));
           }

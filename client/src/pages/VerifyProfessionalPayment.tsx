@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,7 +20,12 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
-import { usePatchProfessionalVerificationPayment } from "@/hooks/use-mango-data";
+import {
+  usePatchProfessionalVerificationPayment,
+  VERIFICATION_STATUS_ME,
+  type VerifyingStatusMeDto,
+} from "@/hooks/use-mango-data";
+import { consumeVerifyReturnPath, ensureDefaultVerifyReturnPath } from "@/lib/verify-return-path";
 import { useToast } from "@/hooks/use-toast";
 import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
 
@@ -30,7 +36,11 @@ export default function VerifyProfessionalPayment() {
   const { isAuthenticated, user } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const paymentMutation = usePatchProfessionalVerificationPayment();
+  useEffect(() => {
+    ensureDefaultVerifyReturnPath();
+  }, []);
   const [transferDate, setTransferDate] = useState<Date | undefined>(undefined);
   const [transferCode, setTransferCode] = useState<string>("");
   const [copied, setCopied] = useState(false);
@@ -59,12 +69,32 @@ export default function VerifyProfessionalPayment() {
         transferReceiptCode: transferCode.trim(),
       },
       {
-        onSuccess: () => {
+        onSuccess: async () => {
           setConfirmModalOpen(false);
           toast({
             title: "Pago registrado",
             description: "Tu solicitud está en revisión.",
           });
+          await queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
+          try {
+            const status = await queryClient.fetchQuery<VerifyingStatusMeDto>({
+              queryKey: [VERIFICATION_STATUS_ME],
+              queryFn: async () => {
+                const token = localStorage.getItem("token");
+                const res = await fetch(VERIFICATION_STATUS_ME, {
+                  headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (!res.ok) throw new Error("No se pudo cargar el estado de verificación");
+                return res.json();
+              },
+            });
+            if (status.identification_verified === "pending" && status.transacction_verified === "pending") {
+              setLocation(consumeVerifyReturnPath());
+              return;
+            }
+          } catch {
+            /* continúa a pasos de verificación */
+          }
           setLocation("/professional/verify");
         },
         onError: (err: Error) => {

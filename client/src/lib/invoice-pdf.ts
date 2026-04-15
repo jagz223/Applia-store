@@ -20,10 +20,11 @@ export interface UserForInvoice {
 
 /** Etiquetas de tipo de transferencia para listados y facturas. */
 export const TRANSFER_TYPE_LABELS: Record<string, string> = {
-  recharge: "Recarga de Saldo Genfeb",
+  recharge: "Abono a saldo GenFeb",
   service_payment: "Ingreso por servicio",
   payment: "Pago de servicio",
-  withdrawal: "Pago a tu cuenta",
+  withdrawal: "Cobro a tu cuenta registrada",
+  verification_fee: "Cargo de verificación profesional",
 };
 
 export function getTransferTypeLabel(transferType: string): string {

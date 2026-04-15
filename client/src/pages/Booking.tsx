@@ -22,12 +22,12 @@ import {
   Mail,
   Loader2
 } from "lucide-react";
-import { useCategories, useServices, useProviderCategoryAvailability, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
+import { useCategories, useCategoryVisibility, useServices, useProviderCategoryAvailability, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
+import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
 import { isBeforeToday } from "@/lib/date-utils";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
@@ -123,21 +123,23 @@ export default function Booking() {
   const [paymentSelectionOpen, setPaymentSelectionOpen] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
+  const isAuthenticated = !!user?.id;
   const [, navigate] = useLocation();
   const createBooking = useCreateBooking();
   const { notifyNewBooking } = useSocketBookings();
   const { data: walletData, isLoading: walletLoading } = useWallet({ enabled: !!user?.id });
 
   const { data: categories } = useCategories();
+  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
   const { data: categoryAvailability } = useProviderCategoryAvailability();
   const visibleCategories = useMemo(() => {
     const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-    const hidden = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
+    const hidden = new Set(effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined));
     return (categories ?? []).filter((c) => {
       const slug = (c as { slug?: string }).slug;
       return slug && providerSlugs.has(slug) && !hidden.has(slug);
     });
-  }, [categories]);
+  }, [categories, isAuthenticated, visibility]);
   const categoryIdNum = selectedService ? Number(selectedService) : undefined;
   const { data: services = [], isLoading: isLoadingServices } = useServices(
     { providerCategoryId: categoryIdNum },
@@ -384,7 +386,7 @@ export default function Booking() {
                 navigate("/recharge");
               }}
             >
-              Recargar Saldo Genfeb
+              Añadir saldo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

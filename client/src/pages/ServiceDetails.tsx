@@ -234,7 +234,7 @@ export default function ServiceDetails() {
                 setLocation("/recharge");
               }}
             >
-              Recargar Saldo Genfeb
+              Añadir saldo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -267,15 +267,6 @@ export default function ServiceDetails() {
                     {initials}
                   </AvatarFallback>
                 </Avatar>
-                {providerProfile?.isVerified ? (
-                  <div
-                    className="absolute bottom-0 right-0 flex h-9 w-9 items-center justify-center rounded-full text-white shadow-md ring-2 ring-white"
-                    style={{ backgroundColor: success }}
-                    title="Verificado en GenFeb"
-                  >
-                    <Check className="h-4 w-4 stroke-[3]" aria-hidden />
-                  </div>
-                ) : null}
               </div>
 
               <div className="min-w-0 flex-1 text-center sm:text-left">
@@ -284,11 +275,11 @@ export default function ServiceDetails() {
                 </h1>
                 {providerProfile?.isVerified ? (
                   <div
-                    className="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold text-white shadow-sm"
+                    className="mt-3 inline-flex max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold text-white shadow-sm sm:gap-2 sm:px-3.5 sm:py-1.5 sm:text-sm"
                     style={{ backgroundColor: gold.darkGoldenrod }}
                   >
-                    <ShieldCheck className="h-4 w-4 text-white" aria-hidden />
-                    Asociado verificado
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-white sm:h-4 sm:w-4" aria-hidden />
+                    <span className="leading-tight">Verificado por GenFeb</span>
                   </div>
                 ) : null}
 
@@ -409,25 +400,14 @@ export default function ServiceDetails() {
         {/* COLUMNA DERECHA: tarjeta de servicio (ancho fijado por la grid, sin solapar la izquierda) */}
         <aside className="relative z-0 min-w-0 w-full max-w-full lg:sticky lg:top-24 lg:self-start">
           <div className="space-y-6 rounded-2xl border border-neutral-200/90 bg-white p-6 shadow-[0_8px_30px_rgba(0,0,0,0.06)] dark:border-border dark:bg-card">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-neutral-600 dark:text-muted-foreground">Precio</p>
-                <p
-                  className="mt-0.5 text-4xl font-bold tabular-nums dark:text-amber-500"
-                  style={{ color: gold.accent }}
-                >
-                  ${Number(service.price).toFixed(0)}
-                </p>
-              </div>
-              {providerProfile?.isVerified ? (
-                <Badge
-                  className="shrink-0 gap-1 border-0 text-white dark:border-[#27AE60]/50"
-                  style={{ backgroundColor: success }}
-                >
-                  <Check className="h-3.5 w-3.5" aria-hidden />
-                  Verificado
-                </Badge>
-              ) : null}
+            <div>
+              <p className="text-sm font-medium text-neutral-600 dark:text-muted-foreground">Precio</p>
+              <p
+                className="mt-0.5 text-4xl font-bold tabular-nums dark:text-amber-500"
+                style={{ color: gold.accent }}
+              >
+                ${Number(service.price).toFixed(0)}
+              </p>
             </div>
 
             <div
@@ -495,7 +475,7 @@ export default function ServiceDetails() {
             {isAuthenticated ? (
                isOwnService ? (
                  <Button
-                   className="h-12 w-full rounded-lg border-0 text-base font-semibold text-white shadow-sm disabled:opacity-90 dark:bg-teal-900"
+                   className="h-auto min-h-12 w-full rounded-lg border-0 px-3 py-3 text-center text-sm font-semibold leading-snug text-white shadow-sm whitespace-normal [text-wrap:balance] disabled:opacity-90 sm:px-4 sm:text-base dark:bg-teal-900"
                    variant="ghost"
                    disabled
                    style={{ backgroundColor: "#33B8A6" }}

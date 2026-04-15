@@ -237,7 +237,7 @@ export function createInvoiceFromBooking(
 }
 
 /**
- * Crea datos de factura desde un abono a Saldo Genfeb (recarga)
+ * Crea datos de factura desde un abono de saldo GenFeb (recarga en la app)
  */
 export function createInvoiceFromTransfer(
   transfer: any,
@@ -264,8 +264,8 @@ export function createInvoiceFromTransfer(
       address: "Av. Principal 123, Quito, Ecuador",
     },
     service: {
-      name: "Recarga de Saldo Genfeb",
-      description: transfer.description || "Abono a Saldo Genfeb en plataforma",
+      name: "Abono a saldo GenFeb",
+      description: transfer.description || "Abono de saldo en la plataforma GenFeb",
       quantity: 1,
       unitPrice: Number(transfer.amount) || 0,
       total: subtotal,
@@ -273,7 +273,10 @@ export function createInvoiceFromTransfer(
     subtotal,
     tax,
     total,
-    paymentMethod: transfer.transferType === "recharge" ? "Transferencia Bancaria" : "Saldo Genfeb",
+    paymentMethod:
+      transfer.transferType === "recharge"
+        ? "Comprobante / referencia de pago"
+        : "Saldo GenFeb",
     referenceId: `TR-${transfer.id}`,
   };
 }
@@ -281,6 +284,20 @@ export function createInvoiceFromTransfer(
 /**
  * Crea datos de factura desde un reporte financiero (Verificación)
  */
+function coerceReportDate(value: unknown): Date {
+  if (value == null) return new Date();
+  if (value instanceof Date) return value;
+  if (typeof value === "object" && value !== null && "toDate" in value && typeof (value as { toDate: () => Date }).toDate === "function") {
+    try {
+      return (value as { toDate: () => Date }).toDate();
+    } catch {
+      return new Date();
+    }
+  }
+  const d = new Date(value as string | number);
+  return Number.isFinite(d.getTime()) ? d : new Date();
+}
+
 export function createInvoiceFromFinancialReport(
   report: any,
   user: any
@@ -292,7 +309,7 @@ export function createInvoiceFromFinancialReport(
 
   return {
     invoiceNumber: generateInvoiceNumber("VER"),
-    date: report.createdAt ? new Date(report.createdAt) : new Date(),
+    date: coerceReportDate(report.createdAt),
     dueDate: new Date(),
     client: {
       name: `${user.name || user.firstName} ${user.lastName || ""}`.trim(),
@@ -315,7 +332,7 @@ export function createInvoiceFromFinancialReport(
     subtotal,
     tax,
     total,
-    paymentMethod: "Transferencia Bancaria",
+    paymentMethod: "Comprobante de pago en línea",
     referenceId: `VR-${report.id}`,
   };
 }

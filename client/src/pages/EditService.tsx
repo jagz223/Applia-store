@@ -9,8 +9,8 @@ import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loader2, ArrowLeft, AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
@@ -27,6 +27,10 @@ import { useState } from "react";
 import { professionalBioFieldSchema } from "@shared/schema";
 import { providerSkillsSchema } from "@shared/skills-schema";
 import { ProviderSkillsField } from "@/components/ProviderSkillsField";
+import {
+  SERVICE_DESCRIPTION_INLINE_HINT,
+  ServiceDescriptionInfoButton,
+} from "@/components/ServiceDescriptionHints";
 
 const editServiceSchema = z.object({
   title: z.string().min(1, "El nombre es obligatorio").max(500),
@@ -146,18 +150,26 @@ export default function EditService() {
 
   return (
     <div className="container max-w-2xl py-12 px-4">
-      <Button variant="ghost" className="mb-6 gap-2" asChild>
+      <Button variant="ghost" className="mb-4 gap-2 -ml-2" asChild>
         <Link href={`/service/${id}`}>
           <ArrowLeft className="h-4 w-4" />
           Volver al servicio
         </Link>
       </Button>
-      <Card>
+      <div className="mb-8 text-center">
+        <h1 className="text-3xl font-display font-bold text-primary mb-2">Editar servicio</h1>
+        <p className="text-muted-foreground">
+          Modifica tu publicación: datos del servicio y tu biografía profesional (50–700 caracteres).
+        </p>
+      </div>
+
+      <Card className="border-border/50 shadow-xl">
         <CardHeader>
-          <CardTitle>Editar servicio</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Modifica tu publicación: datos del servicio y tu biografía profesional (50–700 caracteres).
-          </p>
+          <CardTitle>Tu servicio y perfil</CardTitle>
+          <CardDescription>
+            Mismo formulario que al registrarte como proveedor: nombre, precio, descripción, habilidades y biografía
+            pública.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -168,6 +180,11 @@ export default function EditService() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Nombre del servicio</FormLabel>
+                    <FormDescription>
+                      Título público de tu oferta en el buscador (lo definiste al registrarte como asociado o aquí). Tu nombre
+                      como persona sigue mostrándose en el perfil; este campo describe qué ofreces y cómo quieres titular el
+                      servicio.
+                    </FormDescription>
                     <FormControl>
                       <Input placeholder="Ej: Limpieza completa de hogar" {...field} />
                     </FormControl>
@@ -195,7 +212,11 @@ export default function EditService() {
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Descripción del servicio</FormLabel>
+                    <div className="flex items-center gap-2">
+                      <FormLabel className="mb-0">Descripción del servicio</FormLabel>
+                      <ServiceDescriptionInfoButton />
+                    </div>
+                    <FormDescription>{SERVICE_DESCRIPTION_INLINE_HINT}</FormDescription>
                     <FormControl>
                       <Textarea placeholder="Qué incluye este servicio..." className="min-h-[120px]" {...field} />
                     </FormControl>
@@ -214,14 +235,14 @@ export default function EditService() {
                     <FormLabel>Biografía y enfoque profesional</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="Quién eres, tu especialidad y cómo trabajas. Mínimo 50 caracteres, máximo 700."
+                        placeholder="Quién eres, tu especialidad, cómo trabajas y qué pueden esperar los clientes. Entre 50 y 700 caracteres."
                         className="min-h-[140px] resize-y"
                         maxLength={700}
                         {...field}
                       />
                     </FormControl>
                     <p className="text-xs text-muted-foreground flex justify-between gap-2">
-                      <span>Visible en tu perfil público. Obligatorio al guardar.</span>
+                      <span>Obligatorio: mínimo 50 caracteres, máximo 700.</span>
                       <span className="tabular-nums shrink-0">{field.value?.length ?? 0}/700</span>
                     </p>
                     <FormMessage />
@@ -236,7 +257,7 @@ export default function EditService() {
 
               <Button
                 type="submit"
-                className="w-full"
+                className="w-full text-lg h-12"
                 disabled={updateService.isPending || updateProvider.isPending || isBlocked}
               >
                 {updateService.isPending || updateProvider.isPending ? (

@@ -7,3 +7,6 @@ vite.config.ts.*
 # Firebase credentials (keep local only)
 firebase-creds.json
 *.log
+.env
+.env.*
+!.env.example

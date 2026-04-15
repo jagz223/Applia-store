@@ -152,9 +152,12 @@ class FirestoreStorageImpl implements IStorage {
 
   async getUserByEmail(email: string, includeDeleted?: boolean): Promise<User | undefined> {
     if (!this.db) return undefined;
-    
+
+    const normalized = (email ?? "").trim().toLowerCase();
+    if (!normalized) return undefined;
+
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.USERS)
-      .where("email", "==", email)
+      .where("email", "==", normalized)
       .limit(1)
       .get();
     
@@ -209,10 +212,13 @@ class FirestoreStorageImpl implements IStorage {
 
   async createUser(user: Partial<User>): Promise<User> {
     if (!this.db) throw new Error("Firestore no configurado");
-    
+
+    const emailNorm = (user.email ?? "").trim().toLowerCase();
+    if (!emailNorm) throw new Error("El email es obligatorio");
+
     // Buscar si el usuario ya existe (incluyendo eliminados)
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.USERS)
-      .where("email", "==", user.email)
+      .where("email", "==", emailNorm)
       .limit(1)
       .get();
     
@@ -222,7 +228,7 @@ class FirestoreStorageImpl implements IStorage {
       
       // Si el usuario existe y NO está eliminado, error
       if (!existingData.deletedAt) {
-        throw new Error("El usuario con este email ya existe");
+        throw new Error("Este correo electrónico ya está registrado.");
       }
       
       // Si está eliminado, lo reactivamos
@@ -230,6 +236,7 @@ class FirestoreStorageImpl implements IStorage {
       const reactivatedUser = {
         ...existingData,
         ...user, // Actualizar datos con lo nuevo (password, nombre, etc.)
+        email: emailNorm,
         deletedAt: null,
         isActive: true,
         updatedAt: now,
@@ -245,7 +252,7 @@ class FirestoreStorageImpl implements IStorage {
     const role = user.role || "client";
     const newUser: User = {
       id: docRef.id,
-      email: user.email!,
+      email: emailNorm,
       password: user.password!,
       name: user.name!,
       lastName: user.lastName!,
@@ -2412,6 +2419,7 @@ class FirestoreStorageImpl implements IStorage {
       userId: String(data.userId ?? userId),
       imageUrl: data.imageUrl != null ? String(data.imageUrl) : null,
       imageVerified: data.imageVerified === true,
+      professionalCredentialUrl: data.professionalCredentialUrl != null ? String(data.professionalCredentialUrl) : null,
       transferReceiptCode: data.transferReceiptCode != null ? String(data.transferReceiptCode) : null,
       transferDate: data.transferDate != null ? String(data.transferDate) : null,
       createdAt: data.createdAt as any,
@@ -2434,6 +2442,7 @@ class FirestoreStorageImpl implements IStorage {
         userId,
         imageUrl,
         imageVerified: false,
+        professionalCredentialUrl: null,
         transferReceiptCode: null,
         transferDate: null,
         createdAt: new Date(),
@@ -2455,12 +2464,14 @@ class FirestoreStorageImpl implements IStorage {
     const existing = snap.exists ? await this.getProfessionalVerificationByUserId(userId) : null;
     const imageUrl = existing?.imageUrl ?? null;
     const imageVerified = false; // siempre false por ahora
+    const professionalCredentialUrl = existing?.professionalCredentialUrl ?? null;
     // No reescribir createdAt al actualizar: convertir Timestamp de Firestore con `new Date(...)`
     // puede producir fechas inválidas y el error "Value for argument \"seconds\" is not a valid integer".
     const payload: Record<string, unknown> = {
       userId,
       imageUrl,
       imageVerified,
+      professionalCredentialUrl,
       transferReceiptCode: data.transferReceiptCode.trim(),
       transferDate: data.transferDate.trim(),
       updatedAt: new Date(),
@@ -2473,6 +2484,27 @@ class FirestoreStorageImpl implements IStorage {
 
     const out = await this.getProfessionalVerificationByUserId(userId);
     if (!out) throw new Error("No se pudo guardar el pago");
+    return out;
+  }
+
+  async upsertProfessionalVerificationCredential(userId: string, professionalCredentialUrl: string): Promise<ProfessionalVerification> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.PROFESSIONAL_VERIFICATIONS).doc(userId);
+    const snap = await ref.get();
+    const existing = snap.exists ? await this.getProfessionalVerificationByUserId(userId) : null;
+    const payload: Record<string, unknown> = {
+      userId,
+      imageUrl: existing?.imageUrl ?? null,
+      imageVerified: existing?.imageVerified === true ? true : false,
+      professionalCredentialUrl: professionalCredentialUrl.trim(),
+      transferReceiptCode: existing?.transferReceiptCode ?? null,
+      transferDate: existing?.transferDate ?? null,
+      updatedAt: new Date(),
+    };
+    if (!snap.exists) payload.createdAt = new Date();
+    await ref.set(payload, { merge: true });
+    const out = await this.getProfessionalVerificationByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar el documento profesional");
     return out;
   }
 

@@ -68,8 +68,12 @@ export async function registerInvoiceRoutes(
 
           invoiceData = createInvoiceFromTransfer(transfer, user);
 
-        } else if (reportId) {
-          const report: any = await (genFebStorage as any).getFinancialReport(parseInt(reportId));
+        } else if (reportId != null && String(reportId).trim() !== "") {
+          const rid = Number.parseInt(String(reportId).trim(), 10);
+          if (!Number.isFinite(rid) || rid < 1) {
+            return res.status(400).json({ message: "reportId inválido" });
+          }
+          const report: any = await (genFebStorage as any).getFinancialReport(rid);
           if (!report) return res.status(404).json({ message: "Reporte financiero no encontrado" });
 
           const user: any = await genFebStorage.getUserById(report.userId);
@@ -152,40 +156,43 @@ export async function registerInvoiceRoutes(
           const verificationFees = financialReports.filter(r => r.type === "verification_fee");
           
           for (const fee of verificationFees) {
+            const nid = fee.id != null ? Number(fee.id) : NaN;
+            const reportKey = Number.isFinite(nid) ? nid : fee.id;
+            const amt = fee.amount != null ? Number(fee.amount) : 15;
             invoices.push({
-              id: fee.id,
-              reportId: fee.id,
+              id: reportKey,
+              reportId: reportKey,
               type: "verification",
-              invoiceNumber: `VER-${fee.id}`,
+              invoiceNumber: `VER-${reportKey}`,
               date: fee.createdAt,
               service: "Cargo de Verificación de Identidad",
-              amount: fee.amount || 15,
-              status: fee.status,
+              amount: Number.isFinite(amt) ? amt : 15,
+              status: fee.status ?? "pending",
             });
           }
         } catch (err) {
           console.error("Error obteniendo reportes financieros:", err);
         }
 
-        // Obtener recargas (Top-ups)
+        // Abonos de saldo (pendiente, completado o rechazado — misma línea que ves en Transacciones)
         try {
           const { transfers } = await genFebStorage.getTransfersByUser(userId, { transferType: "recharge" });
           for (const transfer of transfers) {
-            if (transfer.status === "completed") {
+            if (transfer.status === "pending_approval" || transfer.status === "completed" || transfer.status === "rejected") {
               invoices.push({
                 id: transfer.id,
                 transferId: transfer.id,
                 type: "recharge",
                 invoiceNumber: `REC-${transfer.id}`,
                 date: transfer.createdAt,
-                service: "Recarga de Saldo Genfeb",
+                service: "Abono a saldo GenFeb",
                 amount: transfer.amount,
                 status: transfer.status,
               });
             }
           }
         } catch (err) {
-          console.error("Error obteniendo recargas:", err);
+          console.error("Error obteniendo abonos de saldo:", err);
         }
 
         // Reservas
@@ -232,6 +239,28 @@ export async function registerInvoiceRoutes(
             }
           }
         }
+
+        const invoiceDateMs = (row: { date?: unknown }) => {
+          const d = row?.date as { toDate?: () => Date; seconds?: number } | string | Date | undefined;
+          if (d == null) return 0;
+          if (d instanceof Date) return d.getTime();
+          if (typeof d === "string") {
+            const t = new Date(d).getTime();
+            return Number.isFinite(t) ? t : 0;
+          }
+          if (typeof d === "object" && "toDate" in d && typeof d.toDate === "function") {
+            try {
+              return d.toDate()!.getTime();
+            } catch {
+              return 0;
+            }
+          }
+          if (typeof d === "object" && typeof (d as { seconds?: number }).seconds === "number") {
+            return ((d as { seconds: number }).seconds || 0) * 1000;
+          }
+          return 0;
+        };
+        invoices.sort((a, b) => invoiceDateMs(b) - invoiceDateMs(a));
 
         res.json(invoices);
       } catch (error) {

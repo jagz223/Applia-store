@@ -26,8 +26,15 @@ const effectiveSecret = JWT_SECRET || devSecret;
 // Schema para registro de usuario
 // avatar puede venir como URL (opcional). Si el cliente sube archivo a Storage,
 // en el registro enviará solo la downloadURL.
+const DUPLICATE_EMAIL_MESSAGE =
+  "Este correo electrónico ya está registrado. Inicia sesión si ya tienes cuenta.";
+
 const registerSchema = z.object({
-  email: z.string().email("Email inválido"),
+  email: z
+    .string()
+    .min(1, "El correo es obligatorio")
+    .email("Email inválido")
+    .transform((s) => s.trim().toLowerCase()),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
@@ -38,7 +45,11 @@ const registerSchema = z.object({
 
 // Schema para login
 const loginSchema = z.object({
-  email: z.string().email("Email inválido"),
+  email: z
+    .string()
+    .min(1, "El correo es obligatorio")
+    .email("Email inválido")
+    .transform((s) => s.trim().toLowerCase()),
   password: z.string().min(1, "La contraseña es requerida"),
 });
 
@@ -128,10 +139,12 @@ export async function registerAuthRoutes(
   app.post("/api/auth/register", async (req, res) => {
     try {
       const data = registerSchema.parse(req.body);
-      
-      // Verificar si el usuario ya existe en storage principal
-      // (En una app real, buscaríamos en la base de datos)
-      
+
+      const existing = await genFebStorage.getUserByEmail(data.email);
+      if (existing && !(existing as { deletedAt?: unknown }).deletedAt) {
+        return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE });
+      }
+
       // Hashear la contraseña
       const hashedPassword = await bcrypt.hash(data.password, 10);
       
@@ -181,9 +194,9 @@ export async function registerAuthRoutes(
         });
       }
       
-      // Verificar si es error de usuario existente
-      if (error instanceof Error && error.message.includes("ya existe")) {
-        return res.status(409).json({ message: error.message });
+      // Usuario duplicado (carrera entre comprobación y createUser, u otro storage)
+      if (error instanceof Error && (error.message.includes("ya existe") || error.message.includes("ya está registrado"))) {
+        return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE });
       }
       
       console.error("Error en registro:", error);

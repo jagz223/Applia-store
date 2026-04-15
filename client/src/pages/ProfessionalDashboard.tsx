@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { 
@@ -6,7 +7,7 @@ import {
   Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
   CheckCircle2, XCircle, Banknote, CircleDollarSign, Inbox, PlayCircle, History, UserPlus, Receipt,
-  AlertTriangle
+  AlertTriangle, ShieldCheck
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -114,10 +115,10 @@ function getTransferMetaForProfessional(t: any) {
     amountColor = "text-red-600";
   }
 
-  let label = "Transacción";
-  if (type === "recharge") label = "Recarga de Saldo Genfeb";
-  if (type === "service_payment") label = "Ingreso por servicio";
-  if (type === "withdrawal") label = "Pago a tu cuenta";
+  let label = "Movimiento";
+  if (type === "recharge") label = getTransferTypeLabel("recharge");
+  if (type === "service_payment") label = getTransferTypeLabel("service_payment");
+  if (type === "withdrawal") label = getTransferTypeLabel("withdrawal");
 
   const createdAt = parseTransferDate(t.createdAt);
   const dateStr = createdAt
@@ -1045,8 +1046,8 @@ function EconomicReportDialog({
     const headers = ["Fecha", "Tipo", "Descripción", "Monto (USD)", "Estado"];
     const typeLabels: Record<string, string> = {
       service_payment: "Ingreso por servicio",
-      recharge: "Recarga Saldo Genfeb",
-      withdrawal: "Pago a cuenta",
+      recharge: "Abono saldo GenFeb",
+      withdrawal: "Cobro a cuenta",
     };
     const statusLabels: Record<string, string> = {
       pending_approval: "Pendiente aprobación",
@@ -1076,7 +1077,7 @@ function EconomicReportDialog({
         <DialogHeader>
           <DialogTitle>Resumen de actividad</DialogTitle>
           <DialogDescription>
-            Ingresos, movimientos y estado de los pagos que solicitaste a tu cuenta. Puedes descargar el historial en CSV.
+            Ingresos, abonos y cobros registrados en la plataforma. Puedes descargar el historial en CSV.
           </DialogDescription>
         </DialogHeader>
         {isLoading ? (
@@ -1095,7 +1096,7 @@ function EconomicReportDialog({
                 <p className="font-semibold text-lg">{formatUsd(totalWithdrawn)}</p>
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Saldo Genfeb</p>
+                <p className="text-muted-foreground">Saldo GenFeb</p>
                 <p className="font-semibold text-lg">{formatUsd(wallet)}</p>
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
@@ -1143,37 +1144,166 @@ function EconomicReportDialog({
 
 function InvoicesTabContent() {
   const [page, setPage] = useState(1);
+  const [pulseReportId, setPulseReportId] = useState<number | null>(null);
   const { user } = useAuth();
-  const { data, isLoading } = useWalletTransfers({ page, limit: 10 });
+  const [location] = useLocation();
+  const autoVerificationPdfDone = useRef(false);
+
+  const { data: invoiceList, isLoading: invoicesLoading } = useQuery({
+    queryKey: ["/api/invoices", "list"],
+    queryFn: async () => {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const res = await fetch("/api/invoices", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("No se pudieron cargar las facturas");
+      return res.json() as Promise<
+        Array<{
+          id?: number;
+          reportId?: number;
+          type: string;
+          service?: string;
+          amount?: number | string;
+          status?: string;
+          date?: string | null;
+        }>
+      >;
+    },
+  });
+
+  const { data, isLoading: transfersLoading } = useWalletTransfers({ page, limit: 10 });
   const transfers = data?.transfers ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 10));
+
+  const verificationRows = useMemo(
+    () => (invoiceList ?? []).filter((inv) => inv.type === "verification"),
+    [invoiceList],
+  );
+
+  const isLoading = invoicesLoading || transfersLoading;
+
+  useEffect(() => {
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (params.get("verificationInvoice") !== "1") {
+      setPulseReportId(null);
+      return;
+    }
+    const rid = params.get("reportId");
+    if (rid != null && rid !== "") {
+      const n = Number(rid);
+      if (!Number.isNaN(n)) {
+        setPulseReportId(n);
+        return;
+      }
+    }
+  }, [location]);
+
+  useEffect(() => {
+    if (pulseReportId != null) return;
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (params.get("verificationInvoice") !== "1") return;
+    const completed = verificationRows.find((r) => r.status === "completed");
+    const id = completed?.reportId ?? completed?.id;
+    if (id != null) setPulseReportId(Number(id));
+  }, [verificationRows, pulseReportId, location]);
+
+  useEffect(() => {
+    if (pulseReportId == null) return;
+    let cancelled = false;
+    let attempts = 0;
+    const attemptScroll = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const el = document.querySelector(`[data-verification-report="${pulseReportId}"]`) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (attempts < 25) window.setTimeout(attemptScroll, 120);
+    };
+    window.setTimeout(attemptScroll, 100);
+    return () => {
+      cancelled = true;
+    };
+  }, [pulseReportId, location, verificationRows.length]);
+
+  useEffect(() => {
+    if (!invoiceList || !user || autoVerificationPdfDone.current) return;
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (params.get("verificationInvoice") !== "1") return;
+    const ridParam = params.get("reportId");
+    const match = verificationRows.find(
+      (r) =>
+        r.status === "completed" &&
+        (ridParam == null || ridParam === "" || String(r.reportId ?? r.id) === ridParam),
+    );
+    if (!match) return;
+    autoVerificationPdfDone.current = true;
+    const reportId = match.reportId ?? match.id;
+    if (reportId == null) return;
+    const amt =
+      typeof match.amount === "number" ? match.amount : parseFloat(String(match.amount ?? "15"));
+    void downloadInvoicePdf(
+      {
+        id: reportId,
+        reportId,
+        transferType: "verification_fee",
+        amount: Number.isFinite(amt) ? amt : 15,
+        description: match.service ?? "Cargo de verificación profesional",
+        createdAt: match.date,
+        status: match.status,
+      },
+      {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        name: (user as { name?: string }).name,
+        email: user.email,
+      },
+    ).then(() => {
+      params.delete("verificationInvoice");
+      params.delete("reportId");
+      const qs = params.toString();
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+      }
+    });
+  }, [invoiceList, verificationRows, user, location]);
+
+  const userForInvoice = user
+    ? {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        name: (user as { name?: string }).name,
+        email: user.email,
+      }
+    : null;
 
   if (isLoading) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Movimientos y descarga de facturas en PDF</CardDescription>
+          <CardDescription>Comprobantes de verificación, abonos de saldo y descarga en PDF</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
-          <p className="text-sm">Cargando transacciones…</p>
+          <p className="text-sm">Cargando facturas…</p>
         </CardContent>
       </Card>
     );
   }
 
-  if (transfers.length === 0) {
+  if (verificationRows.length === 0 && transfers.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Movimientos y descarga de facturas en PDF</CardDescription>
+          <CardDescription>Comprobantes de verificación, abonos de saldo y descarga en PDF</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <FileText className="h-8 w-8 opacity-60" />
-          <p className="text-sm">Aún no tienes transacciones para facturar.</p>
+          <p className="text-sm">Aún no tienes facturas disponibles.</p>
         </CardContent>
       </Card>
     );
@@ -1183,87 +1313,160 @@ function InvoicesTabContent() {
     <Card>
       <CardHeader>
         <CardTitle>Facturas</CardTitle>
-        <CardDescription>Descarga una factura en PDF por cada transacción</CardDescription>
+        <CardDescription>
+          Incluye el cargo de verificación (USD 15), abonos a tu saldo GenFeb y el resto de movimientos con comprobante
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {transfers.map((t: TransferForInvoice & { id: number; status?: string }) => {
-          const label = getTransferTypeLabel(t.transferType);
-          const dateStr = parseTransferDate(t.createdAt)
-            ? format(parseTransferDate(t.createdAt)!, "dd MMM yyyy HH:mm", { locale: es })
-            : "—";
-          return (
-            <div
-              key={t.id}
-              className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
-            >
-              <div className="flex items-start gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <Receipt className="w-4 h-4 text-primary" />
-                </div>
-                <div className="min-w-0 space-y-1">
-                  <p className="font-medium text-sm">{label}</p>
-                  <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
-                  <p className="text-xs text-muted-foreground">{dateStr}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <p className="font-semibold text-sm">{formatWalletAmount(t.amount)}</p>
-                <Badge
-                  variant={
-                    t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"
-                  }
+      <CardContent className="space-y-6">
+        {verificationRows.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-foreground">Verificación profesional</p>
+            {verificationRows.map((inv) => {
+              const reportKey = inv.reportId ?? inv.id;
+              if (reportKey == null) return null;
+              const amt =
+                typeof inv.amount === "number" ? inv.amount : parseFloat(String(inv.amount ?? "15"));
+              const dateStr = parseTransferDate(inv.date)
+                ? format(parseTransferDate(inv.date)!, "dd MMM yyyy HH:mm", { locale: es })
+                : "—";
+              const st = inv.status ?? "";
+              const isCompleted = st === "completed";
+              const isRejected = st === "rejected";
+              const highlight = pulseReportId != null && Number(reportKey) === pulseReportId;
+              return (
+                <div
+                  key={`ver-${reportKey}`}
+                  data-verification-report={reportKey}
+                  className={cn(
+                    "flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card",
+                    highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+                  )}
                 >
-                  {t.status === "pending_approval" ? "Pendiente" : t.status === "completed" ? "Completado" : "Rechazado"}
-                </Badge>
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <ShieldCheck className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-medium text-sm">{getTransferTypeLabel("verification_fee")}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {inv.service ?? "Cargo de verificación profesional"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{dateStr}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0 flex-wrap sm:flex-nowrap">
+                    <p className="font-semibold text-sm">{formatWalletAmount(Number.isFinite(amt) ? amt : 15)}</p>
+                    <Badge variant={isCompleted ? "default" : isRejected ? "destructive" : "secondary"}>
+                      {isCompleted ? "Completado" : isRejected ? "Rechazado" : "Pendiente"}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        userForInvoice &&
+                        downloadInvoicePdf(
+                          {
+                            id: reportKey,
+                            reportId: reportKey,
+                            transferType: "verification_fee",
+                            amount: Number.isFinite(amt) ? amt : 15,
+                            description: inv.service ?? "Cargo de verificación profesional",
+                            createdAt: inv.date,
+                            status: inv.status,
+                          },
+                          userForInvoice,
+                        )
+                      }
+                      disabled={!userForInvoice || !isCompleted}
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Generar factura
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {transfers.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-foreground">Abonos y otros movimientos</p>
+            {transfers.map((t: TransferForInvoice & { id: number; status?: string }) => {
+              const label = getTransferTypeLabel(t.transferType);
+              const dateStr = parseTransferDate(t.createdAt)
+                ? format(parseTransferDate(t.createdAt)!, "dd MMM yyyy HH:mm", { locale: es })
+                : "—";
+              return (
+                <div
+                  key={t.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <Receipt className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-medium text-sm">{label}</p>
+                      <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
+                      <p className="text-xs text-muted-foreground">{dateStr}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <p className="font-semibold text-sm">{formatWalletAmount(t.amount)}</p>
+                    <Badge
+                      variant={
+                        t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"
+                      }
+                    >
+                      {t.status === "pending_approval" ? "Pendiente" : t.status === "completed" ? "Completado" : "Rechazado"}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        userForInvoice &&
+                        downloadInvoicePdf(
+                          {
+                            id: t.id,
+                            amount: t.amount,
+                            transferType: t.transferType,
+                            description: t.description,
+                            createdAt: t.createdAt,
+                            status: t.status,
+                          },
+                          userForInvoice,
+                        )
+                      }
+                      disabled={!userForInvoice || t.status !== "completed"}
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Generar factura
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex items-center justify-between pt-2">
+              <p className="text-xs text-muted-foreground">
+                Página {page} de {totalPages}
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  Anterior
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    user &&
-                    downloadInvoicePdf(
-                      {
-                        id: t.id,
-                        amount: t.amount,
-                        transferType: t.transferType,
-                        description: t.description,
-                        createdAt: t.createdAt,
-                        status: t.status,
-                      },
-                      {
-                        firstName: user.firstName,
-                        lastName: user.lastName,
-                        name: (user as { name?: string }).name,
-                        email: user.email,
-                      }
-                    )
-                  }
-                  disabled={!user}
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 >
-                  <Download className="w-4 h-4 mr-2" />
-                  Generar factura
+                  Siguiente
                 </Button>
               </div>
             </div>
-          );
-        })}
-        <div className="flex items-center justify-between pt-2">
-          <p className="text-xs text-muted-foreground">
-            Página {page} de {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Siguiente
-            </Button>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1593,7 +1796,7 @@ export default function ProfessionalDashboard() {
           {!hasBankData ? (
             <div className="space-y-4 py-2">
               <p className="text-sm text-amber-600 dark:text-amber-500">
-                Para cobrar tus ingresos debes completar los datos de la cuenta de destino (nombre del banco y número de cuenta) en tu perfil.
+                Para cobrar tus ingresos debes indicar en tu perfil la cuenta donde quieres recibir el pago (entidad financiera y número de cuenta).
               </p>
               <Button asChild variant="outline">
                 <Link href="/settings" onClick={() => setWithdrawDialogOpen(false)}>Ir a Configuración</Link>
@@ -1601,7 +1804,7 @@ export default function ProfessionalDashboard() {
             </div>
           ) : (
             <div className="space-y-4 py-2">
-              <p className="text-sm text-muted-foreground">Saldo Genfeb: <strong>{formatUsd(wallet)}</strong></p>
+              <p className="text-sm text-muted-foreground">Saldo GenFeb: <strong>{formatUsd(wallet)}</strong></p>
               <div className="space-y-2">
                 <Label htmlFor="withdraw-amount">Monto a cobrar (USD)</Label>
                 <Input

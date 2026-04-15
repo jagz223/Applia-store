@@ -13,7 +13,7 @@ const FIRESTORE_METHODS = new Set([
   "getAllServices", "getService", "createService",
   "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getPendingBookingRatings", "submitBookingRating",
-  "getProfessionalVerificationByUserId", "upsertProfessionalVerificationImage", "upsertProfessionalVerificationPayment",
+  "getProfessionalVerificationByUserId", "upsertProfessionalVerificationImage", "upsertProfessionalVerificationCredential", "upsertProfessionalVerificationPayment",
   "getVerifyingStatusByUserId",
   "upsertVerifyingStatusIdentificationPending",
   "upsertVerifyingStatusTransactionPending",
@@ -57,6 +57,9 @@ export class HybridStorage implements IStorage {
   getProfessionalVerificationByUserId(userId: string) { return this.delegate("getProfessionalVerificationByUserId", [userId]); }
   upsertProfessionalVerificationImage(userId: string, imageUrl: string) {
     return this.delegate("upsertProfessionalVerificationImage", [userId, imageUrl]);
+  }
+  upsertProfessionalVerificationCredential(userId: string, professionalCredentialUrl: string) {
+    return this.delegate("upsertProfessionalVerificationCredential", [userId, professionalCredentialUrl]);
   }
   upsertProfessionalVerificationPayment(
     userId: string,

@@ -8,12 +8,16 @@ import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Tag } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { getCategoryDisplayName } from "@shared/default-categories";
+import {
+  SERVICE_DESCRIPTION_INLINE_HINT,
+  ServiceDescriptionInfoButton,
+} from "@/components/ServiceDescriptionHints";
 
 export default function CreateService() {
   const { user, isLoading: authLoading } = useAuth();
@@ -197,7 +201,11 @@ export default function CreateService() {
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Descripción</FormLabel>
+                    <div className="flex items-center gap-2">
+                      <FormLabel className="mb-0">Descripción del servicio</FormLabel>
+                      <ServiceDescriptionInfoButton />
+                    </div>
+                    <FormDescription>{SERVICE_DESCRIPTION_INLINE_HINT}</FormDescription>
                     <FormControl>
                       <Textarea placeholder="Qué incluye este servicio?" className="h-32" {...field} />
                     </FormControl>

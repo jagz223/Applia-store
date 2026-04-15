@@ -356,11 +356,11 @@ export default function Dashboard() {
       amountColor = "text-red-600";
     }
 
-    let label = "Transacción";
-    if (type === "recharge") label = "Recarga de Saldo Genfeb";
-    if (type === "service_payment") label = "Pago de servicio";
-    if (type === "payment") label = "Pago por servicio";
-    if (type === "withdrawal") label = "Pago a tu cuenta";
+    let label = "Movimiento";
+    if (type === "recharge") label = getTransferTypeLabel("recharge");
+    if (type === "service_payment") label = getTransferTypeLabel("service_payment");
+    if (type === "payment") label = getTransferTypeLabel("payment");
+    if (type === "withdrawal") label = getTransferTypeLabel("withdrawal");
 
     const createdAt = parseTransferDate(t.createdAt);
     const dateStr = createdAt
@@ -409,7 +409,7 @@ export default function Dashboard() {
                 Mi <span className="text-gradient-primary">actividad</span>
               </h1>
               <p className="text-muted-foreground mt-1.5 text-sm sm:text-base leading-snug">
-                Movimientos, facturas y Saldo Genfeb en un solo lugar
+                Movimientos, comprobantes y saldo GenFeb en un solo lugar
               </p>
             </div>
             <div className="flex gap-3 justify-center md:justify-end flex-wrap">

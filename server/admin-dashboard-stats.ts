@@ -2,7 +2,9 @@
  * Agregación de métricas para el panel admin (sin depender de Firestore vs memoria).
  */
 
-export const USER_RECHARGE_DESCRIPTION_PREFIX = "Recarga al usuario ";
+/** Prefijo actual en descripciones de abono (antes: "Recarga al usuario "). */
+export const USER_RECHARGE_DESCRIPTION_PREFIX = "Abono de saldo — ";
+const LEGACY_USER_RECHARGE_PREFIX = "Recarga al usuario ";
 
 export type AdminDashboardStatsPreset = "day" | "week" | "month" | "year";
 
@@ -190,7 +192,8 @@ export function aggregateAdminDashboardStats(
 
     const amt = typeof tr.amount === "number" && Number.isFinite(tr.amount) ? tr.amount : 0;
     const desc = String(tr.description ?? "");
-    const isUserFlow = desc.startsWith(USER_RECHARGE_DESCRIPTION_PREFIX);
+    const isUserFlow =
+      desc.startsWith(USER_RECHARGE_DESCRIPTION_PREFIX) || desc.startsWith(LEGACY_USER_RECHARGE_PREFIX);
     const cms = toCreatedAtMs(tr.createdAt);
 
     if (tr.status === "pending_approval") {

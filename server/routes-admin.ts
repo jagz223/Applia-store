@@ -17,6 +17,15 @@ import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
+import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
+import {
+  getHiddenCategorySlugs,
+  getHiddenCategorySlugsByRole,
+  getHiddenCategorySlugsForRole,
+  setHiddenCategorySlugs,
+  setHiddenCategorySlugsForRole,
+} from "./category-visibility";
+import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
 
 const updateUserSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -224,12 +233,26 @@ export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/verifying-status/pending", authenticateJWT, requireFullAdmin, async (_req, res) => {
     try {
       const pending = await genFebStorage.getPendingVerifyingStatuses();
+      // Filtro por rol (si en el futuro un rol no-admin ve esta vista):
+      // ocultar solicitudes de marcas que ese rol no puede ver.
+      // Importante: NO aplicamos "hiddenSlugs" global aquí; solo reglas por rol (admin siempre ve todo).
+      const reqRole = String((_req as any)?.user?.role ?? "");
+      const hiddenByRole = reqRole && reqRole !== "admin" ? await getHiddenCategorySlugsByRole() : {};
+      const hiddenSlugs = new Set(reqRole && reqRole !== "admin" ? (hiddenByRole[reqRole] ?? []) : []);
+      const categories = await genFebStorage.getCategories();
+      const catById = new Map<number, any>();
+      for (const c of categories ?? []) {
+        const id = Number((c as any)?.id);
+        if (Number.isFinite(id)) catById.set(id, c);
+      }
+
       const items: Array<{
         userId: string;
         name: string;
         email?: string | null;
         avatar?: string | null;
         user_identification?: string | null;
+        professionalCredentialUrl?: string | null;
         identification_verified: "pending" | "verified" | "rejected";
         transacction_date: string | null;
         transacction_verified: "pending" | "verified" | "rejected";
@@ -239,6 +262,16 @@ export function registerAdminRoutes(app: Express): void {
       for (const st of pending ?? []) {
         const userId = String((st as any).user ?? "");
         if (!userId) continue;
+
+        // Filtrar por marca del proveedor (Pack Go / Shop Go / Car Go, etc.) si aplica al rol.
+        if (hiddenSlugs.size > 0) {
+          const provider = await genFebStorage.getProviderByUserId(userId);
+          const catId = Number((provider as any)?.categoryId);
+          const slugFromId =
+            Number.isFinite(catId) && catId > 0 ? String((catById.get(catId) as any)?.slug ?? "") : "";
+          const slug = slugFromId || String((provider as any)?.category ?? "").trim();
+          if (slug && hiddenSlugs.has(slug)) continue;
+        }
 
         const user = (await genFebStorage.getUserById(userId)) as any;
         const name =
@@ -258,6 +291,7 @@ export function registerAdminRoutes(app: Express): void {
           email,
           avatar,
           user_identification,
+          professionalCredentialUrl: profVer?.professionalCredentialUrl ?? null,
           identification_verified: (st.identification_verified as any) ?? "rejected",
           transacction_date: st.transacction_date ?? null,
           transacction_verified: (st.transacction_verified as any) ?? "rejected",
@@ -349,18 +383,52 @@ export function registerAdminRoutes(app: Express): void {
         const status = parsed.action === "approve" ? "verified" : "rejected";
 
         const updated = await genFebStorage.setVerifyingStatusTransaction(userId, status as any);
+        let verificationReportId: number | null = null;
         if (status === "verified") {
           await maybeVerifyProfessional(userId);
           
-          // Actualizar reporte financiero (factura) a completado
+          // Reporte financiero (factura USD 15): completar pendiente o crear si faltaba al subir comprobante
+          try {
+            const reports = await genFebStorage.getFinancialReports(userId);
+            const pendingFee = reports.find((r: { type?: string; status?: string }) => r.type === "verification_fee" && r.status === "pending");
+            if (pendingFee) {
+              const rid = pendingFee.id != null ? Number(pendingFee.id) : NaN;
+              verificationReportId = Number.isFinite(rid) ? rid : null;
+              await genFebStorage.updateFinancialReportStatus(pendingFee.id, "completed");
+            } else {
+              const alreadyDone = reports.find(
+                (r: { type?: string; status?: string }) => r.type === "verification_fee" && r.status === "completed",
+              );
+              if (alreadyDone) {
+                const rid = alreadyDone.id != null ? Number(alreadyDone.id) : NaN;
+                verificationReportId = Number.isFinite(rid) ? rid : null;
+              } else {
+                const created = await genFebStorage.createFinancialReport({
+                  userId,
+                  type: "verification_fee",
+                  amount: "15.00",
+                  currency: "USD",
+                  status: "completed",
+                  description: "Pago por verificación de cuenta profesional (activación)",
+                  createdAt: new Date(),
+                });
+                const cr = created?.id != null ? Number(created.id) : NaN;
+                verificationReportId = Number.isFinite(cr) ? cr : null;
+              }
+            }
+          } catch (err) {
+            console.error("Error actualizando reporte financiero:", err);
+          }
+        } else {
+          // Rechazo: marcar cargo pendiente como rechazado para poder crear uno nuevo al reenviar comprobante
           try {
             const reports = await genFebStorage.getFinancialReports(userId);
             const pendingFee = reports.find(r => r.type === "verification_fee" && r.status === "pending");
             if (pendingFee) {
-              await genFebStorage.updateFinancialReportStatus(pendingFee.id, "completed");
+              await genFebStorage.updateFinancialReportStatus(pendingFee.id, "rejected");
             }
           } catch (err) {
-            console.error("Error actualizando reporte financiero:", err);
+            console.error("Error actualizando reporte financiero (rechazo):", err);
           }
         }
 
@@ -372,10 +440,43 @@ export function registerAdminRoutes(app: Express): void {
             ? "Tu comprobante de pago ha sido verificado correctamente."
             : "Tu comprobante de pago ha sido rechazado. Por favor, verifica los datos de la transferencia e intenta nuevamente.";
 
+          const txNotifyData = (() => {
+            const base: Record<string, unknown> = {
+              step: "transaction",
+              status,
+              message: msg,
+            };
+            if (isApprove) {
+              base.url =
+                verificationReportId != null
+                  ? `/professional-dashboard?tab=invoices&verificationInvoice=1&reportId=${verificationReportId}`
+                  : `/professional-dashboard?tab=invoices&verificationInvoice=1`;
+              if (verificationReportId != null) base.reportId = verificationReportId;
+            } else {
+              base.url = "/professional-dashboard";
+            }
+            return base;
+          })();
+
+          const pushNotifyData: Record<string, string> = {
+            step: "transaction",
+            status,
+            message: msg,
+            url:
+              isApprove && verificationReportId != null
+                ? `/professional-dashboard?tab=invoices&verificationInvoice=1&reportId=${verificationReportId}`
+                : isApprove
+                  ? `/professional-dashboard?tab=invoices&verificationInvoice=1`
+                  : "/professional-dashboard",
+          };
+          if (isApprove && verificationReportId != null) {
+            pushNotifyData.reportId = String(verificationReportId);
+          }
+
           await genFebStorage.createNotification({
             userId,
             type: "verification_result",
-            data: { step: "transaction", status, message: msg, url: "/professional-dashboard" }
+            data: txNotifyData as any,
           });
 
           const io = getIO();
@@ -384,14 +485,14 @@ export function registerAdminRoutes(app: Express): void {
               type: "verification_result",
               title,
               body: msg,
-              data: { step: "transaction", status, url: "/professional-dashboard" }
+              data: txNotifyData,
             });
           }
 
           void notificationService.sendPushToUser(userId, {
             title,
             body: msg,
-            data: { step: "transaction", status, url: "/professional-dashboard" }
+            data: pushNotifyData,
           }).catch(err => console.error("[push-tx-res] Error:", err));
         } catch (err) {
           console.error("Error notificando resultado tx:", err);
@@ -476,6 +577,396 @@ export function registerAdminRoutes(app: Express): void {
     } catch (error) {
       console.error("Error listing providers with services:", error);
       return res.status(500).json({ message: "Error al listar proveedores" });
+    }
+  });
+
+  /**
+   * GET /api/admin/services/active
+   * Staff (admin o Soporte TI): lista todos los servicios activos (isActive !== false) con datos del proveedor/usuario.
+   * Nota: se lee directo de Firestore para no aplicar filtros del catálogo público (p. ej. verificación).
+   */
+  app.get("/api/admin/services/active", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
+    try {
+      const role = req.user?.role as string | undefined;
+      const hiddenForRole = new Set(await getHiddenCategorySlugsForRole(role));
+      const search = String(req.query.search ?? "").trim().toLowerCase();
+      const brandSlug = String(req.query.brandSlug ?? "").trim();
+
+      const db = getFirestore();
+      if (!db) {
+        // Sin Firestore, caemos a storage (puede ser vacío en memoria) y filtramos.
+        const list = (await genFebStorage.getAllServices()) ?? [];
+        const active = list.filter((s: any) => s?.isActive !== false);
+        return res.status(200).json({ services: active, total: active.length });
+      }
+
+      const [categoriesSnap, servicesSnap] = await Promise.all([
+        db.collection(FIRESTORE_COLLECTIONS.CATEGORIES).get(),
+        db.collection(FIRESTORE_COLLECTIONS.SERVICES).get(),
+      ]);
+      const categories = categoriesSnap.docs.map((d) => ({ id: parseInt(d.id, 10), ...d.data() })) as any[];
+      const catById = new Map<number, any>();
+      for (const c of categories) catById.set(Number(c.id), c);
+
+      const serviceDocs = servicesSnap.docs.map((d) => ({ id: parseInt(d.id, 10), ...d.data() })) as any[];
+      const activeServices = serviceDocs.filter((s) => s?.isActive !== false);
+
+      // Cache provider/user para evitar N+1 pesado
+      const providerCache = new Map<number, any>();
+      const userCache = new Map<string, any>();
+
+      const out: any[] = [];
+      for (const s of activeServices) {
+        const providerId = Number(s?.providerId);
+        const provider =
+          Number.isFinite(providerId) && providerId > 0
+            ? (providerCache.get(providerId) ?? (await genFebStorage.getProvider(providerId)))
+            : null;
+        if (provider && Number.isFinite(providerId)) providerCache.set(providerId, provider);
+
+        const userId = String((provider as any)?.userId ?? "");
+        const user = userId ? (userCache.get(userId) ?? (await genFebStorage.getUserById(userId))) : null;
+        if (userId) userCache.set(userId, user);
+
+        const category = catById.get(Number(s?.categoryId)) ?? null;
+        const slug = String(category?.slug ?? "");
+        if (slug && hiddenForRole.has(slug)) continue;
+        if (brandSlug && slug !== brandSlug) continue;
+
+        out.push({
+          id: Number(s?.id),
+          title: String(s?.title ?? ""),
+          price: s?.price ?? null,
+          categoryId: Number(s?.categoryId),
+          categorySlug: category?.slug ?? null,
+          categoryDisplayName: category ? getCategoryDisplayName(category) : null,
+          providerId: providerId,
+          providerVerified: (provider as any)?.isVerified === true,
+          providerProfession: (provider as any)?.profession ?? null,
+          userId,
+          userName:
+            (user as any)?.name ??
+            [String((user as any)?.firstName ?? ""), String((user as any)?.lastName ?? "")]
+              .filter(Boolean)
+              .join(" ")
+              .trim(),
+          userEmail: (user as any)?.email ?? null,
+        });
+      }
+
+      const filtered = search
+        ? out.filter((row: any) => {
+            const h = `${row.title ?? ""} ${row.userName ?? ""} ${row.userEmail ?? ""}`.toLowerCase();
+            return h.includes(search);
+          })
+        : out;
+
+      filtered.sort((a, b) => String(a.categoryDisplayName ?? "").localeCompare(String(b.categoryDisplayName ?? ""), "es"));
+      return res.status(200).json({ services: filtered, total: filtered.length });
+    } catch (e) {
+      console.error("Error listing active services (admin):", e);
+      return res.status(500).json({ message: "Error al listar servicios activos" });
+    }
+  });
+
+  /**
+   * GET /api/admin/service-brands
+   * Admin-only: lista marcas (Fix Go / Man Go / Pro Go / etc.) con conteos de servicios activos/inactivos.
+   * Nota: "marca" aquí = categoría (categories) cuyo slug está en DEFAULT_CATEGORIES.
+   */
+  app.get("/api/admin/service-brands", authenticateJWT, requireFullAdmin, async (_req, res) => {
+    try {
+      const [categories, services] = await Promise.all([genFebStorage.getCategories(), genFebStorage.getAllServices()]);
+      const brandSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
+      const hiddenSlugs = new Set(await getHiddenCategorySlugs());
+      const brands = (categories ?? [])
+        .filter((c: any) => brandSlugs.has(String(c?.slug ?? "")))
+        .map((c: any) => {
+          const catId = Number(c.id);
+          const svc = (services ?? []).filter((s: any) => Number(s?.categoryId) === catId);
+          const activeServices = svc.filter((s: any) => s?.isActive !== false).length;
+          const inactiveServices = svc.length - activeServices;
+          const slug = String(c.slug ?? "");
+          const uiHidden = hiddenSlugs.has(slug);
+          return {
+            categoryId: catId,
+            slug,
+            name: String(c.name ?? ""),
+            displayName: getCategoryDisplayName(c),
+            uiHidden,
+            totalServices: svc.length,
+            activeServices,
+            inactiveServices,
+          };
+        })
+        .sort((a, b) => a.displayName.localeCompare(b.displayName, "es"));
+      return res.status(200).json({ brands });
+    } catch (e) {
+      console.error("Error listing service brands:", e);
+      return res.status(500).json({ message: "Error al listar marcas de servicios" });
+    }
+  });
+
+  /**
+   * GET /api/admin/category-visibility/by-role
+   * Admin-only: mapa de slugs ocultos por rol (además del ocultamiento global).
+   */
+  app.get("/api/admin/category-visibility/by-role", authenticateJWT, requireFullAdmin, async (_req, res) => {
+    try {
+      const map = await getHiddenCategorySlugsByRole();
+      return res.status(200).json({ byRole: map });
+    } catch (e) {
+      console.error("Error reading role category visibility:", e);
+      return res.status(500).json({ message: "Error al leer visibilidad por rol" });
+    }
+  });
+
+  const roleVisibilityPatchSchema = z.object({
+    role: z.string().min(1).max(50),
+    hiddenSlugs: z.array(z.string().min(1).max(50)).default([]),
+  });
+
+  /**
+   * PATCH /api/admin/category-visibility/by-role
+   * Admin-only: define slugs ocultos para un rol (no afecta admin).
+   */
+  app.patch("/api/admin/category-visibility/by-role", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const parsed = roleVisibilityPatchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Datos inválidos" });
+      if (parsed.data.role === "admin") return res.status(400).json({ message: "No se puede configurar ocultamiento para admin" });
+      const byRole = await setHiddenCategorySlugsForRole(parsed.data.role, parsed.data.hiddenSlugs);
+      return res.status(200).json({ ok: true, byRole });
+    } catch (e: any) {
+      const msg = e?.message || "Error al guardar visibilidad por rol";
+      return res.status(400).json({ message: msg });
+    }
+  });
+
+  const brandToggleSchema = z.object({ isActive: z.boolean() });
+
+  /**
+   * PATCH /api/admin/service-brands/:categoryId
+   * Admin-only: activa/desactiva TODOS los servicios de una marca (categoryId).
+   */
+  app.patch("/api/admin/service-brands/:categoryId", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const categoryId = Number(req.params.categoryId);
+      if (!Number.isFinite(categoryId) || categoryId <= 0) {
+        return res.status(400).json({ message: "categoryId inválido" });
+      }
+      const parsed = brandToggleSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Datos inválidos" });
+
+      // Preparar info de marca para notificaciones
+      const categories = await genFebStorage.getCategories();
+      const cat = (categories ?? []).find((c: any) => Number(c?.id) === categoryId);
+      const slug = String((cat as any)?.slug ?? "");
+      const brandDisplay = cat ? getCategoryDisplayName(cat) : `Categoría ${categoryId}`;
+
+      // 1) Visibilidad de la marca en UI (chips)
+      try {
+        if (slug) {
+          const currentHidden = new Set(await getHiddenCategorySlugs());
+          if (parsed.data.isActive) currentHidden.delete(slug);
+          else currentHidden.add(slug);
+          await setHiddenCategorySlugs(Array.from(currentHidden));
+        }
+      } catch (e) {
+        console.error("Error updating category visibility:", e);
+      }
+
+      const all = await genFebStorage.getAllServices();
+      const target = (all ?? []).filter((s: any) => Number(s?.categoryId) === categoryId);
+      const ids = target.map((s: any) => Number(s?.id)).filter((id: any) => Number.isFinite(id));
+
+      await Promise.all(ids.map((id) => genFebStorage.updateService(Number(id), { isActive: parsed.data.isActive })));
+
+      // 2) Notificar a admins (solo rol admin) que se cambió el estatus de una marca/servicios
+      try {
+        const adminUserId = String((req as any).user?.id ?? "");
+        const adminWhoProcessed = adminUserId ? await genFebStorage.getUserById(adminUserId) : null;
+        const adminName =
+          (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string } | null)?.name ??
+          ([((adminWhoProcessed as any)?.firstName ?? ""), ((adminWhoProcessed as any)?.lastName ?? "")].filter(Boolean).join(" ") ||
+            (adminWhoProcessed as any)?.email ||
+            "Un administrador");
+        const actionLabel = parsed.data.isActive ? "activó" : "desactivó";
+        const title = "Cambio de estatus de marca";
+        const body = `${adminName} ${actionLabel} ${brandDisplay}.`;
+
+        const allAdmins = await getFullAdminUsers(genFebStorage);
+        for (const admin of allAdmins ?? []) {
+          const aid = (admin as { id?: string }).id;
+          if (!aid) continue;
+          // Notificar a todos los admins (incluyendo al que ejecutó) según tu requerimiento
+          await genFebStorage.createNotification({
+            userId: aid,
+            type: "admin",
+            data: {
+              type: "brand_status_changed",
+              brandCategoryId: categoryId,
+              brandSlug: slug || undefined,
+              brandName: brandDisplay,
+              isActive: parsed.data.isActive,
+              changedByAdminId: adminUserId || undefined,
+              changedByAdminName: adminName,
+              message: body,
+            },
+          });
+          void notificationService
+            .sendPushToUser(aid, {
+              title,
+              body,
+              data: {
+                url: "/admin?tab=services",
+                type: "admin",
+                adminEvent: "brand_status_changed",
+                brandCategoryId: String(categoryId),
+                brandSlug: slug,
+                isActive: String(parsed.data.isActive),
+              },
+            })
+            .catch(() => {});
+        }
+
+        const io = getIO();
+        if (io) {
+          sendNotificationToAdmins(io, {
+            type: "brand_status_changed",
+            data: { categoryId, slug, brandName: brandDisplay, isActive: parsed.data.isActive, changedByAdminName: adminName },
+          });
+        }
+      } catch (e) {
+        console.error("Error notifying admins on brand toggle:", e);
+      }
+
+      return res.status(200).json({ ok: true, updated: ids.length });
+    } catch (e) {
+      console.error("Error toggling brand services:", e);
+      return res.status(500).json({ message: "Error al actualizar servicios de la marca" });
+    }
+  });
+
+  /**
+   * GET /api/admin/service-brands/:categoryId/providers
+   * Admin-only: lista "usuarios" (proveedores) dentro de una marca con filtros básicos.
+   */
+  app.get("/api/admin/service-brands/:categoryId/providers", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const categoryId = Number(req.params.categoryId);
+      if (!Number.isFinite(categoryId) || categoryId <= 0) {
+        return res.status(400).json({ message: "categoryId inválido" });
+      }
+      const search = String(req.query.search ?? "").trim().toLowerCase();
+      const minRating = req.query.minRating != null ? Number(req.query.minRating) : undefined;
+      const sort = String(req.query.sort ?? "rating_desc");
+
+      const services = await genFebStorage.getAllServices();
+      const inBrand = (services ?? []).filter((s: any) => Number(s?.categoryId) === categoryId);
+
+      const byProvider = new Map<number, any[]>();
+      for (const s of inBrand) {
+        const pid = Number(s?.providerId);
+        if (!Number.isFinite(pid)) continue;
+        const arr = byProvider.get(pid) ?? [];
+        arr.push(s);
+        byProvider.set(pid, arr);
+      }
+
+      const items: Array<{
+        providerId: number;
+        userId: string;
+        name: string;
+        email?: string | null;
+        rating: number;
+        ratingCount: number;
+        verified: boolean;
+        totalServices: number;
+        activeServices: number;
+        inactiveServices: number;
+      }> = [];
+
+      for (const [providerId, svc] of Array.from(byProvider.entries())) {
+        const provider = await genFebStorage.getProvider(providerId);
+        if (!provider) continue;
+        const userId = String((provider as any)?.userId ?? "");
+        if (!userId) continue;
+        const rawUser = await genFebStorage.getUserById(userId);
+        const u = rawUser as any;
+        const name = (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) || "Usuario";
+        const email = u?.email ?? null;
+        const rating = typeof u?.rating === "number" ? u.rating : Number(u?.rating ?? 5) || 5;
+        const ratingCount = typeof u?.ratingCount === "number" ? u.ratingCount : Number(u?.ratingCount ?? 0) || 0;
+
+        const totalServices = svc.length;
+        const activeServices = svc.filter((s: any) => s?.isActive !== false).length;
+        const inactiveServices = totalServices - activeServices;
+
+        const verified = (provider as any)?.isVerified === true;
+
+        const haystack = `${name} ${email ?? ""}`.toLowerCase();
+        if (search && !haystack.includes(search)) continue;
+        if (minRating != null && Number.isFinite(minRating) && rating < minRating) continue;
+
+        items.push({
+          providerId,
+          userId,
+          name,
+          email,
+          rating,
+          ratingCount,
+          verified,
+          totalServices,
+          activeServices,
+          inactiveServices,
+        });
+      }
+
+      const cmpName = (a: any, b: any) => a.name.localeCompare(b.name, "es");
+      const cmpRatingDesc = (a: any, b: any) => (b.rating ?? 0) - (a.rating ?? 0) || cmpName(a, b);
+      const cmpRatingAsc = (a: any, b: any) => (a.rating ?? 0) - (b.rating ?? 0) || cmpName(a, b);
+      const cmpActiveDesc = (a: any, b: any) => (b.activeServices ?? 0) - (a.activeServices ?? 0) || cmpRatingDesc(a, b);
+
+      if (sort === "name_asc") items.sort(cmpName);
+      else if (sort === "rating_asc") items.sort(cmpRatingAsc);
+      else if (sort === "active_desc") items.sort(cmpActiveDesc);
+      else items.sort(cmpRatingDesc);
+
+      return res.status(200).json({ providers: items, total: items.length });
+    } catch (e) {
+      console.error("Error listing brand providers:", e);
+      return res.status(500).json({ message: "Error al listar proveedores de la marca" });
+    }
+  });
+
+  const providerToggleSchema = z.object({ isActive: z.boolean() });
+
+  /**
+   * PATCH /api/admin/providers/:providerId/services
+   * Admin-only: activa/desactiva servicios del proveedor (en todas sus marcas).
+   */
+  app.patch("/api/admin/providers/:providerId/services", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const providerId = Number(req.params.providerId);
+      if (!Number.isFinite(providerId) || providerId <= 0) {
+        return res.status(400).json({ message: "providerId inválido" });
+      }
+      const parsed = providerToggleSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Datos inválidos" });
+
+      const provider = await genFebStorage.getProvider(providerId);
+      const providerUserId = String((provider as any)?.userId ?? "");
+
+      const all = await genFebStorage.getAllServices();
+      const target = (all ?? []).filter((s: any) => Number(s?.providerId) === providerId);
+      const ids = target.map((s: any) => Number(s?.id)).filter((id: any) => Number.isFinite(id));
+      await Promise.all(ids.map((id) => genFebStorage.updateService(Number(id), { isActive: parsed.data.isActive })));
+
+      return res.status(200).json({ ok: true, updated: ids.length });
+    } catch (e) {
+      console.error("Error toggling provider services:", e);
+      return res.status(500).json({ message: "Error al actualizar servicios del proveedor" });
     }
   });
 

@@ -79,6 +79,23 @@ export function useProviderCategoryAvailability() {
   });
 }
 
+/** Config pública: slugs de marcas/categorías ocultas en UI (chips). */
+export function useCategoryVisibility(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["/api/platform/category-visibility"],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/platform/category-visibility", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("No se pudo cargar la visibilidad de categorías");
+      return res.json() as Promise<{ hiddenSlugs: string[] }>;
+    },
+    staleTime: 30_000,
+    enabled: options?.enabled !== false,
+  });
+}
+
 export function useProviders(params?: { profession?: string; category?: string }) {
   const profession = params?.profession;
   const category = params?.category;
@@ -130,7 +147,7 @@ export function useCreateProvider() {
   const { toast } = useToast();
   
   return useMutation({
-    mutationFn: async (data: InsertProvider) => {
+    mutationFn: async (data: InsertProvider & { serviceTitle?: string; serviceDescription?: string }) => {
       const token = getToken();
       const res = await fetch(api.providers.create.path, {
         method: "POST",
@@ -1123,12 +1140,14 @@ export function useAdminWithdrawalHistory(params: {
 // ========== Verificación de profesional ==========
 
 const PROFESSIONAL_VERIFICATION_ME = "/api/me/professional-verification";
-const VERIFICATION_STATUS_ME = "/api/me/verifying-status";
+/** Exportado para fetch tras mutación (pago) y misma clave de caché que `useVerifyingStatusMe`. */
+export const VERIFICATION_STATUS_ME = "/api/me/verifying-status";
 
 export type ProfessionalVerificationDto = {
   userId: string;
   imageUrl: string | null;
   imageVerified: boolean;
+  professionalCredentialUrl?: string | null;
   transferReceiptCode: string | null;
   transferDate: string | null;
   createdAt?: string;
@@ -1228,6 +1247,30 @@ export function usePatchProfessionalVerificationPayment() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
       queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
+    },
+  });
+}
+
+export function usePatchProfessionalVerificationCredential() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { professionalCredentialUrl: string; name?: string; mimeType?: string; size?: number }) => {
+      const token = getToken();
+      const res = await fetch(`${PROFESSIONAL_VERIFICATION_ME}/credential`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { message?: string }).message || "Error al guardar el documento profesional");
+      return data as ProfessionalVerificationDto;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
+      queryClient.invalidateQueries({ queryKey: ["vault-documents"] });
     },
   });
 }

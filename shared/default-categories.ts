@@ -7,13 +7,23 @@
 /** Slugs ocultos en la UI (vista categorías, explorar, configurarse como profesional) hasta que se activen. */
 export const HIDDEN_CATEGORY_SLUGS_IN_UI: ReadonlyArray<string> = ["delivery", "marketplace", "transport"];
 
+/**
+ * Lista efectiva de slugs ocultos: siempre incluye las marcas desactivadas por defecto
+ * (Pack Go / Shop Go / Car Go) y se une con lo que venga de la API o Firestore.
+ * Así nunca se muestran chips de marcas desactivadas por un `hiddenSlugs` incompleto o vacío.
+ */
+export function effectiveHiddenCategorySlugs(apiHidden: string[] | undefined | null): string[] {
+  const extra = Array.isArray(apiHidden) ? apiHidden : [];
+  return Array.from(new Set([...HIDDEN_CATEGORY_SLUGS_IN_UI, ...extra]));
+}
+
 /** Nombres de marca para mostrar en la UI (Familia GenFeb). Solo afecta la visualización. */
 export const CATEGORY_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   technical: "Fix Go",
   professional: "Pro Go",
   maintenance: "Man Go",
   delivery: "Pack Go",
-  marketplace: "Shog Go",
+  marketplace: "Shop Go",
   transport: "Car Go",
 } as const;
 
