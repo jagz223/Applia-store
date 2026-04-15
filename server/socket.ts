@@ -107,7 +107,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
 
     // Send confirmation to client
     socket.emit("connected", {
-      message: "Connected to GenFeb S.A.S. real-time server",
+      message: "Connected to GenFeb real-time server",
       userId: user.id,
     });
   });

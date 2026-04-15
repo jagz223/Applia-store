@@ -72,6 +72,9 @@ const MAX_AVATAR_SIZE_MB = 5;
 const MAX_ID_DOC_SIZE_MB = 5;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
+/** Documento de identidad en verificación: solo JPG o PNG. */
+const ALLOWED_VERIFICATION_ID_TYPES = ["image/jpeg", "image/png"] as const;
+
 /**
  * Sube una imagen de perfil a Firebase Storage y devuelve la URL de descarga.
  * Usado en registro (y opcionalmente en perfil). El archivo no pasa por el servidor.
@@ -112,17 +115,17 @@ export async function uploadProfileImage(file: File): Promise<string> {
  */
 export async function uploadVerificationIdImage(userId: string, file: File): Promise<string> {
   if (file.size > MAX_ID_DOC_SIZE_MB * 1024 * 1024) {
-    throw new Error(`La imagen no debe superar ${MAX_ID_DOC_SIZE_MB} MB`);
+    throw new Error(`El archivo no debe superar ${MAX_ID_DOC_SIZE_MB} MB`);
   }
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+  if (!ALLOWED_VERIFICATION_ID_TYPES.includes(file.type as (typeof ALLOWED_VERIFICATION_ID_TYPES)[number])) {
+    throw new Error("Formato no válido. Usa JPG o PNG.");
   }
 
   const storage = getFirebaseStorage();
   if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
 
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-  const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+  const safeExt = ["jpg", "jpeg", "png"].includes(ext) ? ext : "jpg";
   const path = `verification_ids/${userId}/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
   const storageRef = ref(storage, path);
 
@@ -134,6 +137,36 @@ export async function uploadVerificationIdImage(userId: string, file: File): Pro
       (err) => reject(err),
       () => resolve()
     );
+  });
+
+  return getDownloadURL(storageRef);
+}
+
+/**
+ * Sube documento que avala la profesión (PDF o imagen).
+ * - Storage path: `professional_credentials/{userId}/{uuid}_{timestamp}.{ext}`
+ * - Las reglas de Firebase Storage deben permitir `application/pdf` en esa ruta (ver `storage.rules` en la raíz del repo).
+ */
+export async function uploadProfessionalCredential(userId: string, file: File): Promise<string> {
+  const maxMb = 12;
+  const allowed = ["application/pdf", "image/jpeg", "image/png"] as const;
+  if (file.size > maxMb * 1024 * 1024) {
+    throw new Error(`El archivo no debe superar ${maxMb} MB`);
+  }
+  if (!allowed.includes(file.type as (typeof allowed)[number])) {
+    throw new Error("Formato no válido. Usa JPG, PNG o PDF.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || (file.type === "application/pdf" ? "pdf" : "jpg");
+  const safeExt = ["pdf", "jpg", "jpeg", "png"].includes(ext) ? ext : "pdf";
+  const path = `professional_credentials/${userId}/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on("state_changed", () => {}, (err) => reject(err), () => resolve());
   });
 
   return getDownloadURL(storageRef);

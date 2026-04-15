@@ -91,7 +91,21 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       return "/movimientos";
     case "admin_verification_request":
       return data.url ?? "/admin?tab=overview";
-    case "verification_result":
+    case "verification_result": {
+      const step = data.step ?? data.data?.step;
+      const st = data.status ?? data.data?.status;
+      if (step === "transaction" && st === "verified") {
+        const fromServer = data.url ?? data.data?.url;
+        if (typeof fromServer === "string" && fromServer.includes("tab=invoices")) {
+          return fromServer.startsWith("/") ? fromServer : `/${fromServer}`;
+        }
+        const q = new URLSearchParams({ tab: "invoices", verificationInvoice: "1" });
+        const reportId = data.reportId ?? data.data?.reportId;
+        if (reportId != null) q.set("reportId", String(reportId));
+        return `/professional-dashboard?${q.toString()}`;
+      }
+      return typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/professional-dashboard";
+    }
     case "verification_welcome":
       return data.url ?? "/professional-dashboard";
     default:
@@ -159,8 +173,8 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
   if (type === "booking_schedule_changed") return "Se cambió la fecha del servicio";
   if (type === "booking_cost_changed") return "Se actualizó el monto del servicio";
 
-  if (type === "recharge_completed") return "Recarga aprobada";
-  if (type === "recharge_rejected") return "Recarga rechazada";
+  if (type === "recharge_completed") return "Abono confirmado";
+  if (type === "recharge_rejected") return "Abono no confirmado";
   if (type === "balance_credited") return "Saldo acreditado";
 
   if (type === "withdrawal_approved") return "Retiro procesado";
@@ -201,7 +215,7 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     return "La reserva fue actualizada.";
   }
   if (type === "booking" && d.type === "new_booking") {
-    const method = d.booking?.paymentMethod === "cash" ? "Efectivo" : "Billetera";
+    const method = d.booking?.paymentMethod === "cash" ? "Efectivo" : "Saldo Genfeb";
     return `Tienes una nueva solicitud de reserva (Pago: ${method}). Revisa el detalle en tu Panel Asociado.`;
   }
   // 1) Mensajes de reserva (comunes)

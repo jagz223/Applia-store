@@ -1,15 +1,22 @@
 import { useMemo } from "react";
 import { useLocation } from "wouter";
-import { useCategories, useProviderCategoryAvailability, useSubcategories } from "@/hooks/use-mango-data";
-import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI } from "@shared/default-categories";
+import { useCategories, useCategoryVisibility, useProviderCategoryAvailability, useSubcategories } from "@/hooks/use-mango-data";
+import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { ExploreCategoryCards } from "@/components/ExploreCategoryCards";
+import { useAuth } from "@/hooks/use-auth";
 
 const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-const hiddenSlugs = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
 
 export default function Categories() {
   const [, setLocation] = useLocation();
+  const { isAuthenticated } = useAuth();
   const { data: categories = [] } = useCategories();
+  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
+  const hiddenSlugs = useMemo(
+    () =>
+      new Set(effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined)),
+    [isAuthenticated, visibility]
+  );
   const { data: availability } = useProviderCategoryAvailability();
   const providerCategories = useMemo(
     () =>
@@ -19,7 +26,7 @@ export default function Categories() {
           return slug && providerSlugs.has(slug) && !hiddenSlugs.has(slug);
         }
       ),
-    [categories]
+    [categories, hiddenSlugs]
   );
   const professionalCategory = useMemo(
     () => providerCategories.find((c) => (c as { slug?: string }).slug === "professional"),

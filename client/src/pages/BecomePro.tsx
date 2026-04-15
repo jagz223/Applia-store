@@ -1,36 +1,60 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { insertProviderSchema } from "@shared/schema";
+import { insertProviderSchema, professionalBioFieldSchema } from "@shared/schema";
+import { providerSkillsSchema } from "@shared/skills-schema";
 import { type InsertProvider } from "@shared/schema";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCreateProvider, useCurrentProvider, useCategories, useSubcategories } from "@/hooks/use-mango-data";
+import { useCreateProvider, useCurrentProvider, useCategories, useSubcategories, useCategoryVisibility } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { api } from "@shared/routes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo } from "react";
-import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
+import { ProviderSkillsField } from "@/components/ProviderSkillsField";
+import {
+  BiographyOnboardingInfoButton,
+  SERVICE_DESCRIPTION_INLINE_HINT,
+  ServiceDescriptionInfoButton,
+} from "@/components/ServiceDescriptionHints";
+import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 
 /** Solo categorías válidas para proveedor (excluye legal/financial, que son subcategorías). */
 const PROVIDER_CATEGORY_SLUGS = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-const HIDDEN_SLUGS = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
 
-const becomeProFormSchema = insertProviderSchema.extend({
-  categoryId: z.number().int().positive({ message: "Selecciona una categoría para tu perfil y tu servicio." }),
-  category: z.string().optional(),
-  subcategoryId: z.number().int().positive().optional().nullable(),
-});
+const becomeProFormSchema = insertProviderSchema
+  .extend({
+    categoryId: z.number().int().positive({ message: "Selecciona una categoría para tu perfil y tu servicio." }),
+    category: z.string().optional(),
+    subcategoryId: z.number().int().positive().optional().nullable(),
+  })
+  .extend({
+    bio: professionalBioFieldSchema,
+    skills: providerSkillsSchema,
+    /** Título público del servicio (mismo valor que en «Editar servicio»). */
+    serviceTitle: z
+      .string()
+      .trim()
+      .min(2, { message: "Indica el nombre público de tu servicio (mínimo 2 caracteres)." })
+      .max(300),
+    /** Qué incluye esta oferta; si lo dejas vacío, se usará la biografía como texto inicial del servicio. */
+    serviceDescription: z.string().max(5000, { message: "Máximo 5000 caracteres." }),
+  });
 type BecomeProForm = z.infer<typeof becomeProFormSchema>;
 
 export default function BecomePro() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
+  const hiddenSlugs = useMemo(
+    () => new Set(effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined)),
+    [isAuthenticated, visibility]
+  );
   const { data: existingProfile, isLoading: profileLoading } = useCurrentProvider();
   const createProvider = useCreateProvider();
   const queryClient = useQueryClient();
@@ -42,10 +66,10 @@ export default function BecomePro() {
       categories.filter(
         (c) => {
           const slug = (c as { slug?: string }).slug;
-          return slug && PROVIDER_CATEGORY_SLUGS.has(slug) && !HIDDEN_SLUGS.has(slug);
+          return slug && PROVIDER_CATEGORY_SLUGS.has(slug) && !hiddenSlugs.has(slug);
         }
       ),
-    [categories]
+    [categories, hiddenSlugs]
   );
   const form = useForm<BecomeProForm>({
     resolver: zodResolver(becomeProFormSchema),
@@ -56,8 +80,11 @@ export default function BecomePro() {
       subcategoryId: undefined,
       profession: "",
       bio: "",
+      skills: [] as string[],
       yearsExperience: 0,
       hourlyRate: "50",
+      serviceTitle: "",
+      serviceDescription: "",
     },
   });
   const selectedCategoryId = form.watch("categoryId");
@@ -122,7 +149,10 @@ export default function BecomePro() {
     <div className="container max-w-2xl py-12 px-4">
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-display font-bold text-primary mb-2">Datos de proveedor</h1>
-        <p className="text-muted-foreground">Completa tu perfil. Con estos datos se creará tu único servicio (nombre = tu nombre, descripción = tu bio, precio = tu tarifa).</p>
+        <p className="text-muted-foreground">
+          Completa tu perfil. Tu nombre de usuario se muestra en el perfil; el <strong className="text-foreground">nombre del
+          servicio</strong> es el título de tu oferta en el buscador (el mismo que podrás editar después).
+        </p>
       </div>
 
       <Card className="border-border/50 shadow-xl">
@@ -206,6 +236,53 @@ export default function BecomePro() {
                 )}
               />
 
+              <FormField
+                control={form.control}
+                name="serviceTitle"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nombre del servicio</FormLabel>
+                    <FormDescription>
+                      Título de tu publicación en el listado (qué ofreces y cómo quieres llamar a tu servicio). Es el mismo
+                      campo que verás en «Editar servicio»; no tiene por qué coincidir solo con tu nombre personal.
+                    </FormDescription>
+                    <FormControl>
+                      <Input placeholder="Ej. Asesoría legal laboral para PYMEs" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="serviceDescription"
+                render={({ field }) => (
+                  <FormItem>
+                    <div className="flex items-center gap-2">
+                      <FormLabel className="mb-0">Descripción del servicio</FormLabel>
+                      <ServiceDescriptionInfoButton ariaLabel="Información: descripción del servicio" />
+                    </div>
+                    <FormDescription>{SERVICE_DESCRIPTION_INLINE_HINT}</FormDescription>
+                    <p className="text-xs text-muted-foreground -mt-1">
+                      Opcional: si no escribes nada aquí, el texto de tu biografía (más abajo) se usará como descripción
+                      inicial del servicio.
+                    </p>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Qué incluye esta oferta: alcance, entregables, duración o lo que cubre el precio."
+                        className="min-h-[120px] resize-y"
+                        {...field}
+                      />
+                    </FormControl>
+                    <p className="text-xs text-muted-foreground flex justify-end tabular-nums">
+                      {(field.value?.length ?? 0)}/5000
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
@@ -243,19 +320,33 @@ export default function BecomePro() {
                 />
               </div>
 
+              <ProviderSkillsField control={form.control} name="skills" />
+
               <FormField
                 control={form.control}
                 name="bio"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Descripción y habilidades</FormLabel>
+                    <div className="flex items-center gap-2">
+                      <FormLabel className="mb-0">Biografía y enfoque profesional</FormLabel>
+                      <BiographyOnboardingInfoButton />
+                    </div>
+                    <FormDescription>
+                      Quién eres y cómo trabajas. Si arriba no pusiste descripción del servicio, este texto también se usará
+                      como descripción inicial de la publicación (luego puedes separarlos en «Editar servicio»).
+                    </FormDescription>
                     <FormControl>
-                      <Textarea 
-                        placeholder="Describe tu experiencia, certificaciones y qué ofreces. Esta descripción será la de tu servicio." 
-                        className="h-32"
-                        {...field} 
+                      <Textarea
+                        placeholder="Quién eres, tu especialidad, cómo trabajas y qué pueden esperar los clientes. Entre 50 y 700 caracteres."
+                        className="min-h-[140px] resize-y"
+                        maxLength={700}
+                        {...field}
                       />
                     </FormControl>
+                    <p className="text-xs text-muted-foreground flex justify-between gap-2">
+                      <span>Obligatorio: mínimo 50 caracteres, máximo 700.</span>
+                      <span className="tabular-nums shrink-0">{field.value?.length ?? 0}/700</span>
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

@@ -70,7 +70,7 @@ const updateUserRoleSchema = z.object({
   bio: z.string().optional(),
 });
 
-// ============== RUTAS DE GENFEB S.A.S. ==============
+// ============== RUTAS GENFEB ==============
 
 export async function registerGenFebRoutes(
   httpServer: Server,
@@ -189,7 +189,7 @@ export async function registerGenFebRoutes(
         void notificationService
           .sendPushToUser(providerUserId, {
             title: "Nueva solicitud de reserva",
-            body: `Tienes una nueva solicitud de reserva (Pago: ${(data as any).paymentMethod === "cash" ? "Efectivo" : "Billetera"}). Revisa el detalle en tu Panel Asociado.`,
+            body: `Tienes una nueva solicitud de reserva (Pago: ${(data as any).paymentMethod === "cash" ? "Efectivo" : "Saldo Genfeb"}). Revisa el detalle en tu Panel Asociado.`,
             data: {
               url: `/professional-dashboard?tab=bookings&highlight=${(booking as { id: number }).id}`,
               type: "booking",
@@ -361,8 +361,8 @@ export async function registerGenFebRoutes(
 
           const message = refundHappened
             ? amountFormatted
-              ? `El asociado canceló el servicio. Se te devolvieron ${amountFormatted} a tu billetera.`
-              : "El asociado canceló el servicio. Se te devolvió el monto retenido a tu billetera."
+              ? `El asociado canceló el servicio. Se te devolvieron ${amountFormatted} a tu Saldo Genfeb.`
+              : "El asociado canceló el servicio. Se te devolvió el monto retenido a tu Saldo Genfeb."
             : "El asociado canceló el servicio. No se realizó ningún cobro.";
 
           const notifData = { bookingId, message };
@@ -1073,7 +1073,7 @@ export async function registerGenFebRoutes(
       const user = await storage.getUserById(userId);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
       const name = [user.name, (user as { lastName?: string }).lastName].filter(Boolean).join(" ").trim() || "Usuario";
-      const description = `Recarga al usuario ${name}`;
+      const description = `Abono de saldo — ${name}`;
       const staffForTransfer = await getFullAdminUsers(storage);
       const fromUserId = staffForTransfer?.length ? (staffForTransfer[0] as { id?: string }).id ?? null : null;
       const transfer = await storage.createTransfer({
@@ -1255,17 +1255,17 @@ export async function registerGenFebRoutes(
           if (newStatus === "completed") {
             void notificationService
               .sendPushToUser(uid, {
-                title: "¡Recarga Aprobada!",
-                body: `Se han acreditado $${amountFormatted} USD a tu saldo. Ya puedes usar tu dinero en la plataforma.`,
-                data: { type: "recharge_completed", url: "/movimientos" },
+                title: "Abono de saldo confirmado",
+                body: `Se acreditaron $${amountFormatted} USD a tu saldo GenFeb. Puedes descargar el comprobante en Mi actividad → Facturas.`,
+                data: { type: "recharge_completed", url: "/dashboard" },
               })
               .catch((err) => console.error("[push] Error notificando recarga aprobada:", err));
           } else {
             void notificationService
               .sendPushToUser(uid, {
-                title: "Solicitud de Recarga Rechazada",
-                body: `Tu solicitud por $${amountFormatted} USD no pudo ser procesada. Por favor, verifica los datos del comprobante o contacta a soporte.`,
-                data: { type: "recharge_rejected", url: "/movimientos" },
+                title: "No pudimos confirmar tu abono",
+                body: `Tu solicitud por $${amountFormatted} USD no pudo completarse. Revisa el comprobante o contacta a soporte.`,
+                data: { type: "recharge_rejected", url: "/dashboard" },
               })
               .catch((err) => console.error("[push] Error notificando recarga rechazada:", err));
           }
@@ -1700,7 +1700,7 @@ export async function registerGenFebRoutes(
     }
   });
   
-  console.log("✅ GenFeb S.A.S. routes registered");
+  console.log("✅ GenFeb routes registered");
   
   // =====================================================
   // NUEVAS RUTAS (Inspiradas en BookingDo SaaS)

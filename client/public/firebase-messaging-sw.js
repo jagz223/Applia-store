@@ -43,7 +43,7 @@ self.addEventListener("push", function (event) {
     self.registration
       .showNotification(title, {
         body: body,
-        icon: "/logo%20GenFeb.jpg",
+        icon: "/genfeb-mark.svg",
         tag: tag,
         renotify: true,
         data: { url: url },

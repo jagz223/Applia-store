@@ -38,7 +38,7 @@ const transactions = [
   { id: 2, type: "out", amount: 150, currency: "USD", status: "completed", description: "Transferencia a cuenta bancaria", date: "21 Feb 2026", method: "bank" },
   { id: 3, type: "escrow", amount: 300, currency: "USD", status: "pending", description: "Fondo en garantía - Servicio Legal", date: "20 Feb 2026", method: "escrow" },
   { id: 4, type: "in", amount: 200, currency: "USD", status: "completed", description: "Pago por servicio - María García", date: "19 Feb 2026", method: "paypal" },
-  { id: 5, type: "out", amount: 85, currency: "USD", status: "completed", description: "Retiro a wallet", date: "18 Feb 2026", method: "wallet" },
+  { id: 5, type: "out", amount: 85, currency: "USD", status: "completed", description: "Retiro a Saldo Genfeb", date: "18 Feb 2026", method: "wallet" },
 ];
 
 const escrowPayments = [
@@ -51,7 +51,7 @@ const paymentMethods = [
   { id: "stripe", name: "Stripe", icon: CreditCard, color: "text-purple-500", bg: "bg-purple-500/10" },
   { id: "paypal", name: "PayPal", icon: Globe, color: "text-blue-500", bg: "bg-blue-500/10" },
   { id: "bank", name: "Transferencia", icon: Building2, color: "text-primary", bg: "bg-primary/10" },
-  { id: "wallet", name: "Wallet GenFeb", icon: Wallet, color: "text-accent", bg: "bg-accent/10" },
+  { id: "wallet", name: "Saldo Genfeb", icon: Wallet, color: "text-accent", bg: "bg-accent/10" },
 ];
 
 export default function Payments() {
@@ -355,7 +355,7 @@ export default function Payments() {
                               {method.id === "stripe" && "•••• •••• •••• 4242"}
                               {method.id === "paypal" && "user@email.com"}
                               {method.id === "bank" && "Banco Pichincha •••• 8901"}
-                              {method.id === "wallet" && "Wallet GenFeb"}
+                              {method.id === "wallet" && "Saldo Genfeb"}
                             </p>
                           </div>
                         </div>

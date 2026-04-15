@@ -1,21 +1,22 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
-import { useCategories, useServices, useSubcategories } from "@/hooks/use-mango-data";
-import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
+import { useCategories, useCategoryVisibility, useServices, useSubcategories } from "@/hooks/use-mango-data";
+import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { ServiceListItem } from "@/components/ServiceListItem";
+import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp, Bookmark, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
 
 const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-const hiddenSlugs = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
 
 export default function Explore() {
   const [, setLocation] = useLocation();
+  const { isAuthenticated } = useAuth();
   const { setExploreCategoryDisplayName } = useExploreCategoryDisplayName();
   const [search, setSearch] = useState("");
   const params = new URLSearchParams(window.location.search);
@@ -29,9 +30,34 @@ export default function Explore() {
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<number | undefined>(
     !Number.isNaN(parsedSubId) ? parsedSubId : undefined
   );
-  const [filtersExpanded, setFiltersExpanded] = useState(true);
+  /** Panel de filtros (chips): expandido; al guardar o al bajar con scroll se pliega; al subir cerca del tope se despliega de nuevo */
+  const [filtersPanelExpanded, setFiltersPanelExpanded] = useState(true);
+  const prevScrollY = useRef(0);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const y = window.scrollY;
+      const prev = prevScrollY.current;
+      const collapseAt = 110;
+      const expandBelow = 56;
+      if (prev <= collapseAt && y > collapseAt) setFiltersPanelExpanded(false);
+      if (prev >= expandBelow && y < expandBelow) setFiltersPanelExpanded(true);
+      prevScrollY.current = y;
+    };
+    prevScrollY.current = window.scrollY;
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   const { data: categories = [] } = useCategories();
+  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
+  const hiddenSlugs = useMemo(
+    () =>
+      new Set(
+        effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined)
+      ),
+    [isAuthenticated, visibility]
+  );
   const providerCategories = useMemo(
     () =>
       categories.filter(
@@ -40,7 +66,7 @@ export default function Explore() {
           return slug && providerSlugs.has(slug) && !hiddenSlugs.has(slug);
         }
       ),
-    [categories]
+    [categories, hiddenSlugs]
   );
   const { data: subcategories = [] } = useSubcategories(selectedProviderCategoryId ?? null);
   const servicesQuery = useServices({
@@ -89,12 +115,26 @@ export default function Explore() {
     return () => setExploreCategoryDisplayName(null);
   }, [categoryDisplayName, setExploreCategoryDisplayName]);
 
+  useEffect(() => {
+    setFiltersPanelExpanded(true);
+    prevScrollY.current = window.scrollY;
+  }, [hasCategorySelected]);
+
+  const filterSummaryLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedProviderCategoryData) parts.push(getCategoryDisplayName(selectedProviderCategoryData));
+    else parts.push("Todos");
+    if (selectedSubcategoryData) parts.push(selectedSubcategoryData.name);
+    if (search.trim()) parts.push(`"${search.trim()}"`);
+    return parts.join(" · ");
+  }, [selectedProviderCategoryData, selectedSubcategoryData, search]);
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
       {/* Vista cuando hay categoría seleccionada: encabezado centrado en la categoría */}
       {hasCategorySelected ? (
-        <div className="bg-white dark:bg-card border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-white/80 dark:bg-card/80">
-          <div className="container mx-auto px-4 py-6 max-w-7xl">
+        <div className="bg-white dark:bg-card border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-white/80 dark:bg-card/80 shadow-sm transition-shadow duration-300">
+          <div className={`container mx-auto px-4 max-w-7xl ${filtersPanelExpanded ? "py-6" : "py-3"}`}>
             <Button
               variant="ghost"
               className="mb-4 gap-2 -ml-2"
@@ -104,16 +144,12 @@ export default function Explore() {
               Volver a categorías
             </Button>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div>
+              <div className="min-w-0">
                 <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
                   {categoryDisplayName}
                 </h1>
-                <p className="text-muted-foreground mt-1">
-                  Servicios en {categoryDisplayName}
-                  {selectedSubcategoryData ? ` · ${selectedSubcategoryData.name}` : ""}
-                </p>
               </div>
-              <div className="relative w-full md:w-80">
+              <div className="relative w-full md:w-80 shrink-0">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   placeholder="Buscar en esta categoría..."
@@ -131,50 +167,101 @@ export default function Explore() {
                 )}
               </div>
             </div>
-            {/* Subcategorías (Pro Go): 2 botones visibles */}
-            {subcategories.length > 0 && (
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium text-muted-foreground mr-1">Subcategorías:</span>
-                {subcategories.map((sub) => (
-                  <button
-                    key={sub.id}
+            <motion.div
+              initial={false}
+              animate={
+                filtersPanelExpanded
+                  ? { height: "auto", opacity: 1 }
+                  : { height: 0, opacity: 0 }
+              }
+              transition={{ duration: 0.38, ease: [0.33, 1, 0.68, 1] }}
+              className="overflow-hidden"
+            >
+              <p className="text-muted-foreground mt-1">
+                Servicios en {categoryDisplayName}
+                {selectedSubcategoryData ? ` · ${selectedSubcategoryData.name}` : ""}
+              </p>
+              {subcategories.length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-muted-foreground mr-1">Subcategorías:</span>
+                  {subcategories.map((sub) => (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => setSubcategory(selectedSubcategoryId === sub.id ? undefined : sub.id)}
+                      className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                        selectedSubcategoryId === sub.id
+                          ? "bg-primary text-white shadow-lg shadow-primary/30"
+                          : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {sub.name}
+                    </button>
+                  ))}
+                  {selectedSubcategoryId != null && (
+                    <button
+                      type="button"
+                      onClick={() => setSubcategory(undefined)}
+                      className="text-sm font-medium text-muted-foreground hover:text-foreground px-2"
+                    >
+                      Ver todas
+                    </button>
+                  )}
+                </div>
+              )}
+            </motion.div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {filtersPanelExpanded ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="gap-2 rounded-full shadow-sm"
+                  onClick={() => setFiltersPanelExpanded(false)}
+                >
+                  <Bookmark className="h-4 w-4" />
+                  Guardar vista
+                </Button>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.28, ease: [0.33, 1, 0.68, 1] }}
+                  className="flex flex-wrap items-center gap-2 w-full justify-between"
+                >
+                  <p className="text-xs sm:text-sm text-muted-foreground truncate max-w-[min(100%,28rem)]">
+                    <span className="font-medium text-foreground/80">Vista guardada:</span>{" "}
+                    {categoryDisplayName}
+                    {selectedSubcategoryData ? ` · ${selectedSubcategoryData.name}` : ""}
+                    {search.trim() ? ` · "${search.trim()}"` : ""}
+                  </p>
+                  <Button
                     type="button"
-                    onClick={() => setSubcategory(selectedSubcategoryId === sub.id ? undefined : sub.id)}
-                    className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                      selectedSubcategoryId === sub.id
-                        ? "bg-primary text-white shadow-lg shadow-primary/30"
-                        : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
-                    }`}
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 rounded-full shrink-0"
+                    onClick={() => setFiltersPanelExpanded(true)}
                   >
-                    {sub.name}
-                  </button>
-                ))}
-                {selectedSubcategoryId != null && (
-                  <button
-                    type="button"
-                    onClick={() => setSubcategory(undefined)}
-                    className="text-sm font-medium text-muted-foreground hover:text-foreground px-2"
-                  >
-                    Ver todas
-                  </button>
-                )}
-              </div>
-            )}
+                    <Layers className="h-4 w-4" />
+                    Mostrar filtros
+                  </Button>
+                </motion.div>
+              )}
+            </div>
           </div>
         </div>
       ) : (
         /* Vista sin categoría: Explorar Servicios con filtros */
-        <div className="bg-white dark:bg-card border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-white/80 dark:bg-card/80">
-          <div className="container mx-auto px-4 py-6 max-w-7xl">
+        <div className="bg-white dark:bg-card border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-white/80 dark:bg-card/80 shadow-sm transition-shadow duration-300">
+          <div className={`container mx-auto px-4 max-w-7xl ${filtersPanelExpanded ? "py-6" : "py-3"}`}>
             <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
-              <div>
+              <div className="min-w-0">
                 <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground flex items-center gap-3">
-                  <Sparkles className="h-7 w-7 text-primary" />
+                  <Sparkles className="h-7 w-7 text-primary shrink-0" />
                   Explorar Servicios
                 </h1>
-                <p className="text-muted-foreground mt-1">Encuentra el asociado perfecto para tu proyecto</p>
               </div>
-              <div className="relative w-full md:w-96">
+              <div className="relative w-full md:w-96 shrink-0">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   placeholder="Buscar servicios..."
@@ -192,49 +279,92 @@ export default function Explore() {
                 )}
               </div>
             </div>
-            <div className="mt-4 flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => setFiltersExpanded((v) => !v)}
-                className="md:hidden flex items-center justify-between w-full py-2 pr-2 rounded-lg hover:bg-muted/50 transition-colors text-left"
-                aria-expanded={filtersExpanded}
-              >
-                <span className="text-sm font-medium text-muted-foreground">Tipo de servicio:</span>
-                <span className="shrink-0 text-muted-foreground">
-                  {filtersExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-                </span>
-              </button>
-              <div
-                className={`flex flex-wrap items-center gap-2 overflow-hidden transition-[max-height,opacity] duration-300 ease-out md:!max-h-none md:!opacity-100 ${
-                  filtersExpanded ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
-                } md:flex`}
-              >
-                <span className="text-sm font-medium text-muted-foreground mr-1 hidden md:inline">Tipo de servicio:</span>
+            <motion.div
+              initial={false}
+              animate={
+                filtersPanelExpanded
+                  ? { height: "auto", opacity: 1 }
+                  : { height: 0, opacity: 0 }
+              }
+              transition={{ duration: 0.38, ease: [0.33, 1, 0.68, 1] }}
+              className="overflow-hidden"
+            >
+              <p className="text-muted-foreground mt-1">Encuentra el asociado perfecto para tu proyecto</p>
+              <div className="mt-4 flex flex-col gap-2">
                 <button
-                  onClick={() => setProviderCategory(undefined)}
-                  className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                    selectedProviderCategoryId == null
-                      ? "bg-primary text-white shadow-lg shadow-primary/30"
-                      : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
-                  }`}
+                  type="button"
+                  onClick={() => setFiltersPanelExpanded((v) => !v)}
+                  className="md:hidden flex items-center justify-between w-full py-2 pr-2 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  aria-expanded={filtersPanelExpanded}
                 >
-                  Todos
+                  <span className="text-sm font-medium text-muted-foreground">Tipo de servicio:</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {filtersPanelExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                  </span>
                 </button>
-                {providerCategories.map((cat) => (
+                <div className="flex flex-wrap items-center gap-2 md:flex">
+                  <span className="text-sm font-medium text-muted-foreground mr-1 hidden md:inline">Tipo de servicio:</span>
                   <button
-                    key={cat.id}
-                    onClick={() => cat.id != null && setProviderCategory(cat.id as number)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
-                      selectedProviderCategoryId === cat.id
+                    onClick={() => setProviderCategory(undefined)}
+                    className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                      selectedProviderCategoryId == null
                         ? "bg-primary text-white shadow-lg shadow-primary/30"
                         : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    <CategoryIcon name={(cat as { icon?: string }).icon ?? "HelpCircle"} className="h-4 w-4" />
-                    {getCategoryDisplayName(cat)}
+                    Todos
                   </button>
-                ))}
+                  {providerCategories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => cat.id != null && setProviderCategory(cat.id as number)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
+                        selectedProviderCategoryId === cat.id
+                          ? "bg-primary text-white shadow-lg shadow-primary/30"
+                          : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <CategoryIcon name={(cat as { icon?: string }).icon ?? "HelpCircle"} className="h-4 w-4" />
+                      {getCategoryDisplayName(cat)}
+                    </button>
+                  ))}
+                </div>
               </div>
+            </motion.div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {filtersPanelExpanded ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="gap-2 rounded-full shadow-sm"
+                  onClick={() => setFiltersPanelExpanded(false)}
+                >
+                  <Bookmark className="h-4 w-4" />
+                  Guardar vista
+                </Button>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.28, ease: [0.33, 1, 0.68, 1] }}
+                  className="flex flex-wrap items-center gap-2 w-full justify-between"
+                >
+                  <p className="text-xs sm:text-sm text-muted-foreground truncate max-w-[min(100%,28rem)]">
+                    <span className="font-medium text-foreground/80">Vista guardada:</span> {filterSummaryLabel}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 rounded-full shrink-0"
+                    onClick={() => setFiltersPanelExpanded(true)}
+                  >
+                    <Layers className="h-4 w-4" />
+                    Mostrar filtros
+                  </Button>
+                </motion.div>
+              )}
             </div>
           </div>
         </div>

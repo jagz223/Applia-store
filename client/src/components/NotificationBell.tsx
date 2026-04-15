@@ -98,11 +98,18 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       return "/professional-dashboard";
     case "verification_result": {
       const step = data.step ?? data.data?.step;
-      const status = data.status ?? data.data?.status;
-      if (step === "transaction" && status === "verified") {
-        return "/financial-dashboard"; // Or wherever invoices are
+      const st = data.status ?? data.data?.status;
+      if (step === "transaction" && st === "verified") {
+        const fromServer = data.url ?? data.data?.url;
+        if (typeof fromServer === "string" && fromServer.includes("tab=invoices")) {
+          return fromServer.startsWith("/") ? fromServer : `/${fromServer}`;
+        }
+        const q = new URLSearchParams({ tab: "invoices", verificationInvoice: "1" });
+        const reportId = data.reportId ?? data.data?.reportId;
+        if (reportId != null) q.set("reportId", String(reportId));
+        return `/professional-dashboard?${q.toString()}`;
       }
-      return "/professional-dashboard";
+      return typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/professional-dashboard";
     }
     default:
       return "/dashboard";
@@ -304,13 +311,13 @@ export function NotificationBell() {
       return note ? `${message} Nota: ${note}` : message;
     }
     if (type === "withdrawal_rejected") {
-      const message = data?.message ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu billetera.";
+      const message = data?.message ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.";
       const note = data?.adminNote;
       return note ? `${message} Nota: ${note}` : message;
     }
     if (type === "booking_cancelled_by_provider") {
       const message = data?.message ?? data?.data?.message;
-      return message ?? "El asociado cancelo el servicio. El monto fue devuelto a tu billetera.";
+      return message ?? "El asociado cancelo el servicio. El monto fue devuelto a tu Saldo Genfeb.";
     }
     if (type === "booking_cancelled") {
       const message = data?.message ?? data?.data?.message;

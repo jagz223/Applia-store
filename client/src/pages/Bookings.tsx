@@ -128,7 +128,7 @@ export default function Bookings() {
                 <p className="text-sm text-muted-foreground">
                   {booking.paymentMethod === "cash" 
                     ? `El asociado ha confirmado esta reserva. Al confirmar, aceptas que el servicio se pagará en Efectivo ($${Number(cost).toFixed(2)} USD) directamente al profesional.`
-                    : `El asociado ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago. Se descontará $${Number(cost).toFixed(2)} USD de tu billetera.`}
+                    : `El asociado ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago. Se descontará $${Number(cost).toFixed(2)} USD de tu Saldo Genfeb.`}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -298,7 +298,7 @@ export default function Bookings() {
             <DialogDescription>
               {bookingToConfirm?.paymentMethod === "cash"
                 ? "Confirma si estás de acuerdo con iniciar este servicio. El pago se realizará en efectivo directamente al profesional al finalizar el trabajo."
-                : "Confirma solo si estás de acuerdo con que este sea el monto decidido para el trabajo acordado. Al confirmar, se descontará el monto de tu billetera y se retendrán los fondos para este servicio."}
+                : "Confirma solo si estás de acuerdo con que este sea el monto decidido para el trabajo acordado. Al confirmar, se descontará el monto de tu Saldo Genfeb y se retendrán los fondos para este servicio."}
             </DialogDescription>
           </DialogHeader>
           {bookingToConfirm && (

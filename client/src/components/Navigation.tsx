@@ -31,7 +31,7 @@ import {
   Package,
   Store,
   Car,
-  Wallet,
+  Banknote,
   Star,
   Smartphone,
 } from "lucide-react";
@@ -62,7 +62,15 @@ export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth();
   const showBecomePro = useShowBecomePro();
   const { data: providerProfile } = useCurrentProvider();
-  const { data: myServices = [], isLoading: myServicesLoading } = useMyServices({ enabled: !!providerProfile || (user as { role?: string } | null)?.role === "professional" });
+  /** Incluir `user.provider`: si el perfil remoto aún no cargó, igual debemos pedir /api/me/services. */
+  const shouldFetchMyServices =
+    isAuthenticated &&
+    (!!providerProfile ||
+      !!(user as { provider?: unknown } | null)?.provider ||
+      (user as { role?: string } | null)?.role === "professional");
+  const { data: myServices = [], isLoading: myServicesLoading } = useMyServices({
+    enabled: shouldFetchMyServices,
+  });
   const { data: walletData } = useWallet({ enabled: isAuthenticated });
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
   const userRating =
@@ -110,8 +118,9 @@ export function Navigation() {
   const isProfessional = !!providerProfile || (user as { role?: string } | null)?.role === "professional";
   /** Panel "Mis servicios" visible solo si tiene al menos un servicio activo (condición distinta a Crear servicio). */
   const activeServices = myServices.filter((s) => s.isActive !== false);
-  const hasActiveServices = activeServices.length > 0;
-  const activeService = activeServices[0] ?? null;
+  /** Cualquier servicio propio (aunque esté inactivo) para poder abrir el panel y editar. */
+  const hasMyServiceNav = activeServices.length > 0 || myServices.length > 0;
+  const panelService = activeServices[0] ?? myServices[0] ?? null;
 
   const getServiceIcon = (service: any) => {
     const iconName = service?.category?.icon ?? service?.category?.type ?? service?.category?.slug;
@@ -197,7 +206,7 @@ export function Navigation() {
               </Link>
             </DropdownMenuItem>
           )}
-          {isProfessional && !myServicesLoading && hasActiveServices && (
+          {isProfessional && !myServicesLoading && hasMyServiceNav && (
             <DropdownMenuItem
               onSelect={(e) => {
                 e.preventDefault();
@@ -220,7 +229,7 @@ export function Navigation() {
       {isAuthenticated && (
         <>
           <Link href="/vault" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/vault') ? 'text-primary' : 'text-muted-foreground'}`}>
-            Bóveda
+            Documentos
           </Link>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -231,8 +240,8 @@ export function Navigation() {
             <DropdownMenuContent className="bg-card border-border">
               <DropdownMenuItem asChild>
                 <Link href="/recharge" className="flex items-center gap-2 w-full">
-                  <Wallet className="h-4 w-4" />
-                  <span>Recargar</span>
+                  <Banknote className="h-4 w-4" />
+                  <span>Añadir saldo</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
@@ -256,11 +265,18 @@ export function Navigation() {
         {/* Logo & Desktop Nav */}
         <div className="flex items-center gap-8">
           <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-1.5 min-[400px]:gap-2 shrink-0">
-            <img src="/logo GenFeb.jpg" alt="GENFEB Logo" className="h-7 w-auto object-contain min-[400px]:h-8" />
+            <img
+              src="/favicon.png"
+              alt=""
+              className="h-7 w-7 min-[400px]:h-8 min-[400px]:w-8 shrink-0 bg-white object-contain"
+              width={32}
+              height={32}
+              decoding="async"
+              aria-hidden
+            />
+            <span className="sr-only">GenFeb, inicio</span>
             <span className="hidden text-xl font-bold font-display text-primary sm:inline-block tracking-wider">
-              {exploreCategoryDisplayName ?? (
-                <>GENFEB<span className="text-accent">.S.A.S</span></>
-              )}
+              {exploreCategoryDisplayName ?? <>GENFEB</>}
             </span>
           </Link>
           <div className="hidden lg:flex items-center gap-6">
@@ -277,13 +293,13 @@ export function Navigation() {
                 <span>ES</span>
               </Button>
 
-          {/* Wallet balance - visible desktop y móvil (icono en header) */}
+          {/* Saldo Genfeb en cabecera (importe + valoración) */}
           {isAuthenticated && (
             <div
               className="flex items-center gap-1.5 min-w-0 px-2 py-1.5 min-[400px]:gap-2 min-[400px]:px-2.5 min-[400px]:py-1.5 rounded-md min-[400px]:rounded-lg bg-primary/10 border border-primary/20 text-primary max-w-[100%]"
-              title="Saldo y valoración"
+              title="Saldo GenFeb y valoración"
             >
-              <Wallet className="h-4 w-4 min-[400px]:h-4 min-[400px]:w-4 shrink-0" aria-hidden />
+              <Banknote className="h-4 w-4 min-[400px]:h-4 min-[400px]:w-4 shrink-0" aria-hidden />
               <span className="text-sm min-[400px]:text-sm font-semibold tabular-nums truncate max-w-[5.5rem] min-[400px]:max-w-[7rem] sm:max-w-[8rem]">
                 {walletData === undefined ? "—" : formatWallet(walletBalance)}
               </span>
@@ -399,13 +415,13 @@ export function Navigation() {
                   <DropdownMenuItem asChild>
                     <Link href="/vault" className="flex items-center">
                       <Vault className="mr-2 h-4 w-4" />
-                      Bóveda Segura
+                      Mis documentos
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link href="/recharge" className="flex items-center">
-                      <Wallet className="mr-2 h-4 w-4" />
-                      Recargar wallet
+                      <Banknote className="mr-2 h-4 w-4" />
+                      Añadir saldo
                     </Link>
                   </DropdownMenuItem>
                   {SHOW_PAYMENTS && (
@@ -475,10 +491,10 @@ export function Navigation() {
               </Button>
             </SheetTrigger>
             <SheetContent side="right" className="w-[300px] bg-card border-l border-border">
-              {/* Wallet en menú móvil */}
+              {/* Saldo en menú móvil */}
               {isAuthenticated && (
                 <div className="flex items-center gap-2 mt-6 mb-2 px-1 py-3 rounded-xl bg-primary/10 border border-primary/20">
-                  <Wallet className="h-5 w-5 text-primary shrink-0" />
+                  <Banknote className="h-5 w-5 text-primary shrink-0" />
                   <span className="text-base font-semibold text-primary tabular-nums">
                     {walletData === undefined ? "—" : formatWallet(walletBalance)}
                   </span>
@@ -516,7 +532,7 @@ export function Navigation() {
                         Crear servicio
                       </Link>
                     )}
-                    {!myServicesLoading && hasActiveServices && (
+                    {!myServicesLoading && hasMyServiceNav && (
                       <button
                         type="button"
                         className="text-lg font-medium text-left w-full hover:text-primary transition-colors"
@@ -533,10 +549,10 @@ export function Navigation() {
                 {isAuthenticated && (
                   <>
                     <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                      Bóveda Segura
+                      Mis documentos
                     </Link>
                     <Link href="/recharge" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                      Recargar wallet
+                      Añadir saldo
                     </Link>
                     <Link href="/movimientos" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Historial de movimientos
@@ -652,7 +668,7 @@ export function Navigation() {
                   </div>
                 </CardContent>
               </Card>
-            ) : activeService == null ? (
+            ) : panelService == null ? (
               <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
                 <div className="rounded-full bg-muted/60 p-6 mb-4">
                   <PackageOpen className="h-12 w-12 text-muted-foreground" />
@@ -676,24 +692,24 @@ export function Navigation() {
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
-                        {getServiceIcon(activeService)}
+                        {getServiceIcon(panelService)}
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <h3 className="font-bold text-base text-foreground truncate">{activeService.title ?? "—"}</h3>
+                        <h3 className="font-bold text-base text-foreground truncate">{panelService.title ?? "—"}</h3>
 
                         <div className="flex flex-wrap items-center gap-2 mt-2">
                           <Badge
                             variant="outline"
                             className="bg-amber-500/15 text-amber-700 dark:text-amber-400 dark:bg-amber-500/20 border-amber-500/30 font-semibold"
                           >
-                            {activeService.price ?? "—"} USD/h
+                            {panelService.price ?? "—"} USD/h
                           </Badge>
-                          <span className="text-xs text-muted-foreground">{getServiceBrand(activeService)}</span>
+                          <span className="text-xs text-muted-foreground">{getServiceBrand(panelService)}</span>
                         </div>
 
-                        {activeService.subcategory?.name && (
-                          <div className="text-xs text-muted-foreground mt-1">Subcategoría: {activeService.subcategory.name}</div>
+                        {panelService.subcategory?.name && (
+                          <div className="text-xs text-muted-foreground mt-1">Subcategoría: {panelService.subcategory.name}</div>
                         )}
                       </div>
 
@@ -706,7 +722,7 @@ export function Navigation() {
                               className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
                               asChild
                             >
-                              <Link href={`/edit-service/${activeService.id}`} onClick={() => setMyServicesOpen(false)}>
+                              <Link href={`/edit-service/${panelService.id}`} onClick={() => setMyServicesOpen(false)}>
                                 <Pencil className="h-4 w-4" />
                               </Link>
                             </Button>
@@ -716,13 +732,21 @@ export function Navigation() {
                       </div>
                     </div>
 
-                    <div className="mt-3 text-sm text-muted-foreground break-words leading-relaxed">
-                      {activeService.description ? activeService.description : "—"}
+                    <div className="mt-3">
+                      <p className="text-xs font-medium text-muted-foreground mb-1.5">Descripción</p>
+                      <div
+                        className="max-h-36 sm:max-h-44 overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-muted/15 px-2.5 py-2 text-sm text-muted-foreground break-words leading-relaxed [scrollbar-gutter:stable]"
+                        tabIndex={0}
+                        role="region"
+                        aria-label="Descripción del servicio"
+                      >
+                        {panelService.description ? panelService.description : "—"}
+                      </div>
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/service/${activeService.id}`} onClick={() => setMyServicesOpen(false)}>
+                        <Link href={`/service/${panelService.id}`} onClick={() => setMyServicesOpen(false)}>
                           Ver en el sitio
                         </Link>
                       </Button>

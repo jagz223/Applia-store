@@ -151,18 +151,24 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       if (type === "recharge_completed" || type === "recharge_rejected") {
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/invoices", "list"] });
         debouncedRefetch(queryClient, ["/api/wallet/me"]);
         debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
+        debouncedRefetch(queryClient, ["/api/invoices", "list"]);
         const amount = notification?.data?.amountFormatted ?? notification?.data?.amount ?? "";
         if (type === "recharge_completed") {
           toast({
-            title: "Recarga aprobada",
-            description: amount ? `Se han acreditado $${amount} USD a tu saldo.` : "Tu saldo ha sido actualizado.",
+            title: "Abono confirmado",
+            description: amount
+              ? `Se acreditaron $${amount} USD a tu saldo GenFeb. La factura queda en Mi actividad → Facturas.`
+              : "Tu saldo GenFeb fue actualizado. Revisa Facturas en Mi actividad si necesitas el comprobante.",
           });
         } else {
           toast({
-            title: "Recarga rechazada",
-            description: amount ? `Tu solicitud por $${amount} USD no pudo ser procesada.` : "Revisa los detalles en movimientos.",
+            title: "No pudimos confirmar el abono",
+            description: amount
+              ? `Tu solicitud por $${amount} USD no pudo completarse. Revisa el comprobante o contacta a soporte.`
+              : "Revisa el detalle en la pestaña Transacciones.",
             variant: "destructive",
           });
         }
@@ -170,8 +176,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       if (type === "balance_credited") {
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/invoices", "list"] });
         debouncedRefetch(queryClient, ["/api/wallet/me"]);
         debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
+        debouncedRefetch(queryClient, ["/api/invoices", "list"]);
         const message = notification?.data?.message;
         const amount = notification?.data?.amountFormatted;
         toast({
@@ -268,9 +276,21 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
         toast({
           title: "Retiro rechazado",
-          description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu billetera.",
+          description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.",
           variant: "destructive",
         });
+      }
+      if (type === "verification_result") {
+        queryClient.invalidateQueries({ queryKey: ["/api/invoices", "list"] });
+        debouncedRefetch(queryClient, ["/api/invoices", "list"]);
+        const step = notification?.data?.step ?? notification?.data?.data?.step;
+        const st = notification?.data?.status ?? notification?.data?.data?.status;
+        if (step === "transaction" && st === "verified") {
+          toast({
+            title: "Pago de verificación confirmado",
+            description: "Tu factura de activación (USD 15) ya está en Facturas — Mi actividad.",
+          });
+        }
       }
     });
 

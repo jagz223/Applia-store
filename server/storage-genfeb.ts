@@ -43,7 +43,7 @@ export interface RoleDefinition {
 export type NewRoleDefinition = Omit<RoleDefinition, "createdAt" | "updatedAt">;
 
 /**
- * Contrato de almacenamiento de dominio - GenFeb S.A.S.
+ * Contrato de almacenamiento de dominio - GenFeb
  * Implementa segregación de interfaces (SOLID): IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage
  * están en storage-contracts.ts; IStorage los compone y añade el resto del dominio.
  */
@@ -243,6 +243,10 @@ export interface IStorage
   // ==================== VERIFICACIÓN DE PROFESIONALES ====================
   getProfessionalVerificationByUserId(userId: string): Promise<ProfessionalVerification | null>;
   upsertProfessionalVerificationImage(userId: string, imageUrl: string): Promise<ProfessionalVerification>;
+  upsertProfessionalVerificationCredential(
+    userId: string,
+    professionalCredentialUrl: string
+  ): Promise<ProfessionalVerification>;
   upsertProfessionalVerificationPayment(
     userId: string,
     data: { transferReceiptCode: string; transferDate: string }
@@ -276,7 +280,9 @@ export class InMemoryStorage implements IStorage {
   }
   
   async getUserByEmail(email: string, includeDeleted?: boolean): Promise<any | undefined> {
-    const user = this.users.find(u => u.email === email);
+    const n = (email ?? "").trim().toLowerCase();
+    if (!n) return undefined;
+    const user = this.users.find((u) => (u.email ?? "").trim().toLowerCase() === n);
     if (!includeDeleted && user?.deletedAt) return undefined;
     return user;
   }
@@ -317,27 +323,33 @@ export class InMemoryStorage implements IStorage {
   }
   
   async createUser(user: any): Promise<any> {
-    // Verificar si el email ya existe
-    const existingUser = this.users.find(u => u.email === user.email);
+    const emailNorm = (user.email ?? "").trim().toLowerCase();
+    if (!emailNorm) throw new Error("El email es obligatorio");
+
+    const existingUser = this.users.find(
+      (u) => (u.email ?? "").trim().toLowerCase() === emailNorm
+    );
     if (existingUser) {
       if (!existingUser.deletedAt) {
-        throw new Error("El usuario con este email ya existe");
+        throw new Error("Este correo electrónico ya está registrado.");
       }
-      
+
       // Reactivar usuario eliminado
       const now = new Date();
       Object.assign(existingUser, user, {
+        email: emailNorm,
         deletedAt: null,
         isActive: true,
         updatedAt: now,
       });
       return existingUser;
     }
-    
+
     const role = user.role || "client";
     const newUser = {
       id: String(this.userIdCounter++),
       ...user,
+      email: emailNorm,
       ...(role === "professional"
         ? { acceptedProviderTermsOfUse: user.acceptedProviderTermsOfUse ?? false }
         : {}),
@@ -611,7 +623,7 @@ export class InMemoryStorage implements IStorage {
     if (!client) throw new Error("Usuario cliente no encontrado");
     const clientWallet = typeof (client as { wallet?: number }).wallet === "number" ? (client as { wallet: number }).wallet : 0;
     const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
-    if (clientWallet < cost) throw new Error("Saldo insuficiente. Recarga tu billetera para confirmar el pago.");
+    if (clientWallet < cost) throw new Error("Saldo insuficiente. Añade saldo a tu Saldo Genfeb para confirmar el pago.");
 
     (client as { wallet: number }).wallet = clientWallet - cost;
     (client as { pendingBalance: number }).pendingBalance = clientPending + cost;
@@ -1029,6 +1041,7 @@ export class InMemoryStorage implements IStorage {
       isVerified: false,
       rating: "0",
       reviewCount: 0,
+      skills: (insertProvider as { skills?: string[] }).skills ?? [],
       createdAt: new Date(),
     };
     this.providers.push(newProvider);
@@ -1863,6 +1876,25 @@ export class InMemoryStorage implements IStorage {
       imageVerified: false, // siempre false por ahora
       transferReceiptCode: data.transferReceiptCode.trim(),
       transferDate: data.transferDate.trim(),
+      createdAt: cur?.createdAt ? new Date(cur.createdAt as any) : new Date(),
+      updatedAt: new Date(),
+    };
+    this.professionalVerifications.set(userId, next);
+    return next;
+  }
+
+  async upsertProfessionalVerificationCredential(
+    userId: string,
+    professionalCredentialUrl: string
+  ): Promise<ProfessionalVerification> {
+    const cur = this.professionalVerifications.get(userId);
+    const next: ProfessionalVerification = {
+      userId,
+      imageUrl: cur?.imageUrl ?? null,
+      imageVerified: cur?.imageVerified === true ? true : false,
+      professionalCredentialUrl,
+      transferReceiptCode: cur?.transferReceiptCode ?? null,
+      transferDate: cur?.transferDate ?? null,
       createdAt: cur?.createdAt ? new Date(cur.createdAt as any) : new Date(),
       updatedAt: new Date(),
     };

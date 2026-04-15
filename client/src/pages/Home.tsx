@@ -73,8 +73,8 @@ export default function HomePage() {
     },
     {
       icon: Vault,
-      title: "Bóveda Segura",
-      description: "Almacenamiento cifrado de documentos y contratos con AES-256.",
+      title: "Documentos en la plataforma",
+      description: "Comprobantes y facturas asociados a tus reservas, con acceso protegido desde tu cuenta.",
       color: "text-secondary",
       bgColor: "bg-secondary/10"
     },
@@ -87,8 +87,8 @@ export default function HomePage() {
     },
     {
       icon: TrendingUp,
-      title: "Panel Económico",
-      description: "Dashboard avanzado con KPIs financieros y facturación automática.",
+      title: "Mi actividad",
+      description: "Resumen de reservas, ingresos y comprobantes desde tu cuenta.",
       color: "text-accent",
       bgColor: "bg-accent/10",
       hideForGuests: true,
@@ -167,7 +167,7 @@ export default function HomePage() {
               
               <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-lg">
                 Conecta con asociados verificados para servicios técnicos, legales, financieros y mantenimiento. 
-                Todo en un solo lugar con la garantía de GenFeb S.A.S.
+                Todo en un solo lugar con la garantía de GenFeb.
               </p>
 
               {/* Quick Search */}
@@ -453,7 +453,7 @@ export default function HomePage() {
               ¿Listo para transformar tu negocio?
             </h2>
               <p className="text-lg text-muted-foreground mb-8">
-              Únete a miles de asociados y clientes que ya están usando GenFeb S.A.S.
+              Únete a miles de asociados y clientes que ya están usando GenFeb.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/register">
@@ -480,9 +480,14 @@ export default function HomePage() {
         <div className="container px-4 mx-auto max-w-7xl">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-4">
-              <img src="/logo GenFeb.jpg" alt="GENFEB Logo" className="h-10 w-auto" />
+              <span
+                className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary border border-primary/25 shrink-0"
+                aria-hidden
+              >
+                <Shield className="h-6 w-6" />
+              </span>
               <div>
-                <p className="font-bold">GenFeb S.A.S.</p>
+                <p className="font-bold">GenFeb</p>
                 <p className="text-sm text-muted-foreground">Eje central del ecosistema GENFECORP</p>
               </div>
             </div>

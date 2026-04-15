@@ -20,10 +20,11 @@ export interface UserForInvoice {
 
 /** Etiquetas de tipo de transferencia para listados y facturas. */
 export const TRANSFER_TYPE_LABELS: Record<string, string> = {
-  recharge: "Recarga de saldo",
+  recharge: "Abono a saldo GenFeb",
   service_payment: "Ingreso por servicio",
   payment: "Pago de servicio",
-  withdrawal: "Retiro de fondos",
+  withdrawal: "Cobro a tu cuenta registrada",
+  verification_fee: "Cargo de verificación profesional",
 };
 
 export function getTransferTypeLabel(transferType: string): string {
@@ -56,7 +57,7 @@ export async function downloadInvoicePdf(
     } else if (transfer.transferType === "verification_fee" || transfer.description?.toLowerCase().includes("verificaci")) {
       body.reportId = transfer.reportId || transfer.id;
     } else {
-      // Fallback: si no sabemos qué es, probamos como transferId si es un movimiento de billetera
+      // Fallback: si no sabemos qué es, probamos como transferId si es un movimiento de Saldo Genfeb
       body.transferId = transfer.id;
     }
 

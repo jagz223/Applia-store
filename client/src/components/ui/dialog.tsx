@@ -32,14 +32,16 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 type DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
   /** Si es true, no se muestra la X (p. ej. modales obligatorios). */
   hideClose?: boolean;
+  /** Clases extra para el fondo (overlay), p. ej. más oscuro en visores de documento. */
+  overlayClassName?: string;
 };
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideClose, ...props }, ref) => (
+>(({ className, children, hideClose, overlayClassName, ...props }, ref) => (
   <DialogPortal>
-    <DialogOverlay />
+    <DialogOverlay className={cn(overlayClassName)} />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(

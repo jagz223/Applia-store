@@ -3,12 +3,14 @@ import type { Server } from "http";
 import { z } from "zod";
 import { hasAdminPrivileges, isFullAdmin } from "@shared/roles";
 import { api } from "@shared/routes";
-import { insertProviderSchema, insertServiceSchema } from "@shared/schema";
+import { insertProviderSchema, insertServiceSchema, professionalBioFieldSchema } from "@shared/schema";
+import { providerSkillsSchema } from "@shared/skills-schema";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
 import {
   patchProfessionalVerificationImageBody,
+  patchProfessionalVerificationCredentialBody,
   patchProfessionalVerificationPaymentBody,
 } from "@shared/professional-verification";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
@@ -22,6 +24,7 @@ import { registerSeoRoutes } from "./seo";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
+import { getHiddenCategorySlugsForRole } from "./category-visibility";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -65,6 +68,7 @@ export async function registerRoutes(
         userId,
         imageUrl,
         imageVerified: doc?.imageVerified === true,
+        professionalCredentialUrl: doc?.professionalCredentialUrl ?? null,
         transferReceiptCode: doc?.transferReceiptCode ?? null,
         transferDate: doc?.transferDate ?? null,
         createdAt: doc?.createdAt ?? undefined,
@@ -186,6 +190,48 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/me/professional-verification/credential", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
+
+      const parsed = patchProfessionalVerificationCredentialBody.parse(req.body);
+      const updated = await genFebStorage.upsertProfessionalVerificationCredential(userId, parsed.professionalCredentialUrl);
+
+      // Guardar también en Mis documentos (bóveda). Esto permite verlo siempre aunque haya subido más tarde.
+      try {
+        const name = parsed.name?.trim() || "Documento profesional";
+        await genFebStorage.createDocument({
+          userId,
+          name,
+          type: "professional_credential",
+          encryptedPath: parsed.professionalCredentialUrl,
+          size: typeof parsed.size === "number" ? parsed.size : undefined,
+          mimeType: parsed.mimeType,
+          status: "verified",
+        } as any);
+      } catch (e) {
+        console.error("Error guardando documento profesional en bóveda:", e);
+      }
+
+      return res.json({
+        userId,
+        professionalCredentialUrl: updated?.professionalCredentialUrl ?? null,
+        imageUrl: updated?.imageUrl ?? null,
+        imageVerified: updated?.imageVerified === true,
+        transferReceiptCode: updated?.transferReceiptCode ?? null,
+        transferDate: updated?.transferDate ?? null,
+        createdAt: updated?.createdAt ?? undefined,
+        updatedAt: updated?.updatedAt ?? undefined,
+      });
+    } catch (e: any) {
+      if (e?.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      res.status(400).json({ message: e?.message || "Error al guardar" });
+    }
+  });
+
   app.patch("/api/me/professional-verification/payment", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id;
@@ -209,17 +255,23 @@ export async function registerRoutes(
       // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
       await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate);
 
-      // Crear registro en reportes financieros (factura temporal)
+      // Un solo cargo pendiente por usuario: evita duplicados si reenvía comprobante.
       try {
-        await genFebStorage.createFinancialReport({
-          userId,
-          type: "verification_fee",
-          amount: "15.00",
-          currency: "USD",
-          status: "pending",
-          description: `Pago por verificación de cuenta (Comprobante: ${body.transferReceiptCode})`,
-          createdAt: new Date(),
-        });
+        const reports = await genFebStorage.getFinancialReports(userId);
+        const hasPendingVerification = reports.some(
+          (r: { type?: string; status?: string }) => r.type === "verification_fee" && r.status === "pending",
+        );
+        if (!hasPendingVerification) {
+          await genFebStorage.createFinancialReport({
+            userId,
+            type: "verification_fee",
+            amount: "15.00",
+            currency: "USD",
+            status: "pending",
+            description: `Pago por verificación de cuenta (Comprobante: ${body.transferReceiptCode})`,
+            createdAt: new Date(),
+          });
+        }
       } catch (err) {
         console.error("Error creando reporte financiero para verificación:", err);
       }
@@ -287,6 +339,11 @@ export async function registerRoutes(
   app.get("/api/provider-categories/availability", async (_req, res) => {
     res.json(await catalogService.getProviderCategoryAvailability());
   });
+  // Config pública: qué marcas/categorías están ocultas en UI (chips).
+  app.get("/api/platform/category-visibility", authenticateJWT, async (req: any, res) => {
+    const role = req.user?.role as string | undefined;
+    res.json({ hiddenSlugs: await getHiddenCategorySlugsForRole(role) });
+  });
   app.get(api.categories.homeAssociateCounts.path, async (_req, res) => {
     res.json(await catalogService.getHomeCategoryAssociateCounts());
   });
@@ -305,11 +362,13 @@ export async function registerRoutes(
     const search = (req.query.search as string) || undefined;
     const providerCategoryId = req.query.providerCategoryId ? Number(req.query.providerCategoryId) : undefined;
     const subcategoryId = req.query.subcategoryId ? Number(req.query.subcategoryId) : undefined;
-    res.json(await catalogService.getAllServices(categoryId, search, providerCategoryId, subcategoryId));
+    const list = await catalogService.getAllServices(categoryId, search, providerCategoryId, subcategoryId);
+    // Catálogo público: no exponer servicios desactivados.
+    res.json((list ?? []).filter((s: any) => s?.isActive !== false));
   });
   app.get(api.services.get.path, async (req, res) => {
     const service = await catalogService.getService(Number(req.params.id));
-    if (!service) return res.status(404).json({ message: "Service not found" });
+    if (!service || (service as any)?.isActive === false) return res.status(404).json({ message: "Service not found" });
     res.json(service);
   });
 
@@ -445,18 +504,28 @@ export async function registerRoutes(
   // Registrar rutas de PayPal
   await registerPayPalRoutes(httpServer, app);
 
-  const createProviderBodySchema = insertProviderSchema.extend({
-    category: providerCategorySchema.optional(),
-    categoryId: z.number().int().positive().optional(),
-    subcategoryId: z.number().int().positive().optional().nullable(),
-  });
+  const createProviderBodySchema = insertProviderSchema
+    .extend({
+      category: providerCategorySchema.optional(),
+      categoryId: z.number().int().positive().optional(),
+      subcategoryId: z.number().int().positive().optional().nullable(),
+    })
+    .extend({
+      bio: professionalBioFieldSchema,
+      skills: providerSkillsSchema,
+      /** Título público del único servicio (listado / edición). Si no se envía, se deriva de profesión o nombre. */
+      serviceTitle: z.string().trim().max(500).optional(),
+      /** Qué incluye la oferta; si no se envía o va vacío, se usa la biografía como texto inicial del servicio. */
+      serviceDescription: z.string().trim().max(5000).optional(),
+    });
   const updateProviderBodySchema = z.object({
     category: providerCategorySchema.optional(),
     categoryId: z.number().int().positive().optional(),
     profession: z.string().min(1).max(200).optional(),
-    bio: z.string().max(2000).optional(),
+    bio: professionalBioFieldSchema.optional(),
     yearsExperience: z.number().int().min(0).optional(),
     hourlyRate: z.string().optional(),
+    skills: providerSkillsSchema.optional(),
   });
 
   app.post(api.providers.create.path, authenticateJWT, async (req: any, res) => {
@@ -464,11 +533,19 @@ export async function registerRoutes(
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const data = createProviderBodySchema.parse(req.body);
-      const keepAdminRole = isFullAdmin(req.user?.role);
+      const {
+        serviceTitle: serviceTitleFromClient,
+        serviceDescription: serviceDescriptionFromClient,
+        ...providerInsert
+      } = data;
+      const dbUser = await genFebStorage.getUserById(userId);
+      const effectiveRole = (dbUser as { role?: string } | undefined)?.role ?? req.user?.role;
+      /** Admin o Soporte TI: no degradar a professional; misma regla que requireStaffFromDb (BD primero). */
+      const keepStaffRole = hasAdminPrivileges(effectiveRole);
       const existing = await catalogService.getProviderByUserId(userId);
       if (existing) {
-        // No degradar administrador a professional si ya tenía proveedor (409).
-        if (!keepAdminRole) {
+        // No degradar staff a professional si ya tenía proveedor (409).
+        if (!keepStaffRole) {
           await genFebStorage.updateUser(userId, {
             role: "professional",
             acceptedProviderTermsOfUse: false,
@@ -478,17 +555,20 @@ export async function registerRoutes(
       }
       const provider = await catalogService.createProvider({
         userId,
-        categoryId: data.categoryId ?? undefined,
-        category: data.category ?? null,
-        subcategoryId: data.subcategoryId ?? undefined,
-        profession: data.profession,
-        bio: data.bio ?? "",
-        yearsExperience: data.yearsExperience ?? 0,
-        hourlyRate: data.hourlyRate ?? null,
+        categoryId: providerInsert.categoryId ?? undefined,
+        category: providerInsert.category ?? null,
+        subcategoryId: providerInsert.subcategoryId ?? undefined,
+        profession: providerInsert.profession,
+        bio: providerInsert.bio ?? "",
+        yearsExperience: providerInsert.yearsExperience ?? 0,
+        hourlyRate: providerInsert.hourlyRate ?? null,
+        skills: providerInsert.skills ?? [],
       } as any);
-      if (keepAdminRole) {
-        // Admin como asociado: conserva rol admin y no requiere verificación de plataforma.
-        await catalogService.updateProvider((provider as { id: number }).id, { isVerified: true } as any);
+      if (keepStaffRole) {
+        // Solo administrador pleno: verificado en catálogo sin flujo de verificación de plataforma.
+        if (isFullAdmin(effectiveRole)) {
+          await catalogService.updateProvider((provider as { id: number }).id, { isVerified: true } as any);
+        }
       } else {
         await genFebStorage.updateUser(userId, {
           role: "professional",
@@ -496,20 +576,32 @@ export async function registerRoutes(
         } as any);
       }
 
-      // Un solo servicio por profesional: se crea desde los datos del proveedor (nombre = nombre del profesional, descripción = bio, precio = tarifa).
+      // Un solo servicio por profesional: título = nombre explícito del servicio, o profesión, o nombre del usuario.
       const categoryId = (provider as { categoryId?: number }).categoryId;
       if (categoryId != null && !Number.isNaN(Number(categoryId)) && Number(categoryId) >= 1) {
         const user = await genFebStorage.getUserById(userId);
         const u = user as { name?: string; firstName?: string; lastName?: string } | null;
+        const fullName =
+          (typeof u?.name === "string" && u.name.trim()) ||
+          [u?.firstName, u?.lastName]
+            .filter((x) => x != null && String(x).trim() !== "")
+            .map((x) => String(x).trim())
+            .join(" ") ||
+          "";
+        const prof = String((provider as { profession?: string }).profession ?? "").trim();
+        const explicit = typeof serviceTitleFromClient === "string" ? serviceTitleFromClient.trim() : "";
         const serviceTitle =
-          (u?.name ?? ([u?.firstName, u?.lastName].filter(Boolean).join(" ").trim() || (provider as { profession?: string }).profession)) ||
-          (provider as { profession?: string }).profession;
+          explicit.length >= 2 ? explicit : prof || fullName || "Servicio";
+        const descExplicit =
+          typeof serviceDescriptionFromClient === "string" ? serviceDescriptionFromClient.trim() : "";
+        const serviceDescriptionText =
+          descExplicit.length > 0 ? descExplicit : String((provider as { bio?: string }).bio ?? "");
         await catalogService.createService({
           providerId: provider.id,
           categoryId: Number(categoryId),
           subcategoryId: (provider as { subcategoryId?: number | null }).subcategoryId ?? undefined,
           title: serviceTitle,
-          description: (provider as { bio?: string }).bio ?? "",
+          description: serviceDescriptionText,
           price: (provider as { hourlyRate?: string | null }).hourlyRate ?? "0",
           imageUrl: "",
           isActive: true,

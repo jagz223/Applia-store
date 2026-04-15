@@ -1,4 +1,4 @@
-// GenFeb S.A.S. - Base de Datos Extendida
+// GenFeb - Base de Datos Extendida
 // Incluye roles de usuario, integración con App ManGo y nuevas funcionalidades
 
 import { pgTable, text, serial, integer, boolean, timestamp, varchar, decimal, jsonb } from "drizzle-orm/pg-core";

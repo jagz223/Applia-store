@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { 
   DollarSign, TrendingUp, Calendar, Users, 
   Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
-  CheckCircle2, XCircle, Banknote, Wallet, Inbox, PlayCircle, History, UserPlus, Receipt,
-  AlertTriangle
+  CheckCircle2, XCircle, Banknote, CircleDollarSign, Inbox, PlayCircle, History, UserPlus, Receipt,
+  AlertTriangle, ShieldCheck
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -114,10 +115,10 @@ function getTransferMetaForProfessional(t: any) {
     amountColor = "text-red-600";
   }
 
-  let label = "Transacción";
-  if (type === "recharge") label = "Recarga de saldo";
-  if (type === "service_payment") label = "Ingreso por servicio";
-  if (type === "withdrawal") label = "Retiro de fondos";
+  let label = "Movimiento";
+  if (type === "recharge") label = getTransferTypeLabel("recharge");
+  if (type === "service_payment") label = getTransferTypeLabel("service_payment");
+  if (type === "withdrawal") label = getTransferTypeLabel("withdrawal");
 
   const createdAt = parseTransferDate(t.createdAt);
   const dateStr = createdAt
@@ -526,8 +527,8 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
             )}
             {booking.paymentMethod === "wallet" && (
               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
-                <Wallet className="h-3 w-3" />
-                BILLETERA
+                <CircleDollarSign className="h-3 w-3" />
+                SALDO GENFEB
               </Badge>
             )}
           </div>
@@ -727,7 +728,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
               <DialogTitle>Servicio en Efectivo</DialogTitle>
             </div>
             <DialogDescription className="text-foreground">
-              Como este servicio se pagará en <strong>Efectivo</strong>, la plataforma descontará automáticamente una comisión del <strong>10%</strong> de tu wallet cuando finalices el trabajo.
+              Como este servicio se pagará en <strong>Efectivo</strong>, la plataforma descontará automáticamente una comisión del <strong>10%</strong> de tu Saldo Genfeb cuando finalices el trabajo.
             </DialogDescription>
           </DialogHeader>
 
@@ -742,7 +743,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 <span className="font-bold">-${(Number(cashWarningBooking.cost || 0) * 0.1).toFixed(2)}</span>
               </div>
               <p className="text-[11px] text-muted-foreground mt-2 border-t pt-2">
-                * El descuento se aplicará a tu wallet al marcar el servicio como completado. Tu saldo puede quedar en negativo si no tienes fondos suficientes.
+                * El descuento se aplicará a tu Saldo Genfeb al marcar el servicio como completado. Puede quedar en negativo si no tienes saldo suficiente en tu Saldo Genfeb.
               </p>
             </div>
           )}
@@ -1016,7 +1017,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
   );
 }
 
-/** Dialog que muestra resumen económico y permite descargar reporte CSV (transferencias, ingresos, estado de retiros). */
+/** Dialog de resumen de actividad y export CSV (movimientos, ingresos, pagos solicitados). */
 function EconomicReportDialog({
   open,
   onOpenChange,
@@ -1045,8 +1046,8 @@ function EconomicReportDialog({
     const headers = ["Fecha", "Tipo", "Descripción", "Monto (USD)", "Estado"];
     const typeLabels: Record<string, string> = {
       service_payment: "Ingreso por servicio",
-      recharge: "Recarga",
-      withdrawal: "Retiro",
+      recharge: "Abono saldo GenFeb",
+      withdrawal: "Cobro a cuenta",
     };
     const statusLabels: Record<string, string> = {
       pending_approval: "Pendiente aprobación",
@@ -1065,7 +1066,7 @@ function EconomicReportDialog({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `reporte-economico-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    a.download = `reporte-actividad-${format(new Date(), "yyyy-MM-dd")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1074,9 +1075,9 @@ function EconomicReportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Reporte Económico</DialogTitle>
+          <DialogTitle>Resumen de actividad</DialogTitle>
           <DialogDescription>
-            Resumen de ingresos, transferencias y estado de retiros. Puedes descargar el historial en CSV.
+            Ingresos, abonos y cobros registrados en la plataforma. Puedes descargar el historial en CSV.
           </DialogDescription>
         </DialogHeader>
         {isLoading ? (
@@ -1091,20 +1092,20 @@ function EconomicReportDialog({
                 <p className="font-semibold text-lg">{formatUsd(totalEarnings)}</p>
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Retiros completados</p>
+                <p className="text-muted-foreground">Pagos completados</p>
                 <p className="font-semibold text-lg">{formatUsd(totalWithdrawn)}</p>
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Saldo disponible</p>
+                <p className="text-muted-foreground">Saldo GenFeb</p>
                 <p className="font-semibold text-lg">{formatUsd(wallet)}</p>
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Retiro pendiente</p>
+                <p className="text-muted-foreground">Pago en proceso</p>
                 <p className="font-semibold text-lg">{withdrawingFunds > 0 ? formatUsd(withdrawingFunds) : "—"}</p>
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Últimas {transfers.length} transferencias. Estado: Pendiente aprobación / Completado / Rechazado.
+              Últimos {transfers.length} movimientos. Estado: Pendiente aprobación / Completado / Rechazado.
             </p>
             <div className="max-h-48 overflow-y-auto rounded border text-sm">
               {transfers.length === 0 ? (
@@ -1143,37 +1144,166 @@ function EconomicReportDialog({
 
 function InvoicesTabContent() {
   const [page, setPage] = useState(1);
+  const [pulseReportId, setPulseReportId] = useState<number | null>(null);
   const { user } = useAuth();
-  const { data, isLoading } = useWalletTransfers({ page, limit: 10 });
+  const [location] = useLocation();
+  const autoVerificationPdfDone = useRef(false);
+
+  const { data: invoiceList, isLoading: invoicesLoading } = useQuery({
+    queryKey: ["/api/invoices", "list"],
+    queryFn: async () => {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const res = await fetch("/api/invoices", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("No se pudieron cargar las facturas");
+      return res.json() as Promise<
+        Array<{
+          id?: number;
+          reportId?: number;
+          type: string;
+          service?: string;
+          amount?: number | string;
+          status?: string;
+          date?: string | null;
+        }>
+      >;
+    },
+  });
+
+  const { data, isLoading: transfersLoading } = useWalletTransfers({ page, limit: 10 });
   const transfers = data?.transfers ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 10));
+
+  const verificationRows = useMemo(
+    () => (invoiceList ?? []).filter((inv) => inv.type === "verification"),
+    [invoiceList],
+  );
+
+  const isLoading = invoicesLoading || transfersLoading;
+
+  useEffect(() => {
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (params.get("verificationInvoice") !== "1") {
+      setPulseReportId(null);
+      return;
+    }
+    const rid = params.get("reportId");
+    if (rid != null && rid !== "") {
+      const n = Number(rid);
+      if (!Number.isNaN(n)) {
+        setPulseReportId(n);
+        return;
+      }
+    }
+  }, [location]);
+
+  useEffect(() => {
+    if (pulseReportId != null) return;
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (params.get("verificationInvoice") !== "1") return;
+    const completed = verificationRows.find((r) => r.status === "completed");
+    const id = completed?.reportId ?? completed?.id;
+    if (id != null) setPulseReportId(Number(id));
+  }, [verificationRows, pulseReportId, location]);
+
+  useEffect(() => {
+    if (pulseReportId == null) return;
+    let cancelled = false;
+    let attempts = 0;
+    const attemptScroll = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const el = document.querySelector(`[data-verification-report="${pulseReportId}"]`) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (attempts < 25) window.setTimeout(attemptScroll, 120);
+    };
+    window.setTimeout(attemptScroll, 100);
+    return () => {
+      cancelled = true;
+    };
+  }, [pulseReportId, location, verificationRows.length]);
+
+  useEffect(() => {
+    if (!invoiceList || !user || autoVerificationPdfDone.current) return;
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    if (params.get("verificationInvoice") !== "1") return;
+    const ridParam = params.get("reportId");
+    const match = verificationRows.find(
+      (r) =>
+        r.status === "completed" &&
+        (ridParam == null || ridParam === "" || String(r.reportId ?? r.id) === ridParam),
+    );
+    if (!match) return;
+    autoVerificationPdfDone.current = true;
+    const reportId = match.reportId ?? match.id;
+    if (reportId == null) return;
+    const amt =
+      typeof match.amount === "number" ? match.amount : parseFloat(String(match.amount ?? "15"));
+    void downloadInvoicePdf(
+      {
+        id: reportId,
+        reportId,
+        transferType: "verification_fee",
+        amount: Number.isFinite(amt) ? amt : 15,
+        description: match.service ?? "Cargo de verificación profesional",
+        createdAt: match.date,
+        status: match.status,
+      },
+      {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        name: (user as { name?: string }).name,
+        email: user.email,
+      },
+    ).then(() => {
+      params.delete("verificationInvoice");
+      params.delete("reportId");
+      const qs = params.toString();
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+      }
+    });
+  }, [invoiceList, verificationRows, user, location]);
+
+  const userForInvoice = user
+    ? {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        name: (user as { name?: string }).name,
+        email: user.email,
+      }
+    : null;
 
   if (isLoading) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+          <CardDescription>Comprobantes de verificación, abonos de saldo y descarga en PDF</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
-          <p className="text-sm">Cargando transacciones…</p>
+          <p className="text-sm">Cargando facturas…</p>
         </CardContent>
       </Card>
     );
   }
 
-  if (transfers.length === 0) {
+  if (verificationRows.length === 0 && transfers.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Transacciones y descarga de facturas en PDF</CardDescription>
+          <CardDescription>Comprobantes de verificación, abonos de saldo y descarga en PDF</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <FileText className="h-8 w-8 opacity-60" />
-          <p className="text-sm">Aún no tienes transacciones para facturar.</p>
+          <p className="text-sm">Aún no tienes facturas disponibles.</p>
         </CardContent>
       </Card>
     );
@@ -1183,87 +1313,160 @@ function InvoicesTabContent() {
     <Card>
       <CardHeader>
         <CardTitle>Facturas</CardTitle>
-        <CardDescription>Descarga una factura en PDF por cada transacción</CardDescription>
+        <CardDescription>
+          Incluye el cargo de verificación (USD 15), abonos a tu saldo GenFeb y el resto de movimientos con comprobante
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {transfers.map((t: TransferForInvoice & { id: number; status?: string }) => {
-          const label = getTransferTypeLabel(t.transferType);
-          const dateStr = parseTransferDate(t.createdAt)
-            ? format(parseTransferDate(t.createdAt)!, "dd MMM yyyy HH:mm", { locale: es })
-            : "—";
-          return (
-            <div
-              key={t.id}
-              className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
-            >
-              <div className="flex items-start gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <Receipt className="w-4 h-4 text-primary" />
-                </div>
-                <div className="min-w-0 space-y-1">
-                  <p className="font-medium text-sm">{label}</p>
-                  <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
-                  <p className="text-xs text-muted-foreground">{dateStr}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <p className="font-semibold text-sm">{formatWalletAmount(t.amount)}</p>
-                <Badge
-                  variant={
-                    t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"
-                  }
+      <CardContent className="space-y-6">
+        {verificationRows.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-foreground">Verificación profesional</p>
+            {verificationRows.map((inv) => {
+              const reportKey = inv.reportId ?? inv.id;
+              if (reportKey == null) return null;
+              const amt =
+                typeof inv.amount === "number" ? inv.amount : parseFloat(String(inv.amount ?? "15"));
+              const dateStr = parseTransferDate(inv.date)
+                ? format(parseTransferDate(inv.date)!, "dd MMM yyyy HH:mm", { locale: es })
+                : "—";
+              const st = inv.status ?? "";
+              const isCompleted = st === "completed";
+              const isRejected = st === "rejected";
+              const highlight = pulseReportId != null && Number(reportKey) === pulseReportId;
+              return (
+                <div
+                  key={`ver-${reportKey}`}
+                  data-verification-report={reportKey}
+                  className={cn(
+                    "flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card",
+                    highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+                  )}
                 >
-                  {t.status === "pending_approval" ? "Pendiente" : t.status === "completed" ? "Completado" : "Rechazado"}
-                </Badge>
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <ShieldCheck className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-medium text-sm">{getTransferTypeLabel("verification_fee")}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {inv.service ?? "Cargo de verificación profesional"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{dateStr}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0 flex-wrap sm:flex-nowrap">
+                    <p className="font-semibold text-sm">{formatWalletAmount(Number.isFinite(amt) ? amt : 15)}</p>
+                    <Badge variant={isCompleted ? "default" : isRejected ? "destructive" : "secondary"}>
+                      {isCompleted ? "Completado" : isRejected ? "Rechazado" : "Pendiente"}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        userForInvoice &&
+                        downloadInvoicePdf(
+                          {
+                            id: reportKey,
+                            reportId: reportKey,
+                            transferType: "verification_fee",
+                            amount: Number.isFinite(amt) ? amt : 15,
+                            description: inv.service ?? "Cargo de verificación profesional",
+                            createdAt: inv.date,
+                            status: inv.status,
+                          },
+                          userForInvoice,
+                        )
+                      }
+                      disabled={!userForInvoice || !isCompleted}
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Generar factura
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {transfers.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-foreground">Abonos y otros movimientos</p>
+            {transfers.map((t: TransferForInvoice & { id: number; status?: string }) => {
+              const label = getTransferTypeLabel(t.transferType);
+              const dateStr = parseTransferDate(t.createdAt)
+                ? format(parseTransferDate(t.createdAt)!, "dd MMM yyyy HH:mm", { locale: es })
+                : "—";
+              return (
+                <div
+                  key={t.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <Receipt className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-medium text-sm">{label}</p>
+                      <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
+                      <p className="text-xs text-muted-foreground">{dateStr}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <p className="font-semibold text-sm">{formatWalletAmount(t.amount)}</p>
+                    <Badge
+                      variant={
+                        t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"
+                      }
+                    >
+                      {t.status === "pending_approval" ? "Pendiente" : t.status === "completed" ? "Completado" : "Rechazado"}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        userForInvoice &&
+                        downloadInvoicePdf(
+                          {
+                            id: t.id,
+                            amount: t.amount,
+                            transferType: t.transferType,
+                            description: t.description,
+                            createdAt: t.createdAt,
+                            status: t.status,
+                          },
+                          userForInvoice,
+                        )
+                      }
+                      disabled={!userForInvoice || t.status !== "completed"}
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Generar factura
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex items-center justify-between pt-2">
+              <p className="text-xs text-muted-foreground">
+                Página {page} de {totalPages}
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  Anterior
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    user &&
-                    downloadInvoicePdf(
-                      {
-                        id: t.id,
-                        amount: t.amount,
-                        transferType: t.transferType,
-                        description: t.description,
-                        createdAt: t.createdAt,
-                        status: t.status,
-                      },
-                      {
-                        firstName: user.firstName,
-                        lastName: user.lastName,
-                        name: (user as { name?: string }).name,
-                        email: user.email,
-                      }
-                    )
-                  }
-                  disabled={!user}
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 >
-                  <Download className="w-4 h-4 mr-2" />
-                  Generar factura
+                  Siguiente
                 </Button>
               </div>
             </div>
-          );
-        })}
-        <div className="flex items-center justify-between pt-2">
-          <p className="text-xs text-muted-foreground">
-            Página {page} de {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Siguiente
-            </Button>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1533,7 +1736,7 @@ export default function ProfessionalDashboard() {
 
   const avgEarnings6m = useMemo(() => (monthlyEarnings.length > 0 ? totalEarnings6m / monthlyEarnings.length : 0), [totalEarnings6m, monthlyEarnings]);
 
-  // Panel Económico (Bóveda Profesional): ocultar secciones específicas por UI.
+  // Panel del asociado (Mi actividad): ocultar secciones específicas por UI.
   const SHOW_PRO_MONTHLY_EARNINGS = false;
   const SHOW_PRO_RATING_BREAKDOWN = false;
   const SHOW_PRO_QUICK_ACTIONS = false;
@@ -1548,14 +1751,14 @@ export default function ProfessionalDashboard() {
               <BarChart3 className="h-6 w-6 text-mango-orange" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold">Panel Económico</h1>
-              <p className="text-gray-500 text-sm sm:text-base">Gestiona tus ingresos y estadísticas</p>
+              <h1 className="text-xl sm:text-2xl font-bold">Mi actividad</h1>
+              <p className="text-gray-500 text-sm sm:text-base">Resumen de servicios, ingresos y movimientos</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full sm:w-auto">
             <Button variant="outline" size="sm" className="flex-1 sm:flex-initial min-w-0" onClick={() => setReportDialogOpen(true)}>
               <FileText className="h-4 w-4 mr-2 shrink-0" />
-              <span className="truncate">Generar Reporte</span>
+              <span className="truncate">Exportar resumen</span>
             </Button>
             <TooltipProvider>
               <Tooltip>
@@ -1568,12 +1771,12 @@ export default function ProfessionalDashboard() {
                       onClick={() => !pendingWithdrawal && setWithdrawDialogOpen(true)}
                     >
                       <CreditCard className="h-4 w-4 mr-2 shrink-0" />
-                      <span className="truncate">Retirar Fondos</span>
+                      <span className="truncate">Cobrar ingresos</span>
             </Button>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {pendingWithdrawal ? "Solicitud en revisión por el administrador" : "Solicitar retiro de fondos a tu cuenta bancaria"}
+                  {pendingWithdrawal ? "Solicitud en revisión por el administrador" : "Solicitar que te abonen a la cuenta registrada en tu perfil"}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -1581,19 +1784,19 @@ export default function ProfessionalDashboard() {
         </div>
       </div>
 
-      {/* Dialog Retirar Fondos */}
+      {/* Dialog cobrar ingresos */}
       <Dialog open={withdrawDialogOpen} onOpenChange={setWithdrawDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Retirar Fondos</DialogTitle>
+            <DialogTitle>Cobrar ingresos</DialogTitle>
             <DialogDescription>
-              El monto se moverá a &quot;En proceso de retiro&quot; y aparecerás en Panel Admin → Payouts para que el administrador realice la transferencia a tu cuenta.
+              El monto quedará en &quot;Pago en proceso&quot; y el equipo revisará la solicitud en el panel de administración para abonarte a la cuenta que indicaste.
             </DialogDescription>
           </DialogHeader>
           {!hasBankData ? (
             <div className="space-y-4 py-2">
               <p className="text-sm text-amber-600 dark:text-amber-500">
-                Para retirar fondos debes completar los datos bancarios (nombre del banco y número de cuenta) en tu perfil.
+                Para cobrar tus ingresos debes indicar en tu perfil la cuenta donde quieres recibir el pago (entidad financiera y número de cuenta).
               </p>
               <Button asChild variant="outline">
                 <Link href="/settings" onClick={() => setWithdrawDialogOpen(false)}>Ir a Configuración</Link>
@@ -1601,9 +1804,9 @@ export default function ProfessionalDashboard() {
             </div>
           ) : (
             <div className="space-y-4 py-2">
-              <p className="text-sm text-muted-foreground">Saldo disponible: <strong>{formatUsd(wallet)}</strong></p>
+              <p className="text-sm text-muted-foreground">Saldo GenFeb: <strong>{formatUsd(wallet)}</strong></p>
               <div className="space-y-2">
-                <Label htmlFor="withdraw-amount">Monto a retirar (USD)</Label>
+                <Label htmlFor="withdraw-amount">Monto a cobrar (USD)</Label>
                 <Input
                   id="withdraw-amount"
                   type="number"
@@ -1634,7 +1837,7 @@ export default function ProfessionalDashboard() {
                         setWithdrawDialogOpen(false);
                         toast({
                           title: "Solicitud enviada",
-                          description: "Aparecerás en Panel Admin → Payouts. El administrador procesará la transferencia.",
+                          description: "Tu solicitud quedará en el panel de administración para que te abonen a tu cuenta.",
                         });
                       },
                       onError: (err: Error) => {
@@ -1649,7 +1852,7 @@ export default function ProfessionalDashboard() {
                       Procesando…
                     </>
                   ) : (
-                    "Solicitar retiro"
+                    "Solicitar pago"
                   )}
                 </Button>
               </DialogFooter>
@@ -1748,7 +1951,7 @@ export default function ProfessionalDashboard() {
           <TabsList className="w-full flex flex-nowrap justify-start sm:justify-center overflow-x-auto h-auto min-h-10 gap-1 p-2 sm:p-1 sm:flex-wrap sm:h-10 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
             <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
             <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>
-            <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Transacciones</TabsTrigger>
+            <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Movimientos</TabsTrigger>
             <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Facturas</TabsTrigger>
           </TabsList>
 
@@ -1842,7 +2045,7 @@ export default function ProfessionalDashboard() {
                 <CardContent className="space-y-2">
                   <Button variant="outline" className="w-full justify-start">
                     <CreditCard className="h-4 w-4 mr-2" />
-                    Solicitar retiro de fondos
+                    Solicitar pago a mi cuenta
                   </Button>
                   <Button variant="outline" className="w-full justify-start">
                     <FileText className="h-4 w-4 mr-2" />
@@ -1865,7 +2068,7 @@ export default function ProfessionalDashboard() {
           <TabsContent value="transactions">
             <Card>
               <CardHeader>
-                <CardTitle>Historial de Transacciones</CardTitle>
+                <CardTitle>Historial de movimientos</CardTitle>
                 <CardDescription>Todas tus transacciones y ganancias</CardDescription>
               </CardHeader>
               <CardContent>

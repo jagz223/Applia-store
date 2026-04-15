@@ -7,6 +7,8 @@ export const professionalVerificationSchema = z.object({
   imageUrl: z.string().nullable().optional(),
   /** Solo el admin puede ponerlo en true */
   imageVerified: z.boolean().default(false),
+  /** Documento que avala la profesión (certificado / título). Se guarda también en Mis documentos. */
+  professionalCredentialUrl: z.string().nullable().optional(),
   /** Código / comprobante de transferencia del pago de verificación */
   transferReceiptCode: z.string().nullable().optional(),
   /** Fecha de la transferencia (yyyy-MM-dd) */
@@ -27,6 +29,14 @@ export function isProfessionalVerificationLocked(v: Partial<ProfessionalVerifica
 
 export const patchProfessionalVerificationImageBody = z.object({
   imageUrl: z.string().url().min(1),
+});
+
+export const patchProfessionalVerificationCredentialBody = z.object({
+  professionalCredentialUrl: z.string().url().min(1),
+  /** Nombre para mostrar/guardar en Mis documentos. */
+  name: z.string().min(1).max(200).optional(),
+  mimeType: z.string().min(1).max(200).optional(),
+  size: z.number().optional(),
 });
 
 export const patchProfessionalVerificationPaymentBody = z.object({

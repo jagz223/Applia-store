@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, varchar, decimal } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, varchar, decimal, json } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./models/auth";
@@ -31,6 +31,8 @@ export const providers = pgTable("providers", {
   isVerified: boolean("is_verified").default(false),
   rating: decimal("rating", { precision: 3, scale: 2 }).default("0"),
   reviewCount: integer("review_count").default(0),
+  /** Etiquetas cortas de habilidades (JSON string[] en Postgres / array en Firestore). */
+  skills: json("skills").$type<string[] | null>(),
 });
 
 export const services = pgTable("services", {
@@ -110,6 +112,13 @@ export const usersRelations = relations(users, ({ one, many }) => ({
 
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
 export const insertProviderSchema = createInsertSchema(providers).omit({ id: true, rating: true, reviewCount: true, isVerified: true });
+
+/** Biografía y enfoque profesional (`providers.bio`): no vacío ni demasiado corto; máx. 700 en UI y API. */
+export const professionalBioFieldSchema = z
+  .string()
+  .trim()
+  .min(50, { message: "Escribe al menos 50 caracteres (un poco más que un eslogan)." })
+  .max(700, { message: "Máximo 700 caracteres." });
 export const insertServiceSchema = createInsertSchema(services).omit({ id: true });
 export const insertBookingSchema = createInsertSchema(bookings).omit({ id: true, createdAt: true, status: true });
 

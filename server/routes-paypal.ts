@@ -30,7 +30,7 @@ export async function registerPayPalRoutes(
         const order = await createPayPalOrder(
           amount,
           currency || "USD",
-          description || "Pago GenFeb S.A.S.",
+          description || "Pago GenFeb",
           bookingId.toString()
         );
 

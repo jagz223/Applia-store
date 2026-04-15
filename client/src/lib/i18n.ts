@@ -1,4 +1,4 @@
-// GenFeb S.A.S. - Internationalization (i18n)
+// GenFeb - Internationalization (i18n)
 // Soporte para Español (Ecuador) e Inglés
 
 export type Language = "es" | "en" | "pt";
@@ -146,7 +146,7 @@ const translations: Record<Language, Translations> = {
       services: "Servicios",
       bookings: "Reservas",
       categories: "Categorías",
-      vault: "Bóveda",
+      vault: "Documentos",
       dashboard: "Panel",
       payments: "Pagos",
       chat: "Mensajes",
@@ -172,7 +172,7 @@ const translations: Record<Language, Translations> = {
     home: {
       hero: {
         title: "La plataforma de servicios más avanzada",
-        subtitle: "Conecta con asociados verificados para servicios técnicos, legales, financieros y mantenimiento. Todo en un solo lugar con la garantía de GenFeb S.A.S.",
+        subtitle: "Conecta con asociados verificados para servicios técnicos, legales, financieros y mantenimiento. Todo en un solo lugar con la garantía de GenFeb.",
         cta: "Explorar Servicios",
         ctaSecondary: "Reservar Ahora",
       },
@@ -205,7 +205,7 @@ const translations: Record<Language, Translations> = {
       code: "Código de Reserva",
     },
     dashboard: {
-      title: "Panel Económico",
+      title: "Mi actividad",
       overview: "Resumen",
       transactions: "Transacciones",
       invoices: "Facturación",
@@ -217,8 +217,8 @@ const translations: Record<Language, Translations> = {
       },
     },
     vault: {
-      title: "Bóveda Segura",
-      subtitle: "Almacena y gestiona tus documentos de forma segura",
+      title: "Mis documentos",
+      subtitle: "Comprobantes y archivos de tu cuenta en la plataforma",
       encrypted: "Cifrado AES-256",
       documents: "Documentos",
       folders: "Carpetas",
@@ -271,7 +271,7 @@ const translations: Record<Language, Translations> = {
       services: "Services",
       bookings: "Bookings",
       categories: "Categories",
-      vault: "Vault",
+      vault: "Documents",
       dashboard: "Dashboard",
       payments: "Payments",
       chat: "Messages",
@@ -297,7 +297,7 @@ const translations: Record<Language, Translations> = {
     home: {
       hero: {
         title: "The most advanced services platform",
-        subtitle: "Connect with verified professionals for technical, legal, financial, and maintenance services. All in one place with GenFeb S.A.S. guarantee.",
+        subtitle: "Connect with verified professionals for technical, legal, financial, and maintenance services. All in one place with GenFeb guarantee.",
         cta: "Explore Services",
         ctaSecondary: "Book Now",
       },
@@ -330,7 +330,7 @@ const translations: Record<Language, Translations> = {
       code: "Booking Code",
     },
     dashboard: {
-      title: "Economic Panel",
+      title: "My activity",
       overview: "Overview",
       transactions: "Transactions",
       invoices: "Invoicing",
@@ -342,8 +342,8 @@ const translations: Record<Language, Translations> = {
       },
     },
     vault: {
-      title: "Secure Vault",
-      subtitle: "Store and manage your documents securely",
+      title: "My documents",
+      subtitle: "Receipts and files from your platform account",
       encrypted: "AES-256 Encrypted",
       documents: "Documents",
       folders: "Folders",
@@ -396,7 +396,7 @@ const translations: Record<Language, Translations> = {
       services: "Serviços",
       bookings: "Reservas",
       categories: "Categorias",
-      vault: "Cofre",
+      vault: "Documentos",
       dashboard: "Painel",
       payments: "Pagamentos",
       chat: "Mensagens",
@@ -422,7 +422,7 @@ const translations: Record<Language, Translations> = {
     home: {
       hero: {
         title: "A plataforma de serviços mais avançada",
-        subtitle: "Conecte-se com profissionais verificados para serviços técnicos, legais, financeiros e manutenção. Tudo em um só lugar com a garantia da GenFeb S.A.S.",
+        subtitle: "Conecte-se com profissionais verificados para serviços técnicos, legais, financeiros e manutenção. Tudo em um só lugar com a garantia GenFeb.",
         cta: "Explorar Serviços",
         ctaSecondary: "Reservar Agora",
       },
@@ -455,7 +455,7 @@ const translations: Record<Language, Translations> = {
       code: "Código de Reserva",
     },
     dashboard: {
-      title: "Painel Econômico",
+      title: "Minha atividade",
       overview: "Visão Geral",
       transactions: "Transações",
       invoices: "Faturamento",
@@ -467,8 +467,8 @@ const translations: Record<Language, Translations> = {
       },
     },
     vault: {
-      title: "Cofre Seguro",
-      subtitle: "Armazene e gerencie seus documentos com segurança",
+      title: "Meus documentos",
+      subtitle: "Comprovantes e arquivos da sua conta na plataforma",
       encrypted: "Criptografado AES-256",
       documents: "Documentos",
       folders: "Pastas",

@@ -58,6 +58,9 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate, isValidDate } from "@/lib/date-utils";
 import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
+import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
+import { AnimatePresence, motion } from "framer-motion";
+import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
 
 const USERS_PAGE_SIZE = 10;
 
@@ -102,6 +105,45 @@ type AdminProviderWithServices = {
   rating: number;
   ratingCount: number;
   verified: boolean;
+};
+
+type AdminActiveServiceRow = {
+  id: number;
+  title: string;
+  price?: unknown;
+  categoryId: number;
+  categorySlug?: string | null;
+  categoryDisplayName?: string | null;
+  providerId: number;
+  providerVerified: boolean;
+  providerProfession?: string | null;
+  userId: string;
+  userName?: string;
+  userEmail?: string | null;
+};
+
+type AdminServiceBrand = {
+  categoryId: number;
+  slug: string;
+  name: string;
+  displayName: string;
+  uiHidden: boolean;
+  totalServices: number;
+  activeServices: number;
+  inactiveServices: number;
+};
+
+type AdminBrandProviderRow = {
+  providerId: number;
+  userId: string;
+  name: string;
+  email?: string | null;
+  rating: number;
+  ratingCount: number;
+  verified: boolean;
+  totalServices: number;
+  activeServices: number;
+  inactiveServices: number;
 };
 
 type AdminBookingItem = {
@@ -310,7 +352,7 @@ function AdminWithdrawalsTab({
             title: pendingAction === "approve" ? "Pago aprobado" : "Retiro rechazado",
             description: pendingAction === "approve"
               ? "El retiro fue registrado y el asociado será notificado."
-              : "Los fondos fueron devueltos a la billetera del usuario.",
+              : "Los fondos fueron devueltos al Saldo Genfeb del usuario.",
           });
         },
         onError: (err: Error) => {
@@ -455,7 +497,7 @@ function AdminWithdrawalsTab({
           <DialogDescription>
             {pendingAction === "approve"
               ? "Confirma que realizaste la transferencia bancaria al asociado. El usuario recibirá una notificación sin que se muestre tu nombre."
-              : "Los fondos volverán a la billetera del usuario. Opcionalmente indica el motivo (ej. datos bancarios incorrectos, banco en mantenimiento)."}
+              : "Los fondos volverán al Saldo Genfeb del usuario. Opcionalmente indica el motivo (ej. datos bancarios incorrectos, banco en mantenimiento)."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
@@ -527,7 +569,7 @@ function useSaldoUserSearch(debouncedName: string, queryEnabled = true) {
 }
 
 /** Pestañas solo para administrador (no Soporte TI). */
-const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts"] as const;
+const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts", "services"] as const;
 
 export default function AdminPanel() {
   const { user } = useAuth();
@@ -550,6 +592,7 @@ export default function AdminPanel() {
       if (tab === "recargas") return "recargas";
       if (tab === "saldo") return "saldo";
       if (tab === "payouts") return "payouts";
+      if (tab === "services") return "services";
     }
     return "overview";
   });
@@ -570,6 +613,7 @@ export default function AdminPanel() {
     if (tab === "recargas") setActiveTab("recargas");
     if (tab === "saldo") setActiveTab("saldo");
     if (tab === "payouts") setActiveTab("payouts");
+    if (tab === "services") setActiveTab("services");
     const highlight = q.get("highlight");
     if (highlight) {
       const id = parseInt(highlight, 10);
@@ -632,6 +676,55 @@ export default function AdminPanel() {
   useEffect(() => {
     setAdminTransfersPage(1);
   }, [transferStatusFilter]);
+
+  // Servicios (admin-only): gestión de marcas (Fix Go / Man Go / etc.) y proveedores dentro de marca
+  const [selectedBrandCategoryId, setSelectedBrandCategoryId] = useState<number | null>(null);
+  const [brandProviderSearch, setBrandProviderSearch] = useState("");
+  const [brandProviderMinRating, setBrandProviderMinRating] = useState<number>(0);
+  const [brandProviderSort, setBrandProviderSort] = useState<"rating_desc" | "rating_asc" | "name_asc" | "active_desc">("rating_desc");
+
+  // Proveedores -> Servicios activos (staff)
+  const [activeServicesSearch, setActiveServicesSearch] = useState("");
+  const [activeServicesBrandSlug, setActiveServicesBrandSlug] = useState<string>("");
+
+  const [brandConfirmOpen, setBrandConfirmOpen] = useState(false);
+  const [brandConfirmAction, setBrandConfirmAction] = useState<null | { categoryId: number; brandName: string; nextActive: boolean }>(null);
+  const [providerConfirmOpen, setProviderConfirmOpen] = useState(false);
+  const [providerConfirmAction, setProviderConfirmAction] = useState<null | { providerId: number; name: string; nextActive: boolean }>(null);
+
+  const [pulseBrandId, setPulseBrandId] = useState<number | null>(null);
+  const [pulseProviderId, setPulseProviderId] = useState<number | null>(null);
+
+  const [roleHideRole, setRoleHideRole] = useState<string>("tiSupport");
+  const [roleHideSlugsDraft, setRoleHideSlugsDraft] = useState<string[]>([]);
+  const [roleHideConfirmOpen, setRoleHideConfirmOpen] = useState(false);
+  const [roleHidePending, setRoleHidePending] = useState<null | { role: string; hiddenSlugs: string[] }>(null);
+
+  const { data: roleVisibilityData } = useQuery({
+    queryKey: ["admin-category-visibility-by-role"],
+    queryFn: () => fetchWithAuth("/api/admin/category-visibility/by-role"),
+    enabled: fullAdmin && activeTab === "services",
+    staleTime: 15_000,
+  });
+
+  useEffect(() => {
+    const map = (roleVisibilityData as any)?.byRole as Record<string, string[]> | undefined;
+    if (!map) return;
+    setRoleHideSlugsDraft(map[roleHideRole] ?? []);
+  }, [roleVisibilityData, roleHideRole]);
+
+  const patchRoleVisibilityMutation = useMutation({
+    mutationFn: async (args: { role: string; hiddenSlugs: string[] }) =>
+      patchWithAuth("/api/admin/category-visibility/by-role", { role: args.role, hiddenSlugs: args.hiddenSlugs }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-category-visibility-by-role"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/platform/category-visibility"] });
+      toast({ title: "Guardado", description: "Se actualizó la visibilidad por rol." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message || "No se pudo guardar.", variant: "destructive" });
+    },
+  });
 
   // Gestión de Saldo: selector de usuarios/roles y recarga manual
   const [selectedUsersSaldo, setSelectedUsersSaldo] = useState<UserOption[]>([]);
@@ -713,12 +806,89 @@ export default function AdminPanel() {
   const updateTransferStatus = useUpdateTransferStatus();
   const push = usePushNotifications();
 
-  const { data: adminProvidersData, isLoading: adminProvidersLoading } = useQuery({
-    queryKey: ["admin-providers-with-services"],
-    queryFn: () => fetchWithAuth("/api/admin/providers/with-services"),
+  const { data: adminActiveServicesData, isLoading: adminActiveServicesLoading } = useQuery({
+    queryKey: ["admin-active-services", activeServicesSearch, activeServicesBrandSlug],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (activeServicesSearch.trim()) params.set("search", activeServicesSearch.trim());
+      if (activeServicesBrandSlug) params.set("brandSlug", activeServicesBrandSlug);
+      const qs = params.toString();
+      return fetchWithAuth(`/api/admin/services/active${qs ? `?${qs}` : ""}`);
+    },
     enabled: hasAdminRole(user) && activeTab === "providers",
+    staleTime: 10_000,
   });
-  const providersWithServices: AdminProviderWithServices[] = adminProvidersData?.providers ?? [];
+  const activeServicesRows: AdminActiveServiceRow[] = adminActiveServicesData?.services ?? [];
+
+  const { data: serviceBrandsData, isLoading: serviceBrandsLoading } = useQuery({
+    queryKey: ["admin-service-brands"],
+    queryFn: () => fetchWithAuth("/api/admin/service-brands"),
+    enabled: fullAdmin && activeTab === "services",
+    staleTime: 30_000,
+  });
+  const serviceBrands: AdminServiceBrand[] = serviceBrandsData?.brands ?? [];
+  const selectedBrand = (serviceBrands ?? []).find((b) => b.categoryId === selectedBrandCategoryId) ?? null;
+
+  const { data: brandProvidersData, isLoading: brandProvidersLoading } = useQuery({
+    queryKey: ["admin-service-brand-providers", selectedBrandCategoryId, brandProviderSearch, brandProviderMinRating, brandProviderSort],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (brandProviderSearch.trim()) params.set("search", brandProviderSearch.trim());
+      if (brandProviderMinRating > 0) params.set("minRating", String(brandProviderMinRating));
+      if (brandProviderSort) params.set("sort", brandProviderSort);
+      return fetchWithAuth(`/api/admin/service-brands/${selectedBrandCategoryId}/providers?${params.toString()}`);
+    },
+    enabled: fullAdmin && activeTab === "services" && selectedBrandCategoryId != null,
+    staleTime: 10_000,
+  });
+  const brandProviders: AdminBrandProviderRow[] = brandProvidersData?.providers ?? [];
+
+  const toggleBrandMutation = useMutation({
+    mutationFn: async (args: { categoryId: number; isActive: boolean }) =>
+      patchWithAuth(`/api/admin/service-brands/${args.categoryId}`, { isActive: args.isActive }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-service-brands"] });
+      // Refrescar catálogo público de inmediato (Explore / listados)
+      queryClient.invalidateQueries({ queryKey: ["/api/services"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/services/:id"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/platform/category-visibility"] });
+      if (selectedBrandCategoryId != null) {
+        queryClient.invalidateQueries({ queryKey: ["admin-service-brand-providers", selectedBrandCategoryId] });
+      }
+      const label = brandConfirmAction?.brandName ? `"${brandConfirmAction.brandName}"` : "la marca";
+      const action = brandConfirmAction?.nextActive ? "activada" : "desactivada";
+      toast({ title: "Acción aplicada", description: `Se ha ${action} ${label}.` });
+      setPulseBrandId(brandConfirmAction?.categoryId ?? null);
+      setTimeout(() => setPulseBrandId(null), 650);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message || "No se pudo actualizar la marca.", variant: "destructive" });
+    },
+  });
+
+  const toggleProviderServicesMutation = useMutation({
+    mutationFn: async (args: { providerId: number; isActive: boolean }) =>
+      patchWithAuth(`/api/admin/providers/${args.providerId}/services`, { isActive: args.isActive }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-service-brands"] });
+      // Refrescar catálogo público de inmediato (Explore / listados)
+      queryClient.invalidateQueries({ queryKey: ["/api/services"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/services/:id"] });
+      if (selectedBrandCategoryId != null) {
+        queryClient.invalidateQueries({
+          queryKey: ["admin-service-brand-providers", selectedBrandCategoryId, brandProviderSearch, brandProviderMinRating, brandProviderSort],
+        });
+      }
+      const label = providerConfirmAction?.name ? `"${providerConfirmAction.name}"` : "el proveedor";
+      const action = providerConfirmAction?.nextActive ? "activado" : "desactivado";
+      toast({ title: "Acción aplicada", description: `Se ha ${action} ${label}.` });
+      setPulseProviderId(providerConfirmAction?.providerId ?? null);
+      setTimeout(() => setPulseProviderId(null), 650);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message || "No se pudo actualizar el proveedor.", variant: "destructive" });
+    },
+  });
 
   type AdminVerifyingStatusItem = {
     userId: string;
@@ -726,11 +896,19 @@ export default function AdminPanel() {
     email?: string | null;
     avatar?: string | null;
     user_identification?: string | null;
+    professionalCredentialUrl?: string | null;
     identification_verified: "pending" | "verified" | "rejected";
     transacction_date: string | null;
     transacction_verified: "pending" | "verified" | "rejected";
     transacction_code?: string | null;
   };
+
+  const associateVerificationSlides = (assoc: AdminVerifyingStatusItem) =>
+    [
+      { id: "avatar", title: "Foto de perfil", src: assoc.avatar ?? null },
+      { id: "id", title: "Identificación", src: assoc.user_identification ?? null },
+      { id: "credential", title: "Documento profesional", src: assoc.professionalCredentialUrl ?? null },
+    ] as const;
 
   const { data: adminVerifyingStatusData, isLoading: adminVerifyingStatusLoading } = useQuery({
     queryKey: ["admin-verifying-status-pending"],
@@ -765,9 +943,11 @@ export default function AdminPanel() {
 
   const [assocImageDialog, setAssocImageDialog] = useState<{
     open: boolean;
-    title: string;
-    src: string | null;
-  }>({ open: false, title: "", src: null });
+    userId: string;
+    revieweeName: string;
+    slides: { id: string; title: string; src: string | null }[];
+    initialIndex: number;
+  }>({ open: false, userId: "", revieweeName: "", slides: [], initialIndex: 0 });
 
   const { data: adminBookingsData, isLoading: adminBookingsLoading } = useQuery({
     queryKey: ["admin-bookings"],
@@ -849,7 +1029,7 @@ export default function AdminPanel() {
             <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-mango-orange shrink-0" />
             <div className="min-w-0">
               <h1 className="text-lg sm:text-2xl font-bold truncate">Panel de Administración</h1>
-              <p className="text-gray-500 text-sm truncate">GenFeb S.A.S.</p>
+              <p className="text-gray-500 text-sm truncate">GenFeb</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
@@ -894,6 +1074,12 @@ export default function AdminPanel() {
                 <TabsTrigger value="users" className="shrink-0">Usuarios</TabsTrigger>
                 <TabsTrigger value="providers" className="shrink-0">Proveedores</TabsTrigger>
                 <TabsTrigger value="bookings" className="shrink-0">Reservas</TabsTrigger>
+                {fullAdmin && (
+                  <TabsTrigger value="services" className="gap-1.5 shrink-0">
+                    <Layers className="h-4 w-4 shrink-0" />
+                    Servicios
+                  </TabsTrigger>
+                )}
                 {fullAdmin && (
                   <TabsTrigger value="recargas" className="shrink-0">Recargas</TabsTrigger>
                 )}
@@ -954,7 +1140,7 @@ export default function AdminPanel() {
                               const identEnabled = assoc.identification_verified === "pending";
                               const txEnabled = assoc.transacction_verified === "pending";
                               return (
-                                <div key={assoc.userId} className="flex flex-col gap-3 p-4 border rounded-lg bg-white">
+                                <div key={assoc.userId} className="flex min-w-0 flex-col gap-3 rounded-lg border bg-white p-4">
                                   <div className="flex items-center justify-between gap-3">
                                     <div className="flex items-center gap-3 min-w-0">
                                       <Avatar>
@@ -968,14 +1154,15 @@ export default function AdminPanel() {
                                   </div>
 
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <div>
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div className="min-w-0 flex-1">
                                         <p className="font-medium">Verificación de identificación</p>
                                         <p className="text-xs text-gray-500 mt-1">
                                           Estado: {stateLabel(assoc.identification_verified)}
                                         </p>
                                       </div>
                                       <Badge
+                                        className="shrink-0"
                                         variant={
                                           assoc.identification_verified === "pending"
                                             ? "secondary"
@@ -988,17 +1175,20 @@ export default function AdminPanel() {
                                       </Badge>
                                     </div>
 
-                                    <div className="flex items-center justify-between gap-3">
-                                      <div className="flex items-center gap-2">
+                                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                      <div className="flex flex-wrap items-center gap-2">
                                         <Button
                                           variant="outline"
                                           size="icon"
+                                          className="shrink-0"
                                           disabled={!assoc.avatar}
                                           onClick={() =>
                                             setAssocImageDialog({
                                               open: true,
-                                              title: "Foto de perfil",
-                                              src: assoc.avatar ?? null,
+                                              userId: assoc.userId,
+                                              revieweeName: assoc.name?.trim() || "—",
+                                              initialIndex: 0,
+                                              slides: [...associateVerificationSlides(assoc)],
                                             })
                                           }
                                         >
@@ -1007,24 +1197,45 @@ export default function AdminPanel() {
                                         <Button
                                           variant="outline"
                                           size="icon"
+                                          className="shrink-0"
                                           disabled={!assoc.user_identification}
                                           onClick={() =>
                                             setAssocImageDialog({
                                               open: true,
-                                              title: "Imagen de identificación",
-                                              src: assoc.user_identification ?? null,
+                                              userId: assoc.userId,
+                                              revieweeName: assoc.name?.trim() || "—",
+                                              initialIndex: 1,
+                                              slides: [...associateVerificationSlides(assoc)],
                                             })
                                           }
                                         >
                                           <FileText className="h-4 w-4" />
                                         </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="shrink-0"
+                                          disabled={!assoc.professionalCredentialUrl}
+                                          onClick={() =>
+                                            setAssocImageDialog({
+                                              open: true,
+                                              userId: assoc.userId,
+                                              revieweeName: assoc.name?.trim() || "—",
+                                              initialIndex: 2,
+                                              slides: [...associateVerificationSlides(assoc)],
+                                            })
+                                          }
+                                          title="Ver documento profesional"
+                                        >
+                                          <Shield className="h-4 w-4" />
+                                        </Button>
                                       </div>
 
-                                      <div className="flex gap-2">
+                                      <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0 sm:gap-2">
                                         <Button
                                           size="sm"
                                           variant="outline"
-                                          className="text-green-600"
+                                          className="min-w-0 justify-center text-green-600"
                                           disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
                                           onClick={() =>
                                             updateVerifyingStatusMutation.mutate({
@@ -1034,13 +1245,13 @@ export default function AdminPanel() {
                                             })
                                           }
                                         >
-                                          <CheckCircle className="h-4 w-4 mr-1" />
-                                          Aprobar
+                                          <CheckCircle className="h-4 w-4 shrink-0 sm:mr-1" />
+                                          <span className="truncate">Aprobar</span>
                                         </Button>
                                         <Button
                                           size="sm"
                                           variant="outline"
-                                          className="text-red-600"
+                                          className="min-w-0 justify-center text-red-600"
                                           disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
                                           onClick={() =>
                                             updateVerifyingStatusMutation.mutate({
@@ -1050,18 +1261,18 @@ export default function AdminPanel() {
                                             })
                                           }
                                         >
-                                          <XCircle className="h-4 w-4 mr-1" />
-                                          Rechazar
+                                          <XCircle className="h-4 w-4 shrink-0 sm:mr-1" />
+                                          <span className="truncate">Rechazar</span>
                                         </Button>
                                       </div>
                                     </div>
                                   </div>
 
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <div>
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div className="min-w-0 flex-1">
                                         <p className="font-medium">Recarga de 15$</p>
-                                        <p className="text-xs text-gray-500 mt-1">
+                                        <p className="break-words text-xs text-gray-500 mt-1">
                                           Fecha:{" "}
                                           {assoc.transacction_date
                                             ? new Date(assoc.transacction_date).toLocaleDateString("es-EC")
@@ -1070,6 +1281,7 @@ export default function AdminPanel() {
                                         </p>
                                       </div>
                                       <Badge
+                                        className="shrink-0"
                                         variant={
                                           assoc.transacction_verified === "pending"
                                             ? "secondary"
@@ -1082,11 +1294,11 @@ export default function AdminPanel() {
                                       </Badge>
                                     </div>
 
-                                    <div className="flex justify-end gap-2">
+                                    <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-2">
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="text-green-600"
+                                        className="min-w-0 justify-center text-green-600"
                                         disabled={!txEnabled || updateVerifyingStatusMutation.isPending}
                                         onClick={() =>
                                           updateVerifyingStatusMutation.mutate({
@@ -1096,13 +1308,13 @@ export default function AdminPanel() {
                                           })
                                         }
                                       >
-                                        <CheckCircle className="h-4 w-4 mr-1" />
-                                        Aprobar
+                                        <CheckCircle className="h-4 w-4 shrink-0 sm:mr-1" />
+                                        <span className="truncate">Aprobar</span>
                                       </Button>
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="text-red-600"
+                                        className="min-w-0 justify-center text-red-600"
                                         disabled={!txEnabled || updateVerifyingStatusMutation.isPending}
                                         onClick={() =>
                                           updateVerifyingStatusMutation.mutate({
@@ -1112,8 +1324,8 @@ export default function AdminPanel() {
                                           })
                                         }
                                       >
-                                        <XCircle className="h-4 w-4 mr-1" />
-                                        Rechazar
+                                        <XCircle className="h-4 w-4 shrink-0 sm:mr-1" />
+                                        <span className="truncate">Rechazar</span>
                                       </Button>
                                     </div>
                                   </div>
@@ -1275,20 +1487,54 @@ export default function AdminPanel() {
           <TabsContent value="providers">
             <Card>
               <CardHeader>
-                <CardTitle>Proveedores</CardTitle>
-                <CardDescription>Asociados con servicios publicados</CardDescription>
+                <CardTitle>Servicios activos</CardTitle>
+                <CardDescription>Listado global de servicios activos y su usuario/proveedor</CardDescription>
               </CardHeader>
               <CardContent>
-                {adminProvidersLoading ? (
-                  <div className="py-10 text-center text-sm text-muted-foreground">Cargando proveedores…</div>
-                ) : providersWithServices.length === 0 ? (
-                  <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay asociados con servicios publicados.</div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                  <div className="sm:col-span-2">
+                    <Label>Buscar</Label>
+                    <Input
+                      placeholder="Servicio, nombre o correo…"
+                      value={activeServicesSearch}
+                      onChange={(e) => {
+                        setProvidersPage(1);
+                        setActiveServicesSearch(e.target.value);
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <Label>Marca</Label>
+                    <Select
+                      value={activeServicesBrandSlug || "all"}
+                      onValueChange={(v) => {
+                        setProvidersPage(1);
+                        setActiveServicesBrandSlug(v === "all" ? "" : v);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas</SelectItem>
+                        {DEFAULT_CATEGORIES.map((c) => (
+                          <SelectItem key={c.slug} value={c.slug}>
+                            {getCategoryDisplayName(c as any)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {adminActiveServicesLoading ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">Cargando servicios…</div>
+                ) : activeServicesRows.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay servicios activos.</div>
                 ) : (
                   <div className="space-y-4">
                     {(() => {
                       const pageSize = USERS_PAGE_SIZE;
-                      const providerList: AdminProviderWithServices[] =
-                        providersWithServices.length > 0 ? providersWithServices : (mockProviders as any);
+                      const providerList: AdminActiveServiceRow[] = activeServicesRows;
                       const totalPages = Math.max(1, Math.ceil(providerList.length / pageSize));
                       const safePage = Math.min(totalPages, Math.max(1, providersPage));
                       const start = (safePage - 1) * pageSize;
@@ -1299,29 +1545,22 @@ export default function AdminPanel() {
                         <>
                           <div className="space-y-4">
                             {paged.map((p) => (
-                              <div key={p.providerId} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border rounded-lg bg-white">
+                              <div key={p.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border rounded-lg bg-white">
                                 <div className="flex items-center gap-3 min-w-0">
                                   <Avatar>
-                                    <AvatarFallback>{p.name?.[0] ?? "P"}</AvatarFallback>
+                                    <AvatarFallback>{(p.userName || p.userEmail || "S")[0] ?? "S"}</AvatarFallback>
                                   </Avatar>
                                   <div className="min-w-0">
-                                    <p className="font-medium truncate">{p.name}</p>
-                                    <p className="text-sm text-gray-500 truncate">
-                                      {(p.profession || p.category || "Asociado")} · {p.serviceCount} servicio(s)
+                                    <p className="font-medium truncate">{p.title || "Servicio"}</p>
+                                    <p className="text-sm text-gray-500 truncate">{p.categoryDisplayName ?? p.categorySlug ?? "—"}</p>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {p.userName || "—"} · {p.userEmail || "—"}
                                     </p>
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-3 sm:gap-4 justify-between sm:justify-end">
-                                  <div className="flex items-center gap-1">
-                                    <Star className="h-4 w-4 text-yellow-500" />
-                                    <span className="text-sm font-medium">
-                                      {Number(p.rating ?? 5).toFixed(1)}
-                                    </span>
-                                    <span className="text-xs text-gray-500">({p.ratingCount ?? 0})</span>
-                                  </div>
-                                  <span className="text-sm text-gray-500">{p.bookingsCount} reservas</span>
-                                  <Badge variant={p.verified ? "default" : "secondary"}>
-                                    {p.verified ? "Verificado" : "No verificado"}
+                                  <Badge variant={p.providerVerified ? "default" : "secondary"}>
+                                    {p.providerVerified ? "Proveedor verificado" : "Proveedor no verificado"}
                                   </Badge>
                                   <Button size="sm" variant="outline" asChild>
                                     <Link href={`/admin/users/${p.userId}/edit`}>Ver perfil</Link>
@@ -1363,6 +1602,365 @@ export default function AdminPanel() {
                     })()}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="services">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card className="min-w-0">
+                <CardHeader>
+                  <CardTitle>Servicios (marcas)</CardTitle>
+                  <CardDescription>Activa o desactiva marcas como Man Go o Fix Go. Solo admin.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {serviceBrandsLoading ? (
+                    <div className="py-10 text-center text-sm text-muted-foreground">Cargando marcas…</div>
+                  ) : serviceBrands.length === 0 ? (
+                    <div className="py-10 text-center text-sm text-muted-foreground">No hay marcas disponibles.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {serviceBrands.map((b) => {
+                        // “Activa/Inactiva” debe reflejar si la marca está habilitada en la app (chips Fix/Man/Pro).
+                        // Pack/Shop/Car se muestran aquí aunque estén ocultas en UI pública.
+                        const isBrandActive = !b.uiHidden;
+                        const selected = selectedBrandCategoryId === b.categoryId;
+                        const isPulsing = pulseBrandId === b.categoryId;
+                        const isBusy = toggleBrandMutation.isPending && brandConfirmAction?.categoryId === b.categoryId;
+                        return (
+                          <motion.div
+                            key={b.categoryId}
+                            layout
+                            initial={false}
+                            animate={
+                              isPulsing
+                                ? { scale: 1.01, boxShadow: "0 0 0 6px rgba(249,115,22,0.12)" }
+                                : { scale: 1, boxShadow: "0 0 0 0px rgba(249,115,22,0)" }
+                            }
+                            transition={{ type: "spring", stiffness: 280, damping: 22 }}
+                            className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 border rounded-lg bg-white transition-colors ${
+                              selected ? "border-primary/40 bg-primary/5" : ""
+                            } ${isBusy ? "opacity-80" : ""}`}
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-semibold truncate">{b.displayName || b.name}</p>
+                                <Badge variant={isBrandActive ? "default" : "secondary"}>
+                                  {isBrandActive ? "Activa" : "Inactiva"}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                Servicios: {b.activeServices} activos · {b.inactiveServices} inactivos · {b.totalServices} total
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2 sm:justify-end">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedBrandCategoryId(b.categoryId);
+                                }}
+                              >
+                                Ver usuarios
+                              </Button>
+                              {isBrandActive ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-red-600"
+                                  disabled={toggleBrandMutation.isPending}
+                                  onClick={() => {
+                                    setBrandConfirmAction({ categoryId: b.categoryId, brandName: b.displayName || b.name, nextActive: false });
+                                    setBrandConfirmOpen(true);
+                                  }}
+                                >
+                                  {isBusy ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                      Desactivando…
+                                    </>
+                                  ) : (
+                                    "Desactivar servicio"
+                                  )}
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-green-600"
+                                  disabled={toggleBrandMutation.isPending}
+                                  onClick={() => {
+                                    setBrandConfirmAction({ categoryId: b.categoryId, brandName: b.displayName || b.name, nextActive: true });
+                                    setBrandConfirmOpen(true);
+                                  }}
+                                >
+                                  {isBusy ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                      Activando…
+                                    </>
+                                  ) : (
+                                    "Activar servicio"
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="min-w-0">
+                <CardHeader>
+                  <CardTitle>
+                    {selectedBrand ? `Usuarios de ${selectedBrand.displayName || selectedBrand.name}` : "Usuarios por marca"}
+                  </CardTitle>
+                  <CardDescription>
+                    {selectedBrandCategoryId == null
+                      ? "Selecciona una marca para ver sus usuarios."
+                      : "Filtra por nombre/correo y estrellas. El botón Activar/Desactivar aplica al servicio del proveedor (no a su cuenta)."}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {selectedBrandCategoryId != null && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="sm:col-span-2">
+                        <Label>Buscar</Label>
+                        <Input
+                          placeholder="Nombre o correo…"
+                          value={brandProviderSearch}
+                          onChange={(e) => setBrandProviderSearch(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Ordenar</Label>
+                        <Select value={brandProviderSort} onValueChange={(v) => setBrandProviderSort(v as any)}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="rating_desc">Estrellas ↓</SelectItem>
+                            <SelectItem value="rating_asc">Estrellas ↑</SelectItem>
+                            <SelectItem value="name_asc">Nombre A–Z</SelectItem>
+                            <SelectItem value="active_desc">Activos primero</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="sm:col-span-3">
+                        <Label>Mínimo de estrellas: {brandProviderMinRating}</Label>
+                        <Slider
+                          value={[brandProviderMinRating]}
+                          min={0}
+                          max={5}
+                          step={1}
+                          onValueChange={(v) => setBrandProviderMinRating(v[0] ?? 0)}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedBrandCategoryId == null ? (
+                    <div className="py-10 text-center text-sm text-muted-foreground">Selecciona una marca para continuar.</div>
+                  ) : brandProvidersLoading ? (
+                    <div className="py-10 text-center text-sm text-muted-foreground">Cargando usuarios…</div>
+                  ) : brandProviders.length === 0 ? (
+                    <div className="py-10 text-center text-sm text-muted-foreground">No hay usuarios con esos filtros.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {brandProviders.map((p) => {
+                        const isActive = p.activeServices > 0;
+                        const isPulsing = pulseProviderId === p.providerId;
+                        const isBusy =
+                          toggleProviderServicesMutation.isPending && providerConfirmAction?.providerId === p.providerId;
+                        return (
+                          <motion.div
+                            key={p.providerId}
+                            layout
+                            initial={false}
+                            animate={
+                              isPulsing
+                                ? { scale: 1.01, boxShadow: "0 0 0 6px rgba(249,115,22,0.12)" }
+                                : { scale: 1, boxShadow: "0 0 0 0px rgba(249,115,22,0)" }
+                            }
+                            transition={{ type: "spring", stiffness: 280, damping: 22 }}
+                            className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 border rounded-lg bg-white ${
+                              isBusy ? "opacity-80" : ""
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="text-xs">{p.name?.[0] ?? "U"}</AvatarFallback>
+                                </Avatar>
+                                <div className="min-w-0">
+                                  <p className="font-medium truncate">{p.name}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{p.email ?? "—"}</p>
+                                </div>
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <div className="flex items-center gap-1">
+                                  <Star className="h-4 w-4 text-yellow-500" />
+                                  <span className="text-sm font-medium">{Number(p.rating ?? 5).toFixed(1)}</span>
+                                  <span className="text-xs text-muted-foreground">({p.ratingCount ?? 0})</span>
+                                </div>
+                                <Badge variant={p.verified ? "default" : "secondary"}>
+                                  {p.verified ? "Verificado" : "No verificado"}
+                                </Badge>
+                                <Badge variant={isActive ? "default" : "secondary"}>
+                                  {isActive ? "Activo" : "Inactivo"}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {p.activeServices} activos · {p.inactiveServices} inactivos
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2 sm:justify-end">
+                              {isActive ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-red-600"
+                                  disabled={toggleProviderServicesMutation.isPending}
+                                  onClick={() => {
+                                    setProviderConfirmAction({ providerId: p.providerId, name: p.name, nextActive: false });
+                                    setProviderConfirmOpen(true);
+                                  }}
+                                >
+                                  {isBusy ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                      Desactivando…
+                                    </>
+                                  ) : (
+                                    "Desactivar servicio"
+                                  )}
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-green-600"
+                                  disabled={toggleProviderServicesMutation.isPending}
+                                  onClick={() => {
+                                    setProviderConfirmAction({ providerId: p.providerId, name: p.name, nextActive: true });
+                                    setProviderConfirmOpen(true);
+                                  }}
+                                >
+                                  {isBusy ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                      Activando…
+                                    </>
+                                  ) : (
+                                    "Activar servicio"
+                                  )}
+                                </Button>
+                              )}
+                              <Button size="sm" variant="outline" asChild>
+                                <Link href={`/admin/users/${p.userId}/edit`}>Ver perfil</Link>
+                              </Button>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="min-w-0">
+              <CardHeader>
+                <CardTitle>Visibilidad por rol</CardTitle>
+                <CardDescription>
+                  Oculta marcas activas para un rol específico (no afecta a <strong>admin</strong>). Ejemplo: que{" "}
+                  <strong>Soporte TI</strong> no vea <strong>Pack Go / Shop Go / Car Go</strong>.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                  <div className="md:col-span-1">
+                    <Label>Rol</Label>
+                    <Select value={roleHideRole} onValueChange={(v) => setRoleHideRole(v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(roles as any[])
+                          .filter((r: any) => {
+                            const code = String(r?.code ?? "");
+                            if (!code) return false;
+                            if (code === "admin") return false;
+                            if (code === "_seed") return false;
+                            return true;
+                          })
+                          .map((r: any) => (
+                            <SelectItem key={String(r.code)} value={String(r.code)}>
+                              {String(r.name ?? r.code)}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="md:col-span-2 flex flex-wrap gap-2 justify-start md:justify-end">
+                    <Button
+                      type="button"
+                      className="bg-primary hover:bg-primary/90"
+                      disabled={patchRoleVisibilityMutation.isPending}
+                      onClick={() => {
+                        setRoleHidePending({ role: roleHideRole, hiddenSlugs: roleHideSlugsDraft });
+                        setRoleHideConfirmOpen(true);
+                      }}
+                    >
+                      {patchRoleVisibilityMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Guardando…
+                        </>
+                      ) : (
+                        "Guardar"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Marca lo que quieres ocultar para el rol seleccionado. Si desmarcas todo, ese rol vuelve a ver todas las marcas permitidas globalmente.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {DEFAULT_CATEGORIES.map((c) => {
+                      const checked = roleHideSlugsDraft.includes(c.slug);
+                      const label = getCategoryDisplayName(c as any);
+                      return (
+                        <label key={c.slug} className="flex items-start gap-3 rounded-md border border-border/60 bg-card px-3 py-2">
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 accent-primary"
+                            checked={checked}
+                            onChange={(e) => {
+                              const on = e.target.checked;
+                              setRoleHideSlugsDraft((prev) => {
+                                const set = new Set(prev);
+                                if (on) set.add(c.slug);
+                                else set.delete(c.slug);
+                                return Array.from(set);
+                              });
+                            }}
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate">{label}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">slug: {c.slug}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -2307,32 +2905,15 @@ export default function AdminPanel() {
           </TabsContent>
         </Tabs>
 
-        <Dialog
+        <AdminVerificationDocumentDialog
+          key={assocImageDialog.open ? assocImageDialog.userId : "closed"}
           open={assocImageDialog.open}
           onOpenChange={(o) => setAssocImageDialog((s) => ({ ...s, open: o }))}
-        >
-          <DialogContent className="sm:max-w-2xl border-border bg-card">
-            <DialogHeader>
-              <DialogTitle>{assocImageDialog.title}</DialogTitle>
-            </DialogHeader>
-            {assocImageDialog.src ? (
-              <div className="w-full">
-                <img
-                  src={assocImageDialog.src}
-                  alt={assocImageDialog.title}
-                  className="w-full max-h-[70vh] object-contain rounded-md border border-border bg-background"
-                />
-              </div>
-            ) : (
-              <div className="py-6 text-center text-sm text-muted-foreground">No hay imagen disponible.</div>
-            )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setAssocImageDialog((s) => ({ ...s, open: false }))}>
-                Cerrar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          userId={assocImageDialog.userId}
+          revieweeName={assocImageDialog.revieweeName}
+          slides={assocImageDialog.slides}
+          initialIndex={assocImageDialog.initialIndex}
+        />
 
         <Dialog open={commissionEditOpen} onOpenChange={setCommissionEditOpen}>
           <DialogContent className="sm:max-w-md border-border bg-card text-foreground">
@@ -2384,6 +2965,152 @@ export default function AdminPanel() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Confirmación: Activar/Desactivar marca */}
+        <AlertDialog
+          open={brandConfirmOpen}
+          onOpenChange={(o) => {
+            setBrandConfirmOpen(o);
+            if (!o) setBrandConfirmAction(null);
+          }}
+        >
+          <AlertDialogContent className="border-border bg-card text-foreground">
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Estás seguro de esta acción?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {brandConfirmAction ? (
+                  <>
+                    Vas a <strong>{brandConfirmAction.nextActive ? "activar" : "desactivar"}</strong> la marca{" "}
+                    <strong>{brandConfirmAction.brandName}</strong>. Esto afectará qué marcas aparecen como activas en la app.
+                  </>
+                ) : (
+                  "Confirma la acción para continuar."
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="border-border">Cancelar</AlertDialogCancel>
+              <Button
+                variant="default"
+                className="bg-primary hover:bg-primary/90"
+                disabled={!brandConfirmAction || toggleBrandMutation.isPending}
+                onClick={() => {
+                  if (!brandConfirmAction) return;
+                  setBrandConfirmOpen(false);
+                  toggleBrandMutation.mutate({ categoryId: brandConfirmAction.categoryId, isActive: brandConfirmAction.nextActive });
+                }}
+              >
+                {toggleBrandMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Aplicando…
+                  </>
+                ) : (
+                  "Confirmar"
+                )}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Confirmación: Activar/Desactivar proveedor */}
+        <AlertDialog
+          open={providerConfirmOpen}
+          onOpenChange={(o) => {
+            setProviderConfirmOpen(o);
+            if (!o) setProviderConfirmAction(null);
+          }}
+        >
+          <AlertDialogContent className="border-border bg-card text-foreground">
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Estás seguro de esta acción?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {providerConfirmAction ? (
+                  <>
+                    Vas a <strong>{providerConfirmAction.nextActive ? "activar" : "desactivar"}</strong> al proveedor{" "}
+                    <strong>{providerConfirmAction.name}</strong>. Esto activará/desactivará sus servicios.
+                  </>
+                ) : (
+                  "Confirma la acción para continuar."
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="border-border">Cancelar</AlertDialogCancel>
+              <Button
+                variant="default"
+                className="bg-primary hover:bg-primary/90"
+                disabled={!providerConfirmAction || toggleProviderServicesMutation.isPending}
+                onClick={() => {
+                  if (!providerConfirmAction) return;
+                  setProviderConfirmOpen(false);
+                  toggleProviderServicesMutation.mutate({
+                    providerId: providerConfirmAction.providerId,
+                    isActive: providerConfirmAction.nextActive,
+                  });
+                }}
+              >
+                {toggleProviderServicesMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Aplicando…
+                  </>
+                ) : (
+                  "Confirmar"
+                )}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Confirmación: Guardar visibilidad por rol */}
+        <AlertDialog
+          open={roleHideConfirmOpen}
+          onOpenChange={(o) => {
+            setRoleHideConfirmOpen(o);
+            if (!o) setRoleHidePending(null);
+          }}
+        >
+          <AlertDialogContent className="border-border bg-card text-foreground">
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Confirmas estos cambios?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {roleHidePending ? (
+                  <>
+                    Se actualizará la visibilidad de marcas para el rol <strong>{roleHidePending.role}</strong>.
+                    <br />
+                    Marcas ocultas:{" "}
+                    <strong>{roleHidePending.hiddenSlugs.length > 0 ? roleHidePending.hiddenSlugs.join(", ") : "ninguna"}</strong>.
+                  </>
+                ) : (
+                  "Confirma la acción para continuar."
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="border-border">Cancelar</AlertDialogCancel>
+              <Button
+                variant="default"
+                className="bg-primary hover:bg-primary/90"
+                disabled={!roleHidePending || patchRoleVisibilityMutation.isPending}
+                onClick={() => {
+                  if (!roleHidePending) return;
+                  setRoleHideConfirmOpen(false);
+                  patchRoleVisibilityMutation.mutate(roleHidePending);
+                }}
+              >
+                {patchRoleVisibilityMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Guardando…
+                  </>
+                ) : (
+                  "Confirmar"
+                )}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <AlertDialog
           open={commissionConfirmOpen}

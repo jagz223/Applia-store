@@ -184,7 +184,7 @@ export function PaymentVoucher({ amount = 0, serviceName = "Servicio", onSuccess
               </p>
               <p className="text-xl font-mono tracking-wider">{selectedBankData.account}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Titular: GenFeb S.A.S. | RUC: 0999999999001
+                Titular: GenFeb | RUC: 0999999999001
               </p>
             </div>
           )}

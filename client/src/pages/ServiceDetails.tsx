@@ -1,7 +1,25 @@
 import { useRoute, Link, useLocation } from "wouter";
 import { useService, useCreateBooking, useCurrentProvider, useBookings, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
-import { Loader2, Star, ShieldCheck, Calendar, Clock, ArrowLeft, MessageSquare, Pencil, User, Wallet, Banknote } from "lucide-react";
+import {
+  Loader2,
+  Star,
+  ShieldCheck,
+  Calendar,
+  Clock,
+  ArrowLeft,
+  MessageSquare,
+  Pencil,
+  Banknote,
+  Cog,
+  Lightbulb,
+  LineChart,
+  Wrench,
+  Sparkles,
+  Target,
+  Award,
+  Check,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -15,11 +33,9 @@ import {
 } from "@/components/ui/dialog";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { useState } from "react";
-import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
 import { isBeforeToday } from "@/lib/date-utils";
 import { useToast } from "@/hooks/use-toast";
-import { api } from "@shared/routes";
 import { getCategoryDisplayName } from "@shared/default-categories";
 import { useSocketBookings } from "@/hooks/use-socket";
 import {
@@ -34,6 +50,23 @@ import {
 } from "@/components/ui/alert-dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
+
+const SKILL_ICONS = [Cog, Lightbulb, LineChart, Wrench, Sparkles, Target, Award] as const;
+
+/** Paleta alineada al diseño de referencia (crema, dorado/naranja, verde éxito). */
+const cream = {
+  page: "#FDFBF7",
+  box: "#F2F2F2",
+};
+const gold = {
+  accent: "#D48806",
+  darkGoldenrod: "#B8860B",
+  ctaFrom: "#F39C12",
+  ctaTo: "#E67E22",
+};
+const success = "#27AE60";
 
 export default function ServiceDetails() {
   const [, params] = useRoute("/service/:id");
@@ -76,8 +109,8 @@ export default function ServiceDetails() {
     
     if (walletLoading) {
       toast({
-        title: "Validando saldo",
-        description: "Estamos cargando tu saldo actual, intenta de nuevo en un momento.",
+        title: "Validando Saldo Genfeb",
+        description: "Estamos cargando tu Saldo Genfeb, intenta de nuevo en un momento.",
       });
       return;
     }
@@ -127,19 +160,69 @@ export default function ServiceDetails() {
     );
   }
 
+  const providerProfile = service.provider as {
+    id?: number;
+    profession?: string;
+    yearsExperience?: number;
+    bio?: string;
+    skills?: string[] | null;
+    isVerified?: boolean;
+    rating?: string | number | null;
+    reviewCount?: number | null;
+    user?: {
+      firstName?: string;
+      lastName?: string;
+      name?: string;
+      rating?: number;
+      ratingCount?: number;
+      profileImageUrl?: string | null;
+    };
+  };
+
+  const avatarUrl = getProviderUserAvatarUrl(providerProfile);
+  const ratingNum = (() => {
+    const r = providerProfile?.rating;
+    if (r != null && String(r).trim() !== "") {
+      const n = Number(r);
+      if (!Number.isNaN(n)) return n;
+    }
+    const uR = Number(providerProfile?.user?.rating);
+    return Number.isFinite(uR) ? uR : 0;
+  })();
+  const reviewTotal = (() => {
+    const rc = providerProfile?.reviewCount;
+    if (rc != null && Number(rc) >= 0) return Number(rc);
+    return Number(providerProfile?.user?.ratingCount ?? 0);
+  })();
+  const displayName =
+    [providerProfile?.user?.firstName, providerProfile?.user?.lastName].filter(Boolean).join(" ").trim() ||
+    providerProfile?.user?.name ||
+    "Asociado";
+  const initials =
+    displayName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase())
+      .join("") || "?";
+
   // Prevent booking own service
   const isOwnService = myProviderProfile?.id === service.providerId;
   const hasBookingForThisService = (myBookings as { serviceId: number }[] | undefined)?.some((b) => b.serviceId === id) ?? false;
   const showChatButton = isAuthenticated && (isOwnService || hasBookingForThisService);
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
+    <div
+      className="min-h-screen overflow-x-hidden dark:bg-background"
+      style={{ backgroundColor: cream.page }}
+    >
+    <div className="container mx-auto max-w-6xl px-4 py-8">
       <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Saldo insuficiente</AlertDialogTitle>
+            <AlertDialogTitle>Saldo Genfeb insuficiente</AlertDialogTitle>
             <AlertDialogDescription>
-              No tienes saldo suficiente en tu wallet para pedir este servicio. Recarga tu saldo para continuar.
+              No tienes suficiente Saldo Genfeb para pedir este servicio. Añade saldo para continuar.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -151,96 +234,219 @@ export default function ServiceDetails() {
                 setLocation("/recharge");
               }}
             >
-              Recargar saldo
+              Añadir saldo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <Link href="/explore" className="inline-flex items-center text-muted-foreground hover:text-primary mb-6 transition-colors">
+      <Link
+        href="/explore"
+        className="mb-6 inline-flex items-center text-neutral-600 transition-colors hover:text-[#D48806] dark:text-muted-foreground dark:hover:text-primary"
+      >
         <ArrowLeft className="mr-2 h-4 w-4" /> Volver a los servicios
       </Link>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* LEFT COLUMN: Service Info */}
-        <div className="lg:col-span-2 space-y-8">
-          {/* Nota: no mostramos foto del servicio. Solo mostramos foto del profesional en el círculo. */}
-
-          <div>
-            <div className="flex items-center gap-3 mb-4">
-              <Badge className="bg-primary/10 text-primary hover:bg-primary/20">{getCategoryDisplayName(service.category)}</Badge>
-              <div className="flex items-center text-amber-500 font-bold text-sm">
-                <Star className="h-4 w-4 fill-current mr-1" />
-                {Number((service.provider?.user as { rating?: number } | undefined)?.rating ?? 5).toFixed(1)} (
-                {Number((service.provider?.user as { ratingCount?: number } | undefined)?.ratingCount ?? 0)} reseñas)
-                <span className="font-normal text-xs text-muted-foreground ml-2">
-                  · {completedCountLoading ? "..." : `${completedCount ?? 0}`} servicios completados
-                </span>
+      {/*
+        Grid estable: minmax(0,1fr) evita que la columna de texto colapse a 0 y rompa palabras.
+        Dos columnas solo desde lg (≥1024px) para no forzar 1fr+360px en ventanas estrechas.
+      */}
+      <div className="mx-auto grid w-full max-w-full grid-cols-1 gap-x-8 gap-y-10 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:items-start lg:gap-x-10">
+        {/* COLUMNA IZQUIERDA: perfil + contenido */}
+        <div className="min-w-0 max-w-full space-y-10 break-words">
+          {/* Hero perfil (estilo referencia) */}
+          <section className="relative isolate rounded-2xl border border-neutral-200/90 bg-white p-6 shadow-sm md:p-8 dark:border-border dark:bg-card/80">
+            <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+              <div className="relative shrink-0">
+                <Avatar
+                  className="h-32 w-32 border-2 border-white shadow-md ring-4 ring-[#C9A227]/90 md:h-40 md:w-40"
+                  style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}
+                >
+                  <AvatarImage src={avatarUrl ?? undefined} alt="" className="object-cover" />
+                  <AvatarFallback className="bg-muted text-3xl font-semibold text-muted-foreground md:text-4xl">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
               </div>
-            </div>
-            
-            <h1 className="text-4xl font-display font-bold mb-4">{service.title}</h1>
-            
-            <div className="prose prose-lg max-w-none text-muted-foreground">
-              <p>{service.description}</p>
-            </div>
-          </div>
 
-          <div className="border-t border-border/50 pt-8">
-            <h3 className="text-xl font-bold font-display mb-6">Acerca del asociado</h3>
-            <div className="flex items-start gap-4">
-              <div className="h-16 w-16 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-2xl overflow-hidden">
-                {service.provider?.user?.profileImageUrl ? (
-                  <img
-                    src={service.provider?.user?.profileImageUrl}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <User className="w-7 h-7" />
-                )}
-              </div>
-              <div>
-                <h4 className="font-bold text-lg">{service.provider?.user?.firstName ?? ""} {service.provider?.user?.lastName ?? ""}</h4>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <span>{service.provider.profession}</span>
-                  <span>•</span>
-                  <span>{service.provider.yearsExperience} años de experiencia</span>
+              <div className="min-w-0 flex-1 text-center sm:text-left">
+                <h1 className="font-display text-2xl font-bold tracking-tight text-neutral-950 md:text-3xl dark:text-foreground">
+                  {displayName}
+                </h1>
+                {providerProfile?.isVerified ? (
+                  <div
+                    className="mt-3 inline-flex max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold text-white shadow-sm sm:gap-2 sm:px-3.5 sm:py-1.5 sm:text-sm"
+                    style={{ backgroundColor: gold.darkGoldenrod }}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-white sm:h-4 sm:w-4" aria-hidden />
+                    <span className="leading-tight">Verificado por GenFeb</span>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex flex-col items-center gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:justify-start sm:gap-x-6 sm:gap-y-2">
+                  <div className="flex items-center gap-1.5" style={{ color: gold.accent }}>
+                    <Star className="h-5 w-5 fill-current" aria-hidden />
+                    {reviewTotal === 0 && ratingNum === 0 ? (
+                      <span className="font-medium text-neutral-600 dark:text-muted-foreground">Sin reseñas aún</span>
+                    ) : (
+                      <>
+                        <span className="text-lg font-bold tabular-nums text-neutral-950 dark:text-foreground">
+                          {ratingNum.toFixed(1)}
+                        </span>
+                        <span className="text-neutral-600 dark:text-muted-foreground">
+                          ({reviewTotal === 1 ? "1 reseña" : `${reviewTotal} reseñas`})
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-neutral-600 dark:text-muted-foreground">
+                    {completedCountLoading ? (
+                      "…"
+                    ) : (
+                      <>
+                        <span className="font-semibold tabular-nums text-neutral-950 dark:text-foreground">
+                          {completedCount ?? 0}
+                        </span>{" "}
+                        servicios completados
+                      </>
+                    )}
+                  </p>
                 </div>
-                <p className="text-muted-foreground">{service.provider.bio}</p>
+
+                <p className="mt-3 text-sm text-neutral-600 dark:text-muted-foreground">
+                  <span className="font-medium text-neutral-950 dark:text-foreground">{providerProfile?.profession}</span>
+                  {providerProfile?.yearsExperience != null ? (
+                    <>
+                      <span className="mx-2 text-border">·</span>
+                      {providerProfile.yearsExperience} años de experiencia
+                    </>
+                  ) : null}
+                </p>
               </div>
             </div>
-          </div>
+          </section>
+
+          {/* Servicio publicado */}
+          <section className="space-y-3">
+            <Badge
+              variant="outline"
+              className="border-[#D48806]/35 bg-[#D48806]/10 text-[#B45309] dark:border-primary/25 dark:bg-primary/10 dark:text-primary"
+            >
+              {getCategoryDisplayName(service.category)}
+            </Badge>
+            <h2 className="font-display text-2xl font-bold text-neutral-950 md:text-3xl dark:text-foreground">{service.title}</h2>
+            <p className="text-base leading-relaxed text-neutral-700 dark:text-muted-foreground">{service.description}</p>
+          </section>
+
+          {/* Biografía */}
+          {providerProfile?.bio ? (
+            <section className="space-y-3">
+              <h3 className="text-lg font-bold text-neutral-950 dark:text-foreground">Biografía y enfoque profesional</h3>
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-neutral-700 dark:text-muted-foreground">
+                {providerProfile.bio}
+              </p>
+            </section>
+          ) : null}
+
+          {/* Competencias (datos estructurados; sin campo extra en BD) */}
+          <section className="space-y-3">
+            <h3 className="text-lg font-bold text-neutral-950 dark:text-foreground">Competencias principales</h3>
+            <ul
+              className="list-disc space-y-2 pl-5 text-[15px] text-neutral-700 marker:text-[#D48806] dark:text-muted-foreground dark:marker:text-amber-600"
+            >
+              <li>
+                <span className="font-medium text-neutral-950 dark:text-foreground">Categoría:</span>{" "}
+                {getCategoryDisplayName(service.category)}
+              </li>
+              <li>
+                <span className="font-medium text-neutral-950 dark:text-foreground">Especialidad:</span>{" "}
+                {providerProfile?.profession ?? "—"}
+              </li>
+              {providerProfile?.yearsExperience != null ? (
+                <li>
+                  <span className="font-medium text-neutral-950 dark:text-foreground">Experiencia:</span>{" "}
+                  {providerProfile.yearsExperience} años
+                </li>
+              ) : null}
+            </ul>
+          </section>
+
+          {/* Habilidades con iconos */}
+          {Array.isArray(providerProfile?.skills) && providerProfile.skills.length > 0 ? (
+            <section className="space-y-3">
+              <h3 className="text-lg font-bold text-neutral-950 dark:text-foreground">Habilidades clave</h3>
+              <div className="flex flex-wrap gap-2.5">
+                {providerProfile.skills.map((skill, index) => {
+                  const Icon = SKILL_ICONS[index % SKILL_ICONS.length];
+                  return (
+                    <div
+                      key={`${skill}-${index}`}
+                      className="inline-flex items-center gap-2.5 rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm font-medium text-neutral-900 shadow-sm dark:border-border dark:bg-muted/20 dark:text-foreground"
+                    >
+                      <Icon
+                        className="h-4 w-4 shrink-0 dark:text-amber-500"
+                        style={{ color: gold.darkGoldenrod }}
+                        aria-hidden
+                      />
+                      {skill}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
         </div>
 
-        {/* RIGHT COLUMN: Booking Card */}
-        <div className="lg:col-span-1">
-          <div className="sticky top-24 rounded-2xl border border-border bg-white shadow-xl p-6 space-y-6">
-            <div className="flex items-end justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Price</p>
-                <p className="text-3xl font-bold text-primary">${Number(service.price).toFixed(0)}</p>
-              </div>
-              {service.provider.isVerified && (
-                <div className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded-full text-xs font-bold">
-                  <ShieldCheck className="h-3 w-3" /> Verificado
-                </div>
-              )}
+        {/* COLUMNA DERECHA: tarjeta de servicio (ancho fijado por la grid, sin solapar la izquierda) */}
+        <aside className="relative z-0 min-w-0 w-full max-w-full lg:sticky lg:top-24 lg:self-start">
+          <div className="space-y-6 rounded-2xl border border-neutral-200/90 bg-white p-6 shadow-[0_8px_30px_rgba(0,0,0,0.06)] dark:border-border dark:bg-card">
+            <div>
+              <p className="text-sm font-medium text-neutral-600 dark:text-muted-foreground">Precio</p>
+              <p
+                className="mt-0.5 text-4xl font-bold tabular-nums dark:text-amber-500"
+                style={{ color: gold.accent }}
+              >
+                ${Number(service.price).toFixed(0)}
+              </p>
             </div>
 
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
-                <Clock className="h-5 w-5 text-muted-foreground" />
+            <div
+              className="rounded-xl border border-neutral-200/90 p-4 dark:border-border dark:bg-muted/10"
+              style={{ backgroundColor: cream.box }}
+            >
+              <div className="flex gap-3">
+                <Clock className="mt-0.5 h-5 w-5 shrink-0 text-neutral-500 dark:text-muted-foreground" />
                 <div>
-                  <p className="text-xs font-bold text-foreground">Tiempo de respuesta</p>
-                  <p className="text-xs text-muted-foreground">Suele responder en 1 hora</p>
+                  <p className="text-sm font-semibold text-neutral-950 dark:text-foreground">Tiempo de respuesta</p>
+                  <p className="text-sm text-neutral-600 dark:text-muted-foreground">Suele responder en 1 hora</p>
                 </div>
               </div>
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-dashed border-neutral-200 bg-white px-4 py-3 dark:border-border dark:bg-muted/5">
+              <p className="text-sm font-semibold text-neutral-950 dark:text-foreground">Incluye</p>
+              <ul className="space-y-2 text-sm text-neutral-600 dark:text-muted-foreground">
+                <li className="flex gap-2">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0" style={{ color: success }} aria-hidden />
+                  Reserva con fecha acordada en la app
+                </li>
+                <li className="flex gap-2">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0" style={{ color: success }} aria-hidden />
+                  Chat con el asociado tras la reserva
+                </li>
+                <li className="flex gap-2">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0" style={{ color: success }} aria-hidden />
+                  Pago con Saldo Genfeb o en efectivo al finalizar
+                </li>
+              </ul>
             </div>
 
             {showChatButton && (
-              <Button className="w-full" variant="outline" asChild>
+              <Button
+                variant="outline"
+                className="h-11 w-full rounded-lg border-[#E0E0E0] bg-white font-medium text-neutral-900 shadow-sm hover:bg-[#F9F9F9] hover:text-neutral-950 dark:border-neutral-600 dark:bg-card dark:text-foreground dark:hover:bg-muted/50 [&_svg]:text-neutral-500"
+                asChild
+              >
                 <Link
                   href={
                     (service as { provider?: { userId?: string } }).provider?.userId
@@ -255,7 +461,11 @@ export default function ServiceDetails() {
               </Button>
             )}
             {isOwnService && (
-              <Button className="w-full" variant="outline" asChild>
+              <Button
+                variant="outline"
+                className="h-11 w-full rounded-lg border-[#E0E0E0] bg-white font-medium text-neutral-900 shadow-sm hover:bg-[#F9F9F9] hover:text-neutral-950 dark:border-neutral-600 dark:bg-card dark:text-foreground dark:hover:bg-muted/50 [&_svg]:text-neutral-500"
+                asChild
+              >
                 <Link href={`/edit-service/${id}`} className="gap-2">
                   <Pencil className="h-4 w-4" />
                   Editar servicio
@@ -264,11 +474,24 @@ export default function ServiceDetails() {
             )}
             {isAuthenticated ? (
                isOwnService ? (
-                 <Button className="w-full" variant="secondary" disabled>No puedes reservar tu propio servicio</Button>
+                 <Button
+                   className="h-auto min-h-12 w-full rounded-lg border-0 px-3 py-3 text-center text-sm font-semibold leading-snug text-white shadow-sm whitespace-normal [text-wrap:balance] disabled:opacity-90 sm:px-4 sm:text-base dark:bg-teal-900"
+                   variant="ghost"
+                   disabled
+                   style={{ backgroundColor: "#33B8A6" }}
+                 >
+                   No puedes reservar tu propio servicio
+                 </Button>
                ) : (
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button className="w-full h-12 text-lg shadow-lg shadow-primary/20 hover:scale-105 transition-transform">
+                    <Button
+                      variant="ghost"
+                      className="h-12 w-full rounded-lg border-0 text-lg font-semibold text-white shadow-lg shadow-orange-500/25 transition-transform hover:scale-[1.01] hover:opacity-[0.98] hover:shadow-xl hover:shadow-orange-500/30"
+                      style={{
+                        backgroundImage: `linear-gradient(to right, ${gold.ctaFrom}, ${gold.ctaTo})`,
+                      }}
+                    >
                       Reservar ahora
                     </Button>
                   </DialogTrigger>
@@ -303,8 +526,8 @@ export default function ServiceDetails() {
                               htmlFor="wallet"
                               className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all"
                             >
-                              <Wallet className="mb-2 h-6 w-6" />
-                              <span className="text-xs font-medium">Billetera</span>
+                              <Banknote className="mb-2 h-6 w-6" />
+                              <span className="text-xs font-medium">Saldo Genfeb</span>
                               <span className="text-[10px] text-muted-foreground mt-1">${walletBalance.toFixed(2)}</span>
                             </Label>
                           </div>
@@ -321,7 +544,7 @@ export default function ServiceDetails() {
                           </div>
                         </RadioGroup>
                         {paymentMethod === "wallet" && walletBalance < Number(service.price) && (
-                          <p className="text-[11px] text-red-500 font-medium">Saldo insuficiente para este método.</p>
+                          <p className="text-[11px] text-red-500 font-medium">Saldo Genfeb insuficiente para este método.</p>
                         )}
                         {paymentMethod === "cash" && (
                           <p className="text-[11px] text-muted-foreground">Paga directamente al asociado al finalizar el servicio.</p>
@@ -338,7 +561,20 @@ export default function ServiceDetails() {
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button onClick={handleBooking} disabled={createBooking.isPending}>
+                      <Button
+                        variant="ghost"
+                        disabled={createBooking.isPending}
+                        className={
+                          createBooking.isPending
+                            ? "h-11 w-full rounded-lg border border-neutral-200 bg-muted font-semibold text-muted-foreground shadow-sm sm:w-auto"
+                            : "h-11 w-full rounded-lg border-0 font-semibold text-white shadow-md shadow-orange-500/20 hover:opacity-95 sm:w-auto"
+                        }
+                        style={
+                          createBooking.isPending
+                            ? undefined
+                            : { backgroundImage: `linear-gradient(to right, ${gold.ctaFrom}, ${gold.ctaTo})` }
+                        }
+                      >
                         {createBooking.isPending ? "Reservando..." : "Confirmar reserva"}
                       </Button>
                     </DialogFooter>
@@ -346,7 +582,11 @@ export default function ServiceDetails() {
                 </Dialog>
                )
             ) : (
-              <Button className="w-full h-12 text-lg" variant="outline" asChild>
+              <Button
+                variant="outline"
+                className="h-12 w-full rounded-lg border-[#E0E0E0] bg-white text-lg font-semibold text-neutral-900 shadow-sm hover:bg-[#F9F9F9] dark:border-neutral-600 dark:bg-card dark:text-foreground dark:hover:bg-muted/50"
+                asChild
+              >
                 <Link href="/login">Inicia sesión para reservar</Link>
               </Button>
             )}
@@ -355,8 +595,9 @@ export default function ServiceDetails() {
               Todavía no se te cobrará.
             </p>
           </div>
-        </div>
+        </aside>
       </div>
+    </div>
     </div>
   );
 }

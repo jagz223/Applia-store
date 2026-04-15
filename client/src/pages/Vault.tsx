@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
+import { storeVerifyReturnPath } from "@/lib/verify-return-path";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -99,10 +100,15 @@ export default function Vault() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [hasUserIdentification, setHasUserIdentification] = useState(false);
+  const [hasProfessionalCredential, setHasProfessionalCredential] = useState(false);
 
   const [viewIdentificationOpen, setViewIdentificationOpen] = useState(false);
   const [viewIdentificationLoading, setViewIdentificationLoading] = useState(false);
   const [viewIdentificationImageUrl, setViewIdentificationImageUrl] = useState<string | null>(null);
+
+  const [viewCredentialOpen, setViewCredentialOpen] = useState(false);
+  const [viewCredentialLoading, setViewCredentialLoading] = useState(false);
+  const [viewCredentialUrl, setViewCredentialUrl] = useState<string | null>(null);
   const { data: transfersData, isLoading: transfersLoading } = useWalletTransfers({
     page: transfersPage,
     limit: 10,
@@ -121,6 +127,8 @@ export default function Vault() {
         return <CreditCard className="w-5 h-5 text-accent" />;
       case "identity":
         return <User className="w-5 h-5 text-secondary" />;
+      case "professional_credential":
+        return <FileCheck className="w-5 h-5 text-primary" />;
       case "legal":
         return <Building2 className="w-5 h-5 text-warning" />;
       case "insurance":
@@ -196,6 +204,23 @@ export default function Vault() {
     status: String(doc.status ?? "pending"),
   }));
 
+  function inferVaultCredentialKind(url: string): "image" | "pdf" | "other" {
+    try {
+      const u = new URL(url);
+      const afterO = u.pathname.includes("/o/") ? decodeURIComponent(u.pathname.split("/o/")[1] ?? "") : "";
+      const seg = afterO.split("/").pop() || "";
+      const ext = seg.includes(".") ? seg.split(".").pop()?.toLowerCase() ?? "" : "";
+      if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return "image";
+      if (ext === "pdf") return "pdf";
+    } catch {
+      /* ignore */
+    }
+    const lower = url.toLowerCase();
+    if (/\.(jpe?g|png|gif|webp)(\?|#|$)/i.test(lower)) return "image";
+    if (/\.pdf(\?|#|$)/i.test(lower)) return "pdf";
+    return "other";
+  }
+
   const handleViewIdentification = async () => {
     if (!user?.id) return;
     try {
@@ -228,7 +253,39 @@ export default function Vault() {
     }
   };
 
-  // Mostrar la pestaña/filtro "Identificación" solo si existe user_identification
+  const handleViewProfessionalCredential = async () => {
+    if (!user?.id) return;
+    try {
+      setViewCredentialLoading(true);
+      setViewCredentialUrl(null);
+
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/me/professional-verification", {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "No se pudo cargar el documento profesional");
+      }
+
+      const data = (await res.json()) as { professionalCredentialUrl?: string | null };
+      setViewCredentialUrl(data.professionalCredentialUrl?.trim() || null);
+      setViewCredentialOpen(true);
+    } catch (e: unknown) {
+      toast({
+        title: "Error",
+        description: e instanceof Error ? e.message : "No se pudo cargar el documento profesional",
+        variant: "destructive",
+      });
+    } finally {
+      setViewCredentialLoading(false);
+    }
+  };
+
+  // Mostrar filtros de identificación / documento profesional solo si existen (solo cuentas de profesional).
   useEffect(() => {
     const load = async () => {
       if (!user?.id) return;
@@ -242,13 +299,19 @@ export default function Vault() {
 
         if (!res.ok) {
           setHasUserIdentification(false);
+          setHasProfessionalCredential(false);
           return;
         }
 
-        const data = (await res.json()) as { imageUrl?: string | null };
+        const data = (await res.json()) as {
+          imageUrl?: string | null;
+          professionalCredentialUrl?: string | null;
+        };
         setHasUserIdentification(Boolean(data.imageUrl?.trim()));
+        setHasProfessionalCredential(Boolean(data.professionalCredentialUrl?.trim()));
       } catch {
         setHasUserIdentification(false);
+        setHasProfessionalCredential(false);
       }
     };
 
@@ -261,7 +324,16 @@ export default function Vault() {
     }
   }, [selectedCategory, hasUserIdentification]);
 
+  useEffect(() => {
+    if (selectedCategory === "professional_credential" && !hasProfessionalCredential) {
+      setSelectedCategory("all");
+    }
+  }, [selectedCategory, hasProfessionalCredential]);
+
   const filteredDocs = vaultDocuments.filter((doc) => {
+    if (doc.type === "professional_credential") {
+      return false;
+    }
     const matchesSearch = doc.name.toLowerCase().includes(searchQuery.toLowerCase());
     // En "Todos" la "factura" se muestra desde la lista de transacciones (Facturas),
     // por eso excluimos type="invoice" del listado de documentos para evitar duplicados.
@@ -272,7 +344,7 @@ export default function Vault() {
     return matchesSearch && matchesCategory;
   });
 
-  // Bóveda Segura: ocultar pestañas/UI específicas (Carpetas/Compartidos/Buscar y subidas)
+  // Página de documentos/comprobantes: ocultar pestañas/UI específicas (Carpetas/Compartidos/Buscar y subidas)
   // y ocultar filtros/subpestañas: Contratos, Legales, Seguros.
   const SHOW_VAULT_DOCUMENTS_TAB = false;
   const SHOW_VAULT_FOLDERS_TAB = false;
@@ -306,19 +378,19 @@ export default function Vault() {
                   Cifrado AES-256
                 </Badge>
                 <h1 className="text-3xl font-display font-bold">
-                  Bóveda <span className="text-gradient-primary">Segura</span>
+                  Mis <span className="text-gradient-primary">documentos</span>
                 </h1>
               </div>
             </div>
             <p className="text-muted-foreground max-w-2xl">
-              Almacena y gestiona tus documentos y contratos de forma segura con cifrado de grado militar. 
-              Acceso protegido con autenticación de dos factores.
+              Consulta tus comprobantes y facturas de la plataforma, y mantén a mano la documentación que subas a tu cuenta.
+              La información sensible se trata con medidas de protección acordes al servicio.
             </p>
           </motion.div>
         </div>
       </section>
 
-      {/* Panel superior oculto en Bóveda Segura */}
+      {/* Panel superior oculto */}
       {false && (
         <section className="py-6 border-b border-border">
           <div className="container px-4 mx-auto max-w-7xl">
@@ -392,6 +464,7 @@ export default function Vault() {
                   { id: "all", label: "Todos" },
                   { id: "invoice", label: "Facturas" },
                   ...(hasUserIdentification ? [{ id: "identity", label: "Identificación" }] : []),
+                  ...(hasProfessionalCredential ? [{ id: "professional_credential", label: "Documento profesional" }] : []),
                 ].map((cat) => (
                   <Button
                     key={cat.id}
@@ -558,6 +631,34 @@ export default function Vault() {
                           </div>
                         </div>
                       )}
+                      {selectedCategory === "professional_credential" && hasProfessionalCredential && (
+                        <div className="flex items-center gap-3 sm:gap-4 p-4 hover:bg-primary/5 transition-colors min-w-0">
+                          <div className="p-2 rounded-lg bg-primary/10 shrink-0 self-start sm:self-center">
+                            <FileCheck className="w-5 h-5 text-primary" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-foreground text-sm sm:text-base">Documento profesional</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Certificado o título que enviaste para la verificación como asociado.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleViewProfessionalCredential}
+                              disabled={viewCredentialLoading}
+                            >
+                              {viewCredentialLoading ? (
+                                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                              ) : (
+                                <Eye className="w-4 h-4 mr-2" />
+                              )}
+                              ver documento
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                       {filteredDocs.map((doc) => {
                           const infoBlock = (
                             <>
@@ -656,7 +757,11 @@ export default function Vault() {
                 </Card>
               )}
 
-              {!vaultDocsLoading && selectedCategory !== "invoice" && filteredDocs.length === 0 && (
+              {!vaultDocsLoading &&
+                selectedCategory !== "invoice" &&
+                filteredDocs.length === 0 &&
+                !(selectedCategory === "identity" && hasUserIdentification) &&
+                !(selectedCategory === "professional_credential" && hasProfessionalCredential) && (
                 <div className="text-center py-12">
                   <FileText className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                   <p className="text-muted-foreground">No se encontraron documentos</p>
@@ -691,12 +796,73 @@ export default function Vault() {
                   <Button variant="outline" onClick={() => setViewIdentificationOpen(false)} disabled={viewIdentificationLoading}>
                     Cerrar
                   </Button>
-                  <Button
-                    asChild
-                    onClick={() => setViewIdentificationOpen(false)}
-                    disabled={viewIdentificationLoading}
-                  >
-                    <Link href="/professional/verify">Ir a verificar</Link>
+                  <Button asChild disabled={viewIdentificationLoading}>
+                    <Link
+                      href="/professional/verify"
+                      onClick={() => {
+                        setViewIdentificationOpen(false);
+                        storeVerifyReturnPath();
+                      }}
+                    >
+                      Ir a verificar
+                    </Link>
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={viewCredentialOpen} onOpenChange={setViewCredentialOpen}>
+              <DialogContent className="sm:max-w-3xl border-border bg-card">
+                <DialogHeader>
+                  <DialogTitle>Documento profesional</DialogTitle>
+                  <DialogDescription>
+                    {viewCredentialUrl
+                      ? "Archivo que enviaste para acreditar tu formación o experiencia."
+                      : "Aún no tienes un documento profesional registrado."}
+                  </DialogDescription>
+                </DialogHeader>
+                {viewCredentialUrl ? (
+                  <div className="w-full max-h-[70vh] overflow-auto rounded-md border border-border bg-muted/20 p-2">
+                    {inferVaultCredentialKind(viewCredentialUrl) === "image" ? (
+                      <img
+                        src={viewCredentialUrl}
+                        alt="Documento profesional"
+                        className="mx-auto max-h-[65vh] w-auto max-w-full object-contain"
+                      />
+                    ) : inferVaultCredentialKind(viewCredentialUrl) === "pdf" ? (
+                      <iframe
+                        title="Documento profesional"
+                        src={viewCredentialUrl}
+                        className="h-[min(65vh,560px)] w-full min-h-[240px] rounded border-0 bg-white"
+                      />
+                    ) : (
+                      <div className="space-y-3 py-4 text-center text-sm text-muted-foreground">
+                        <p>Vista previa no disponible para este formato. Ábrelo en una pestaña nueva.</p>
+                        <Button variant="secondary" asChild>
+                          <a href={viewCredentialUrl} target="_blank" rel="noopener noreferrer">
+                            Abrir archivo
+                          </a>
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-sm text-muted-foreground">No hay archivo disponible.</div>
+                )}
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button variant="outline" onClick={() => setViewCredentialOpen(false)} disabled={viewCredentialLoading}>
+                    Cerrar
+                  </Button>
+                  <Button asChild disabled={viewCredentialLoading}>
+                    <Link
+                      href="/professional/verify"
+                      onClick={() => {
+                        setViewCredentialOpen(false);
+                        storeVerifyReturnPath();
+                      }}
+                    >
+                      Ir a verificación
+                    </Link>
                   </Button>
                 </DialogFooter>
               </DialogContent>

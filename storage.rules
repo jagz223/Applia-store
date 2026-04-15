@@ -1,0 +1,31 @@
+rules_version = '2';
+// Desplegar: Firebase Console → Storage → Rules, o `firebase deploy --only storage`
+// (requiere firebase.json y proyecto vinculado con `firebase use`).
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Fotos de perfil (registro) — solo imágenes, máx. 5 MB (ver firebase-client.ts)
+    match /avatars/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Documento de identidad en verificación — solo JPG/PNG, máx. 5 MB
+    match /verification_ids/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 6 * 1024 * 1024
+        && (request.resource.contentType == 'image/jpeg'
+            || request.resource.contentType == 'image/png');
+    }
+
+    // Documento profesional — JPG, PNG o PDF (application/pdf); máx. 13 MB (cliente: 12 MB)
+    // Sin permitir PDF aquí, la subida falla con storage/unauthorized aunque el código lo acepte.
+    match /professional_credentials/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 13 * 1024 * 1024
+        && (request.resource.contentType == 'image/jpeg'
+            || request.resource.contentType == 'image/png'
+            || request.resource.contentType == 'application/pdf');
+    }
+  }
+}

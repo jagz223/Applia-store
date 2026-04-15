@@ -230,4 +230,4 @@ export const coupons = pgTable("coupons", {
 ---
 
 *Documento generado el 25 de febrero de 2026*
-*Proyecto GenFeb S.A.S.*
+*Proyecto GenFeb*

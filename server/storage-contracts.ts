@@ -58,7 +58,9 @@ export interface Subcategory {
 
 /** Datos parciales para actualizar un proveedor (solo campos editables). */
 export type ProviderUpdate = Partial<
-  Pick<Provider, "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate"> & { subcategoryId?: number | null }
+  Pick<Provider, "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate" | "skills"> & {
+    subcategoryId?: number | null;
+  }
 >;
 
 /** Datos parciales para actualizar un servicio (solo campos editables). */

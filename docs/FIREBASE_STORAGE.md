@@ -2,6 +2,22 @@
 
 La app sube la foto de perfil **desde el navegador** directamente a **Firebase Storage** (no pasa por Render). Solo se guarda en Firestore la URL que devuelve Storage.
 
+También se suben desde el cliente: **documento de identidad** (`verification_ids/`), **documento profesional** (`professional_credentials/`) y **avatares** (`avatars/`).
+
+## Error al subir PDF: `storage/unauthorized`
+
+Si al subir un **PDF** como documento profesional aparece:
+
+`Firebase Storage: User does not have permission to access 'professional_credentials/.../archivo.pdf' (storage/unauthorized)`
+
+las **reglas de Storage** están permitiendo solo imágenes (`image/...`) y **bloquean** `application/pdf`. Hay que publicar reglas que acepten PDF en la ruta `professional_credentials/{userId}/{fileName}`.
+
+En el repo hay un ejemplo listo: **`storage.rules`** (y **`firebase.json`** para desplegar con CLI). Copia el bloque `professional_credentials` a Firebase Console → **Storage** → **Rules** → **Publish**, o despliega con:
+
+`firebase deploy --only storage`
+
+Si ya tenías reglas propias, **añade** la condición `|| request.resource.contentType == 'application/pdf'` al `allow write` de esa carpeta (o sustituye el archivo completo por el del repo si encaja con tu proyecto).
+
 ## 1. Activar Storage en Firebase Console
 
 1. Entra en [Firebase Console](https://console.firebase.google.com) y abre tu proyecto (ej. `mango-169db`).
@@ -13,12 +29,9 @@ No hace falta “activar” ningún SDK aparte: el mismo proyecto y las variable
 
 ## 2. Reglas de Storage (recomendadas)
 
-En **Storage** → **Rules**, puedes usar reglas como estas para permitir:
+En **Storage** → **Rules**, la fuente de verdad recomendada es el archivo **`storage.rules`** en la raíz del repo (incluye `avatars/`, `verification_ids/` y `professional_credentials/` con **PDF** permitido en documento profesional).
 
-- **Subir** solo imágenes en la carpeta `avatars/` y con tamaño máximo 5 MB (usuarios aún no autenticados en registro).
-- **Leer** esas imágenes para mostrarlas en la app.
-
-Ejemplo de reglas:
+Resumen del ejemplo histórico solo para **avatars** (si mantienes un proyecto mínimo):
 
 ```
 rules_version = '2';
@@ -34,7 +47,9 @@ service firebase.storage {
 ```
 
 - `allow read: if true` → cualquiera puede ver las fotos (necesario para mostrar avatares en la app).
-- `allow write` → solo se aceptan archivos &lt; 5 MB y de tipo imagen en `avatars/`.
+- `allow write` en avatares → solo imágenes &lt; 5 MB.
+
+Para verificación y credencial profesional, usa el **`storage.rules`** completo del repositorio y publícalo.
 
 Después de editarlas, pulsa **Publish**.
 

@@ -22,12 +22,12 @@ import {
   Mail,
   Loader2
 } from "lucide-react";
-import { useCategories, useServices, useProviderCategoryAvailability, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
+import { useCategories, useCategoryVisibility, useServices, useProviderCategoryAvailability, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { DEFAULT_CATEGORIES, HIDDEN_CATEGORY_SLUGS_IN_UI, getCategoryDisplayName } from "@shared/default-categories";
+import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
 import { isBeforeToday } from "@/lib/date-utils";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
@@ -123,21 +123,23 @@ export default function Booking() {
   const [paymentSelectionOpen, setPaymentSelectionOpen] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
+  const isAuthenticated = !!user?.id;
   const [, navigate] = useLocation();
   const createBooking = useCreateBooking();
   const { notifyNewBooking } = useSocketBookings();
   const { data: walletData, isLoading: walletLoading } = useWallet({ enabled: !!user?.id });
 
   const { data: categories } = useCategories();
+  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
   const { data: categoryAvailability } = useProviderCategoryAvailability();
   const visibleCategories = useMemo(() => {
     const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-    const hidden = new Set(HIDDEN_CATEGORY_SLUGS_IN_UI);
+    const hidden = new Set(effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined));
     return (categories ?? []).filter((c) => {
       const slug = (c as { slug?: string }).slug;
       return slug && providerSlugs.has(slug) && !hidden.has(slug);
     });
-  }, [categories]);
+  }, [categories, isAuthenticated, visibility]);
   const categoryIdNum = selectedService ? Number(selectedService) : undefined;
   const { data: services = [], isLoading: isLoadingServices } = useServices(
     { providerCategoryId: categoryIdNum },
@@ -310,8 +312,8 @@ export default function Booking() {
     }
     if (walletLoading) {
       toast({
-        title: "Validando saldo",
-        description: "Estamos cargando tu saldo actual, intenta de nuevo en un momento.",
+        title: "Validando Saldo Genfeb",
+        description: "Estamos cargando tu Saldo Genfeb, intenta de nuevo en un momento.",
       });
       return;
     }
@@ -371,9 +373,9 @@ export default function Booking() {
       <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Saldo insuficiente</AlertDialogTitle>
+            <AlertDialogTitle>Saldo Genfeb insuficiente</AlertDialogTitle>
             <AlertDialogDescription>
-              No tienes saldo suficiente en tu wallet para pedir este servicio. Recarga tu saldo para continuar.
+              No tienes suficiente Saldo Genfeb para pedir este servicio. Añade saldo para continuar.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -384,7 +386,7 @@ export default function Booking() {
                 navigate("/recharge");
               }}
             >
-              Recargar saldo
+              Añadir saldo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -398,7 +400,7 @@ export default function Booking() {
               ¿Cómo deseas pagar este servicio?
               <br />
               <span className="text-sm text-muted-foreground">
-                (Wallet retiene el saldo de forma segura. Efectivo se paga directamente al asociado).
+                (El pago con Saldo Genfeb queda reservado en la plataforma hasta confirmar el servicio. Efectivo se paga directamente al asociado).
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -408,8 +410,8 @@ export default function Booking() {
               className="h-16 text-lg font-semibold flex flex-col gap-1"
               onClick={() => confirmBookingWithMethod("wallet")}
             >
-              <span>Usar Wallet</span>
-              <span className="text-xs font-normal opacity-80">Saldo disponible: ${walletBalance.toFixed(2)}</span>
+              <span>Pagar con Saldo Genfeb</span>
+              <span className="text-xs font-normal opacity-80">Saldo Genfeb: ${walletBalance.toFixed(2)}</span>
             </Button>
             <Button 
               variant="outline" 
