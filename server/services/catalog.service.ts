@@ -45,8 +45,14 @@ export class CatalogService {
     return this.storage.deleteProvider(id);
   }
 
-  async getAllServices(categoryId?: number, search?: string, providerCategoryId?: number, subcategoryId?: number) {
-    return this.storage.getAllServices(categoryId, search, providerCategoryId, subcategoryId);
+  async getAllServices(
+    categoryId?: number,
+    search?: string,
+    providerCategoryId?: number,
+    subcategoryId?: number,
+    includeUnverifiedForAdmin?: boolean
+  ) {
+    return this.storage.getAllServices(categoryId, search, providerCategoryId, subcategoryId, includeUnverifiedForAdmin);
   }
 
   async getService(id: number) {

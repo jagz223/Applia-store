@@ -50,8 +50,14 @@ export class HybridStorage implements IStorage {
   getProvider(id: number) { return this.delegate("getProvider", [id]); }
   getProviderByUserId(userId: string) { return this.delegate("getProviderByUserId", [userId]); }
   createProvider(provider: any) { return this.delegate("createProvider", [provider]); }
-  getAllServices(categoryId?: number, search?: string, providerCategoryId?: number, subcategoryId?: number) {
-    return this.delegate("getAllServices", [categoryId, search, providerCategoryId, subcategoryId]);
+  getAllServices(
+    categoryId?: number,
+    search?: string,
+    providerCategoryId?: number,
+    subcategoryId?: number,
+    includeUnverifiedForAdmin?: boolean
+  ) {
+    return this.delegate("getAllServices", [categoryId, search, providerCategoryId, subcategoryId, includeUnverifiedForAdmin]);
   }
   getService(id: number) { return this.delegate("getService", [id]); }
   getProfessionalVerificationByUserId(userId: string) { return this.delegate("getProfessionalVerificationByUserId", [userId]); }

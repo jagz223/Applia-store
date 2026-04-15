@@ -26,6 +26,30 @@ import {
   setHiddenCategorySlugsForRole,
 } from "./category-visibility";
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
+import { isFullAdmin } from "@shared/roles";
+
+/** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
+async function adminListAllServices() {
+  return genFebStorage.getAllServices(undefined, undefined, undefined, undefined, true);
+}
+
+/**
+ * Misma noción de "marca" que Explore (`providerCategoryId`): cuenta un servicio en la marca
+ * si la categoría del servicio o la del proveedor coincide (evita que perfiles con categoryId desalineado no aparezcan en admin).
+ */
+function serviceBelongsToBrand(
+  s: { categoryId?: unknown; provider?: { categoryId?: unknown; category?: unknown } | undefined },
+  brandCategoryId: number,
+  categories: Array<{ id?: unknown; slug?: unknown }>
+): boolean {
+  if (Number(s?.categoryId) === brandCategoryId) return true;
+  const p = s?.provider;
+  if (!p) return false;
+  if (p.categoryId != null && Number(p.categoryId) === brandCategoryId) return true;
+  const slug = categories.find((c) => Number(c?.id) === brandCategoryId)?.slug;
+  if (slug != null && typeof p.category === "string" && p.category.trim() === String(slug)) return true;
+  return false;
+}
 
 const updateUserSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -516,7 +540,7 @@ export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/providers/with-services", authenticateJWT, requireStaffFromDb, async (_req, res) => {
     try {
       // Usamos getAllServices y agrupamos por providerId para filtrar solo proveedores con servicios.
-      const services = await genFebStorage.getAllServices();
+      const services = await adminListAllServices();
       const byProviderId = new Map<number, any[]>();
       for (const s of services ?? []) {
         const pid = (s as { providerId?: number; provider?: { id?: number } }).providerId ?? (s as any)?.provider?.id;
@@ -595,7 +619,7 @@ export function registerAdminRoutes(app: Express): void {
       const db = getFirestore();
       if (!db) {
         // Sin Firestore, caemos a storage (puede ser vacío en memoria) y filtramos.
-        const list = (await genFebStorage.getAllServices()) ?? [];
+        const list = (await adminListAllServices()) ?? [];
         const active = list.filter((s: any) => s?.isActive !== false);
         return res.status(200).json({ services: active, total: active.length });
       }
@@ -676,14 +700,16 @@ export function registerAdminRoutes(app: Express): void {
    */
   app.get("/api/admin/service-brands", authenticateJWT, requireFullAdmin, async (_req, res) => {
     try {
-      const [categories, services] = await Promise.all([genFebStorage.getCategories(), genFebStorage.getAllServices()]);
+      const [categories, services] = await Promise.all([genFebStorage.getCategories(), adminListAllServices()]);
       const brandSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
       const hiddenSlugs = new Set(await getHiddenCategorySlugs());
       const brands = (categories ?? [])
         .filter((c: any) => brandSlugs.has(String(c?.slug ?? "")))
         .map((c: any) => {
           const catId = Number(c.id);
-          const svc = (services ?? []).filter((s: any) => Number(s?.categoryId) === catId);
+          const svc = (services ?? [])
+            .filter((s: any) => serviceBelongsToBrand(s, catId, categories ?? []))
+            .filter((s: any) => s?.provider?.isVerified === true);
           const activeServices = svc.filter((s: any) => s?.isActive !== false).length;
           const inactiveServices = svc.length - activeServices;
           const slug = String(c.slug ?? "");
@@ -776,8 +802,8 @@ export function registerAdminRoutes(app: Express): void {
         console.error("Error updating category visibility:", e);
       }
 
-      const all = await genFebStorage.getAllServices();
-      const target = (all ?? []).filter((s: any) => Number(s?.categoryId) === categoryId);
+      const all = await adminListAllServices();
+      const target = (all ?? []).filter((s: any) => serviceBelongsToBrand(s, categoryId, categories ?? []));
       const ids = target.map((s: any) => Number(s?.id)).filter((id: any) => Number.isFinite(id));
 
       await Promise.all(ids.map((id) => genFebStorage.updateService(Number(id), { isActive: parsed.data.isActive })));
@@ -862,8 +888,8 @@ export function registerAdminRoutes(app: Express): void {
       const minRating = req.query.minRating != null ? Number(req.query.minRating) : undefined;
       const sort = String(req.query.sort ?? "rating_desc");
 
-      const services = await genFebStorage.getAllServices();
-      const inBrand = (services ?? []).filter((s: any) => Number(s?.categoryId) === categoryId);
+      const [services, categories] = await Promise.all([adminListAllServices(), genFebStorage.getCategories()]);
+      const inBrand = (services ?? []).filter((s: any) => serviceBelongsToBrand(s, categoryId, categories ?? []));
 
       const byProvider = new Map<number, any[]>();
       for (const s of inBrand) {
@@ -903,7 +929,12 @@ export function registerAdminRoutes(app: Express): void {
         const activeServices = svc.filter((s: any) => s?.isActive !== false).length;
         const inactiveServices = totalServices - activeServices;
 
-        const verified = (provider as any)?.isVerified === true;
+        // Documento Firestore (sin depender de `svc[0].provider` del listado, que a veces no coincide).
+        const platformVerified = (provider as { isVerified?: unknown }).isVerified === true;
+        const adminAsAssociate = isFullAdmin(u?.role);
+        if (!platformVerified && !adminAsAssociate) continue;
+
+        const verified = platformVerified || adminAsAssociate;
 
         const haystack = `${name} ${email ?? ""}`.toLowerCase();
         if (search && !haystack.includes(search)) continue;
@@ -958,7 +989,7 @@ export function registerAdminRoutes(app: Express): void {
       const provider = await genFebStorage.getProvider(providerId);
       const providerUserId = String((provider as any)?.userId ?? "");
 
-      const all = await genFebStorage.getAllServices();
+      const all = await adminListAllServices();
       const target = (all ?? []).filter((s: any) => Number(s?.providerId) === providerId);
       const ids = target.map((s: any) => Number(s?.id)).filter((id: any) => Number.isFinite(id));
       await Promise.all(ids.map((id) => genFebStorage.updateService(Number(id), { isActive: parsed.data.isActive })));

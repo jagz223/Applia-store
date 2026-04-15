@@ -85,7 +85,9 @@ export function useAuth(): UseAuthReturn {
     queryKey: ["user"],
     queryFn: fetchUser,
     retry: false,
-    staleTime: 1000 * 60 * 5,
+    /** Incluye `provider` embebido; debe acercarse a /providers/me tras verificación. */
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
   });
 
   const loginMutation = useMutation({
