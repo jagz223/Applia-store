@@ -3,8 +3,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
-import { useCurrentProvider, useMyServices, useWallet, useCategories } from "@/hooks/use-mango-data";
-import { getCategoryDisplayName } from "@shared/default-categories";
+import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility } from "@/hooks/use-mango-data";
+import { isCarGoProvider } from "@shared/provider-car-go";
+import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { 
   Briefcase, 
@@ -48,7 +49,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
 import { motion, AnimatePresence } from "framer-motion";
 import { Check } from "lucide-react";
@@ -82,6 +83,8 @@ export function Navigation() {
   const [location] = useLocation();
   const { exploreCategoryDisplayName: exploreCategoryFromContext } = useExploreCategoryDisplayName();
   const { data: categories = [] } = useCategories();
+  const { data: visibility } = useCategoryVisibility();
+  const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
   const exploreCategoryFromUrl = (() => {
     const pathname = location.split("?")[0];
     const search = pathname === "/explore"
@@ -121,6 +124,12 @@ export function Navigation() {
   /** Cualquier servicio propio (aunque esté inactivo) para poder abrir el panel y editar. */
   const hasMyServiceNav = activeServices.length > 0 || myServices.length > 0;
   const panelService = activeServices[0] ?? myServices[0] ?? null;
+
+  const isAdmin = (user as { role?: string } | null)?.role === "admin";
+  /** Conductor Car Go (verificado o no): acceso a vista driver (recibir) en Go. */
+  const isCarGoDriver = !!providerProfile && isCarGoProvider(providerProfile, categories);
+  const isVerifiedCarGoDriver = providerProfile?.isVerified === true && isCarGoDriver;
+  const canSeeMobility = !hiddenSlugs.has("transport");
 
   const getServiceIcon = (service: any) => {
     const iconName = service?.category?.icon ?? service?.category?.type ?? service?.category?.slug;
@@ -206,7 +215,15 @@ export function Navigation() {
               </Link>
             </DropdownMenuItem>
           )}
-          {isProfessional && !myServicesLoading && hasMyServiceNav && (
+          {canSeeMobility && (isAdmin || (isProfessional && !myServicesLoading && isCarGoDriver)) && (
+            <DropdownMenuItem asChild>
+              <Link href="/go/cargo/driver" className="flex items-center gap-2 w-full">
+                <Car className="h-4 w-4" />
+                <span>Go</span>
+              </Link>
+            </DropdownMenuItem>
+          )}
+          {isProfessional && !myServicesLoading && hasMyServiceNav && !isVerifiedCarGoDriver && (
             <DropdownMenuItem
               onSelect={(e) => {
                 e.preventDefault();
@@ -356,14 +373,14 @@ export function Navigation() {
           
           {isAuthenticated ? (
             <>
-              {isProfessional ? (
+              {isProfessional && !isVerifiedCarGoDriver ? (
                  <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
                    <Link href="/professional-dashboard">
                      <Briefcase className="h-4 w-4" />
                      <span>Panel Asociado</span>
                    </Link>
                  </Button>
-              ) : showBecomePro ? (
+              ) : showBecomePro && !isProfessional ? (
                 <Button variant="outline" className="hidden sm:flex border-primary text-primary hover:bg-primary/10" asChild>
                   <Link href="/become-pro">Convertirse en Asociado</Link>
                 </Button>
@@ -392,7 +409,7 @@ export function Navigation() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {isProfessional && (
+                  {isProfessional && !isVerifiedCarGoDriver && (
                     <DropdownMenuItem asChild>
                       <Link href="/professional-dashboard" className="flex items-center">
                         <Briefcase className="mr-2 h-4 w-4" />
@@ -522,7 +539,7 @@ export function Navigation() {
                     </Link>
                   </>
                 )}
-                {isProfessional && (
+                {isProfessional && !isVerifiedCarGoDriver && (
                   <>
                     <Link href="/professional-dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Panel Asociado
@@ -545,6 +562,16 @@ export function Navigation() {
                       </button>
                     )}
                   </>
+                )}
+                {canSeeMobility && (isAdmin || (isProfessional && isCarGoDriver && !myServicesLoading)) && (
+                  <Link
+                    href="/go/cargo/driver"
+                    className="text-lg font-medium flex items-center gap-2 hover:text-primary transition-colors"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Car className="h-5 w-5 shrink-0" />
+                    Go
+                  </Link>
                 )}
                 {isAuthenticated && (
                   <>

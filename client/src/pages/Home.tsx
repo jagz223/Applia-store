@@ -1,4 +1,6 @@
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
+import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
@@ -6,6 +8,10 @@ import { api } from "@shared/routes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useCategories, useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
+import { isCarGoProvider } from "@shared/provider-car-go";
+import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { cn } from "@/lib/utils";
 import { 
   ArrowRight, 
   Search, 
@@ -23,6 +29,10 @@ import {
   TrendingUp,
   Home,
   ChevronRight,
+  Car,
+  Store,
+  Package,
+  X,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
@@ -38,8 +48,21 @@ type HomeFeature = {
 };
 
 export default function HomePage() {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const [location, setLocation] = useLocation();
   const showBecomePro = useShowBecomePro();
+  const { data: providerProfile } = useCurrentProvider();
+  const { data: categories = [] } = useCategories();
+  const { data: visibility } = useCategoryVisibility();
+  const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
+  const mobilityAllowed = {
+    transport: !hiddenSlugs.has("transport"),
+    marketplace: !hiddenSlugs.has("marketplace"),
+    delivery: !hiddenSlugs.has("delivery"),
+  };
+  const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace || mobilityAllowed.delivery;
+  const isCarGoDriver = useMemo(() => !!(providerProfile && isCarGoProvider(providerProfile, categories)), [providerProfile, categories]);
+  const [goQuickOpen, setGoQuickOpen] = useState(false);
   const { data: homeCounts, isLoading: homeCountsLoading, isError: homeCountsError } = useQuery({
     queryKey: [api.categories.homeAssociateCounts.path],
     queryFn: async () => {
@@ -103,9 +126,9 @@ export default function HomePage() {
   ];
 
   const serviceCategories = [
-    { name: "Fix Go", icon: Wrench, countKey: "fixGo" as const, color: "text-primary" },
-    { name: "Pro Go", icon: Briefcase, countKey: "proGo" as const, color: "text-secondary" },
-    { name: "Man Go", icon: Home, countKey: "manGo" as const, color: "text-primary" },
+    { name: "Fix Go", slug: "technical" as const, icon: Wrench, countKey: "fixGo" as const, color: "text-primary" },
+    { name: "Pro Go", slug: "professional" as const, icon: Briefcase, countKey: "proGo" as const, color: "text-secondary" },
+    { name: "Man Go", slug: "maintenance" as const, icon: Home, countKey: "manGo" as const, color: "text-primary" },
   ];
 
   const stats = [
@@ -131,7 +154,7 @@ export default function HomePage() {
   const visibleFeatures = features.filter((f) => !f.hideForGuests || isAuthenticated);
 
   return (
-    <div className="flex flex-col min-h-screen overflow-x-hidden">
+    <div className="relative flex flex-col min-h-screen overflow-x-hidden">
       
       {/* HERO SECTION */}
       <section className="relative overflow-hidden pt-8 pb-20 md:pt-16 md:pb-32">
@@ -399,6 +422,38 @@ export default function HomePage() {
                   : c === 1
                     ? "1 asociado"
                     : `${c} asociados`;
+              const isBrandInactive = hiddenSlugs.has(category.slug);
+              const card = (
+                <Card
+                  className={cn(
+                    "card-industrial transition-all duration-300",
+                    isBrandInactive
+                      ? "cursor-not-allowed opacity-70 grayscale border-border/60"
+                      : "cursor-pointer group hover:border-primary/50",
+                  )}
+                >
+                  <CardContent className="p-6 text-center">
+                    {isBrandInactive && (
+                      <Badge variant="secondary" className="mb-2 text-xs">
+                        No disponible
+                      </Badge>
+                    )}
+                    <div
+                      className={cn(
+                        "p-4 rounded-xl bg-primary/10 w-fit mx-auto mb-4 transition-transform",
+                        category.color,
+                        !isBrandInactive && "group-hover:scale-110",
+                      )}
+                    >
+                      <category.icon className="w-8 h-8" />
+                    </div>
+                    <h3 className="text-lg font-bold mb-1">{category.name}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {isBrandInactive ? "Servicio desactivado en la plataforma" : countLabel}
+                    </p>
+                  </CardContent>
+                </Card>
+              );
               return (
                 <motion.div
                   key={category.countKey}
@@ -407,17 +462,7 @@ export default function HomePage() {
                   transition={{ delay: index * 0.1 }}
                   viewport={{ once: true }}
                 >
-                  <Link href="/explore">
-                    <Card className="card-industrial cursor-pointer group hover:border-primary/50 transition-all duration-300">
-                      <CardContent className="p-6 text-center">
-                        <div className={`p-4 rounded-xl ${category.color} bg-primary/10 w-fit mx-auto mb-4 group-hover:scale-110 transition-transform`}>
-                          <category.icon className="w-8 h-8" />
-                        </div>
-                        <h3 className="text-lg font-bold mb-1">{category.name}</h3>
-                        <p className="text-sm text-muted-foreground">{countLabel}</p>
-                      </CardContent>
-                    </Card>
-                  </Link>
+                  {isBrandInactive ? card : <Link href="/explore">{card}</Link>}
                 </motion.div>
               );
             })}
@@ -502,6 +547,76 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Botón flotante hacia módulos Go: solo conductores con categoría Car Go. */}
+      {isCarGoDriver && anyMobilityAllowed && typeof document !== "undefined"
+        ? createPortal(
+                <div className="fixed bottom-5 right-5 z-[450]">
+                  {goQuickOpen ? (
+                    <div className="w-[280px] rounded-2xl border border-border bg-background/95 p-3 shadow-xl backdrop-blur">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold">Movilidad y envíos</p>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => setGoQuickOpen(false)}
+                          aria-label="Cerrar"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Car Go (conducir), Shop Go y Pack Go.
+                      </p>
+                      <div className="mt-3 grid gap-2">
+                        {mobilityAllowed.transport ? (
+                        <Button
+                          className="w-full justify-start gap-2 rounded-xl"
+                          variant="default"
+                          onClick={() => {
+                            setGoQuickOpen(false);
+                            setLocation("/go/cargo/driver");
+                          }}
+                        >
+                          <Car className="h-4 w-4" /> Car Go (conducir)
+                        </Button>
+                        ) : null}
+                        {mobilityAllowed.marketplace ? (
+                        <Button
+                          className="w-full justify-start gap-2 rounded-xl"
+                          variant="secondary"
+                          onClick={() => {
+                            setGoQuickOpen(false);
+                            setLocation("/go/shop");
+                          }}
+                        >
+                          <Store className="h-4 w-4" /> Shop Go
+                        </Button>
+                        ) : null}
+                        {mobilityAllowed.delivery ? (
+                        <Button
+                          className="w-full justify-start gap-2 rounded-xl"
+                          variant="secondary"
+                          onClick={() => {
+                            setGoQuickOpen(false);
+                            setLocation("/go/pack");
+                          }}
+                        >
+                          <Package className="h-4 w-4" /> Pack Go
+                        </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <Button className="h-12 rounded-full px-5 shadow-xl" onClick={() => setGoQuickOpen(true)}>
+                      Ir a movilidad y módulos Go
+                    </Button>
+                  )}
+                </div>,
+                document.body
+              )
+        : null}
     </div>
   );
 }

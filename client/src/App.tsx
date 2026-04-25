@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -14,6 +14,9 @@ import { RatingGate } from "@/components/RatingGate";
 import HomePage from "@/pages/Home";
 import Explore from "@/pages/Explore";
 import Categories from "@/pages/Categories";
+import TaxiRide from "@/pages/TaxiRide";
+import DriverGoGenfeb, { DriverGoGenfebWithGoChat } from "@/pages/DriverGoGenfeb";
+import CargoDriverSettings from "@/pages/CargoDriverSettings";
 import ServiceDetails from "@/pages/ServiceDetails";
 import Dashboard from "@/pages/Dashboard";
 import BecomePro from "@/pages/BecomePro";
@@ -42,16 +45,25 @@ import { ProfessionalVerificationBanner } from "@/components/ProfessionalVerific
 import { ProviderTermsGate } from "@/components/ProviderTermsGate";
 import VerifyProfessional from "@/pages/VerifyProfessional";
 import VerifyProfessionalPayment from "@/pages/VerifyProfessionalPayment";
+import { GoShellLayout } from "@/components/go/GoShellLayout";
+import { GoCategoryGate } from "@/components/go/GoCategoryGate";
+import { CargoActiveRideResume } from "@/components/go/CargoActiveRideResume";
+import GoShop from "@/pages/go/GoShop";
+import GoPack from "@/pages/go/GoPack";
 
 // Oculta pagos temporalmente (se configurará en el futuro).
 const SHOW_PAYMENTS = false;
 
-function Router() {
+function MainRouter() {
   return (
     <Switch>
       <Route path="/" component={HomePage} />
       <Route path="/explore" component={Explore} />
       <Route path="/categories" component={Categories} />
+      <Route path="/taxi" component={TaxiRide} />
+      {/* Rutas legacy (mantener por compatibilidad, pero el shell nuevo vive en /go/*). */}
+      <Route path="/driver/go-genfeb" component={DriverGoGenfebWithGoChat} />
+      <Route path="/driver/go-genfeb/configuracion" component={CargoDriverSettings} />
       <Route path="/service/:id" component={ServiceDetails} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
@@ -67,7 +79,8 @@ function Router() {
       <Route path="/admin/create-role" component={CreateRole} />
       <Route path="/admin/users/:id/edit" component={EditUser} />
       <Route path="/professional-dashboard" component={ProfessionalDashboard} />
-      <Route path="/payment-voucher" component={PaymentVoucher} />
+      {/* wouter: `component` recibe props de ruta; render inline evita mismatch de props */}
+      <Route path="/payment-voucher">{() => <PaymentVoucher />}</Route>
       <Route path="/bookings" component={Bookings} />
       <Route path="/recharge" component={Recharge} />
       <Route path="/recharge/confirm" component={RechargeConfirm} />
@@ -82,24 +95,74 @@ function Router() {
   );
 }
 
+function GoRouter() {
+  const GoCargoClient = () => (
+    <GoCategoryGate slug="transport">
+      <TaxiRide />
+    </GoCategoryGate>
+  );
+  const GoCargoDriver = () => (
+    <GoCategoryGate slug="transport">
+      <DriverGoGenfeb />
+    </GoCategoryGate>
+  );
+  const GoCargoDriverSettings = () => (
+    <GoCategoryGate slug="transport">
+      <CargoDriverSettings />
+    </GoCategoryGate>
+  );
+  const GoShopRoute = () => (
+    <GoCategoryGate slug="marketplace">
+      <GoShop />
+    </GoCategoryGate>
+  );
+  const GoPackRoute = () => (
+    <GoCategoryGate slug="delivery">
+      <GoPack />
+    </GoCategoryGate>
+  );
+  return (
+    <Switch>
+      {/* Cliente (pedir servicio): mover flujo existente /taxi a esta sección */}
+      <Route path="/go/cargo" component={GoCargoClient} />
+      {/* Conductor (recibir viajes): panel de conducción */}
+      <Route path="/go/cargo/driver" component={GoCargoDriver} />
+      <Route path="/go/cargo/driver/settings" component={GoCargoDriverSettings} />
+      <Route path="/go/shop" component={GoShopRoute} />
+      <Route path="/go/pack" component={GoPackRoute} />
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
 function App() {
+  const [location] = useLocation();
+  const inGoShell = location === "/go" || location.startsWith("/go/");
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <SocketProvider>
           <ExploreCategoryProvider>
             <PushForegroundHandler />
+            <CargoActiveRideResume />
             <RatingGate />
             <ProviderTermsGate />
-            <div className="flex flex-col min-h-screen bg-background font-sans">
-              <Navigation />
-              <ProfessionalVerificationBanner />
-              <main className="flex-grow">
-                <Router />
-              </main>
-            <Footer />
+            {inGoShell ? (
+              <GoShellLayout>
+                <GoRouter />
+              </GoShellLayout>
+            ) : (
+              <div className="flex flex-col min-h-screen bg-background font-sans">
+                <Navigation />
+                <ProfessionalVerificationBanner />
+                <main className="flex-grow">
+                  <MainRouter />
+                </main>
+                <Footer />
+              </div>
+            )}
             <Toaster />
-          </div>
           </ExploreCategoryProvider>
         </SocketProvider>
       </TooltipProvider>

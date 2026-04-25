@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,10 @@ import {
   usePatchProfessionalVerificationImage,
   usePatchProfessionalVerificationCredential,
   useVerifyingStatusMe,
+  useCurrentProvider,
+  useCategories,
 } from "@/hooks/use-mango-data";
+import { isCarGoProvider } from "@shared/provider-car-go";
 import { uploadProfessionalCredential, uploadVerificationIdImage } from "@/lib/firebase-client";
 import { ArrowLeft, ExternalLink, FileText, Loader2, Lock, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -110,7 +113,10 @@ export default function VerifyProfessional() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
-  const provider = user?.provider;
+  const { data: currentProvider } = useCurrentProvider();
+  const { data: categories = [] } = useCategories();
+  const provider = currentProvider ?? user?.provider;
+  const isCarGo = useMemo(() => isCarGoProvider(provider ?? undefined, categories), [provider, categories]);
   const enabled = Boolean(isAuthenticated && provider);
   const { data: verification, isLoading: verLoading } = useProfessionalVerification(enabled);
   const patchImage = usePatchProfessionalVerificationImage();
@@ -161,14 +167,16 @@ export default function VerifyProfessional() {
       const url = await uploadProfessionalCredential(user.id, file);
       await patchCredential.mutateAsync({
         professionalCredentialUrl: url,
-        name: file.name,
+        name: isCarGo ? "Licencia de conducir" : file.name,
         mimeType: file.type,
         size: file.size,
       });
       setCredentialUploadMeta({ fileName: file.name, mimeType: file.type });
       toast({
-        title: "Documento profesional enviado",
-        description: "Se guardó en Mis documentos. El admin lo verá en tu verificación.",
+        title: isCarGo ? "Licencia de conducir enviada" : "Documento profesional enviado",
+        description: isCarGo
+          ? "Se guardó en Mis documentos. El equipo la revisará en tu verificación Car Go."
+          : "Se guardó en Mis documentos. El admin lo verá en tu verificación.",
       });
     } catch (err: unknown) {
       toast({
@@ -235,7 +243,9 @@ export default function VerifyProfessional() {
 
       <h1 className="text-2xl font-bold tracking-tight mb-2">Pasos para verificarse</h1>
       <p className="text-muted-foreground text-sm mb-8">
-        Completa ambos pasos. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud.
+        {isCarGo
+          ? "Completa la verificación para que los clientes puedan usar tus servicios de transporte. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."
+          : "Completa ambos pasos. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."}
       </p>
 
       <div className="flex flex-col gap-4">
@@ -295,10 +305,11 @@ export default function VerifyProfessional() {
           <CardHeader>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <CardTitle className="text-lg">Cuota por ser profesional</CardTitle>
+                <CardTitle className="text-lg">{isCarGo ? "Cuota de asociado Car Go" : "Cuota por ser profesional"}</CardTitle>
                 <CardDescription>
-                  Es un pago de una sola vez (USD 15). Una vez verificado, ya estarás asociado a nosotros y
-                  podrás ofrecer tu servicio de forma pública.
+                  {isCarGo
+                    ? "Es un pago de una sola vez (USD 15). Una vez verificado, podrás operar como asociado y los clientes podrán usar tus servicios de transporte en la plataforma."
+                    : "Es un pago de una sola vez (USD 15). Una vez verificado, ya estarás asociado a nosotros y podrás ofrecer tu servicio de forma pública."}
                 </CardDescription>
               </div>
               {step2Locked ? <Lock className="h-5 w-5 text-muted-foreground shrink-0" /> : null}
@@ -320,9 +331,11 @@ export default function VerifyProfessional() {
           <CardHeader>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <CardTitle className="text-lg">Documento profesional</CardTitle>
+                <CardTitle className="text-lg">{isCarGo ? "Licencia de conducir" : "Documento profesional"}</CardTitle>
                 <CardDescription>
-                  Sube un certificado, título universitario o documento que avale tu profesión. Es requerido para la verificación.
+                  {isCarGo
+                    ? "Sube una foto o PDF legible de tu licencia de conducir vigente (anverso y reverso en un solo archivo si aplica). Es requerida para la verificación Car Go."
+                    : "Sube un certificado, título universitario o documento que avale tu profesión. Es requerido para la verificación."}
                 </CardDescription>
               </div>
             </div>
@@ -337,7 +350,9 @@ export default function VerifyProfessional() {
               onChange={handleCredentialFile}
             />
             {hasCredential ? (
-              <p className="text-sm text-muted-foreground mb-3">Documento enviado. Puedes reemplazarlo si lo necesitas.</p>
+              <p className="text-sm text-muted-foreground mb-3">
+                {isCarGo ? "Licencia enviada. Puedes reemplazarla si lo necesitas." : "Documento enviado. Puedes reemplazarlo si lo necesitas."}
+              </p>
             ) : (
               <p className="text-sm text-muted-foreground mb-3">
                 Si no lo tienes ahora, puedes volver después y subirlo. Se guardará en Mis documentos.
@@ -348,7 +363,7 @@ export default function VerifyProfessional() {
                 url={verification.professionalCredentialUrl}
                 mimeHint={credentialUploadMeta?.mimeType}
                 fileNameHint={credentialUploadMeta?.fileName}
-                label="Vista previa del documento profesional"
+                label={isCarGo ? "Vista previa de la licencia de conducir" : "Vista previa del documento profesional"}
               />
             ) : null}
             <Button

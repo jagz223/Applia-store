@@ -149,6 +149,8 @@ export const FIRESTORE_COLLECTIONS = {
   CATEGORIES: "categories",
   SUB_CATEGORIES: "sub_categories",
   PROVIDERS: "providers",
+  /** Car Go: one document per registered vehicle (linked to `providerId`). */
+  VEHICLES: "vehicles",
   SERVICES: "services",
   SERVICE_ADDONS: "service_addons",
   BOOKINGS: "bookings",
@@ -179,4 +181,6 @@ export const FIRESTORE_COLLECTIONS = {
   VERIFYING_STATUS: "verifying_status",
   /** Ajustes globales (comisión, etc.): doc `global`. */
   PLATFORM_SETTINGS: "platform_settings",
+  /** Peticiones de cambio de datos de cuenta (correo/nombre/teléfono). */
+  ACCOUNT_CHANGE_REQUESTS: "account_change_requests",
 } as const;

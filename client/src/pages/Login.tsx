@@ -43,6 +43,12 @@ export default function Login() {
           title: "Bienvenido",
           description: `Hola ${result.user.firstName}, has iniciado sesión correctamente`,
         });
+        const redirect = sessionStorage.getItem("postLoginRedirect");
+        if (redirect) {
+          sessionStorage.removeItem("postLoginRedirect");
+          setLocation(redirect);
+          return;
+        }
         setLocation("/dashboard");
       },
       onError: (error: any) => {

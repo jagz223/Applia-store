@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { isCarGoProvider } from "@shared/provider-car-go";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import {
   usePatchProfessionalVerificationPayment,
+  useCurrentProvider,
+  useCategories,
   VERIFICATION_STATUS_ME,
   type VerifyingStatusMeDto,
 } from "@/hooks/use-mango-data";
@@ -34,6 +37,10 @@ const VERIFY_AMOUNT_USD = 15;
 
 export default function VerifyProfessionalPayment() {
   const { isAuthenticated, user } = useAuth();
+  const { data: currentProvider } = useCurrentProvider();
+  const { data: categories = [] } = useCategories();
+  const provider = currentProvider ?? user?.provider;
+  const isCarGo = useMemo(() => isCarGoProvider(provider ?? undefined, categories), [provider, categories]);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -141,6 +148,12 @@ export default function VerifyProfessionalPayment() {
           </h1>
           <p className="text-muted-foreground mt-1">
             Realiza la transferencia por el monto indicado y registra la fecha (solo día) y el código de transferencia.
+            {isCarGo ? (
+              <>
+                {" "}
+                Este paso forma parte de la verificación para que los clientes puedan usar tus servicios Car Go.
+              </>
+            ) : null}
           </p>
         </div>
 

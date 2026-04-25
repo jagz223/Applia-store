@@ -16,11 +16,13 @@ import type {
   ProviderWithUser,
   ServiceWithProvider,
 } from "@shared/schema";
+import type { InsertProviderVehicle } from "@shared/vehicle-schema";
 
 /** Contrato para operaciones de usuarios (auth, listado, CRUD). */
 export interface IUserStorage {
   getUserById(id: string, includeDeleted?: boolean): Promise<unknown | undefined>;
   getUserByEmail(email: string, includeDeleted?: boolean): Promise<unknown | undefined>;
+  getUserByPhone(phone: string, includeDeleted?: boolean): Promise<unknown | undefined>;
   getUsers(params: {
     role?: string;
     name?: string;
@@ -77,6 +79,22 @@ export interface ICatalogStorage {
   getProvider(id: number | null | undefined): Promise<Provider | undefined>;
   getProviderByUserId(userId: string): Promise<Provider | undefined>;
   createProvider(provider: InsertProvider): Promise<Provider>;
+  /** Car Go: guarda un vehículo vinculado al proveedor (colección `vehicles` en Firestore). */
+  createProviderVehicle(input: {
+    providerId: number;
+    userId: string;
+    vehicle: InsertProviderVehicle;
+  }): Promise<{ id: number }>;
+  /** Primer vehículo del proveedor (p. ej. icono en mapa conductor y panel Car Go). */
+  getPrimaryVehicleByProviderId(
+    providerId: number
+  ): Promise<{
+    vehicle_type: string;
+    brand?: string | null;
+    model?: string | null;
+    license_plate?: string | null;
+    model_year?: number | null;
+  } | null>;
   updateProvider(id: number, data: ProviderUpdate): Promise<Provider | undefined>;
   deleteProvider(id: number): Promise<boolean>;
   /**

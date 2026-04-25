@@ -12,6 +12,17 @@ export function ensureDefaultVerifyReturnPath(): void {
   }
 }
 
+/** Fija explícitamente la ruta de retorno tras la verificación (p. ej. al registrar asociado y enviar a `/professional/verify`). */
+export function setVerifyReturnPath(path: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const p = path.trim() || "/professional-dashboard";
+    sessionStorage.setItem(VERIFY_RETURN_KEY, p.startsWith("/professional/verify") ? "/professional-dashboard" : p);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Guarda la ruta actual para volver tras terminar la verificación (no guarda si ya estás en /professional/verify). */
 export function storeVerifyReturnPath(): void {
   if (typeof window === "undefined") return;

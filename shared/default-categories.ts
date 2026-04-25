@@ -4,13 +4,15 @@
  * Nota: "Servicios Legales" y "Consultoría Financiera" no son categorías aquí; solo existen como subcategorías en default-subcategories.ts (seeder de subcategorías).
  */
 
-/** Slugs ocultos en la UI (vista categorías, explorar, configurarse como profesional) hasta que se activen. */
-export const HIDDEN_CATEGORY_SLUGS_IN_UI: ReadonlyArray<string> = ["delivery", "marketplace", "transport"];
+/**
+ * Slugs ocultos en la UI hasta que el admin los active vía Firestore (`hiddenCategorySlugs`).
+ * Pack Go y Shop Go siguen ocultos por defecto; Car Go (`transport`) no: su visibilidad la controla solo el admin.
+ */
+export const HIDDEN_CATEGORY_SLUGS_IN_UI: ReadonlyArray<string> = ["delivery", "marketplace"];
 
 /**
- * Lista efectiva de slugs ocultos: siempre incluye las marcas desactivadas por defecto
- * (Pack Go / Shop Go / Car Go) y se une con lo que venga de la API o Firestore.
- * Así nunca se muestran chips de marcas desactivadas por un `hiddenSlugs` incompleto o vacío.
+ * Lista efectiva de slugs ocultos: incluye las marcas desactivadas por defecto (p. ej. Pack Go / Shop Go)
+ * y lo que venga de la API o Firestore (p. ej. Car Go si el admin lo ocultó).
  */
 export function effectiveHiddenCategorySlugs(apiHidden: string[] | undefined | null): string[] {
   const extra = Array.isArray(apiHidden) ? apiHidden : [];

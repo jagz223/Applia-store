@@ -1,23 +1,19 @@
 import { useMemo } from "react";
 import { useLocation } from "wouter";
-import { useCategories, useCategoryVisibility, useProviderCategoryAvailability, useSubcategories } from "@/hooks/use-mango-data";
+import { useCategories, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
 import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { ExploreCategoryCards } from "@/components/ExploreCategoryCards";
-import { useAuth } from "@/hooks/use-auth";
 
 const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
 
 export default function Categories() {
   const [, setLocation] = useLocation();
-  const { isAuthenticated } = useAuth();
   const { data: categories = [] } = useCategories();
-  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
+  const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(
-    () =>
-      new Set(effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined)),
-    [isAuthenticated, visibility]
+    () => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)),
+    [visibility]
   );
-  const { data: availability } = useProviderCategoryAvailability();
   const providerCategories = useMemo(
     () =>
       categories.filter(
@@ -39,11 +35,19 @@ export default function Categories() {
   }, [professionalCategory?.id, subcategoriesProfessional]);
 
   const handleSelectCategory = (categoryId: number) => {
-    setLocation(`/explore?providerCategoryId=${categoryId}`);
+    const cat = providerCategories.find((c) => c.id === categoryId);
+    const slug = (cat as { slug?: string } | undefined)?.slug;
+    /** Movilidad/tienda/delivery: abrir esta sección en lugar del listado normal. */
+    if (slug === "transport") return setLocation("/go/cargo?from=categories");
+    if (slug === "marketplace") return setLocation("/go/shop?from=categories");
+    if (slug === "delivery") return setLocation("/go/pack?from=categories");
+    setLocation(`/explore?providerCategoryId=${categoryId}&from=categories`);
   };
 
   const handleSelectSubcategory = (categoryId: number, subcategoryId: number) => {
-    setLocation(`/explore?providerCategoryId=${categoryId}&subcategoryId=${subcategoryId}`);
+    setLocation(
+      `/explore?providerCategoryId=${categoryId}&subcategoryId=${subcategoryId}&from=categories`
+    );
   };
 
   return (
@@ -51,7 +55,6 @@ export default function Categories() {
       <ExploreCategoryCards
         categories={providerCategories}
         subcategoriesByCategoryId={subcategoriesByCategoryId}
-        availability={availability}
         onSelectCategory={handleSelectCategory}
         onSelectSubcategory={handleSelectSubcategory}
       />

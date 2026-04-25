@@ -10,8 +10,11 @@ interface ConversationListItemProps {
 }
 
 export function ConversationListItem({ conversation, isSelected, onSelect }: ConversationListItemProps) {
-  const name = conversation.otherParticipant?.name ?? "Usuario";
+  const name = conversation.otherParticipant?.name  ?? "Usuario";
+  const lastName = conversation.otherParticipant?.lastName ?? "";
   const unread = conversation.unreadCount ?? 0;
+  const avatarUrl = conversation.otherParticipant?.profileImageUrl ?? null;
+  const fullName = [name, lastName].filter(Boolean).join(" ").trim();
 
   return (
     <button
@@ -23,14 +26,18 @@ export function ConversationListItem({ conversation, isSelected, onSelect }: Con
       `}
     >
       <div className="relative shrink-0">
-        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-          <User className="w-5 h-5 text-primary" />
-        </div>
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover ring-2 ring-primary/20" />
+        ) : (
+          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+            <User className="w-5 h-5 text-primary" />
+          </div>
+        )}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
           <p className={`font-medium truncate ${conversation.otherParticipant?.isDeleted ? "text-muted-foreground italic" : ""}`}>
-            {name}
+            {fullName || "Usuario"}
           </p>
           <span className="text-xs text-muted-foreground shrink-0 ml-1">
             {conversation.lastMessageAt ? formatListTime(conversation.lastMessageAt) : ""}

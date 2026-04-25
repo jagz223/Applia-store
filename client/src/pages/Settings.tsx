@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -7,6 +7,7 @@ import { Link } from "wouter";
 import { ArrowLeft, Loader2, User, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Form,
   FormControl,
@@ -38,6 +39,7 @@ function sanitizeAccountNumber(value: string): string {
 }
 
 const profileSchema = z.object({
+  email: z.string().email("Correo inválido").optional().or(z.literal("")),
   name: z.string().min(2, "Mínimo 2 caracteres").max(100).optional().or(z.literal("")),
   lastName: z.string().min(2, "Mínimo 2 caracteres").max(100).optional().or(z.literal("")),
   phone: z.string().max(50).optional(),
@@ -61,10 +63,15 @@ export default function Settings() {
   const [showFirstConfirm, setShowFirstConfirm] = useState(false);
   const [showSecondConfirm, setShowSecondConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [pendingSensitiveSave, setPendingSensitiveSave] = useState<ProfileForm | null>(null);
+  const [changeReqField, setChangeReqField] = useState<"email" | "name" | "phone">("phone");
+  const [changeReqReason, setChangeReqReason] = useState("");
+  const [isSendingRequest, setIsSendingRequest] = useState(false);
 
   const form = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
+      email: "",
       name: "",
       lastName: "",
       phone: "",
@@ -78,6 +85,7 @@ export default function Settings() {
     if (!user) return;
     const u = user as Record<string, unknown>;
     form.reset({
+      email: (u.email as string) ?? "",
       name: (u.name as string) ?? "",
       lastName: (u.lastName as string) ?? "",
       phone: (u.phone as string) ?? "",
@@ -87,12 +95,22 @@ export default function Settings() {
     });
   }, [user, form.reset]);
 
-  const onSubmit = async (data: ProfileForm) => {
+  const grants = useMemo(() => {
+    const g = (user as any)?.profileEditGrants ?? {};
+    return {
+      email: g.email === true,
+      name: g.name === true,
+      phone: g.phone === true,
+    };
+  }, [user]);
+
+  const doSubmit = async (data: ProfileForm) => {
     const token = localStorage.getItem("token");
     const body: Record<string, string | undefined> = {
-      name: data.name || undefined,
-      lastName: data.lastName || undefined,
-      phone: data.phone || undefined,
+      email: grants.email ? (data.email || undefined) : undefined,
+      name: grants.name ? (data.name || undefined) : undefined,
+      lastName: grants.name ? (data.lastName || undefined) : undefined,
+      phone: grants.phone ? (data.phone || undefined) : undefined,
       avatar: data.avatar || undefined,
       bankName: data.bankName || undefined,
       accountNumber: data.accountNumber ? sanitizeAccountNumber(data.accountNumber) : undefined,
@@ -119,6 +137,51 @@ export default function Settings() {
         title: "Error",
         description: e instanceof Error ? e.message : "No se pudo actualizar el perfil.",
       });
+    }
+  };
+
+  const onSubmit = async (data: ProfileForm) => {
+    const sensitive =
+      (grants.email && (data.email ?? "").trim() !== String((user as any)?.email ?? "").trim()) ||
+      (grants.name &&
+        (((data.name ?? "").trim() !== String((user as any)?.name ?? "").trim()) ||
+          ((data.lastName ?? "").trim() !== String((user as any)?.lastName ?? "").trim()))) ||
+      (grants.phone && (data.phone ?? "").trim() !== String((user as any)?.phone ?? "").trim());
+
+    if (sensitive) {
+      setPendingSensitiveSave(data);
+      return;
+    }
+    await doSubmit(data);
+  };
+
+  const sendChangeRequest = async () => {
+    const token = localStorage.getItem("token");
+    const reason = changeReqReason.trim();
+    if (!reason) {
+      toast({ variant: "destructive", title: "Motivo requerido", description: "Escribe un motivo corto para tu solicitud." });
+      return;
+    }
+    setIsSendingRequest(true);
+    try {
+      const res = await fetch("/api/me/account-change-requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ field: changeReqField, reason }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "No se pudo enviar la petición");
+      }
+      setChangeReqReason("");
+      toast({ title: "Petición enviada", description: "Un administrador revisará tu solicitud." });
+    } catch (e: unknown) {
+      toast({ variant: "destructive", title: "Error", description: e instanceof Error ? e.message : "No se pudo enviar la petición." });
+    } finally {
+      setIsSendingRequest(false);
     }
   };
 
@@ -239,9 +302,34 @@ export default function Settings() {
                 <User className="h-5 w-5" />
                 Datos personales
               </CardTitle>
-              <CardDescription>Nombre, contacto y avatar.</CardDescription>
+              <CardDescription>
+                Correo, nombre y teléfono se muestran aquí. Para cambiarlos necesitas una petición aprobada.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Correo</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="email"
+                        placeholder="Tu correo"
+                        {...field}
+                        disabled={!grants.email}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                    {!grants.email ? (
+                      <p className="text-xs text-muted-foreground">Bloqueado. Envía una petición para poder cambiarlo.</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Aprobado: puedes cambiarlo ahora y guardar.</p>
+                    )}
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="name"
@@ -249,7 +337,7 @@ export default function Settings() {
                   <FormItem>
                     <FormLabel>Nombre</FormLabel>
                     <FormControl>
-                      <Input placeholder="Tu nombre" {...field} />
+                      <Input placeholder="Tu nombre" {...field} disabled={!grants.name} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -262,7 +350,7 @@ export default function Settings() {
                   <FormItem>
                     <FormLabel>Apellido</FormLabel>
                     <FormControl>
-                      <Input placeholder="Tu apellido" {...field} />
+                      <Input placeholder="Tu apellido" {...field} disabled={!grants.name} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -275,12 +363,72 @@ export default function Settings() {
                   <FormItem>
                     <FormLabel>Teléfono</FormLabel>
                     <FormControl>
-                      <Input placeholder="Ej. +593 99 123 4567" {...field} />
+                      <Input placeholder="Ej. +593 99 123 4567" {...field} disabled={!grants.phone} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              {!grants.name || !grants.phone || !grants.email ? (
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <p className="text-sm font-medium">Solicitar cambio de datos</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Selecciona qué dato quieres cambiar y explica brevemente el motivo. Un admin revisará la solicitud.
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 gap-3">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Quiero cambiar</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant={changeReqField === "phone" ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setChangeReqField("phone")}
+                        >
+                          Teléfono
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={changeReqField === "name" ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setChangeReqField("name")}
+                        >
+                          Nombre
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={changeReqField === "email" ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setChangeReqField("email")}
+                        >
+                          Correo
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Motivo (corto)</p>
+                      <Textarea
+                        value={changeReqReason}
+                        onChange={(e) => setChangeReqReason(e.target.value)}
+                        rows={3}
+                        placeholder="Ej.: Cambié de número por pérdida del chip…"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button type="button" onClick={sendChangeRequest} disabled={isSendingRequest}>
+                        {isSendingRequest ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Enviando…
+                          </>
+                        ) : (
+                          "Enviar petición"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <FormField
                 control={form.control}
                 name="avatar"
@@ -358,6 +506,36 @@ export default function Settings() {
           </div>
         </form>
       </Form>
+
+      {/* Confirmación: cambios sensibles (una sola vez) */}
+      <AlertDialog
+        open={pendingSensitiveSave != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingSensitiveSave(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Guardar cambio de dato de cuenta</AlertDialogTitle>
+            <AlertDialogDescription>
+              Este cambio no se podrá volver a modificar después. Si necesitas otro cambio, tendrás que enviar una nueva petición.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                const data = pendingSensitiveSave;
+                setPendingSensitiveSave(null);
+                if (data) void doSubmit(data);
+              }}
+            >
+              Guardar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Card className="mt-12 border-destructive/20 shadow-sm transition-all hover:shadow-md bg-destructive/5">
         <CardHeader>

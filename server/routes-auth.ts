@@ -28,6 +28,16 @@ const effectiveSecret = JWT_SECRET || devSecret;
 // en el registro enviará solo la downloadURL.
 const DUPLICATE_EMAIL_MESSAGE =
   "Este correo electrónico ya está registrado. Inicia sesión si ya tienes cuenta.";
+const DUPLICATE_PHONE_MESSAGE =
+  "Este teléfono ya está registrado. Usa otro número o inicia sesión.";
+
+function normalizePhone(raw: string): string {
+  const s = (raw ?? "").trim();
+  if (!s) return "";
+  const hasPlus = s.startsWith("+");
+  const digits = s.replace(/[^\d]/g, "");
+  return hasPlus ? `+${digits}` : digits;
+}
 
 const registerSchema = z.object({
   email: z
@@ -38,7 +48,7 @@ const registerSchema = z.object({
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
-  phone: z.string().optional(),
+  phone: z.string().min(1, "El teléfono es obligatorio").transform((s) => normalizePhone(s)),
   role: z.enum(["client", "professional", "admin"]).default("client"),
   avatar: z.string().url("La foto de perfil debe ser una URL válida").optional().or(z.literal("")),
 });
@@ -90,6 +100,7 @@ function buildAuthClientUser(
     wallet: user.wallet ?? 0,
     pendingBalance: user.pendingBalance ?? 0,
     createdAt: user.createdAt,
+    profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
     acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
     provider: provider ?? null,
   };
@@ -128,6 +139,18 @@ export function authenticateJWT(req: any, res: any, next: any) {
   next();
 }
 
+/** Si hay Bearer válido, asigna `req.user`; si no, sigue sin error (para rutas públicas con contexto de rol). */
+export function optionalAuthenticateJWT(req: any, _res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return next();
+  }
+  const token = authHeader.substring(7);
+  const user = verifyToken(token);
+  if (user) req.user = user;
+  next();
+}
+
 // ============== REGISTRO DE RUTAS ==============
 
 export async function registerAuthRoutes(
@@ -143,6 +166,11 @@ export async function registerAuthRoutes(
       const existing = await genFebStorage.getUserByEmail(data.email);
       if (existing && !(existing as { deletedAt?: unknown }).deletedAt) {
         return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE });
+      }
+
+      const existingPhone = await genFebStorage.getUserByPhone(data.phone, true);
+      if (existingPhone) {
+        return res.status(409).json({ message: DUPLICATE_PHONE_MESSAGE, field: "phone" });
       }
 
       // Hashear la contraseña
@@ -183,6 +211,7 @@ export async function registerAuthRoutes(
           role: user.role,
           phone: user.phone,
           avatar: (user as { avatar?: string }).avatar,
+          profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
           acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
         },
       });
@@ -195,8 +224,13 @@ export async function registerAuthRoutes(
       }
       
       // Usuario duplicado (carrera entre comprobación y createUser, u otro storage)
-      if (error instanceof Error && (error.message.includes("ya existe") || error.message.includes("ya está registrado"))) {
-        return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE });
+      if (error instanceof Error) {
+        if (error.message.includes("teléfono")) {
+          return res.status(409).json({ message: DUPLICATE_PHONE_MESSAGE, field: "phone" });
+        }
+        if (error.message.includes("ya existe") || error.message.includes("ya está registrado")) {
+          return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE });
+        }
       }
       
       console.error("Error en registro:", error);
@@ -210,7 +244,7 @@ export async function registerAuthRoutes(
       const data = loginSchema.parse(req.body);
       
       // Buscar usuario
-      const user = await genFebStorage.getUserByEmail(data.email);
+      const user = (await genFebStorage.getUserByEmail(data.email)) as any;
       
       if (!user) {
         return res.status(401).json({ message: "Credenciales inválidas" });
@@ -245,6 +279,7 @@ export async function registerAuthRoutes(
           role: user.role,
           phone: user.phone,
           avatar: (user as { avatar?: string }).avatar,
+          profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
           acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
           provider: provider ?? null,
         },
@@ -278,6 +313,40 @@ export async function registerAuthRoutes(
       res.status(500).json({ message: "Error interno del servidor" });
     }
   });
+
+  // POST /api/me/account-change-requests - Usuario solicita cambio de email/nombre/teléfono
+  app.post("/api/me/account-change-requests", authenticateJWT, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        field: z.enum(["email", "name", "phone"]),
+        reason: z.string().min(3, "Describe brevemente el motivo").max(280, "Máximo 280 caracteres").transform((s) => s.trim()),
+      });
+      const data = schema.parse(req.body);
+      const created = await genFebStorage.createAccountChangeRequest({
+        userId: String(req.user.id),
+        field: data.field,
+        reason: data.reason,
+      });
+      return res.status(201).json({ request: created });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Error de validación", errors: error.errors });
+      }
+      console.error("Error creating account change request:", error);
+      return res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
+
+  // GET /api/me/account-change-requests - Historial del usuario
+  app.get("/api/me/account-change-requests", authenticateJWT, async (req: any, res) => {
+    try {
+      const list = await genFebStorage.getMyAccountChangeRequests(String(req.user.id));
+      return res.json({ requests: list });
+    } catch (error) {
+      console.error("Error listing my account change requests:", error);
+      return res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
   
   /** Limpia el número de cuenta: solo dígitos, guiones y espacios; elimina caracteres inválidos. */
   function sanitizeAccountNumber(value: string): string {
@@ -288,17 +357,76 @@ export async function registerAuthRoutes(
   app.put("/api/auth/profile", authenticateJWT, async (req: any, res) => {
     try {
       const updateSchema = z.object({
-        name: z.string().min(2).optional(),
-        lastName: z.string().min(2).optional(),
-        phone: z.string().optional(),
+        email: z
+          .string()
+          .email()
+          .optional()
+          .transform((s) => (s == null || s.trim() === "" ? undefined : s.trim().toLowerCase())),
+        name: z
+          .string()
+          .min(2)
+          .optional()
+          .transform((s) => (s == null || s.trim() === "" ? undefined : s.trim())),
+        lastName: z
+          .string()
+          .min(2)
+          .optional()
+          .transform((s) => (s == null || s.trim() === "" ? undefined : s.trim())),
+        phone: z
+          .string()
+          .optional()
+          .transform((s) => (s == null || String(s).trim() === "" ? undefined : normalizePhone(String(s)))),
         avatar: z.string().url().optional(),
         bankName: z.string().max(120).optional().transform((v) => (v === "" ? undefined : v?.trim())),
         accountNumber: z.string().max(40).optional().transform((v) => (v === "" ? undefined : v == null ? undefined : sanitizeAccountNumber(v))),
       });
       
       const data = updateSchema.parse(req.body);
-      
-      const updatedUser = await genFebStorage.updateUser(req.user.id, data);
+
+      const current = (await genFebStorage.getUserById(req.user.id, true)) as any;
+      if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
+
+      const grants = (current.profileEditGrants ?? {}) as { email?: boolean; name?: boolean; phone?: boolean };
+      const wantsEmail = typeof data.email !== "undefined" && data.email !== (current.email ?? "");
+      const wantsName =
+        (typeof data.name !== "undefined" && data.name !== (current.name ?? "")) ||
+        (typeof data.lastName !== "undefined" && data.lastName !== (current.lastName ?? ""));
+      const wantsPhone = typeof data.phone !== "undefined" && data.phone !== (current.phone ?? "");
+
+      // Bloqueos por defecto: solo con grant aprobado.
+      if (wantsEmail && grants.email !== true) {
+        return res.status(403).json({ message: "Para cambiar tu correo, debes enviar una petición y esperar aprobación.", field: "email" });
+      }
+      if (wantsName && grants.name !== true) {
+        return res.status(403).json({ message: "Para cambiar tu nombre, debes enviar una petición y esperar aprobación.", field: "name" });
+      }
+      if (wantsPhone && grants.phone !== true) {
+        return res.status(403).json({ message: "Para cambiar tu teléfono, debes enviar una petición y esperar aprobación.", field: "phone" });
+      }
+
+      // Unicidad: email / phone
+      if (wantsEmail) {
+        const existing = await genFebStorage.getUserByEmail(String(data.email), true);
+        if (existing && String((existing as any).id) !== String(req.user.id) && !(existing as any).deletedAt) {
+          return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE, field: "email" });
+        }
+      }
+      if (wantsPhone) {
+        const existing = await genFebStorage.getUserByPhone(String(data.phone), true);
+        if (existing && String((existing as any).id) !== String(req.user.id) && !(existing as any).deletedAt) {
+          return res.status(409).json({ message: DUPLICATE_PHONE_MESSAGE, field: "phone" });
+        }
+      }
+
+      const patch: any = { ...data };
+      // Consumir grants usados (una sola vez).
+      const nextGrants = { ...grants };
+      if (wantsEmail) nextGrants.email = false;
+      if (wantsName) nextGrants.name = false;
+      if (wantsPhone) nextGrants.phone = false;
+      if (wantsEmail || wantsName || wantsPhone) patch.profileEditGrants = nextGrants;
+
+      const updatedUser = await genFebStorage.updateUser(req.user.id, patch);
       
       if (!updatedUser) {
         return res.status(404).json({ message: "Usuario no encontrado" });
@@ -332,7 +460,7 @@ export async function registerAuthRoutes(
       const data = passwordSchema.parse(req.body);
       
       // Obtener usuario actual
-      const user = await genFebStorage.getUserById(req.user.id);
+      const user = (await genFebStorage.getUserById(req.user.id)) as any;
       
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
@@ -368,7 +496,7 @@ export async function registerAuthRoutes(
   // POST /api/auth/accept-provider-terms-of-use — Profesional acepta el estatuto (campo `acceptedProviderTermsOfUse`).
   app.post("/api/auth/accept-provider-terms-of-use", authenticateJWT, async (req: any, res) => {
     try {
-      const full = await genFebStorage.getUserById(req.user.id);
+      const full = (await genFebStorage.getUserById(req.user.id)) as any;
       if (!full) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
@@ -423,21 +551,21 @@ export async function registerAuthRoutes(
       }
       
       // Verificar si ya existe
-      const existing = await genFebStorage.getUserByEmail("admin@genfeb.com");
+      const existing = (await genFebStorage.getUserByEmail("admin@genfeb.com")) as any;
       if (existing) {
         return res.json({ message: "Admin user already exists", user: { email: existing.email, role: existing.role } });
       }
       
       // Crear admin
       const hashedPassword = await bcrypt.hash("admin123456", 10);
-      const admin = await genFebStorage.createUser({
+      const admin = (await genFebStorage.createUser({
         email: "admin@genfeb.com",
         password: hashedPassword,
         name: "Administrador",
         lastName: "GenFeb",
         phone: "+593999999999",
         role: "admin",
-      });
+      })) as any;
       
       const token = generateToken({
         id: admin.id,

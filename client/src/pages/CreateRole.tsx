@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -11,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
+import { AccessGateLoading } from "@/components/AccessGateLoading";
 
 const createRoleSchema = z.object({
   name: z.string().min(1, "El nombre es requerido").max(100),
@@ -32,7 +34,7 @@ function codeFromName(name: string): string {
 }
 
 export default function CreateRole() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
@@ -45,22 +47,18 @@ export default function CreateRole() {
     },
   });
 
+  useEffect(() => {
+    if (authLoading) return;
+    if (!hasAdminRole(user)) {
+      setLocation("/");
+    }
+  }, [authLoading, user, setLocation]);
+
+  if (authLoading) {
+    return <AccessGateLoading message="Cargando sesión…" />;
+  }
   if (!hasAdminRole(user)) {
-    return (
-      <div className="container mx-auto py-10 px-4 max-w-md">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-destructive">Acceso denegado</CardTitle>
-            <CardDescription>Solo los administradores pueden crear roles.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild variant="outline">
-              <Link href="/admin">Volver al panel</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return <AccessGateLoading message="Redirigiendo al inicio…" />;
   }
 
   async function onSubmit(data: CreateRoleForm) {

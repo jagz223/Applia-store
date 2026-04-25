@@ -7,9 +7,9 @@ import type { IStorage } from "./storage-genfeb";
 import type { FirestoreStorage } from "./storage-firestore";
 
 const FIRESTORE_METHODS = new Set([
-  "getUserById", "getUserByEmail", "createUser", "updateUser", "updateUserPassword",
+  "getUserById", "getUserByEmail", "getUserByPhone", "createUser", "updateUser", "updateUserPassword",
   "getUserRole", "updateUserRole",
-  "getCategories", "getSubcategories", "getSubcategoryById", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider",
+  "getCategories", "getSubcategories", "getSubcategoryById", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId",
   "getAllServices", "getService", "createService",
   "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getPendingBookingRatings", "submitBookingRating",
@@ -21,6 +21,7 @@ const FIRESTORE_METHODS = new Set([
   "setVerifyingStatusIdentification",
   "setVerifyingStatusTransaction",
   "getNotifications", "createNotification", "markNotificationAsRead",
+  "createAccountChangeRequest", "getMyAccountChangeRequests", "getPendingAccountChangeRequests", "resolveAccountChangeRequest",
 ]);
 
 export class HybridStorage implements IStorage {
@@ -38,6 +39,7 @@ export class HybridStorage implements IStorage {
 
   getUserById(id: string) { return this.delegate("getUserById", [id]); }
   getUserByEmail(email: string) { return this.delegate("getUserByEmail", [email]); }
+  getUserByPhone(phone: string) { return this.delegate("getUserByPhone", [phone]); }
   createUser(user: any) { return this.delegate("createUser", [user]); }
   updateUser(id: string, data: any) { return this.delegate("updateUser", [id, data]); }
   updateUserPassword(id: string, password: string) { return this.delegate("updateUserPassword", [id, password]); }
@@ -50,6 +52,10 @@ export class HybridStorage implements IStorage {
   getProvider(id: number) { return this.delegate("getProvider", [id]); }
   getProviderByUserId(userId: string) { return this.delegate("getProviderByUserId", [userId]); }
   createProvider(provider: any) { return this.delegate("createProvider", [provider]); }
+  createProviderVehicle(input: any) { return this.delegate("createProviderVehicle", [input]); }
+  getPrimaryVehicleByProviderId(providerId: number) {
+    return this.delegate("getPrimaryVehicleByProviderId", [providerId]);
+  }
   getAllServices(
     categoryId?: number,
     search?: string,
@@ -128,6 +134,10 @@ export class HybridStorage implements IStorage {
   getNotifications(userId: string, unreadOnly?: boolean) { return this.delegate("getNotifications", [userId, unreadOnly]); }
   createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }) { return this.delegate("createNotification", [notification]); }
   markNotificationAsRead(notificationId: number) { return this.delegate("markNotificationAsRead", [notificationId]); }
+  createAccountChangeRequest(input: any) { return this.delegate("createAccountChangeRequest", [input]); }
+  getMyAccountChangeRequests(userId: string) { return this.delegate("getMyAccountChangeRequests", [userId]); }
+  getPendingAccountChangeRequests() { return this.delegate("getPendingAccountChangeRequests", []); }
+  resolveAccountChangeRequest(args: any) { return this.delegate("resolveAccountChangeRequest", [args]); }
   syncWithMango(userId: string, mangoUserId: string) { return this.memory.syncWithMango(userId, mangoUserId); }
   getMangoSyncStatus(userId: string) { return this.memory.getMangoSyncStatus(userId); }
   getReviews(params: any) { return this.memory.getReviews(params); }

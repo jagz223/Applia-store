@@ -280,6 +280,30 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           variant: "destructive",
         });
       }
+      if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
+        queryClient.invalidateQueries({ queryKey: ["user"] });
+        debouncedRefetch(queryClient, ["user"]);
+        const title =
+          typeof notification?.title === "string" && notification.title.trim()
+            ? notification.title.trim()
+            : type === "account_change_request_approved"
+              ? "Cambio aprobado"
+              : "Solicitud rechazada";
+        const description =
+          typeof notification?.body === "string" && notification.body.trim()
+            ? notification.body.trim()
+            : notification?.data?.message ?? notification?.data?.data?.message;
+        toast({
+          title,
+          description:
+            typeof description === "string" && description.trim()
+              ? description.trim()
+              : type === "account_change_request_approved"
+                ? "Abre Configuración para actualizar tu perfil."
+                : "Revisa o vuelve a solicitar el cambio en Configuración.",
+          variant: type === "account_change_request_rejected" ? "destructive" : undefined,
+        });
+      }
       if (type === "verification_result") {
         queryClient.invalidateQueries({ queryKey: ["/api/invoices", "list"] });
         debouncedRefetch(queryClient, ["/api/invoices", "list"]);
