@@ -78,13 +78,24 @@ export class CatalogService {
   /**
    * Conteos reales de asociados por marca (Fix Go / Pro Go / Man Go) para la home.
    * Pro Go = suma de proveedores en subcategorías legal y financial (bajo categoría professional).
+   * Car Go / Shop Go / Pack Go = proveedores cuya categoría base coincide con el slug.
    */
-  async getHomeCategoryAssociateCounts(): Promise<{ fixGo: number; proGo: number; manGo: number }> {
+  async getHomeCategoryAssociateCounts(): Promise<{
+    fixGo: number;
+    proGo: number;
+    manGo: number;
+    carGo: number;
+    shopGo: number;
+    packGo: number;
+  }> {
     const categories = await this.storage.getCategories();
     const bySlug = (slug: string) => categories.find((c) => (c as { slug?: string }).slug === slug);
     const technical = bySlug("technical");
     const professional = bySlug("professional");
     const maintenance = bySlug("maintenance");
+    const transport = bySlug("transport");
+    const marketplace = bySlug("marketplace");
+    const delivery = bySlug("delivery");
 
     const [allProviders, subcategories] = await Promise.all([
       this.storage.getAllProviders(),
@@ -101,6 +112,9 @@ export class CatalogService {
 
     const fixGo = countByCategoryId(technical?.id);
     const manGo = countByCategoryId(maintenance?.id);
+    const carGo = countByCategoryId(transport?.id);
+    const shopGo = countByCategoryId(marketplace?.id);
+    const packGo = countByCategoryId(delivery?.id);
 
     const legalId = legalSub?.id;
     const financialId = financialSub?.id;
@@ -113,7 +127,7 @@ export class CatalogService {
             return sid === legalId || sid === financialId;
           }).length;
 
-    return { fixGo, proGo, manGo };
+    return { fixGo, proGo, manGo, carGo, shopGo, packGo };
   }
 
   /**

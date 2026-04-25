@@ -100,7 +100,7 @@ export const api = {
         200: z.array(z.custom<typeof categories.$inferSelect>()),
       },
     },
-    /** Conteos de asociados por marca (home): Fix Go, Pro Go (legal+financial), Man Go. */
+    /** Conteos de asociados por marca (home): Fix Go, Pro Go (legal+financial), Man Go, Car/Shop/Pack. */
     homeAssociateCounts: {
       method: 'GET' as const,
       path: '/api/categories/home-associate-counts',
@@ -109,6 +109,9 @@ export const api = {
           fixGo: z.number(),
           proGo: z.number(),
           manGo: z.number(),
+          carGo: z.number(),
+          shopGo: z.number(),
+          packGo: z.number(),
         }),
       },
     },
