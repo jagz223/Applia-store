@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useCategories, useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
-import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { cn } from "@/lib/utils";
 import { 
   ArrowRight, 
@@ -36,6 +36,15 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
+
+type HomeServiceCategory = {
+  name: string;
+  slug: "technical" | "professional" | "maintenance" | "transport" | "marketplace" | "delivery";
+  icon: LucideIcon;
+  countKey: "fixGo" | "proGo" | "manGo" | "carGo" | "shopGo" | "packGo";
+  color: string;
+  href: string;
+};
 
 type HomeFeature = {
   icon: LucideIcon;
@@ -125,11 +134,67 @@ export default function HomePage() {
     }
   ];
 
-  const serviceCategories = [
-    { name: "Fix Go", slug: "technical" as const, icon: Wrench, countKey: "fixGo" as const, color: "text-primary" },
-    { name: "Pro Go", slug: "professional" as const, icon: Briefcase, countKey: "proGo" as const, color: "text-secondary" },
-    { name: "Man Go", slug: "maintenance" as const, icon: Home, countKey: "manGo" as const, color: "text-primary" },
-  ];
+  const serviceCategories = useMemo((): HomeServiceCategory[] => {
+    const all: HomeServiceCategory[] = [
+      {
+        name: getCategoryDisplayName({ slug: "technical" }),
+        slug: "technical",
+        icon: Wrench,
+        countKey: "fixGo",
+        color: "text-primary",
+        href: "/explore",
+      },
+      {
+        name: getCategoryDisplayName({ slug: "professional" }),
+        slug: "professional",
+        icon: Briefcase,
+        countKey: "proGo",
+        color: "text-secondary",
+        href: "/explore",
+      },
+      {
+        name: getCategoryDisplayName({ slug: "maintenance" }),
+        slug: "maintenance",
+        icon: Home,
+        countKey: "manGo",
+        color: "text-primary",
+        href: "/explore",
+      },
+    ];
+
+    if (mobilityAllowed.transport) {
+      all.push({
+        name: getCategoryDisplayName({ slug: "transport" }),
+        slug: "transport",
+        icon: Car,
+        countKey: "carGo",
+        color: "text-primary",
+        href: "/go/cargo",
+      });
+    }
+    if (mobilityAllowed.marketplace) {
+      all.push({
+        name: getCategoryDisplayName({ slug: "marketplace" }),
+        slug: "marketplace",
+        icon: Store,
+        countKey: "shopGo",
+        color: "text-secondary",
+        href: "/go/shop",
+      });
+    }
+    if (mobilityAllowed.delivery) {
+      all.push({
+        name: getCategoryDisplayName({ slug: "delivery" }),
+        slug: "delivery",
+        icon: Package,
+        countKey: "packGo",
+        color: "text-primary",
+        href: "/go/pack",
+      });
+    }
+
+    return all;
+  }, [mobilityAllowed.delivery, mobilityAllowed.marketplace, mobilityAllowed.transport]);
 
   const stats = [
     { value: "10,000+", label: "Usuarios Activos" },
@@ -462,7 +527,7 @@ export default function HomePage() {
                   transition={{ delay: index * 0.1 }}
                   viewport={{ once: true }}
                 >
-                  {isBrandInactive ? card : <Link href="/explore">{card}</Link>}
+                  {isBrandInactive ? card : <Link href={category.href}>{card}</Link>}
                 </motion.div>
               );
             })}
