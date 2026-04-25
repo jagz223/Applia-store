@@ -48,6 +48,8 @@ import {
   useAdminWithdrawalHistory,
   usePlatformCommissionRate,
   usePatchPlatformCommissionRate,
+  usePlatformMobilityFares,
+  usePatchPlatformMobilityFares,
   type WithdrawalHistoryStatus,
   type WithdrawalHistoryItem,
 } from "@/hooks/use-mango-data";
@@ -61,6 +63,7 @@ import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
 import { AnimatePresence, motion } from "framer-motion";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
+import { AccessGateLoading } from "@/components/AccessGateLoading";
 
 const USERS_PAGE_SIZE = 10;
 
@@ -572,7 +575,7 @@ function useSaldoUserSearch(debouncedName: string, queryEnabled = true) {
 const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts", "services"] as const;
 
 export default function AdminPanel() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const fullAdmin = hasFullAdminRole(user);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -583,7 +586,18 @@ export default function AdminPanel() {
   const [commissionConfirmOpen, setCommissionConfirmOpen] = useState(false);
   const [commissionDraftPercent, setCommissionDraftPercent] = useState(10);
   const [commissionPendingPercent, setCommissionPendingPercent] = useState<number | null>(null);
-  const [location] = useLocation();
+  const [faresDraft, setFaresDraft] = useState(() => ({
+    motoBase: 1.75,
+    motoPerKm: 0.5,
+    autoBaseDay: 1.5,
+    autoBaseNight: 1.75,
+    autoPerKm: 0.85,
+    autoPet: 1.0,
+    camionetaBase: 20.0,
+    camionetaPerKm: 1.25,
+    camionetaPet: 2.0,
+  }));
+  const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== "undefined") {
       const p = new URLSearchParams(window.location.search);
@@ -596,6 +610,8 @@ export default function AdminPanel() {
     }
     return "overview";
   });
+  const { data: mobilityFaresData } = usePlatformMobilityFares({ enabled: activeTab === "settings" });
+  const patchMobilityFares = usePatchPlatformMobilityFares();
   const [userPage, setUserPage] = useState(1);
   const [providersPage, setProvidersPage] = useState(1);
   const [overviewPendingProvidersPage, setOverviewPendingProvidersPage] = useState(1);
@@ -604,6 +620,29 @@ export default function AdminPanel() {
 
   // Abrir pestaña Recargas y leer highlight desde la URL o desde evento (clic en notificación)
   const [highlightedTransferId, setHighlightedTransferId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user || !hasAdminRole(user)) {
+      setLocation("/");
+    }
+  }, [authLoading, user, setLocation]);
+
+  useEffect(() => {
+    const f = mobilityFaresData?.fares;
+    if (!f) return;
+    setFaresDraft({
+      motoBase: f.moto.baseUsd,
+      motoPerKm: f.moto.perKmUsd,
+      autoBaseDay: f.auto.baseDayUsd,
+      autoBaseNight: f.auto.baseNightUsd,
+      autoPerKm: f.auto.perKmUsd,
+      autoPet: f.auto.petExtraUsd,
+      camionetaBase: f.camioneta.baseUsd,
+      camionetaPerKm: f.camioneta.perKmUsd,
+      camionetaPet: f.camioneta.petExtraUsd,
+    });
+  }, [mobilityFaresData?.fares]);
 
   useEffect(() => {
     const search = typeof window !== "undefined" ? window.location.search : "";
@@ -901,13 +940,17 @@ export default function AdminPanel() {
     transacction_date: string | null;
     transacction_verified: "pending" | "verified" | "rejected";
     transacction_code?: string | null;
+    providerCategorySlug?: string | null;
   };
+
+  const credentialSlideTitle = (assoc: AdminVerifyingStatusItem) =>
+    assoc.providerCategorySlug === "transport" ? "Licencia de conducir" : "Documento profesional";
 
   const associateVerificationSlides = (assoc: AdminVerifyingStatusItem) =>
     [
       { id: "avatar", title: "Foto de perfil", src: assoc.avatar ?? null },
       { id: "id", title: "Identificación", src: assoc.user_identification ?? null },
-      { id: "credential", title: "Documento profesional", src: assoc.professionalCredentialUrl ?? null },
+      { id: "credential", title: credentialSlideTitle(assoc), src: assoc.professionalCredentialUrl ?? null },
     ] as const;
 
   const { data: adminVerifyingStatusData, isLoading: adminVerifyingStatusLoading } = useQuery({
@@ -916,6 +959,35 @@ export default function AdminPanel() {
     enabled: fullAdmin && activeTab === "overview",
   });
   const pendingAssociates: AdminVerifyingStatusItem[] = adminVerifyingStatusData?.items ?? [];
+
+  type AdminAccountChangeRequest = {
+    id: number;
+    userId: string;
+    field: "email" | "name" | "phone";
+    reason: string;
+    status: "pending" | "approved" | "rejected";
+    createdAt: string | Date;
+    user?: { id: string; name?: string; lastName?: string; email?: string; phone?: string; role?: string } | null;
+  };
+
+  const { data: adminAccountChangeReqData, isLoading: adminAccountChangeReqLoading } = useQuery({
+    queryKey: ["admin-account-change-requests-pending"],
+    queryFn: () => fetchWithAuth("/api/admin/account-change-requests/pending"),
+    enabled: fullAdmin && activeTab === "overview",
+  });
+  const pendingAccountChangeRequests: AdminAccountChangeRequest[] = adminAccountChangeReqData?.requests ?? [];
+
+  const resolveAccountChangeRequestMutation = useMutation({
+    mutationFn: async (args: { id: number; action: "approve" | "reject" }) =>
+      patchWithAuth(`/api/admin/account-change-requests/${args.id}`, { action: args.action }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-account-change-requests-pending"] });
+      toast({ title: "Actualizado", description: "La petición fue procesada correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message || "No se pudo procesar la petición.", variant: "destructive" });
+    },
+  });
 
   const updateVerifyingStatusMutation = useMutation({
     mutationFn: async (args: {
@@ -1003,21 +1075,11 @@ export default function AdminPanel() {
     setPendingRechargeAction(null);
   };
 
-  // Check if user is admin o Soporte TI
-  if (!hasAdminRole(user)) {
-    return (
-      <div className="container mx-auto py-10 px-4">
-        <Card className="max-w-md mx-auto">
-          <CardHeader>
-            <CardTitle className="text-red-500">Acceso Denegado</CardTitle>
-            <CardDescription>No tienes permisos de administrador</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p>Solo los administradores pueden acceder a este panel.</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
+  if (authLoading) {
+    return <AccessGateLoading message="Cargando panel de administración…" />;
+  }
+  if (!user || !hasAdminRole(user)) {
+    return <AccessGateLoading message="Redirigiendo al inicio…" />;
   }
 
   return (
@@ -1113,10 +1175,76 @@ export default function AdminPanel() {
               <Card>
                 <CardHeader>
                   <CardTitle>Gestión de asociados</CardTitle>
-                  <CardDescription>Verificaciones pendientes de identificación y recarga</CardDescription>
+                  <CardDescription>Verificaciones pendientes y peticiones de cambio de datos de cuenta</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
+                    <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-medium">Peticiones de cambio de datos</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Solicitudes para permitir editar correo, nombre o teléfono (se habilita 1 vez).
+                          </p>
+                        </div>
+                      </div>
+
+                      {adminAccountChangeReqLoading ? (
+                        <div className="py-6 text-center text-sm text-muted-foreground">Cargando peticiones…</div>
+                      ) : pendingAccountChangeRequests.length === 0 ? (
+                        <div className="py-6 text-center text-sm text-muted-foreground">No hay peticiones pendientes.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {pendingAccountChangeRequests.map((r) => {
+                            const u = r.user ?? null;
+                            const who =
+                              (u?.name || u?.lastName
+                                ? `${u?.name ?? ""} ${u?.lastName ?? ""}`.trim()
+                                : u?.email) || r.userId;
+                            const fieldLabel =
+                              r.field === "email" ? "correo" : r.field === "name" ? "nombre" : "número de teléfono";
+                            return (
+                              <div key={r.id} className="rounded-lg border bg-background p-3 space-y-2">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-medium truncate">
+                                      Petición de cambio de {fieldLabel}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {who}
+                                      {u?.email ? ` · ${u.email}` : ""}
+                                      {u?.phone ? ` · ${u.phone}` : ""}
+                                    </p>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-green-600"
+                                      disabled={resolveAccountChangeRequestMutation.isPending}
+                                      onClick={() => resolveAccountChangeRequestMutation.mutate({ id: r.id, action: "approve" })}
+                                    >
+                                      Aprobar
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-red-600"
+                                      disabled={resolveAccountChangeRequestMutation.isPending}
+                                      onClick={() => resolveAccountChangeRequestMutation.mutate({ id: r.id, action: "reject" })}
+                                    >
+                                      Rechazar
+                                    </Button>
+                                  </div>
+                                </div>
+                                <p className="text-sm text-muted-foreground break-words">{r.reason}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
                     {adminVerifyingStatusLoading ? (
                       <div className="py-10 text-center text-sm text-muted-foreground">Cargando asociados…</div>
                     ) : pendingAssociates.length === 0 ? (
@@ -1225,7 +1353,11 @@ export default function AdminPanel() {
                                               slides: [...associateVerificationSlides(assoc)],
                                             })
                                           }
-                                          title="Ver documento profesional"
+                                          title={
+                                            assoc.providerCategorySlug === "transport"
+                                              ? "Ver licencia de conducir"
+                                              : "Ver documento profesional"
+                                          }
                                         >
                                           <Shield className="h-4 w-4" />
                                         </Button>
@@ -2899,6 +3031,110 @@ export default function AdminPanel() {
                       <p className="text-xs text-muted-foreground shrink-0">Solo administrador puede editar.</p>
                     )}
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Settings className="h-5 w-5 text-primary" />
+                    Tarifas Car Go / envíos
+                  </CardTitle>
+                  <CardDescription>
+                    Tarifa base y costo por km. Auto/Camioneta incluyen extra opcional por mascota (solo si el usuario marca la opción).
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                    <p className="font-semibold">Delivery / Compras — Moto</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Tarifa base (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.motoBase} onChange={(e) => setFaresDraft((s) => ({ ...s, motoBase: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Costo por km (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.motoPerKm} onChange={(e) => setFaresDraft((s) => ({ ...s, motoPerKm: Number(e.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                    <p className="font-semibold">Transporte Personas — Auto</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Base día (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.autoBaseDay} onChange={(e) => setFaresDraft((s) => ({ ...s, autoBaseDay: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Base noche (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.autoBaseNight} onChange={(e) => setFaresDraft((s) => ({ ...s, autoBaseNight: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Costo por km (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.autoPerKm} onChange={(e) => setFaresDraft((s) => ({ ...s, autoPerKm: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Extra mascota (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.autoPet} onChange={(e) => setFaresDraft((s) => ({ ...s, autoPet: Number(e.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                    <p className="font-semibold">Carga / Personas+ — Camioneta</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Tarifa base (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.camionetaBase} onChange={(e) => setFaresDraft((s) => ({ ...s, camionetaBase: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Costo por km (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.camionetaPerKm} onChange={(e) => setFaresDraft((s) => ({ ...s, camionetaPerKm: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Extra mascota (USD)</Label>
+                        <Input type="number" step="0.01" value={faresDraft.camionetaPet} onChange={(e) => setFaresDraft((s) => ({ ...s, camionetaPet: Number(e.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button
+                      disabled={!fullAdmin || patchMobilityFares.isPending}
+                      onClick={async () => {
+                        try {
+                          await patchMobilityFares.mutateAsync({
+                            moto: { baseUsd: faresDraft.motoBase, perKmUsd: faresDraft.motoPerKm },
+                            auto: {
+                              baseDayUsd: faresDraft.autoBaseDay,
+                              baseNightUsd: faresDraft.autoBaseNight,
+                              perKmUsd: faresDraft.autoPerKm,
+                              petExtraUsd: faresDraft.autoPet,
+                            },
+                            camioneta: {
+                              baseUsd: faresDraft.camionetaBase,
+                              perKmUsd: faresDraft.camionetaPerKm,
+                              petExtraUsd: faresDraft.camionetaPet,
+                            },
+                          });
+                          toast({ title: "Guardado", description: "Tarifas actualizadas correctamente." });
+                        } catch (e: any) {
+                          toast({ title: "Error", description: e?.message || "No se pudo guardar.", variant: "destructive" });
+                        }
+                      }}
+                    >
+                      {patchMobilityFares.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Guardando…
+                        </>
+                      ) : (
+                        "Guardar tarifas"
+                      )}
+                    </Button>
+                  </div>
+                  {!fullAdmin ? <p className="text-xs text-muted-foreground">Solo administrador completo puede editar.</p> : null}
                 </CardContent>
               </Card>
             </div>

@@ -4,7 +4,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { storeVerifyReturnPath } from "@/lib/verify-return-path";
 import { AlertCircle } from "lucide-react";
-import { useCurrentProvider, useVerifyingStatusMe } from "@/hooks/use-mango-data";
+import { useCategories, useCurrentProvider, useVerifyingStatusMe } from "@/hooks/use-mango-data";
+import { isCarGoProvider } from "@shared/provider-car-go";
+import { useMemo } from "react";
 
 /**
  * Aviso global para profesionales cuyo proveedor aún no está verificado por la plataforma.
@@ -17,6 +19,8 @@ export function ProfessionalVerificationBanner() {
   const pathOnly = location.split("?")[0];
 
   const provider = currentProvider || user?.provider;
+  const { data: categories = [] } = useCategories();
+  const isCarGo = useMemo(() => isCarGoProvider(provider ?? undefined, categories), [provider, categories]);
   const isPro = user != null && (user.role === "professional" || provider != null);
   const unverified = provider != null && provider.isVerified !== true;
 
@@ -55,8 +59,9 @@ export function ProfessionalVerificationBanner() {
         <div className="container max-w-6xl mx-auto flex items-start gap-2 min-w-0">
           <AlertCircle className="h-5 w-5 shrink-0 text-sky-800 dark:text-sky-200 mt-0.5" aria-hidden />
           <p className="leading-snug text-sky-950 dark:text-sky-50 font-medium">
-            Tu solicitud de verificación está en revisión. Cuando sea aprobada, tu servicio podrá mostrarse con
-            normalidad en el sitio.
+            {isCarGo
+              ? "Tu solicitud de verificación está en revisión. Cuando sea aprobada, los clientes podrán usar tus servicios Car Go con normalidad."
+              : "Tu solicitud de verificación está en revisión. Cuando sea aprobada, tu servicio podrá mostrarse con normalidad en el sitio."}
           </p>
         </div>
       </div>
@@ -72,7 +77,9 @@ export function ProfessionalVerificationBanner() {
         <div className="flex items-start gap-2 min-w-0">
           <AlertCircle className="h-5 w-5 shrink-0 text-amber-700 mt-0.5" aria-hidden />
           <p className="leading-snug text-amber-950 dark:text-amber-100 font-medium">
-            Aún no estás verificado; tu servicio no será visible para los clientes hasta completar la verificación.
+            {isCarGo
+              ? "Aún no estás verificado; los clientes no podrán usar tus servicios de transporte hasta completar la verificación."
+              : "Aún no estás verificado; tu servicio no será visible para los clientes hasta completar la verificación."}
           </p>
         </div>
         <Button size="sm" variant="default" className="shrink-0 w-fit sm:w-auto" asChild>

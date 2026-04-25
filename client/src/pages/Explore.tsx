@@ -4,7 +4,6 @@ import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext
 import { useCategories, useCategoryVisibility, useServices, useSubcategories } from "@/hooks/use-mango-data";
 import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { ServiceListItem } from "@/components/ServiceListItem";
-import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp, Bookmark, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,10 +15,11 @@ const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
 
 export default function Explore() {
   const [, setLocation] = useLocation();
-  const { isAuthenticated } = useAuth();
   const { setExploreCategoryDisplayName } = useExploreCategoryDisplayName();
   const [search, setSearch] = useState("");
   const params = new URLSearchParams(window.location.search);
+  /** Si el usuario llegó desde /categories, el botón atrás vuelve allí; si no, a /explore (todos los servicios). */
+  const exploreFrom = params.get("from");
   const initialProviderCategoryId = params.get("providerCategoryId");
   const initialSubcategoryId = params.get("subcategoryId");
   const parsedCatId = initialProviderCategoryId ? Number(initialProviderCategoryId) : undefined;
@@ -50,13 +50,10 @@ export default function Explore() {
   }, []);
 
   const { data: categories = [] } = useCategories();
-  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
+  const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(
-    () =>
-      new Set(
-        effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined)
-      ),
-    [isAuthenticated, visibility]
+    () => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)),
+    [visibility]
   );
   const providerCategories = useMemo(
     () =>
@@ -82,6 +79,21 @@ export default function Explore() {
     refetch();
   }, [refetch]);
 
+  /** Categorías con flujo propio: movilidad/tienda/delivery se abren en esta sección. */
+  useEffect(() => {
+    if (!initialProviderCategoryId) return;
+    const id = Number(initialProviderCategoryId);
+    if (Number.isNaN(id) || categories.length === 0) return;
+    const cat = categories.find((c) => c.id === id);
+    if (!cat) return;
+    const slug = (cat as { slug?: string }).slug;
+    if (slug && hiddenSlugs.has(slug)) return;
+    const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
+    if (slug === "transport") return setLocation(`/go/cargo${fromQs}`);
+    if (slug === "marketplace") return setLocation(`/go/shop${fromQs}`);
+    if (slug === "delivery") return setLocation(`/go/pack${fromQs}`);
+  }, [categories, initialProviderCategoryId, exploreFrom, setLocation, hiddenSlugs]);
+
   const verifiedServices = useMemo(
     () => (services ?? []).filter((s) => Boolean(s?.provider?.isVerified)),
     [services]
@@ -93,17 +105,43 @@ export default function Explore() {
   const selectedSubcategoryData = subcategories.find((s) => s.id === selectedSubcategoryId);
 
   const setProviderCategory = (id: number | undefined) => {
-    setSelectedProviderCategoryId(id);
     setSelectedSubcategoryId(undefined);
-    if (id == null) setLocation("/explore");
-    else setLocation(`/explore?providerCategoryId=${id}`);
+    if (id == null) {
+      setSelectedProviderCategoryId(undefined);
+      setLocation("/explore");
+      return;
+    }
+    const cat = providerCategories.find((c) => c.id === id);
+    /** Movilidad/tienda/delivery: abrir esta sección, no el listado de Explorar. */
+    const slug = (cat as { slug?: string } | undefined)?.slug;
+    if (slug === "transport") {
+      const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
+      setLocation(`/go/cargo${fromQs}`);
+      return;
+    }
+    if (slug === "marketplace") {
+      const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
+      setLocation(`/go/shop${fromQs}`);
+      return;
+    }
+    if (slug === "delivery") {
+      const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
+      setLocation(`/go/pack${fromQs}`);
+      return;
+    }
+    setSelectedProviderCategoryId(id);
+    const fromQs = exploreFrom === "categories" ? "&from=categories" : "";
+    setLocation(`/explore?providerCategoryId=${id}${fromQs}`);
   };
 
   const setSubcategory = (id: number | undefined) => {
     setSelectedSubcategoryId(id);
     const base = selectedProviderCategoryId != null ? `providerCategoryId=${selectedProviderCategoryId}` : "";
     const sub = id != null ? `subcategoryId=${id}` : "";
-    const query = [base, sub].filter(Boolean).join("&");
+    let query = [base, sub].filter(Boolean).join("&");
+    if (exploreFrom === "categories") {
+      query += (query ? "&" : "") + "from=categories";
+    }
     setLocation(query ? `/explore?${query}` : "/explore");
   };
 
@@ -138,10 +176,10 @@ export default function Explore() {
             <Button
               variant="ghost"
               className="mb-4 gap-2 -ml-2"
-              onClick={() => setLocation("/categories")}
+              onClick={() => setLocation(exploreFrom === "categories" ? "/categories" : "/explore")}
             >
               <ArrowLeft className="h-4 w-4" />
-              Volver a categorías
+              {exploreFrom === "categories" ? "Volver a categorías" : "Volver a Explorar"}
             </Button>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div className="min-w-0">
@@ -435,10 +473,12 @@ export default function Explore() {
               <Search className="h-10 w-10 text-muted-foreground" />
             </div>
             <h3 className="text-2xl font-bold font-display mb-3">
-              {hasCategorySelected ? `No hay servicios en ${categoryDisplayName}` : "No se encontraron servicios"}
+              {hasCategorySelected ? "Sin servicios disponibles" : "No se encontraron servicios"}
             </h3>
             <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-              {hasCategorySelected ? "Prueba otra subcategoría o quita filtros." : "Intenta ajustar tus filtros o términos de búsqueda."}
+              {hasCategorySelected
+                ? `En ${categoryDisplayName} no hay ofertas publicadas en este momento. Prueba otra categoría o revisa más tarde.`
+                : "Intenta ajustar tus filtros o términos de búsqueda."}
             </p>
             <Button
               className="rounded-full px-8"

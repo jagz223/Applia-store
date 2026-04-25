@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { User, ArrowLeft, MapPin, Bell, BellOff, Loader2, Info } from "lucide-react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
+import { useAuth } from "@/hooks/use-auth";
 import { MessageList } from "./MessageList";
 import { MessageInput } from "./MessageInput";
 import { formatMessageTime } from "@/lib/chat-format";
@@ -43,7 +44,18 @@ export function ChatWindow({
   onBack,
   reminderText,
 }: ChatWindowProps) {
+  const { user } = useAuth();
   const push = usePushNotifications();
+  const otherAvatarUrl = conversation.otherParticipant?.profileImageUrl ?? null;
+  const otherFullName = [conversation.otherParticipant?.name ?? "Usuario", conversation.otherParticipant?.lastName ?? ""]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const myAvatarUrl =
+    (user as any)?.profileImageUrl ||
+    (user as any)?.profile_image_url ||
+    (user as any)?.imageUrl ||
+    null;
   const displayMessages = messages.map((m) => ({
     id: m.id,
     text: m.content,
@@ -51,6 +63,7 @@ export function ChatWindow({
     time: formatMessageTime(m.createdAt),
     isOwn: currentUserId === m.senderId,
     status: m.status ?? "sent",
+    avatarUrl: currentUserId === m.senderId ? myAvatarUrl : otherAvatarUrl,
   }));
 
   const firstDate = messages[0]?.createdAt;
@@ -70,13 +83,17 @@ export function ChatWindow({
               <ArrowLeft className="w-5 h-5" />
             </Button>
           )}
-          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-            <User className="w-5 h-5 text-primary" />
-          </div>
+          {otherAvatarUrl ? (
+            <img src={otherAvatarUrl} alt="" className="w-10 h-10 rounded-full object-cover ring-2 ring-primary/20 shrink-0" />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+              <User className="w-5 h-5 text-primary" />
+            </div>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <p className={`font-medium ${conversation.otherParticipant?.isDeleted ? "text-muted-foreground italic" : ""}`}>
-                {conversation.otherParticipant?.name ?? "Usuario"}
+                {otherFullName || "Usuario"}
               </p>
               {conversation.otherParticipant?.isDeleted && (
                 <Badge variant="outline" className="text-[10px] h-4 px-1 text-muted-foreground border-muted-foreground">

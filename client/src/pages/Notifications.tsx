@@ -108,6 +108,11 @@ function getNotificationPath(notification: { type: string; data?: any }): string
     }
     case "verification_welcome":
       return data.url ?? "/professional-dashboard";
+    case "account_change_request_approved":
+    case "account_change_request_rejected": {
+      const u = data.url ?? data.data?.url;
+      return typeof u === "string" && u.startsWith("/") ? u : "/settings";
+    }
     default:
       return "/dashboard";
   }
@@ -146,6 +151,10 @@ function getIcon(type: string, data?: any) {
         : <ShieldCheck className="h-4 w-4 text-green-500" />;
     case "verification_welcome":
       return <ShieldCheck className="h-4 w-4 text-primary animate-pulse" />;
+    case "account_change_request_approved":
+      return <Bell className="h-4 w-4 text-green-500" />;
+    case "account_change_request_rejected":
+      return <Bell className="h-4 w-4 text-amber-500" />;
     default:
       return <Bell className="h-4 w-4 text-gray-500" />;
   }
@@ -200,6 +209,15 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
   }
 
   if (type === "verification_welcome") return "¡Bienvenido Asociado!";
+
+  if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
+    const t = d.title ?? d.data?.title;
+    if (typeof t === "string" && t.trim()) return t.trim();
+    const field = String(d.field ?? d.data?.field ?? "");
+    const label =
+      field === "email" ? "Correo" : field === "name" ? "Nombre" : field === "phone" ? "Teléfono" : "Perfil";
+    return type === "account_change_request_approved" ? `${label}: aprobado` : `${label}: rechazado`;
+  }
 
   if (type === "message") return conversationSenderName ? `Nuevo mensaje de ${truncateText(conversationSenderName, 18)}` : "Nuevo mensaje";
   return "Notificación";
@@ -314,13 +332,30 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     return d.message ?? d.data?.message ?? "Tu estado de verificación ha sido actualizado.";
   }
 
+  if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
+    const msg = d.message ?? d.data?.message;
+    if (typeof msg === "string" && msg.trim()) return msg.trim();
+    return type === "account_change_request_approved"
+      ? "Abre Configuración para actualizar tu perfil."
+      : "Revisa o vuelve a solicitar el cambio en Configuración.";
+  }
+
   return null;
 }
 
 export default function Notifications() {
   const { isAuthenticated } = useAuth();
   const { notifications, markNotificationAsRead, clearNotifications } = useSocket();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
+
+  const nav = useMemo(() => {
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    const from = params.get("from");
+    const returnToRaw = params.get("returnTo");
+    const returnTo = typeof returnToRaw === "string" && returnToRaw.trim() ? returnToRaw.trim() : null;
+    const backHref = returnTo ?? (from === "go" ? "/go/cargo" : "/dashboard");
+    return { from, returnTo, backHref };
+  }, [location]);
 
   const { data: conversations } = useConversations(!!isAuthenticated);
   const senderNameByConversationId = useMemo(() => {
@@ -384,7 +419,7 @@ export default function Notifications() {
     <div className="container max-w-5xl py-8 sm:py-12 px-4">
       <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
         <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-primary" asChild>
-          <Link href="/dashboard">
+          <Link href={nav.backHref}>
             <ArrowLeft className="h-4 w-4" />
             Volver
           </Link>

@@ -3,13 +3,14 @@
  * Dependen de chatApi y de React Query.
  */
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAuth } from "./use-auth";
 import { useSocket, useSocketChat } from "./use-socket";
 import { chatApi } from "@/lib/chat-api";
 import { toDate } from "@/lib/date-utils";
 import { debouncedRefetch } from "@/lib/refetch-utils";
+import { loadHiddenConversationIds } from "@/lib/hidden-conversations";
 import type { ConversationEnriched, Message } from "@/types/chat";
 
 /** Mensajes por página (alineado con backend). Balance UX / carga servidor. */
@@ -19,6 +20,20 @@ const QUERY_KEYS = {
   conversations: ["chat", "conversations"] as const,
   messages: (conversationId: number) => ["chat", "messages", conversationId] as const,
 };
+
+export function purgeConversationCache(queryClient: QueryClient, conversationId: number) {
+  const id = Number(conversationId);
+  if (!Number.isFinite(id) || id <= 0) return;
+
+  // 1) Remover cache de mensajes (infinite query)
+  queryClient.removeQueries({ queryKey: QUERY_KEYS.messages(id) });
+
+  // 2) Actualizar lista de conversaciones inmediatamente (si está en cache)
+  queryClient.setQueryData<ConversationEnriched[] | undefined>(QUERY_KEYS.conversations, (prev) => {
+    if (!prev) return prev;
+    return prev.filter((c) => c.id !== id);
+  });
+}
 
 function messageCreatedAtMs(m: Message): number {
   return toDate(m.createdAt as Parameters<typeof toDate>[0]).getTime();
@@ -38,7 +53,11 @@ export function useConversations(enabled: boolean) {
     queryKey: QUERY_KEYS.conversations,
     queryFn: () => chatApi.getConversations(),
     enabled,
-    select: sortConversationsByLastMessage,
+    select: (list) => {
+      const hidden = new Set(loadHiddenConversationIds());
+      const filtered = hidden.size ? list.filter((c) => !hidden.has(c.id)) : list;
+      return sortConversationsByLastMessage(filtered);
+    },
   });
 }
 

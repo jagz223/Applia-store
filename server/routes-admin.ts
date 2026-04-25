@@ -15,6 +15,7 @@ import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
+import { getMobilityFares, setMobilityFares } from "./mobility-fares";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
@@ -97,6 +98,17 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  /** Lectura pública de tarifas Car Go / envíos (UI). */
+  app.get("/api/platform/mobility-fares", async (_req, res) => {
+    try {
+      const fares = await getMobilityFares();
+      return res.json({ fares });
+    } catch (e) {
+      console.error("[mobility-fares] GET", e);
+      return res.status(500).json({ message: "Error al leer tarifas" });
+    }
+  });
+
   /** Solo administrador completo: actualizar porcentaje de comisión de plataforma. */
   app.patch(
     "/api/admin/platform-commission-rate",
@@ -118,6 +130,31 @@ export function registerAdminRoutes(app: Express): void {
       }
     },
   );
+
+  const mobilityFaresPatchSchema = z.object({
+    fares: z.object({
+      moto: z.object({ baseUsd: z.number().min(0).max(100), perKmUsd: z.number().min(0).max(20) }),
+      auto: z.object({
+        baseDayUsd: z.number().min(0).max(100),
+        baseNightUsd: z.number().min(0).max(100),
+        perKmUsd: z.number().min(0).max(20),
+        petExtraUsd: z.number().min(0).max(50),
+      }),
+      camioneta: z.object({ baseUsd: z.number().min(0).max(500), perKmUsd: z.number().min(0).max(50), petExtraUsd: z.number().min(0).max(50) }),
+    }),
+  });
+
+  app.patch("/api/admin/mobility-fares", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const parsed = mobilityFaresPatchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      const saved = await setMobilityFares(parsed.data.fares);
+      return res.json({ fares: saved });
+    } catch (e) {
+      console.error("[mobility-fares] PATCH", e);
+      return res.status(500).json({ message: "Error al guardar tarifas" });
+    }
+  });
 
   const adminUsersRouter = express.Router({ mergeParams: true });
 
@@ -281,20 +318,24 @@ export function registerAdminRoutes(app: Express): void {
         transacction_date: string | null;
         transacction_verified: "pending" | "verified" | "rejected";
         transacction_code?: string | null;
+        /** Slug de categoría del proveedor (p. ej. `transport` = Car Go). */
+        providerCategorySlug?: string | null;
       }> = [];
 
       for (const st of pending ?? []) {
         const userId = String((st as any).user ?? "");
         if (!userId) continue;
 
+        const provider = await genFebStorage.getProviderByUserId(userId);
+        const catId = Number((provider as any)?.categoryId);
+        const slugFromId =
+          Number.isFinite(catId) && catId > 0 ? String((catById.get(catId) as any)?.slug ?? "") : "";
+        const providerCategorySlug =
+          (slugFromId || String((provider as any)?.category ?? "").trim()) || null;
+
         // Filtrar por marca del proveedor (Pack Go / Shop Go / Car Go, etc.) si aplica al rol.
         if (hiddenSlugs.size > 0) {
-          const provider = await genFebStorage.getProviderByUserId(userId);
-          const catId = Number((provider as any)?.categoryId);
-          const slugFromId =
-            Number.isFinite(catId) && catId > 0 ? String((catById.get(catId) as any)?.slug ?? "") : "";
-          const slug = slugFromId || String((provider as any)?.category ?? "").trim();
-          if (slug && hiddenSlugs.has(slug)) continue;
+          if (providerCategorySlug && hiddenSlugs.has(providerCategorySlug)) continue;
         }
 
         const user = (await genFebStorage.getUserById(userId)) as any;
@@ -320,6 +361,7 @@ export function registerAdminRoutes(app: Express): void {
           transacction_date: st.transacction_date ?? null,
           transacction_verified: (st.transacction_verified as any) ?? "rejected",
           transacction_code,
+          providerCategorySlug,
         });
       }
 
@@ -327,6 +369,135 @@ export function registerAdminRoutes(app: Express): void {
     } catch (error) {
       console.error("Error listing verifying_status pending:", error);
       return res.status(500).json({ message: "Error al listar asociados" });
+    }
+  });
+
+  // GET /api/admin/account-change-requests/pending - Peticiones pendientes (correo/nombre/teléfono)
+  app.get("/api/admin/account-change-requests/pending", authenticateJWT, requireFullAdmin, async (_req: any, res) => {
+    try {
+      const pending = await genFebStorage.getPendingAccountChangeRequests();
+      const enriched: any[] = [];
+      for (const r of pending ?? []) {
+        const uid = String((r as any).userId ?? "");
+        const u = (await genFebStorage.getUserById(uid, true)) as any;
+        enriched.push({
+          ...r,
+          user: u
+            ? {
+                id: u.id,
+                name: u.name,
+                lastName: u.lastName,
+                email: u.email,
+                phone: u.phone,
+                role: u.role,
+              }
+            : null,
+        });
+      }
+      return res.json({ requests: enriched });
+    } catch (e) {
+      console.error("Error listing account change requests:", e);
+      return res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
+
+  // PATCH /api/admin/account-change-requests/:id - Aprobar/Rechazar
+  app.patch("/api/admin/account-change-requests/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "id inválido" });
+      const schema = z.object({ action: z.enum(["approve", "reject"]) });
+      const body = schema.parse(req.body);
+
+      const resolved = await genFebStorage.resolveAccountChangeRequest({
+        id,
+        action: body.action,
+        adminUserId: String(req.user.id),
+      });
+
+      const userId = String((resolved as any)?.userId ?? "");
+      const field = String((resolved as any)?.field ?? "");
+      const allowed = field === "email" || field === "name" || field === "phone";
+
+      const accountFieldLabelEs = (f: string) =>
+        f === "email" ? "correo" : f === "name" ? "nombre" : f === "phone" ? "teléfono" : "perfil";
+      const capLabel = (f: string) => {
+        const s = accountFieldLabelEs(f);
+        return s.charAt(0).toUpperCase() + s.slice(1);
+      };
+
+      // Notificar y habilitar edición (grants) si se aprueba
+      if (userId && allowed && body.action === "approve") {
+        const u = (await genFebStorage.getUserById(userId, true)) as any;
+        const current = u ?? {};
+        const grants = (current.profileEditGrants ?? {}) as any;
+        const next = { ...grants, [field]: true };
+        await genFebStorage.updateUser(userId, { profileEditGrants: next } as any);
+
+        const title = `${capLabel(field)}: aprobado`;
+        const bodyText = "Abre Configuración para actualizar tu perfil.";
+        const notifData = { field, url: "/settings", message: bodyText, title };
+        const created = await genFebStorage.createNotification({
+          userId,
+          type: "account_change_request_approved",
+          data: notifData,
+        });
+
+        const io = getIO();
+        if (io) {
+          io.to(`user:${userId}`).emit("notification", {
+            id: (created as any)?.id,
+            type: "account_change_request_approved",
+            title,
+            body: bodyText,
+            data: notifData,
+          });
+        }
+        void notificationService
+          .sendPushToUser(userId, {
+            title,
+            body: bodyText,
+            data: { url: "/settings" },
+          })
+          .catch((err) => console.error("[push-account-change] approve:", err));
+      }
+
+      if (userId && allowed && body.action === "reject") {
+        const title = `${capLabel(field)}: rechazado`;
+        const bodyText = "Revisa o vuelve a solicitar el cambio en Configuración.";
+        const notifData = { field, url: "/settings", message: bodyText, title };
+        const created = await genFebStorage.createNotification({
+          userId,
+          type: "account_change_request_rejected",
+          data: notifData,
+        });
+
+        const io = getIO();
+        if (io) {
+          io.to(`user:${userId}`).emit("notification", {
+            id: (created as any)?.id,
+            type: "account_change_request_rejected",
+            title,
+            body: bodyText,
+            data: notifData,
+          });
+        }
+        void notificationService
+          .sendPushToUser(userId, {
+            title,
+            body: bodyText,
+            data: { url: "/settings" },
+          })
+          .catch((err) => console.error("[push-account-change] reject:", err));
+      }
+
+      return res.json({ request: resolved });
+    } catch (e: any) {
+      if (e instanceof z.ZodError) return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      const msg = e instanceof Error ? e.message : "Error";
+      const code = String(msg).toLowerCase().includes("ya fue resuelta") ? 409 : 400;
+      console.error("Error resolving account change request:", e);
+      return res.status(code).json({ message: msg });
     }
   });
 

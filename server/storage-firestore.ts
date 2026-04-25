@@ -23,8 +23,10 @@ import type {
   ProviderWithUser,
   ServiceWithProvider,
 } from "@shared/schema";
+import type { InsertProviderVehicle } from "@shared/vehicle-schema";
 import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
-import { calcCommission, calcProviderNet } from "@shared/platform-commission";
+import { calcCommission, calcProviderNet, roundToCents } from "@shared/platform-commission";
+import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { isFullAdmin } from "@shared/roles";
 import type { ProfessionalVerification, ProfessionalVerificationState } from "@shared/professional-verification";
@@ -127,6 +129,14 @@ const COUNTERS_DOC = "_counters";
 class FirestoreStorageImpl implements IStorage {
   private db = getFirestore();
 
+  private normalizePhone(raw: string): string {
+    const s = (raw ?? "").trim();
+    if (!s) return "";
+    const hasPlus = s.startsWith("+");
+    const digits = s.replace(/[^\d]/g, "");
+    return hasPlus ? `+${digits}` : digits;
+  }
+
   /** Obtiene el siguiente ID numérico para una colección (transacción atómica). */
   private async getNextId(collectionKey: string): Promise<number> {
     if (!this.db) throw new Error("Firestore no configurado");
@@ -180,6 +190,37 @@ class FirestoreStorageImpl implements IStorage {
     } as User;
   }
 
+  async getUserByPhone(phone: string, includeDeleted?: boolean): Promise<User | undefined> {
+    if (!this.db) return undefined;
+    const n = this.normalizePhone(phone);
+    if (!n) return undefined;
+
+    // Preferir campo normalizado si existe.
+    const snapNorm = await this.db
+      .collection(FIRESTORE_COLLECTIONS.USERS)
+      .where("phoneNormalized", "==", n)
+      .limit(1)
+      .get();
+    if (!snapNorm.empty) {
+      const doc = snapNorm.docs[0];
+      const data = doc.data();
+      if (!includeDeleted && data?.deletedAt) return undefined;
+      return { id: doc.id, ...data } as User;
+    }
+
+    // Fallback a campo phone (para usuarios antiguos).
+    const snapPhone = await this.db
+      .collection(FIRESTORE_COLLECTIONS.USERS)
+      .where("phone", "==", n)
+      .limit(1)
+      .get();
+    if (snapPhone.empty) return undefined;
+    const doc = snapPhone.docs[0];
+    const data = doc.data();
+    if (!includeDeleted && data?.deletedAt) return undefined;
+    return { id: doc.id, ...data } as User;
+  }
+
   async getUsers(params: { role?: string; name?: string; email?: string; lastName?: string; search?: string; page: number; limit: number }): Promise<{ users: User[]; total: number }> {
     if (!this.db) return { users: [], total: 0 };
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.USERS).get();
@@ -222,6 +263,8 @@ class FirestoreStorageImpl implements IStorage {
 
     const emailNorm = (user.email ?? "").trim().toLowerCase();
     if (!emailNorm) throw new Error("El email es obligatorio");
+    const phoneNorm = this.normalizePhone(user.phone ?? "");
+    if (!phoneNorm) throw new Error("El teléfono es obligatorio");
 
     // Buscar si el usuario ya existe (incluyendo eliminados)
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.USERS)
@@ -253,6 +296,11 @@ class FirestoreStorageImpl implements IStorage {
       return { id: doc.id, ...reactivatedUser } as User;
     }
 
+    const existingByPhone = await this.getUserByPhone(phoneNorm, true);
+    if (existingByPhone) {
+      throw new Error("Este teléfono ya está registrado.");
+    }
+
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc();
     const now = new Date();
     
@@ -263,7 +311,7 @@ class FirestoreStorageImpl implements IStorage {
       password: user.password!,
       name: user.name!,
       lastName: user.lastName!,
-      phone: user.phone,
+      phone: phoneNorm,
       role,
       avatar: user.avatar,
       wallet: user.wallet ?? 0,
@@ -279,7 +327,7 @@ class FirestoreStorageImpl implements IStorage {
       updatedAt: now,
     };
     
-    await docRef.set(newUser);
+    await docRef.set({ ...(newUser as any), phoneNormalized: phoneNorm });
     return newUser;
   }
 
@@ -308,10 +356,17 @@ class FirestoreStorageImpl implements IStorage {
     void rating;
     void ratingCount;
 
-    await docRef.update({
+    const patch: Record<string, unknown> = {
       ...safeData,
       updatedAt: new Date(),
-    });
+    };
+    if (typeof (safeData as any).phone !== "undefined") {
+      const phoneNorm = this.normalizePhone(String((safeData as any).phone ?? ""));
+      patch.phone = phoneNorm;
+      patch.phoneNormalized = phoneNorm;
+    }
+
+    await docRef.update(patch);
 
     const updated = await docRef.get();
     return { id: updated.id, ...updated.data() } as User;
@@ -363,7 +418,11 @@ class FirestoreStorageImpl implements IStorage {
     if (!doc.exists) throw new Error("Usuario no encontrado");
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (data.role !== undefined) updateData.role = data.role;
-    if (data.phone !== undefined) updateData.phone = data.phone;
+    if (data.phone !== undefined) {
+      const phoneNorm = this.normalizePhone(String(data.phone ?? ""));
+      updateData.phone = phoneNorm;
+      updateData.phoneNormalized = phoneNorm;
+    }
     if (data.address !== undefined) updateData.address = data.address;
     if (data.city !== undefined) updateData.city = data.city;
     if (data.country !== undefined) updateData.country = data.country;
@@ -530,6 +589,72 @@ class FirestoreStorageImpl implements IStorage {
     };
     await docRef.set(newProvider);
     return newProvider as Provider;
+  }
+
+  async createProviderVehicle(input: {
+    providerId: number;
+    userId: string;
+    vehicle: InsertProviderVehicle;
+  }): Promise<{ id: number }> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("vehicles");
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.VEHICLES).doc(id.toString());
+    const v = input.vehicle;
+    const petAllowed = v.vehicle_type === "car" || v.vehicle_type === "pickup_truck";
+    const now = new Date();
+    const payload = {
+      id,
+      providerId: input.providerId,
+      userId: input.userId,
+      license_plate: v.license_plate,
+      model_year: v.model_year,
+      brand: v.brand,
+      model: v.model,
+      vehicle_status: v.vehicle_status,
+      vehicle_type: v.vehicle_type,
+      is_pet_friendly: petAllowed ? Boolean(v.is_pet_friendly) : false,
+      exterior_color: v.exterior_color ?? null,
+      passenger_seats: v.passenger_seats ?? null,
+      insurance_expires_at: v.insurance_expires_at ?? null,
+      mileage_km: v.mileage_km ?? null,
+      service_notes: v.service_notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await docRef.set(payload);
+    return { id };
+  }
+
+  async getPrimaryVehicleByProviderId(providerId: number): Promise<{
+    vehicle_type: string;
+    brand?: string | null;
+    model?: string | null;
+    license_plate?: string | null;
+    model_year?: number | null;
+  } | null> {
+    if (!this.db) return null;
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.VEHICLES)
+      .where("providerId", "==", providerId)
+      .limit(1)
+      .get();
+    if (snap.empty) return null;
+    const d = snap.docs[0].data() as {
+      vehicle_type?: string;
+      brand?: string;
+      model?: string;
+      license_plate?: string;
+      model_year?: number;
+    };
+    const vt = d.vehicle_type;
+    if (typeof vt !== "string") return null;
+    return {
+      vehicle_type: vt,
+      brand: d.brand ?? null,
+      model: d.model ?? null,
+      license_plate: d.license_plate ?? null,
+      model_year: typeof d.model_year === "number" ? d.model_year : null,
+    };
   }
 
   async updateProvider(id: number, data: import("./storage-contracts").ProviderUpdate): Promise<Provider | undefined> {
@@ -1192,13 +1317,19 @@ class FirestoreStorageImpl implements IStorage {
           referenceId: String(bookingId), currency: "USD", createdAt: now,
         });
       } else {
-        // Lógica Cash: Solo descontar comisión del profesional
+        if (!canAffordOffPlatformCommission(providerWallet, commission)) {
+          throw new Error(
+            `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo GenFeb.`
+          );
+        }
+        // Lógica cash / fuera de wallet: descontar comisión; acumular ingresos bruto (lo cobrado al cliente)
         t.update(providerUserRef, { 
           wallet: providerWallet - commission, 
+          totalEarnings: providerTotalEarnings + cost, 
           updatedAt: now 
         });
         
-        // Registro de transferencia para Cash (solo la comisión)
+        // Registro de transferencia (comisión)
         t.set(transfersColl.doc(String(transferId2)), {
           id: transferId2, userId: providerUserId, fromUserId: null, amount: commission,
           transferType: "service_payment", status: "completed", description: "Comisión de plataforma por servicio en efectivo",
@@ -1215,6 +1346,124 @@ class FirestoreStorageImpl implements IStorage {
       });
 
       return { id: bookingId, ...data, status: "completed" } as unknown as Booking;
+    });
+  }
+
+  async applyMobilityRideSettlement(input: {
+    rideId: string;
+    riderUserId: string;
+    driverUserId: string;
+    estimatedUsd: number;
+    paymentMethod: "genfeb" | "cash" | "bank_transfer";
+  }): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const cost = roundToCents(
+      typeof input.estimatedUsd === "number" ? input.estimatedUsd : Number(input.estimatedUsd) || 0
+    );
+    if (cost <= 0) throw new Error("Importe del viaje no definido");
+    const commissionRate = await getPlatformCommissionRate();
+    const commission = calcCommission(cost, commissionRate);
+    const providerNet = calcProviderNet(cost, commissionRate);
+
+    const usersColl = this.db.collection(FIRESTORE_COLLECTIONS.USERS);
+    const transfersColl = this.db.collection(FIRESTORE_COLLECTIONS.WALLET_TRANSFERS);
+    const adminSnap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.USERS)
+      .where("role", "in", ["admin", "tiSupport"])
+      .limit(1)
+      .get();
+    if (adminSnap.empty) {
+      throw new Error("No existe usuario admin o soporte TI para registrar la comisión de plataforma");
+    }
+    const adminUserId = adminSnap.docs[0].id;
+    const now = new Date();
+    const refId = `cargo:${input.rideId}`;
+
+    if (input.paymentMethod === "genfeb") {
+      const transferId1 = await this.getNextId("wallet_transfers");
+      const transferId2 = await this.getNextId("wallet_transfers");
+      const transferId3 = await this.getNextId("wallet_transfers");
+      return this.db.runTransaction(async (t) => {
+        const riderRef = usersColl.doc(input.riderUserId);
+        const driverRef = usersColl.doc(input.driverUserId);
+        const adminRef = usersColl.doc(adminUserId);
+        const [riderSnap, driverSnap, adminSnap2] = await Promise.all([t.get(riderRef), t.get(driverRef), t.get(adminRef)]);
+        if (!riderSnap.exists) throw new Error("Pasajero no encontrado");
+        if (!driverSnap.exists) throw new Error("Conductor no encontrado");
+        if (!adminSnap2.exists) throw new Error("Admin no encontrado");
+        const rData = riderSnap.data() as { wallet?: number };
+        const riderWallet = typeof rData.wallet === "number" ? rData.wallet : 0;
+        if (riderWallet < cost) throw new Error("Saldo insuficiente del pasajero (Saldo GenFeb).");
+        const dData = driverSnap.data() as { wallet?: number; totalEarnings?: number; completedTrips?: number };
+        const dWallet = typeof dData.wallet === "number" ? dData.wallet : 0;
+        const dEarnings = typeof dData.totalEarnings === "number" ? dData.totalEarnings : 0;
+        const dTrips = typeof dData.completedTrips === "number" ? dData.completedTrips : 0;
+        const aData = adminSnap2.data() as { wallet?: number; totalEarnings?: number };
+        const aWallet = typeof aData.wallet === "number" ? aData.wallet : 0;
+        const aEarnings = typeof aData.totalEarnings === "number" ? aData.totalEarnings : 0;
+        t.update(riderRef, { wallet: riderWallet - cost, updatedAt: now });
+        t.update(driverRef, {
+          wallet: dWallet + providerNet,
+          totalEarnings: dEarnings + providerNet,
+          completedTrips: dTrips + 1,
+          updatedAt: now,
+        });
+        t.update(adminRef, { wallet: aWallet + commission, totalEarnings: aEarnings + commission, updatedAt: now });
+        t.set(transfersColl.doc(String(transferId1)), {
+          id: transferId1, userId: input.riderUserId, fromUserId: null, amount: cost,
+          transferType: "payment", status: "completed", description: "Pago viaje Car Go (Saldo GenFeb)",
+          referenceId: refId, currency: "USD", createdAt: now,
+        });
+        t.set(transfersColl.doc(String(transferId2)), {
+          id: transferId2, userId: input.driverUserId, fromUserId: null, amount: providerNet,
+          transferType: "service_payment", status: "completed", description: "Ingreso neto viaje Car Go",
+          referenceId: refId, currency: "USD", createdAt: now,
+        });
+        t.set(transfersColl.doc(String(transferId3)), {
+          id: transferId3, userId: adminUserId, fromUserId: null, amount: commission,
+          transferType: "service_payment", status: "completed", description: "Comisión de plataforma (Car Go, genfeb)",
+          referenceId: refId, currency: "USD", createdAt: now,
+        });
+      });
+    }
+
+    const transferIdA = await this.getNextId("wallet_transfers");
+    const transferIdB = await this.getNextId("wallet_transfers");
+    return this.db.runTransaction(async (t) => {
+      const driverRef = usersColl.doc(input.driverUserId);
+      const adminRef = usersColl.doc(adminUserId);
+      const [driverSnap, adminSnap2] = await Promise.all([t.get(driverRef), t.get(adminRef)]);
+      if (!driverSnap.exists) throw new Error("Conductor no encontrado");
+      if (!adminSnap2.exists) throw new Error("Admin no encontrado");
+      const dData = driverSnap.data() as { wallet?: number; totalEarnings?: number; completedTrips?: number };
+      const dWallet = typeof dData.wallet === "number" ? dData.wallet : 0;
+      const dEarnings = typeof dData.totalEarnings === "number" ? dData.totalEarnings : 0;
+      const dTrips = typeof dData.completedTrips === "number" ? dData.completedTrips : 0;
+      if (!canAffordOffPlatformCommission(dWallet, commission)) {
+        throw new Error(
+          `No se puede completar: la comisión te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Acepta viajes con Saldo GenFeb o recarga.`
+        );
+      }
+      const aData = adminSnap2.data() as { wallet?: number; totalEarnings?: number };
+      const aWallet = typeof aData.wallet === "number" ? aData.wallet : 0;
+      const aEarnings = typeof aData.totalEarnings === "number" ? aData.totalEarnings : 0;
+      t.update(driverRef, {
+        wallet: dWallet - commission,
+        totalEarnings: dEarnings + cost,
+        completedTrips: dTrips + 1,
+        updatedAt: now,
+      });
+      t.update(adminRef, { wallet: aWallet + commission, totalEarnings: aEarnings + commission, updatedAt: now });
+      t.set(transfersColl.doc(String(transferIdA)), {
+        id: transferIdA, userId: input.driverUserId, fromUserId: null, amount: commission,
+        transferType: "service_payment", status: "completed", description: `Comisión de plataforma (Car Go, ${input.paymentMethod})`,
+        referenceId: refId, currency: "USD", createdAt: now,
+      });
+      t.set(transfersColl.doc(String(transferIdB)), {
+        id: transferIdB, userId: adminUserId, fromUserId: null, amount: commission,
+        transferType: "service_payment", status: "completed", description: `Comisión de plataforma (Car Go, ${input.paymentMethod}) — plataforma`,
+        referenceId: refId, currency: "USD", createdAt: now,
+      });
     });
   }
 
@@ -2056,6 +2305,79 @@ class FirestoreStorageImpl implements IStorage {
   async markNotificationAsRead(notificationId: number): Promise<void> {
     if (!this.db) return;
     await this.db.collection(FIRESTORE_COLLECTIONS.NOTIFICATIONS).doc(notificationId.toString()).update({ read: true, readAt: new Date() });
+  }
+
+  // ============ PETICIONES DE CAMBIO DE CUENTA ============
+  async createAccountChangeRequest(input: { userId: string; field: "email" | "name" | "phone"; reason: string }): Promise<any> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const userId = String(input.userId ?? "").trim();
+    const field = input.field;
+    const reason = String(input.reason ?? "").trim();
+    if (!userId) throw new Error("userId requerido");
+    if (!["email", "name", "phone"].includes(field)) throw new Error("field inválido");
+    if (!reason) throw new Error("reason requerido");
+
+    const id = await this.getNextId("account_change_requests");
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.ACCOUNT_CHANGE_REQUESTS).doc(id.toString());
+    const created = {
+      id,
+      userId,
+      field,
+      reason,
+      status: "pending",
+      createdAt: new Date(),
+      resolvedAt: null,
+      resolvedBy: null,
+    };
+    await docRef.set(created);
+    return created;
+  }
+
+  async getMyAccountChangeRequests(userId: string): Promise<any[]> {
+    if (!this.db) return [];
+    const uid = String(userId ?? "").trim();
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.ACCOUNT_CHANGE_REQUESTS)
+      .where("userId", "==", uid)
+      .get();
+    const toMs = (x: any) => (x?.toMillis ? x.toMillis() : x ? new Date(x).getTime() : 0);
+    return snap.docs
+      .map((d: any) => ({ id: parseInt(d.id) || d.id, ...d.data() }))
+      .sort((a: any, b: any) => toMs(b.createdAt) - toMs(a.createdAt));
+  }
+
+  async getPendingAccountChangeRequests(): Promise<any[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.ACCOUNT_CHANGE_REQUESTS)
+      .where("status", "==", "pending")
+      .get();
+    const toMs = (x: any) => (x?.toMillis ? x.toMillis() : x ? new Date(x).getTime() : 0);
+    return snap.docs
+      .map((d: any) => ({ id: parseInt(d.id) || d.id, ...d.data() }))
+      .sort((a: any, b: any) => toMs(b.createdAt) - toMs(a.createdAt));
+  }
+
+  async resolveAccountChangeRequest(args: { id: number; action: "approve" | "reject"; adminUserId: string }): Promise<any> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = Number(args.id);
+    const action = args.action;
+    const adminUserId = String(args.adminUserId ?? "").trim();
+    if (!Number.isFinite(id)) throw new Error("id inválido");
+    if (!adminUserId) throw new Error("adminUserId requerido");
+    if (action !== "approve" && action !== "reject") throw new Error("action inválido");
+
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.ACCOUNT_CHANGE_REQUESTS).doc(id.toString());
+    const snap = await docRef.get();
+    if (!snap.exists) throw new Error("Petición no encontrada");
+    const data = snap.data() as any;
+    if (data?.status !== "pending") throw new Error("La petición ya fue resuelta");
+
+    const nextStatus = action === "approve" ? "approved" : "rejected";
+    const patch = { status: nextStatus, resolvedAt: new Date(), resolvedBy: adminUserId };
+    await docRef.update(patch);
+    const updated = await docRef.get();
+    return { id, ...(updated.data() as any) };
   }
 
   // ============ MANGO SYNC ============

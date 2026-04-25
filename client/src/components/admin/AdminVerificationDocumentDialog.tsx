@@ -81,9 +81,33 @@ export function AdminVerificationDocumentDialog({
     return () => window.clearTimeout(t);
   }, [open, kind, src, activeIndex]);
 
-  const canPrevSlide = activeIndex > 0;
-  const canNextSlide = activeIndex < slides.length - 1;
   const showSlideNav = slides.length > 1;
+
+  const goToPrevSlide = () => {
+    if (slides.length <= 1) return;
+    setActiveIndex((i) => (i - 1 + slides.length) % slides.length);
+  };
+
+  const goToNextSlide = () => {
+    if (slides.length <= 1) return;
+    setActiveIndex((i) => (i + 1) % slides.length);
+  };
+
+  /** Flechas del teclado: mismo comportamiento que los botones (carrusel circular). */
+  useEffect(() => {
+    if (!open || slides.length <= 1) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setActiveIndex((i) => (i - 1 + slides.length) % slides.length);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setActiveIndex((i) => (i + 1) % slides.length);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, slides.length]);
 
   const viewerBody = !src ? (
     <div className="flex min-h-[200px] items-center justify-center rounded-md border border-zinc-200 bg-white px-4 py-10 text-center text-sm text-zinc-600 shadow-sm">
@@ -138,7 +162,7 @@ export function AdminVerificationDocumentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName={overlayClass}
-        className="flex max-h-[min(92vh,100dvh)] w-[min(94vw,32rem)] max-w-[min(94vw,32rem)] flex-col gap-0 overflow-hidden border-border bg-card p-0 text-foreground shadow-2xl !top-[min(5vh,1.5rem)] !translate-y-0 sm:w-[min(94vw,34rem)] sm:max-w-[min(94vw,34rem)]"
+        className="flex max-h-[min(92vh,100vh)] max-h-[min(92vh,100svh)] w-[min(94vw,32rem)] max-w-[min(94vw,32rem)] flex-col gap-0 overflow-hidden border-border bg-card p-0 text-foreground shadow-2xl !top-[min(5vh,1.5rem)] !translate-y-0 sm:w-[min(94vw,34rem)] sm:max-w-[min(94vw,34rem)]"
       >
         <DialogHeader className="shrink-0 space-y-1.5 border-b border-border bg-card px-5 py-3 text-left sm:py-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Documentos de</p>
@@ -146,7 +170,7 @@ export function AdminVerificationDocumentDialog({
           <DialogTitle className="text-base font-semibold text-foreground">{title}</DialogTitle>
           {showSlideNav ? (
             <p className="text-xs text-muted-foreground">
-              {activeIndex + 1} de {slides.length} · Usa las flechas para cambiar de documento
+              {activeIndex + 1} de {slides.length} · Flechas del teclado (← →) o botones laterales; el carrusel es circular
             </p>
           ) : null}
         </DialogHeader>
@@ -158,10 +182,9 @@ export function AdminVerificationDocumentDialog({
                 type="button"
                 variant="outline"
                 size="icon"
-                disabled={!canPrevSlide}
-                className="h-28 max-h-[min(28vh,200px)] w-9 shrink-0 self-center border-border bg-card shadow-sm hover:bg-muted disabled:opacity-40 sm:h-32 sm:w-10"
-                aria-label="Documento anterior"
-                onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
+                className="h-28 max-h-[min(28vh,200px)] w-9 shrink-0 self-center border-border bg-card shadow-sm hover:bg-muted sm:h-32 sm:w-10"
+                aria-label="Documento anterior (vuelve al último si estás en el primero)"
+                onClick={goToPrevSlide}
               >
                 <ChevronLeft className="h-5 w-5" />
               </Button>
@@ -178,10 +201,9 @@ export function AdminVerificationDocumentDialog({
                 type="button"
                 variant="outline"
                 size="icon"
-                disabled={!canNextSlide}
-                className="h-28 max-h-[min(28vh,200px)] w-9 shrink-0 self-center border-border bg-card shadow-sm hover:bg-muted disabled:opacity-40 sm:h-32 sm:w-10"
-                aria-label="Documento siguiente"
-                onClick={() => setActiveIndex((i) => Math.min(slides.length - 1, i + 1))}
+                className="h-28 max-h-[min(28vh,200px)] w-9 shrink-0 self-center border-border bg-card shadow-sm hover:bg-muted sm:h-32 sm:w-10"
+                aria-label="Documento siguiente (vuelve al primero si estás en el último)"
+                onClick={goToNextSlide}
               >
                 <ChevronRight className="h-5 w-5" />
               </Button>

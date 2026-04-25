@@ -321,6 +321,13 @@ export const api = {
             rating: z.number().optional().default(5),
             /** Número de valoraciones recibidas. */
             ratingCount: z.number().optional().default(0),
+            /** Piso de cartera (USD) para comisiones en efectivo/transfer. */
+            providerWalletFloorUsd: z.number().optional().default(-20),
+            /**
+             * True si alcanzaste o superas el piso: no aceptar más servicios en efectivo/transfer
+             * (solo Saldo GenFeb) hasta recargar o bajar deuda.
+             */
+            isProviderDebtCapped: z.boolean().optional().default(false),
           }),
         },
       },
@@ -421,6 +428,16 @@ export const api = {
       adminPatch: {
         method: 'PATCH' as const,
         path: '/api/admin/platform-commission-rate',
+      },
+    },
+    mobilityFares: {
+      get: {
+        method: 'GET' as const,
+        path: '/api/platform/mobility-fares',
+      },
+      adminPatch: {
+        method: 'PATCH' as const,
+        path: '/api/admin/mobility-fares',
       },
     },
   },

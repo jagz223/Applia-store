@@ -1,6 +1,8 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
+/** Leaflet antes del primer paint evita mapa colapsado si el CSS del chunk llega tarde al reiniciar Vite. */
+import "leaflet/dist/leaflet.css";
 
 createRoot(document.getElementById("root")!).render(<App />);
 

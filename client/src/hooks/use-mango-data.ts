@@ -156,7 +156,13 @@ export function useCreateProvider() {
   const { toast } = useToast();
   
   return useMutation({
-    mutationFn: async (data: InsertProvider & { serviceTitle?: string; serviceDescription?: string }) => {
+    mutationFn: async (
+      data: InsertProvider & {
+        serviceTitle?: string;
+        serviceDescription?: string;
+        vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle;
+      }
+    ) => {
       const token = getToken();
       const res = await fetch(api.providers.create.path, {
         method: "POST",
@@ -1308,6 +1314,14 @@ export type PlatformCommissionRateDto = {
   providerPercent: number;
 };
 
+export type MobilityFaresDto = {
+  fares: {
+    moto: { baseUsd: number; perKmUsd: number };
+    auto: { baseDayUsd: number; baseNightUsd: number; perKmUsd: number; petExtraUsd: number };
+    camioneta: { baseUsd: number; perKmUsd: number; petExtraUsd: number };
+  };
+};
+
 /** Tasa vigente para textos y cálculos en UI (endpoint público de solo lectura). */
 export function usePlatformCommissionRate(options?: { enabled?: boolean }) {
   return useQuery({
@@ -1319,6 +1333,45 @@ export function usePlatformCommissionRate(options?: { enabled?: boolean }) {
     },
     staleTime: 30_000,
     enabled: options?.enabled !== false,
+  });
+}
+
+const PLATFORM_MOBILITY_FARES_QUERY_KEY = [api.platform.mobilityFares.get.path] as const;
+
+export function usePlatformMobilityFares(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: PLATFORM_MOBILITY_FARES_QUERY_KEY,
+    queryFn: async () => {
+      const res = await fetch(api.platform.mobilityFares.get.path);
+      if (!res.ok) throw new Error("No se pudieron cargar las tarifas");
+      return res.json() as Promise<MobilityFaresDto>;
+    },
+    staleTime: 30_000,
+    enabled: options?.enabled !== false,
+  });
+}
+
+export function usePatchPlatformMobilityFares() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (fares: MobilityFaresDto["fares"]) => {
+      const token = getToken();
+      const res = await fetch(api.platform.mobilityFares.adminPatch.path, {
+        method: api.platform.mobilityFares.adminPatch.method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ fares }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { message?: string }).message ?? "Error al guardar tarifas");
+      return data as MobilityFaresDto;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(PLATFORM_MOBILITY_FARES_QUERY_KEY, data);
+      void queryClient.invalidateQueries({ queryKey: PLATFORM_MOBILITY_FARES_QUERY_KEY });
+    },
   });
 }
 

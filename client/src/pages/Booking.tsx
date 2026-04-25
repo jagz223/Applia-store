@@ -9,7 +9,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { 
   Calendar as CalendarIcon, 
-  MapPin, 
   Clock, 
   CheckCircle, 
   ArrowRight, 
@@ -22,13 +21,20 @@ import {
   Mail,
   Loader2
 } from "lucide-react";
-import { useCategories, useCategoryVisibility, useServices, useProviderCategoryAvailability, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
+import { useCategories, useCategoryVisibility, useServices, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
-import { getCurrentLocation, reverseGeocode } from "@/lib/google-maps";
+import {
+  DEFAULT_CATEGORIES,
+  effectiveHiddenCategorySlugs,
+  getCategoryDisplayName,
+} from "@shared/default-categories";
+
+/** Marcas con flujo propio (p. ej. taxi / mapa); no se reservan desde esta página. */
+const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set(["transport", "marketplace", "delivery"]);
+import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { isBeforeToday } from "@/lib/date-utils";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
 import { CategoryIcon } from "@/components/CategoryIcon";
@@ -115,9 +121,8 @@ export default function Booking() {
   const [selectedBookingServiceId, setSelectedBookingServiceId] = useState<number | null>(null);
   const [step, setStep] = useState(1);
   /** Dirección/ubicación del servicio (geolocalización); no confundir con useLocation de wouter. */
-  const [userLocation, setUserLocation] = useState("");
-  const [locationLoading, setLocationLoading] = useState(false);
-  const hasValidLocation = userLocation.trim().length > 0;
+  const [locationPlace, setLocationPlace] = useState<PickedLocation | null>(null);
+  const hasValidLocation = locationPlace != null && locationPlace.label.trim().length > 0;
   const [notes, setNotes] = useState("");
   const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
   const [paymentSelectionOpen, setPaymentSelectionOpen] = useState(false);
@@ -130,16 +135,46 @@ export default function Booking() {
   const { data: walletData, isLoading: walletLoading } = useWallet({ enabled: !!user?.id });
 
   const { data: categories } = useCategories();
-  const { data: visibility } = useCategoryVisibility({ enabled: isAuthenticated });
-  const { data: categoryAvailability } = useProviderCategoryAvailability();
+  const { data: visibility } = useCategoryVisibility();
+  const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
+  const mobilityAllowed = useMemo(
+    () => ({
+      transport: !hiddenSlugs.has("transport"),
+      marketplace: !hiddenSlugs.has("marketplace"),
+      delivery: !hiddenSlugs.has("delivery"),
+    }),
+    [hiddenSlugs]
+  );
+  const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace || mobilityAllowed.delivery;
+  const mobilityHref = mobilityAllowed.transport ? "/go/cargo" : mobilityAllowed.marketplace ? "/go/shop" : "/go/pack";
   const visibleCategories = useMemo(() => {
     const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-    const hidden = new Set(effectiveHiddenCategorySlugs(isAuthenticated ? visibility?.hiddenSlugs : undefined));
+    const hidden = new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs));
     return (categories ?? []).filter((c) => {
       const slug = (c as { slug?: string }).slug;
-      return slug && providerSlugs.has(slug) && !hidden.has(slug);
+      return (
+        slug &&
+        providerSlugs.has(slug) &&
+        !hidden.has(slug) &&
+        !BOOKING_EXCLUDED_CATEGORY_SLUGS.has(slug)
+      );
     });
-  }, [categories, isAuthenticated, visibility]);
+  }, [categories, visibility]);
+
+  useEffect(() => {
+    if (!selectedService || !categories?.length) return;
+    const id = Number(selectedService);
+    if (Number.isNaN(id)) return;
+    const cat = categories.find((c) => c.id === id);
+    const slug = (cat as { slug?: string } | undefined)?.slug;
+    if (slug && BOOKING_EXCLUDED_CATEGORY_SLUGS.has(slug)) {
+      setSelectedService(null);
+      setSelectedProvider(null);
+      setSelectedBookingServiceId(null);
+      setStep(1);
+    }
+  }, [selectedService, categories]);
+
   const categoryIdNum = selectedService ? Number(selectedService) : undefined;
   const { data: services = [], isLoading: isLoadingServices } = useServices(
     { providerCategoryId: categoryIdNum },
@@ -225,39 +260,6 @@ export default function Booking() {
     }
     return Array.from(byProvider.values());
   }, [verifiedServices]);
-
-  const handleUseMyLocation = () => {
-    if (!navigator.geolocation) {
-      toast({
-        variant: "destructive",
-        title: "No disponible",
-        description: "Tu navegador no soporta geolocalización",
-      });
-      return;
-    }
-    setLocationLoading(true);
-    toast({ title: "Obteniendo ubicación...", description: "Permite el acceso si el navegador lo pide." });
-    getCurrentLocation()
-      .then(async (position) => {
-        const { latitude, longitude } = position.coords;
-        const result = await reverseGeocode(latitude, longitude);
-        if (result?.address) {
-          setUserLocation(result.address);
-          toast({ title: "Ubicación obtenida", description: "Tu dirección se ha guardado para la reserva." });
-        } else {
-          setUserLocation(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
-          toast({ title: "Coordenadas guardadas", description: "No se pudo obtener la dirección exacta; se usan coordenadas." });
-        }
-      })
-      .catch(() => {
-        toast({
-          variant: "destructive",
-          title: "Ubicación no disponible",
-          description: "No se pudo obtener tu ubicación. Revisa los permisos del navegador.",
-        });
-      })
-      .finally(() => setLocationLoading(false));
-  };
 
   // Horarios disponibles (mock; en el futuro podría venir de disponibilidad del profesional)
   const timeSlots = [
@@ -456,6 +458,27 @@ export default function Booking() {
       {/* Booking Flow */}
       <section className="py-12">
         <div className="container px-4 mx-auto max-w-7xl">
+
+          {/* Acceso rápido a movilidad/envíos */}
+          {anyMobilityAllowed && (
+          <div className="mb-8">
+            <Card className="card-industrial">
+              <CardContent className="p-4 sm:p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="font-semibold text-foreground">¿Necesitas movilidad y envíos?</p>
+                  <p className="text-sm text-muted-foreground">
+                    Taxi (Car Go), pedidos (Shop Go) y delivery (Pack Go) están en esta sección.
+                  </p>
+                </div>
+                <Button asChild className="h-11 rounded-xl shrink-0">
+                  <Link href={mobilityHref}>
+                    Ir a movilidad <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+          )}
           
           {/* Progress Steps */}
           <div className="flex justify-center mb-12">
@@ -498,71 +521,37 @@ export default function Booking() {
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-6">
-                        {/* Location: solo se llena al presionar el botón (como en el chat) */}
-                        <div className="space-y-3">
-                          <Label>Ubicación</Label>
-                          <div className="flex gap-2">
-                            <div className="relative flex-1 min-w-0">
-                              <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground pointer-events-none" />
-                              <Input
-                                readOnly
-                                placeholder="Presiona el botón para usar tu ubicación actual"
-                                className="input-industrial pl-10 bg-muted/50"
-                                value={userLocation}
-                              />
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={handleUseMyLocation}
-                              disabled={locationLoading}
-                              className="shrink-0 border-border"
-                            >
-                              {locationLoading ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <>
-                                  <MapPin className="h-4 w-4 mr-1.5" />
-                                  Usar mi ubicación
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            🎯 La ubicacion nos permite mostrarte asociados cercanos y fijar el punto del servicio
-                          </p>
-                        </div>
+                        <SingleLocationPicker
+                          value={locationPlace}
+                          onChange={setLocationPlace}
+                          fieldLabel="Ubicación del servicio"
+                          mapSize="sm"
+                        />
 
-                        {/* Tipo de servicio: categorías con servicios seleccionables; sin servicios se ven apagadas */}
+                        {/* Tipo de servicio: todas las categorías visibles para el admin; si no hay ofertas, el aviso va en el paso 2 */}
                         <div className="space-y-3">
                           <Label>Tipo de Servicio</Label>
                           <div className="grid sm:grid-cols-2 gap-3">
                             {visibleCategories
                               ?.filter((cat): cat is typeof cat & { id: number; icon?: string } => cat.id != null)
                               ?.map((cat) => {
-                                const hasServices = categoryAvailability?.[String(cat.id)] === true;
+                                const selected = selectedService === String(cat.id);
                                 return (
                                   <button
                                     key={cat.id}
                                     type="button"
-                                    disabled={!hasServices}
-                                    onClick={() => hasServices && setSelectedService(String(cat.id))}
+                                    onClick={() => setSelectedService(String(cat.id))}
                                     className={`
                                       p-4 rounded-lg border text-left transition-all flex items-center gap-3
-                                      ${!hasServices
-                                        ? "opacity-50 cursor-not-allowed border-border bg-muted/30 text-muted-foreground"
-                                        : selectedService === String(cat.id)
-                                          ? "border-primary bg-primary/10 text-primary"
-                                          : "border-border hover:border-primary/50 text-muted-foreground hover:text-foreground"}
+                                      ${selected
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border hover:border-primary/50 text-muted-foreground hover:text-foreground"}
                                     `}
                                   >
-                                    <span className={`flex shrink-0 p-2 rounded-lg ${hasServices ? "bg-muted/80" : "bg-muted"}`}>
+                                    <span className={`flex shrink-0 p-2 rounded-lg ${selected ? "bg-primary/15" : "bg-muted/80"}`}>
                                       <CategoryIcon name={cat.icon ?? "HelpCircle"} className="h-5 w-5" />
                                     </span>
                                     {getCategoryDisplayName(cat)}
-                                    {!hasServices && (
-                                      <span className="text-xs ml-auto shrink-0">Sin servicios</span>
-                                    )}
                                   </button>
                                 );
                               })}
@@ -573,7 +562,7 @@ export default function Booking() {
                           className="w-full" 
                           size="lg"
                           onClick={() => setStep(2)}
-                            disabled={!selectedService || !hasValidLocation || locationLoading}
+                            disabled={!selectedService || !hasValidLocation}
                         >
                           Continuar <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>
@@ -603,7 +592,7 @@ export default function Booking() {
                           </div>
                         ) : !providersInCategory.length ? (
                           <p className="text-center py-8 text-muted-foreground">
-                            No hay asociados con servicios en esta categoria. Prueba otra categoria.
+                            Sin servicios disponibles en esta categoría por ahora. Puedes volver atrás y elegir otra.
                           </p>
                         ) : (
                           <div className="space-y-4">
@@ -736,7 +725,7 @@ export default function Booking() {
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Ubicación:</span>
-                              <span>{userLocation || "Por determinar"}</span>
+                              <span className="text-right max-w-[65%]">{locationPlace?.label || "Por determinar"}</span>
                             </div>
                           </div>
                         </div>

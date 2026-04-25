@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
+import { AccessGateLoading } from "@/components/AccessGateLoading";
 
 const editUserSchema = z.object({
   name: z.string().min(1, "El nombre es requerido").max(100),
@@ -40,7 +41,7 @@ async function fetchWithAuth(url: string, options: RequestInit = {}) {
 export default function EditUser() {
   const [, params] = useRoute("/admin/users/:id/edit");
   const id = params?.id ?? "";
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [loading, setLoading] = useState(true);
@@ -59,7 +60,16 @@ export default function EditUser() {
   });
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!hasAdminRole(currentUser)) {
+      setLocation("/");
+    }
+  }, [authLoading, currentUser, setLocation]);
+
+  useEffect(() => {
     if (!id) return;
+    if (authLoading) return;
+    if (!hasAdminRole(currentUser)) return;
     let cancelled = false;
     (async () => {
       try {
@@ -87,22 +97,19 @@ export default function EditUser() {
       }
     })();
     return () => { cancelled = true; };
-  }, [id, form.reset, setLocation, toast]);
+  }, [id, authLoading, currentUser, form.reset, setLocation, toast]);
 
+  if (authLoading) {
+    return (
+      <div className="container max-w-2xl py-12 px-4 flex justify-center items-center min-h-[200px]">
+        <AccessGateLoading message="Cargando sesión…" className="min-h-0" />
+      </div>
+    );
+  }
   if (!hasAdminRole(currentUser)) {
     return (
-      <div className="container mx-auto py-10 px-4 max-w-md">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-destructive">Acceso denegado</CardTitle>
-            <CardDescription>Solo los administradores pueden editar usuarios.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild variant="outline">
-              <Link href="/admin">Volver al panel</Link>
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="container max-w-2xl py-12 px-4 flex justify-center items-center min-h-[200px]">
+        <AccessGateLoading message="Redirigiendo al inicio…" className="min-h-0" />
       </div>
     );
   }

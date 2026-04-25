@@ -87,6 +87,10 @@ function getNotificationPath(notification: { type: string; data?: any }): string
         return "/admin?tab=payouts";
       }
       return "/dashboard";
+    case "admin_verification_request": {
+      const u = data.url ?? data.data?.url;
+      return typeof u === "string" && u.startsWith("/") ? u : "/admin?tab=overview";
+    }
     case "withdrawal_approved":
     case "withdrawal_rejected":
       return "/movimientos";
@@ -110,6 +114,11 @@ function getNotificationPath(notification: { type: string; data?: any }): string
         return `/professional-dashboard?${q.toString()}`;
       }
       return typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/professional-dashboard";
+    }
+    case "account_change_request_approved":
+    case "account_change_request_rejected": {
+      const u = data.url ?? data.data?.url;
+      return typeof u === "string" && u.startsWith("/") ? u : "/settings";
     }
     default:
       return "/dashboard";
@@ -232,6 +241,10 @@ export function NotificationBell() {
         return <Bell className="h-4 w-4 text-green-500" />;
       case "withdrawal_rejected":
         return <Bell className="h-4 w-4 text-red-500" />;
+      case "account_change_request_approved":
+        return <Bell className="h-4 w-4 text-green-500" />;
+      case "account_change_request_rejected":
+        return <Bell className="h-4 w-4 text-amber-500" />;
       default:
         return <Bell className="h-4 w-4 text-gray-500" />;
     }
@@ -338,6 +351,13 @@ export function NotificationBell() {
     if (type === "admin_verification_request") {
       return data?.message ?? (data as any)?.data?.message ?? "Se ha recibido una nueva solicitud de verificación de asociado.";
     }
+    if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
+      const msg = data?.message ?? (data as any)?.data?.message;
+      if (typeof msg === "string" && msg.trim()) return msg.trim();
+      return type === "account_change_request_approved"
+        ? "Abre Configuración para actualizar tu perfil."
+        : "Revisa o vuelve a solicitar el cambio en Configuración.";
+    }
     return null;
   };
 
@@ -377,6 +397,14 @@ export function NotificationBell() {
       if (step === "identification") return status === "verified" ? "Identificación aprobada" : "Identificación rechazada";
       if (step === "transaction") return status === "verified" ? "Pago verificado" : "Pago rechazado";
       return "Resultado de verificación";
+    }
+    if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
+      const t = data?.title ?? (data as any)?.data?.title;
+      if (typeof t === "string" && t.trim()) return t.trim();
+      const field = String(data?.field ?? (data as any)?.data?.field ?? "");
+      const label =
+        field === "email" ? "Correo" : field === "name" ? "Nombre" : field === "phone" ? "Teléfono" : "Perfil";
+      return type === "account_change_request_approved" ? `${label}: aprobado` : `${label}: rechazado`;
     }
     if (type === "message") {
       const d = data ?? ({} as any);

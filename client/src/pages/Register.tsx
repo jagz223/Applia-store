@@ -28,7 +28,10 @@ const registerSchema = z.object({
     .min(1, "El correo es obligatorio")
     .email("Email inválido")
     .transform((s) => s.trim().toLowerCase()),
-  phone: z.string().optional(),
+  phone: z
+    .string()
+    .min(1, "El teléfono es obligatorio")
+    .transform((s) => s.trim()),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
   confirmPassword: z.string(),
   role: z.enum(["client", "professional"]),
@@ -102,13 +105,16 @@ export default function Register() {
 
       if (!response.ok) {
         if (response.status === 409) {
-          const msg =
-            result.message ||
-            "Este correo electrónico ya está registrado. Inicia sesión si ya tienes cuenta.";
-          form.setError("email", { type: "manual", message: msg });
+          const msg = result.message || "Ya existe una cuenta con esos datos.";
+          const field = (result as { field?: string }).field;
+          if (field === "phone") {
+            form.setError("phone", { type: "manual", message: msg });
+          } else {
+            form.setError("email", { type: "manual", message: msg });
+          }
           toast({
             variant: "destructive",
-            title: "Correo ya registrado",
+            title: "No se pudo crear la cuenta",
             description: msg,
           });
           return;
@@ -318,7 +324,7 @@ export default function Register() {
                 name="phone"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Teléfono (opcional)</FormLabel>
+                    <FormLabel>Teléfono</FormLabel>
                     <FormControl>
                       <Input type="tel" placeholder="+593 99 123 4567" {...field} />
                     </FormControl>
@@ -396,7 +402,7 @@ export default function Register() {
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="professional" id="professional" />
                           <Label htmlFor="professional" className="cursor-pointer">
-                            Asociado
+                            Asociado/Driver
                           </Label>
                         </div>
                       </RadioGroup>

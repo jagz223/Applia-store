@@ -6,6 +6,8 @@
 export interface ChatParticipant {
   id: string;
   name: string;
+  lastName: string;
+  profileImageUrl?: string | null;
   isDeleted?: boolean;
 }
 

@@ -10,6 +10,7 @@ import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socke
 import { calcCommission, calcProviderNet, commissionDisplayPercents } from "@shared/platform-commission";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { isFullAdmin } from "@shared/roles";
+import { isWalletAtOrBelowDebtCap, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
@@ -813,11 +814,14 @@ export async function registerGenFebRoutes(
       const user = await storage.getUserById(userId);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
       const u = user as { wallet?: number; totalEarnings?: number; rating?: number; ratingCount?: number };
+      const w = typeof u.wallet === "number" ? u.wallet : 0;
       res.json({
-        wallet: typeof u.wallet === "number" ? u.wallet : 0,
+        wallet: w,
         totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
         rating: typeof u.rating === "number" ? u.rating : 5,
         ratingCount: typeof u.ratingCount === "number" ? u.ratingCount : 0,
+        providerWalletFloorUsd: PROVIDER_WALLET_FLOOR_USD,
+        isProviderDebtCapped: isWalletAtOrBelowDebtCap(w),
       });
     } catch (error) {
       console.error("Error fetching user wallet:", error);
@@ -835,13 +839,16 @@ export async function registerGenFebRoutes(
       const user = await storage.getUserById(userId);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
       const u = user as { wallet?: number; totalEarnings?: number; pendingBalance?: number; withdrawingFunds?: number; rating?: number; ratingCount?: number };
+      const balance = typeof u.wallet === "number" ? u.wallet : 0;
       res.json({
-        wallet: typeof u.wallet === "number" ? u.wallet : 0,
+        wallet: balance,
         totalEarnings: typeof u.totalEarnings === "number" ? u.totalEarnings : 0,
         pendingBalance: typeof u.pendingBalance === "number" ? u.pendingBalance : 0,
         withdrawingFunds: typeof u.withdrawingFunds === "number" ? u.withdrawingFunds : 0,
         rating: typeof u.rating === "number" ? u.rating : 5,
         ratingCount: typeof u.ratingCount === "number" ? u.ratingCount : 0,
+        providerWalletFloorUsd: PROVIDER_WALLET_FLOOR_USD,
+        isProviderDebtCapped: isWalletAtOrBelowDebtCap(balance),
       });
     } catch (error) {
       console.error("Error fetching user wallet:", error);
@@ -1070,10 +1077,11 @@ export async function registerGenFebRoutes(
       if (!parsed.success) {
         return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
       }
-      const user = await storage.getUserById(userId);
+      const user = (await storage.getUserById(userId)) as { name?: string; lastName?: string } | null;
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
-      const name = [user.name, (user as { lastName?: string }).lastName].filter(Boolean).join(" ").trim() || "Usuario";
-      const description = `Abono de saldo — ${name}`;
+      const name = String(user.name ?? "").trim() || "Usuario";
+      const lastName = String(user.lastName ?? "").trim();
+      const description = `Abono de saldo — ${name} ${lastName}`;
       const staffForTransfer = await getFullAdminUsers(storage);
       const fromUserId = staffForTransfer?.length ? (staffForTransfer[0] as { id?: string }).id ?? null : null;
       const transfer = await storage.createTransfer({
@@ -1380,7 +1388,9 @@ export async function registerGenFebRoutes(
       const enriched = await Promise.all(
         raw.map(async (c: any) => {
           const otherId = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
-          const otherUser = await storage.getUserById(otherId, true) as { id: string; name?: string; lastName?: string; deletedAt?: any } | undefined;
+          const otherUser = await storage.getUserById(otherId, true) as
+            | { id: string; name?: string; lastName?: string; firstName?: string; deletedAt?: any; profileImageUrl?: any; profile_image_url?: any; imageUrl?: any }
+            | undefined;
           let lastMessageText: string | null = null;
           let unreadCount = 0;
           const convId = Number(c.id);
@@ -1398,15 +1408,59 @@ export async function registerGenFebRoutes(
           }
           
           const isDeleted = !!otherUser?.deletedAt;
-          const name = isDeleted 
-            ? "Usuario deshabilitado" 
-            : (otherUser ? [otherUser.name, otherUser.lastName].filter(Boolean).join(" ") || "Usuario" : "Usuario");
+          const buildNameParts = (
+            u?: { name?: string; lastName?: string } | null
+          ): { name: string; lastName: string } => {
+            if (!u) return { name: "Usuario", lastName: "" };
+            // Importante: no concatenar aquí. Enviar campos separados tal cual vienen de BD.
+            // `name` puede existir como nombre (y a veces como nombre completo), pero para chat
+            // preferimos priorizar `firstName`/`name` como nombre y `lastName` como apellido.
+            const name = String(u.name ?? "").trim() || "Usuario";
+            const lastName = String(u.lastName ?? "").trim();
+            return { name, lastName };
+          };
+          const nameParts = buildNameParts(otherUser as any);
+          const name = isDeleted ? "Usuario deshabilitado" : nameParts.name;
+          const lastName = isDeleted ? "" : nameParts.lastName;
+          const profileImageUrl =
+            isDeleted
+              ? null
+              : (otherUser?.profileImageUrl as string) ||
+                (otherUser?.profile_image_url as string) ||
+                (otherUser?.imageUrl as string) ||
+                ((otherUser as any)?.avatar as string) ||
+                null;
+
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[chat]/api/conversations enrich", {
+              conversationId: c?.id,
+              me: userId,
+              otherId,
+              otherUser: otherUser
+                ? {
+                    id: (otherUser as any)?.id,
+                    name: (otherUser as any)?.name,
+                    firstName: (otherUser as any)?.firstName,
+                    lastName: (otherUser as any)?.lastName,
+                    email: (otherUser as any)?.email,
+                    deletedAt: (otherUser as any)?.deletedAt,
+                    profileImageUrl: (otherUser as any)?.profileImageUrl,
+                    profile_image_url: (otherUser as any)?.profile_image_url,
+                    imageUrl: (otherUser as any)?.imageUrl,
+                    avatar: (otherUser as any)?.avatar,
+                  }
+                : null,
+              computed: { isDeleted, nameParts, name, lastName, profileImageUrl },
+            });
+          }
             
           return {
             ...c,
             otherParticipant: { 
               id: String(otherUser?.id ?? otherId), 
               name,
+              lastName,
+              profileImageUrl,
               isDeleted
             },
             lastMessageText,

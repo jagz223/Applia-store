@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { storeVerifyReturnPath } from "@/lib/verify-return-path";
@@ -47,7 +47,8 @@ import {
 import { motion } from "framer-motion";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/hooks/use-auth";
-import { useWalletTransfers } from "@/hooks/use-mango-data";
+import { useCurrentProvider, useCategories, useWalletTransfers } from "@/hooks/use-mango-data";
+import { isCarGoProvider } from "@shared/provider-car-go";
 import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -98,6 +99,14 @@ export default function Vault() {
   const [transfersPage, setTransfersPage] = useState(1);
   const isMobile = useIsMobile();
   const { user } = useAuth();
+  const { data: currentProvider } = useCurrentProvider();
+  const { data: categories = [] } = useCategories();
+  const providerForCarGo = currentProvider ?? user?.provider;
+  const isCarGoVault = useMemo(
+    () => isCarGoProvider(providerForCarGo ?? undefined, categories),
+    [providerForCarGo, categories]
+  );
+  const credentialVaultLabel = isCarGoVault ? "Licencia de conducir" : "Documento profesional";
   const { toast } = useToast();
   const [hasUserIdentification, setHasUserIdentification] = useState(false);
   const [hasProfessionalCredential, setHasProfessionalCredential] = useState(false);
@@ -268,7 +277,9 @@ export default function Vault() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error((err as { message?: string }).message || "No se pudo cargar el documento profesional");
+        throw new Error(
+          (err as { message?: string }).message || `No se pudo cargar ${credentialVaultLabel.toLowerCase()}`
+        );
       }
 
       const data = (await res.json()) as { professionalCredentialUrl?: string | null };
@@ -277,7 +288,7 @@ export default function Vault() {
     } catch (e: unknown) {
       toast({
         title: "Error",
-        description: e instanceof Error ? e.message : "No se pudo cargar el documento profesional",
+        description: e instanceof Error ? e.message : `No se pudo cargar ${credentialVaultLabel.toLowerCase()}`,
         variant: "destructive",
       });
     } finally {
@@ -464,7 +475,7 @@ export default function Vault() {
                   { id: "all", label: "Todos" },
                   { id: "invoice", label: "Facturas" },
                   ...(hasUserIdentification ? [{ id: "identity", label: "Identificación" }] : []),
-                  ...(hasProfessionalCredential ? [{ id: "professional_credential", label: "Documento profesional" }] : []),
+                  ...(hasProfessionalCredential ? [{ id: "professional_credential", label: credentialVaultLabel }] : []),
                 ].map((cat) => (
                   <Button
                     key={cat.id}
@@ -637,7 +648,7 @@ export default function Vault() {
                             <FileCheck className="w-5 h-5 text-primary" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="font-medium text-foreground text-sm sm:text-base">Documento profesional</p>
+                            <p className="font-medium text-foreground text-sm sm:text-base">{credentialVaultLabel}</p>
                             <p className="text-xs text-muted-foreground mt-0.5">
                               Certificado o título que enviaste para la verificación como asociado.
                             </p>
@@ -814,11 +825,15 @@ export default function Vault() {
             <Dialog open={viewCredentialOpen} onOpenChange={setViewCredentialOpen}>
               <DialogContent className="sm:max-w-3xl border-border bg-card">
                 <DialogHeader>
-                  <DialogTitle>Documento profesional</DialogTitle>
+                  <DialogTitle>{credentialVaultLabel}</DialogTitle>
                   <DialogDescription>
                     {viewCredentialUrl
-                      ? "Archivo que enviaste para acreditar tu formación o experiencia."
-                      : "Aún no tienes un documento profesional registrado."}
+                      ? isCarGoVault
+                        ? "Archivo que enviaste como licencia de conducir para la verificación Car Go."
+                        : "Archivo que enviaste para acreditar tu formación o experiencia."
+                      : isCarGoVault
+                        ? "Aún no tienes una licencia de conducir registrada en verificación."
+                        : "Aún no tienes un documento profesional registrado."}
                   </DialogDescription>
                 </DialogHeader>
                 {viewCredentialUrl ? (
@@ -826,12 +841,12 @@ export default function Vault() {
                     {inferVaultCredentialKind(viewCredentialUrl) === "image" ? (
                       <img
                         src={viewCredentialUrl}
-                        alt="Documento profesional"
+                        alt={credentialVaultLabel}
                         className="mx-auto max-h-[65vh] w-auto max-w-full object-contain"
                       />
                     ) : inferVaultCredentialKind(viewCredentialUrl) === "pdf" ? (
                       <iframe
-                        title="Documento profesional"
+                        title={credentialVaultLabel}
                         src={viewCredentialUrl}
                         className="h-[min(65vh,560px)] w-full min-h-[240px] rounded border-0 bg-white"
                       />

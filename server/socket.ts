@@ -2,6 +2,7 @@ import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import { isFullAdmin } from "@shared/roles";
+import { registerCargoMobilitySocket } from "./mobility-rides";
 
 const JWT_SECRET = process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024";
 
@@ -12,6 +13,8 @@ interface ConnectedUser {
 
 // Store connected users
 const connectedUsers: Map<string, ConnectedUser> = new Map();
+/** Última ruta/pantalla visible del usuario (para condicionar push). */
+const userActivePath: Map<string, string> = new Map();
 
 let ioInstance: SocketIOServer | null = null;
 
@@ -43,6 +46,8 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     }
   });
 
+  registerCargoMobilitySocket(io);
+
   io.on("connection", (socket: Socket) => {
     const user = socket.data.user;
     console.log(`🔌 User connected: ${user.email} (${socket.id})`);
@@ -52,6 +57,13 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
 
     // Join user's personal room
     socket.join(`user:${user.id}`);
+
+    // Ruta activa (SPA): el cliente reporta su ubicación para decidir si enviar push.
+    socket.on("go:path", (data: { path?: string }) => {
+      const p = typeof data?.path === "string" ? data.path : "";
+      if (!p) return;
+      userActivePath.set(String(user.id), p);
+    });
 
     // Admin y Soporte TI entran al room "admin" (notificaciones internas: recargas, retiros, etc.)
     if (isFullAdmin(user.role)) {
@@ -103,6 +115,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     socket.on("disconnect", () => {
       console.log(`🔌 User disconnected: ${user.email} (${socket.id})`);
       connectedUsers.delete(user.id);
+      userActivePath.delete(String(user.id));
     });
 
     // Send confirmation to client
@@ -129,6 +142,10 @@ export function sendNotificationToAdmins(io: SocketIOServer, notification: any) 
 // Helper function to broadcast to all connected users
 export function broadcastToAll(io: SocketIOServer, event: string, data: any) {
   io.emit(event, data);
+}
+
+export function getUserActivePath(userId: string): string | null {
+  return userActivePath.get(String(userId)) ?? null;
 }
 
 export { connectedUsers };

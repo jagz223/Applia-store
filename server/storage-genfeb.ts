@@ -16,7 +16,7 @@ import {
   type ProviderWithUser,
   type ServiceWithProvider,
 } from "@shared/schema";
-import { calcCommission, calcProviderNet } from "@shared/platform-commission";
+import { calcCommission, calcProviderNet, roundToCents } from "@shared/platform-commission";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { hasAdminPrivileges } from "@shared/roles";
 import { eq, and, like, desc } from "drizzle-orm";
@@ -24,6 +24,7 @@ import type { IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage } fro
 import type { ProfessionalVerification, VerifyingStatus, ProfessionalVerificationState } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
 import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
+import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 const getDb = async () => (await import("./db")).db;
 
 /**
@@ -90,6 +91,12 @@ export interface IStorage
   getNotifications(userId: string, unreadOnly?: boolean): Promise<any[]>;
   createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any>;
   markNotificationAsRead(notificationId: number): Promise<void>;
+
+  // Peticiones de cambio de cuenta (correo/nombre/teléfono)
+  createAccountChangeRequest(input: { userId: string; field: "email" | "name" | "phone"; reason: string }): Promise<any>;
+  getMyAccountChangeRequests(userId: string): Promise<any[]>;
+  getPendingAccountChangeRequests(): Promise<any[]>;
+  resolveAccountChangeRequest(args: { id: number; action: "approve" | "reject"; adminUserId: string }): Promise<any>;
   
   // Integración ManGo
   syncWithMango(userId: string, mangoUserId: string): Promise<any>;
@@ -261,6 +268,15 @@ export interface IStorage
   setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
 
   getAdminDashboardStats(params: { from: Date; to: Date }): Promise<AdminDashboardStatsResult>;
+
+  /** Car Go: al completar viaje, aplica comisiones y movimientos de wallet. */
+  applyMobilityRideSettlement(input: {
+    rideId: string;
+    riderUserId: string;
+    driverUserId: string;
+    estimatedUsd: number;
+    paymentMethod: "genfeb" | "cash" | "bank_transfer";
+  }): Promise<void>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -283,6 +299,23 @@ export class InMemoryStorage implements IStorage {
     const n = (email ?? "").trim().toLowerCase();
     if (!n) return undefined;
     const user = this.users.find((u) => (u.email ?? "").trim().toLowerCase() === n);
+    if (!includeDeleted && user?.deletedAt) return undefined;
+    return user;
+  }
+
+  private normalizePhone(raw: string): string {
+    const s = (raw ?? "").trim();
+    if (!s) return "";
+    // Mantener un + inicial y solo dígitos.
+    const hasPlus = s.startsWith("+");
+    const digits = s.replace(/[^\d]/g, "");
+    return hasPlus ? `+${digits}` : digits;
+  }
+
+  async getUserByPhone(phone: string, includeDeleted?: boolean): Promise<any | undefined> {
+    const n = this.normalizePhone(phone);
+    if (!n) return undefined;
+    const user = this.users.find((u) => this.normalizePhone(u.phone ?? "") === n);
     if (!includeDeleted && user?.deletedAt) return undefined;
     return user;
   }
@@ -325,6 +358,8 @@ export class InMemoryStorage implements IStorage {
   async createUser(user: any): Promise<any> {
     const emailNorm = (user.email ?? "").trim().toLowerCase();
     if (!emailNorm) throw new Error("El email es obligatorio");
+    const phoneNorm = this.normalizePhone(user.phone ?? "");
+    if (!phoneNorm) throw new Error("El teléfono es obligatorio");
 
     const existingUser = this.users.find(
       (u) => (u.email ?? "").trim().toLowerCase() === emailNorm
@@ -345,11 +380,19 @@ export class InMemoryStorage implements IStorage {
       return existingUser;
     }
 
+    const existingPhone = this.users.find(
+      (u) => this.normalizePhone(u.phone ?? "") === phoneNorm
+    );
+    if (existingPhone) {
+      throw new Error("Este teléfono ya está registrado.");
+    }
+
     const role = user.role || "client";
     const newUser = {
       id: String(this.userIdCounter++),
       ...user,
       email: emailNorm,
+      phone: phoneNorm,
       ...(role === "professional"
         ? { acceptedProviderTermsOfUse: user.acceptedProviderTermsOfUse ?? false }
         : {}),
@@ -403,6 +446,8 @@ export class InMemoryStorage implements IStorage {
   private messages: any[] = [];
   private userRoles: any[] = [];
   private notifications: any[] = [];
+  private accountChangeRequests: any[] = [];
+  private accountChangeRequestIdCounter = 1;
   private mangoSyncs: any[] = [];
   private paymentIdCounter = 1;
   private documentIdCounter = 1;
@@ -488,6 +533,11 @@ export class InMemoryStorage implements IStorage {
       (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
       (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
     } else {
+      if (!canAffordOffPlatformCommission(providerWallet, commission)) {
+        throw new Error(
+          `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo GenFeb.`
+        );
+      }
       // Para efectivo, el profesional ya cobró físicamente. 
       // Descontamos la comisión (10%) de su wallet (puede quedar en negativo).
       (providerUser as { wallet: number }).wallet = providerWallet - commission;
@@ -546,6 +596,123 @@ export class InMemoryStorage implements IStorage {
     this.walletTransfers.push(commissionTransferRecord);
 
     return { ...booking, status: "completed" };
+  }
+
+  async applyMobilityRideSettlement(input: {
+    rideId: string;
+    riderUserId: string;
+    driverUserId: string;
+    estimatedUsd: number;
+    paymentMethod: "genfeb" | "cash" | "bank_transfer";
+  }): Promise<void> {
+    const cost = roundToCents(
+      typeof input.estimatedUsd === "number" ? input.estimatedUsd : Number(input.estimatedUsd) || 0
+    );
+    if (cost <= 0) throw new Error("Importe del viaje no definido");
+    const commissionRate = await getPlatformCommissionRate();
+    const commission = calcCommission(cost, commissionRate);
+    const providerNet = calcProviderNet(cost, commissionRate);
+
+    const adminUser = this.users.find((u: { role?: string }) => hasAdminPrivileges(u.role));
+    if (!adminUser) throw new Error("No existe usuario admin o soporte TI para registrar la comisión de plataforma");
+    const adminId = adminUser.id;
+    const adminUserWallet = typeof (adminUser as { wallet?: number }).wallet === "number" ? (adminUser as { wallet: number }).wallet : 0;
+    const adminUserTotalEarnings =
+      typeof (adminUser as { totalEarnings?: number }).totalEarnings === "number" ? (adminUser as { totalEarnings: number }).totalEarnings : 0;
+
+    const driverUser = this.users.find((u: { id?: string }) => u.id === input.driverUserId);
+    if (!driverUser) throw new Error("Conductor no encontrado");
+    const driverWallet = typeof (driverUser as { wallet?: number }).wallet === "number" ? (driverUser as { wallet: number }).wallet : 0;
+    const driverEarnings = typeof (driverUser as { totalEarnings?: number }).totalEarnings === "number" ? (driverUser as { totalEarnings: number }).totalEarnings : 0;
+    const driverTrips = typeof (driverUser as { completedTrips?: number }).completedTrips === "number" ? (driverUser as { completedTrips: number }).completedTrips : 0;
+
+    const refId = `cargo:${input.rideId}`;
+    const now = new Date();
+
+    if (input.paymentMethod === "genfeb") {
+      const rider = this.users.find((u: { id?: string }) => u.id === input.riderUserId);
+      if (!rider) throw new Error("Pasajero no encontrado");
+      const riderWallet = typeof (rider as { wallet?: number }).wallet === "number" ? (rider as { wallet: number }).wallet : 0;
+      if (riderWallet < cost) throw new Error("Saldo insuficiente del pasajero (Saldo GenFeb).");
+      (rider as { wallet: number }).wallet = riderWallet - cost;
+      (driverUser as { wallet: number }).wallet = driverWallet + providerNet;
+      (driverUser as { totalEarnings: number }).totalEarnings = driverEarnings + providerNet;
+      (driverUser as { completedTrips: number }).completedTrips = driverTrips + 1;
+      (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
+      (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
+
+      this.walletTransfers.push({
+        id: this.walletTransferIdCounter++,
+        userId: input.riderUserId,
+        fromUserId: null,
+        amount: cost,
+        transferType: "payment",
+        status: "completed",
+        description: "Pago viaje Car Go (Saldo GenFeb)",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      });
+      this.walletTransfers.push({
+        id: this.walletTransferIdCounter++,
+        userId: input.driverUserId,
+        fromUserId: null,
+        amount: providerNet,
+        transferType: "service_payment",
+        status: "completed",
+        description: "Ingreso neto viaje Car Go",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      });
+      this.walletTransfers.push({
+        id: this.walletTransferIdCounter++,
+        userId: adminId,
+        fromUserId: null,
+        amount: commission,
+        transferType: "service_payment",
+        status: "completed",
+        description: "Comisión de plataforma (Car Go, genfeb)",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      });
+    } else {
+      if (!canAffordOffPlatformCommission(driverWallet, commission)) {
+        throw new Error(
+          `No se puede completar: la comisión te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Acepta viajes con Saldo GenFeb o recarga.`
+        );
+      }
+      (driverUser as { wallet: number }).wallet = driverWallet - commission;
+      (driverUser as { totalEarnings: number }).totalEarnings = driverEarnings + cost;
+      (driverUser as { completedTrips: number }).completedTrips = driverTrips + 1;
+      (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
+      (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
+      this.walletTransfers.push({
+        id: this.walletTransferIdCounter++,
+        userId: input.driverUserId,
+        fromUserId: null,
+        amount: commission,
+        transferType: "service_payment",
+        status: "completed",
+        description: `Comisión de plataforma (Car Go, ${input.paymentMethod})`,
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      });
+      this.walletTransfers.push({
+        id: this.walletTransferIdCounter++,
+        userId: adminId,
+        fromUserId: null,
+        amount: commission,
+        transferType: "service_payment",
+        status: "completed",
+        description: `Comisión de plataforma (Car Go, ${input.paymentMethod}) — plataforma`,
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      });
+    }
   }
 
   async cancelBookingAndRefundClientEscrow(bookingId: number): Promise<any | undefined> {
@@ -957,6 +1124,59 @@ export class InMemoryStorage implements IStorage {
     }
   }
 
+  // ============== PETICIONES DE CAMBIO DE CUENTA ==============
+
+  async createAccountChangeRequest(input: { userId: string; field: "email" | "name" | "phone"; reason: string }): Promise<any> {
+    const userId = String(input.userId ?? "").trim();
+    const field = input.field;
+    const reason = String(input.reason ?? "").trim();
+    if (!userId) throw new Error("userId requerido");
+    if (!["email", "name", "phone"].includes(field)) throw new Error("field inválido");
+    if (!reason) throw new Error("reason requerido");
+
+    const created = {
+      id: this.accountChangeRequestIdCounter++,
+      userId,
+      field,
+      reason,
+      status: "pending",
+      createdAt: new Date(),
+      resolvedAt: null,
+      resolvedBy: null,
+    };
+    this.accountChangeRequests.unshift(created);
+    return created;
+  }
+
+  async getMyAccountChangeRequests(userId: string): Promise<any[]> {
+    const uid = String(userId ?? "").trim();
+    return this.accountChangeRequests.filter((r) => r.userId === uid);
+  }
+
+  async getPendingAccountChangeRequests(): Promise<any[]> {
+    return this.accountChangeRequests.filter((r) => r.status === "pending");
+  }
+
+  async resolveAccountChangeRequest(args: { id: number; action: "approve" | "reject"; adminUserId: string }): Promise<any> {
+    const id = Number(args.id);
+    const action = args.action;
+    const adminUserId = String(args.adminUserId ?? "").trim();
+    if (!Number.isFinite(id)) throw new Error("id inválido");
+    if (!adminUserId) throw new Error("adminUserId requerido");
+    if (action !== "approve" && action !== "reject") throw new Error("action inválido");
+
+    const idx = this.accountChangeRequests.findIndex((r) => r.id === id);
+    if (idx === -1) throw new Error("Petición no encontrada");
+    const req = this.accountChangeRequests[idx];
+    if (req.status !== "pending") throw new Error("La petición ya fue resuelta");
+
+    const now = new Date();
+    const nextStatus = action === "approve" ? "approved" : "rejected";
+    const updated = { ...req, status: nextStatus, resolvedAt: now, resolvedBy: adminUserId };
+    this.accountChangeRequests[idx] = updated;
+    return updated;
+  }
+
   // ============== MANGO SYNC ==============
   
   async syncWithMango(userId: string, mangoUserId: string): Promise<any> {
@@ -1048,6 +1268,39 @@ export class InMemoryStorage implements IStorage {
     return newProvider as Provider;
   }
 
+  async createProviderVehicle(input: {
+    providerId: number;
+    userId: string;
+    vehicle: import("@shared/vehicle-schema").InsertProviderVehicle;
+  }): Promise<{ id: number }> {
+    const id = this.vehicleIdCounter++;
+    this.vehicles.push({ id, ...input, vehicle: input.vehicle });
+    return { id };
+  }
+
+  async getPrimaryVehicleByProviderId(providerId: number): Promise<{
+    vehicle_type: string;
+    brand?: string | null;
+    model?: string | null;
+    license_plate?: string | null;
+    model_year?: number | null;
+  } | null> {
+    const row = this.vehicles.find(
+      (v: { providerId?: number; vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle }) =>
+        v.providerId === providerId
+    );
+    const veh = row?.vehicle;
+    const vt = veh?.vehicle_type;
+    if (typeof vt !== "string") return null;
+    return {
+      vehicle_type: vt,
+      brand: veh.brand ?? null,
+      model: veh.model ?? null,
+      license_plate: veh.license_plate ?? null,
+      model_year: veh.model_year ?? null,
+    };
+  }
+
   async updateProvider(id: number, data: import("./storage-contracts").ProviderUpdate): Promise<Provider | undefined> {
     const idx = this.providers.findIndex(p => p.id === id);
     if (idx === -1) return undefined;
@@ -1066,6 +1319,8 @@ export class InMemoryStorage implements IStorage {
 
   private providers: any[] = [];
   private providerIdCounter = 1;
+  private vehicles: any[] = [];
+  private vehicleIdCounter = 1;
 
   async getAllServices(
     _categoryId?: number,

@@ -7,7 +7,7 @@ import {
   Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
   CheckCircle2, XCircle, Banknote, CircleDollarSign, Inbox, PlayCircle, History, UserPlus, Receipt,
-  AlertTriangle, ShieldCheck
+  AlertTriangle, ShieldCheck, Wallet
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,9 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
+import { isCarGoProvider } from "@shared/provider-car-go";
+import { useCategories } from "@/hooks/use-mango-data";
+import { AccessGateLoading } from "@/components/AccessGateLoading";
 import { useSocketBookings } from "@/hooks/use-socket";
 import {
   useBookingsByProvider,
@@ -1474,7 +1477,7 @@ function InvoicesTabContent() {
 
 const DASHBOARD_TABS = ["overview", "bookings", "transactions", "invoices"] as const;
 
-export default function ProfessionalDashboard() {
+function ProfessionalDashboardInner() {
   const { user } = useAuth();
   const { data: commissionRateInfo } = usePlatformCommissionRate();
   const dashboardCommissionRate = commissionRateInfo?.commissionRate ?? PLATFORM_COMMISSION_RATE;
@@ -1492,6 +1495,11 @@ export default function ProfessionalDashboard() {
   const showBecomeProBanner = isProfessionalRole && !providerProfileLoading && !providerProfile;
   const withdrawMutation = useWithdraw();
   const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
+  const isProviderDebtCapped = !!(walletData as { isProviderDebtCapped?: boolean })?.isProviderDebtCapped;
+  const providerWalletFloorUsd =
+    typeof (walletData as { providerWalletFloorUsd?: number })?.providerWalletFloorUsd === "number"
+      ? (walletData as { providerWalletFloorUsd: number }).providerWalletFloorUsd
+      : -20;
   const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number"
     ? (walletData as { withdrawingFunds: number }).withdrawingFunds
     : 0;
@@ -1889,7 +1897,37 @@ export default function ProfessionalDashboard() {
         <ResumenActividad />
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
+          <Card className={cn(wallet < 0 && "border-amber-500/40")}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Saldo GenFeb (cartera)</CardTitle>
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div
+                className={cn(
+                  "text-2xl font-bold tabular-nums",
+                  wallet < 0 && "text-amber-600 dark:text-amber-500",
+                )}
+              >
+                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(
+                  wallet,
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Piso permitido:{" "}
+                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(providerWalletFloorUsd)}
+                . En efectivo/transfer, GenFeb retiene comisión; puede quedar deuda.
+              </p>
+              {isProviderDebtCapped ? (
+                <p className="text-xs text-amber-800 dark:text-amber-200 mt-2 flex items-start gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden />
+                  Llegaste al límite: no aceptarás más servicios en efectivo/transfer hasta recargar. Puedes seguir con
+                  pago en Saldo GenFeb para reducir la deuda.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Ingresos Totales</CardTitle>
@@ -2085,3 +2123,48 @@ export default function ProfessionalDashboard() {
     </div>
   );
 }
+
+/**
+ * Conductores Car Go verificados usan Go (Car Go), no este panel.
+ * Quien no sea asociado o no esté logueado se redirige al inicio.
+ */
+function ProfessionalDashboardAccessGate() {
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { data: providerProfile, isLoading: providerLoading } = useCurrentProvider();
+  const { data: categories = [] } = useCategories();
+  const [, setLocation] = useLocation();
+
+  const isVerifiedCarGoDriver = useMemo(
+    () => !!(providerProfile?.isVerified && isCarGoProvider(providerProfile, categories)),
+    [providerProfile, categories]
+  );
+
+  const stillLoading = authLoading || (isAuthenticated && providerLoading);
+
+  useEffect(() => {
+    if (stillLoading) return;
+    if (!isAuthenticated) {
+      setLocation("/");
+      return;
+    }
+    if (!providerProfile) {
+      setLocation("/");
+      return;
+    }
+    if (isVerifiedCarGoDriver) {
+      setLocation("/");
+      return;
+    }
+  }, [stillLoading, isAuthenticated, providerProfile, isVerifiedCarGoDriver, setLocation]);
+
+  if (stillLoading) {
+    return <AccessGateLoading message="Cargando panel de asociado…" />;
+  }
+  if (!isAuthenticated || !providerProfile || isVerifiedCarGoDriver) {
+    return <AccessGateLoading message="Redirigiendo al inicio…" />;
+  }
+
+  return <ProfessionalDashboardInner />;
+}
+
+export default ProfessionalDashboardAccessGate;

@@ -5,6 +5,8 @@ import { hasAdminPrivileges, isFullAdmin } from "@shared/roles";
 import { api } from "@shared/routes";
 import { insertProviderSchema, insertServiceSchema, professionalBioFieldSchema } from "@shared/schema";
 import { providerSkillsSchema } from "@shared/skills-schema";
+import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
+import { isCarGoProvider } from "@shared/provider-car-go";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
@@ -15,11 +17,13 @@ import {
 } from "@shared/professional-verification";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerGenFebRoutes } from "./routes-genfeb";
-import { registerAuthRoutes as registerJwtAuthRoutes, authenticateJWT } from "./routes-auth";
+import { registerAuthRoutes as registerJwtAuthRoutes, authenticateJWT, optionalAuthenticateJWT } from "./routes-auth";
 import { registerInvoiceRoutes } from "./routes-invoices";
 import { registerPayPalRoutes } from "./routes-paypal";
 import { registerRoleRoutes } from "./routes-roles";
 import { registerAdminRoutes } from "./routes-admin";
+import { registerMapRoutes } from "./routes-maps";
+import { registerMobilityRideRoutes } from "./mobility-rides";
 import { registerSeoRoutes } from "./seo";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
@@ -36,6 +40,8 @@ export async function registerRoutes(
   // y no sean interceptadas por session/passport ni por Vite
   registerAdminRoutes(app);
   registerRoleRoutes(app);
+  registerMapRoutes(app);
+  registerMobilityRideRoutes(app);
 
   // GET /api/me/provider — perfil de proveedor del usuario autenticado (Create Service, Dashboard). Ruta explícita y temprana.
   app.get("/api/me/provider", authenticateJWT, async (req: any, res) => {
@@ -43,6 +49,20 @@ export async function registerRoutes(
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const provider = await catalogService.getProviderByUserId(userId);
     res.json(provider ?? null);
+  });
+
+  /** Car Go: tipo de vehículo registrado (icono en mapa conductor). */
+  app.get("/api/me/provider-vehicle", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.json(null);
+      const v = await genFebStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id);
+      res.json(v ?? null);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
   });
 
   // ============ Verificación de profesionales (1 doc por userId) ============
@@ -202,7 +222,10 @@ export async function registerRoutes(
 
       // Guardar también en Mis documentos (bóveda). Esto permite verlo siempre aunque haya subido más tarde.
       try {
-        const name = parsed.name?.trim() || "Documento profesional";
+        const categories = await catalogService.getCategories();
+        const carGo = isCarGoProvider(provider as any, categories);
+        const name =
+          parsed.name?.trim() || (carGo ? "Licencia de conducir" : "Documento profesional");
         await genFebStorage.createDocument({
           userId,
           name,
@@ -339,8 +362,8 @@ export async function registerRoutes(
   app.get("/api/provider-categories/availability", async (_req, res) => {
     res.json(await catalogService.getProviderCategoryAvailability());
   });
-  // Config pública: qué marcas/categorías están ocultas en UI (chips).
-  app.get("/api/platform/category-visibility", authenticateJWT, async (req: any, res) => {
+  // Visibilidad de marcas en UI: lectura pública; JWT opcional para aplicar reglas por rol.
+  app.get("/api/platform/category-visibility", optionalAuthenticateJWT, async (req: any, res) => {
     const role = req.user?.role as string | undefined;
     res.json({ hiddenSlugs: await getHiddenCategorySlugsForRole(role) });
   });
@@ -504,7 +527,27 @@ export async function registerRoutes(
   // Registrar rutas de PayPal
   await registerPayPalRoutes(httpServer, app);
 
-  const createProviderBodySchema = insertProviderSchema
+  /** Registro Car Go (`transport`): el formulario no pide perfil/servicio; pueden ir vacíos (se derivan o se editan después). */
+  const createProviderBodySchemaCarGo = insertProviderSchema
+    .extend({
+      category: providerCategorySchema.optional(),
+      categoryId: z.number().int().positive().optional(),
+      subcategoryId: z.number().int().positive().optional().nullable(),
+    })
+    .extend({
+      bio: z.string().trim().max(700),
+      skills: providerSkillsSchema,
+      serviceTitle: z.string().trim().max(500).optional(),
+      serviceDescription: z.string().trim().max(5000).optional(),
+      vehicle: z.any().optional(),
+      profession: z.string().max(300),
+      hourlyRate: z.preprocess(
+        (v) => (v === "" || v === null || v === undefined ? undefined : v),
+        z.union([z.string(), z.number()]).optional().nullable()
+      ),
+    });
+
+  const createProviderBodySchemaStrict = insertProviderSchema
     .extend({
       category: providerCategorySchema.optional(),
       categoryId: z.number().int().positive().optional(),
@@ -517,6 +560,8 @@ export async function registerRoutes(
       serviceTitle: z.string().trim().max(500).optional(),
       /** Qué incluye la oferta; si no se envía o va vacío, se usa la biografía como texto inicial del servicio. */
       serviceDescription: z.string().trim().max(5000).optional(),
+      /** Solo categoría Car Go (`transport`): datos del vehículo; validación adicional en el handler. */
+      vehicle: z.any().optional(),
     });
   const updateProviderBodySchema = z.object({
     category: providerCategorySchema.optional(),
@@ -532,10 +577,17 @@ export async function registerRoutes(
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      const data = createProviderBodySchema.parse(req.body);
+      const allCatsForSignup = await catalogService.getCategories();
+      const preCategoryId = Number(req.body?.categoryId);
+      const preCat = Number.isFinite(preCategoryId)
+        ? allCatsForSignup.find((c) => c.id === preCategoryId)
+        : undefined;
+      const isCarGoSignup = preCat?.slug === "transport";
+      const data = (isCarGoSignup ? createProviderBodySchemaCarGo : createProviderBodySchemaStrict).parse(req.body);
       const {
         serviceTitle: serviceTitleFromClient,
         serviceDescription: serviceDescriptionFromClient,
+        vehicle: vehicleFromBody,
         ...providerInsert
       } = data;
       const dbUser = await genFebStorage.getUserById(userId);
@@ -606,6 +658,26 @@ export async function registerRoutes(
           imageUrl: "",
           isActive: true,
         } as any);
+      }
+
+      const catForProvider = allCatsForSignup.find((c) => c.id === Number((provider as { categoryId?: number }).categoryId));
+      const isTransportCategory = catForProvider?.slug === "transport";
+      if (vehicleFromBody != null && !isTransportCategory) {
+        return res.status(400).json({ message: "Los datos de vehículo solo aplican a la categoría Car Go." });
+      }
+      if (isTransportCategory) {
+        const parsedVehicle = insertProviderVehicleSchema.safeParse(vehicleFromBody);
+        if (!parsedVehicle.success) {
+          return res.status(400).json({
+            message: "Datos de vehículo inválidos o incompletos.",
+            issues: parsedVehicle.error.flatten(),
+          });
+        }
+        await genFebStorage.createProviderVehicle({
+          providerId: (provider as { id: number }).id,
+          userId,
+          vehicle: parsedVehicle.data,
+        });
       }
 
       return res.status(201).json(provider);

@@ -1,5 +1,6 @@
 /**
  * Visibilidad de marcas/categorías (Fix Go / Man Go / Pro Go / Pack Go / Shop Go / Car Go).
+ * Pack Go y Shop Go siguen forzadas ocultas por defecto en código; Car Go solo obedece Firestore + acciones admin.
  * Persistencia: Firestore (platform_settings/global). Fallback: valores por defecto en memoria.
  */
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";

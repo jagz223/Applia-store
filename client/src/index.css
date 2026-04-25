@@ -314,6 +314,84 @@
   }
 }
 
+@layer components {
+  /**
+   * Car Go (Leaflet): el contenedor raíz debe tener altura en px/vh.
+   * Si solo hay `height: 100%` en `.leaflet-container` sin padre con alto, el mapa queda en 0 px.
+   */
+  .taxi-leaflet-wrapper {
+    position: relative;
+    width: 100%;
+    min-height: 420px;
+    height: 52vh;
+    max-height: 640px;
+  }
+  .taxi-leaflet-wrapper .leaflet-container {
+    width: 100% !important;
+    height: 100% !important;
+    /* Respaldo si height:100% aún no resuelve (padre sin alto en el primer paint). */
+    min-height: 400px !important;
+    border-radius: 0.75rem;
+  }
+  /** Reserva / chat: mapa más bajo dentro de tarjetas. */
+  .taxi-leaflet-wrapper--sm {
+    min-height: 280px;
+    height: min(36vh, 360px);
+    max-height: 360px;
+  }
+  .taxi-leaflet-wrapper--sm .leaflet-container {
+    min-height: 260px !important;
+    border-radius: 0.75rem;
+  }
+
+  /** Car Go conductor (zoom a la derecha): margen fino para no pegar al borde / cabecera del shell. */
+  .genfeb-driver-map-fs .leaflet-top.leaflet-right {
+    margin-top: 0.5rem !important;
+    margin-right: 0.5rem !important;
+    z-index: 650 !important;
+  }
+  /* Cuando está en “Disponible”, el banner ocupa arriba: bajamos el zoom para que no quede debajo. */
+  .genfeb-driver-map-fs.genfeb-driver-map-fs-receiving .leaflet-top.leaflet-right {
+    margin-top: 4.75rem !important;
+  }
+  .genfeb-driver-map-fs .leaflet-top.leaflet-right a {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+  }
+
+  /**
+   * Car Go cliente (mapa fullscreen en móvil): anular min-height fijo del wrapper taxi para que flex/100%
+   * rellene el main; si no, el mapa queda colapsado al reiniciar (padre sin alto).
+   */
+  .taxi-leaflet-wrapper.genfeb-taxi-route-fs {
+    min-height: 0 !important;
+    height: 100% !important;
+    max-height: none !important;
+    flex: 1 1 0% !important;
+  }
+  .taxi-leaflet-wrapper.genfeb-taxi-route-fs .leaflet-container {
+    min-height: 0 !important;
+    height: 100% !important;
+    border-radius: 0 !important;
+  }
+  /**
+   * Zoom cliente móvil: esquina inferior izquierda.
+   * IMPORTANTE: en Car Go móvil hay overlays (Continuar / cards) encima del mapa; si el zoom queda muy abajo,
+   * el botón "−" se tapa y deja de recibir tap. Por eso lo subimos.
+   */
+  .genfeb-taxi-route-fs .leaflet-bottom.leaflet-left {
+    margin-bottom: 5.25rem !important;
+    margin-left: 0.5rem !important;
+    z-index: 650 !important;
+  }
+  .genfeb-taxi-route-fs .leaflet-bottom.leaflet-left a {
+    pointer-events: auto !important;
+  }
+  .genfeb-taxi-route-fs .leaflet-control-zoom a {
+    touch-action: manipulation;
+  }
+}
+
 @layer utilities {
   .text-gradient-primary {
     @apply bg-clip-text text-transparent;

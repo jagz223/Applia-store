@@ -1,0 +1,354 @@
+import type { Express, Request, Response } from "express";
+
+const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
+// OSRM HTTP: el host raíz de FOSSGIS no sirve `/route/v1/...` (404); hace falta el prefijo del perfil.
+// Orden: instancia comunitaria primero (el demo project-osrm suele colgar o cortar por timeout).
+const DEFAULT_OSRM_BASES = [
+  "https://routing.openstreetmap.de/routed-car",
+  "https://router.project-osrm.org",
+] as const;
+
+const OSRM_BASES: readonly string[] = (() => {
+  const raw = String(process.env.OSRM_BASES ?? "").trim();
+  if (!raw) return DEFAULT_OSRM_BASES;
+  const list = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.length ? list : DEFAULT_OSRM_BASES;
+})();
+
+/** Identificación requerida por la política de uso de Nominatim. */
+const MAPS_USER_AGENT =
+  process.env.MAPS_HTTP_USER_AGENT ||
+  "GenFeb-CarGo/1.0 (mapa taxi; contacto: soporte genfeb)";
+
+const MAPS_FETCH_TIMEOUT_MS = Number(process.env.MAPS_FETCH_TIMEOUT_MS || 11_000);
+/** Solo `/api/maps/route`: backends públicos a veces tardan más que geocode/reverse. */
+const MAPS_ROUTE_FETCH_TIMEOUT_MS = Number(process.env.MAPS_ROUTE_FETCH_TIMEOUT_MS || 22_000);
+
+/**
+ * Clave OpenRouteService solo en servidor. Si está definida, `/api/maps/route` intenta ORS antes que OSRM público.
+ * Acepta `OPENROUTE_SERVICE_KEY` (preferido) o `OPENROUTESERVICE_API_KEY` (alias).
+ */
+const OPENROUTESERVICE_API_KEY = String(
+  process.env.OPENROUTE_SERVICE_KEY ?? process.env.OPENROUTESERVICE_API_KEY ?? ""
+).trim();
+const OPENROUTESERVICE_PROFILE =
+  String(process.env.OPENROUTESERVICE_PROFILE ?? "driving-car").trim() || "driving-car";
+const ROUTE_CACHE_TTL_MS = 5 * 60_000;
+const REVERSE_CACHE_TTL_MS = 30 * 60_000;
+
+type CacheEntry<T> = { expiresAt: number; value: T };
+const routeCache = new Map<string, CacheEntry<any>>();
+const reverseCache = new Map<string, CacheEntry<any>>();
+const geocodeCache = new Map<string, CacheEntry<any>>();
+
+function nowMs() {
+  return Date.now();
+}
+
+function cacheGet<T>(m: Map<string, CacheEntry<T>>, key: string): T | null {
+  const e = m.get(key);
+  if (!e) return null;
+  if (e.expiresAt < nowMs()) {
+    m.delete(key);
+    return null;
+  }
+  return e.value;
+}
+
+function cacheSet<T>(m: Map<string, CacheEntry<T>>, key: string, value: T, ttlMs: number) {
+  m.set(key, { expiresAt: nowMs() + ttlMs, value });
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ac.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function nominatimHeaders(): HeadersInit {
+  return {
+    "User-Agent": MAPS_USER_AGENT,
+    Accept: "application/json",
+    "Accept-Language": "es",
+  };
+}
+
+function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const la1 = (a.lat * Math.PI) / 180;
+  const la2 = (b.lat * Math.PI) / 180;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+}
+
+function fallbackRoute(from: { lon: number; lat: number }, to: { lon: number; lat: number }) {
+  const distanceM = haversineM({ lat: from.lat, lon: from.lon }, { lat: to.lat, lon: to.lon });
+  // Aproximación conservadora: 28 km/h urbano.
+  const durationSec = Math.round(distanceM / (28_000 / 3600));
+  return {
+    distanceM,
+    durationSec,
+    geometry: {
+      type: "Feature",
+      properties: { source: "fallback" },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [from.lon, from.lat],
+          [to.lon, to.lat],
+        ],
+      },
+    },
+    fallback: true,
+    source: "fallback" as const,
+  };
+}
+
+/** Espera `lon,lat` (convención OSRM / GeoJSON). */
+function parseLonLatPair(s: string): { lon: number; lat: number } | null {
+  const parts = s.split(",").map((p) => Number(p.trim()));
+  if (parts.length !== 2 || !parts.every((n) => Number.isFinite(n))) return null;
+  return { lon: parts[0], lat: parts[1] };
+}
+
+/**
+ * OpenRouteService (cuenta gratuita de pruebas / luego plan de pago).
+ * Documentación: https://openrouteservice.org/dev/#/api-docs
+ */
+async function fetchOpenRouteServiceRoute(
+  from: { lon: number; lat: number },
+  to: { lon: number; lat: number }
+): Promise<{ distanceM: number; durationSec: number; geometry: unknown } | null> {
+  if (!OPENROUTESERVICE_API_KEY) return null;
+  const url = `https://api.openrouteservice.org/v2/directions/${encodeURIComponent(
+    OPENROUTESERVICE_PROFILE
+  )}/geojson`;
+  try {
+    const t0 = Date.now();
+    const r = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: OPENROUTESERVICE_API_KEY,
+          "Content-Type": "application/json",
+          Accept: "application/json, application/geo+json",
+        },
+        body: JSON.stringify({
+          coordinates: [
+            [from.lon, from.lat],
+            [to.lon, to.lat],
+          ],
+        }),
+      },
+      MAPS_ROUTE_FETCH_TIMEOUT_MS
+    );
+    if (!r.ok) {
+      const snippet = await r.text().catch(() => "");
+      console.warn(`[maps] ORS route HTTP ${r.status}${snippet ? `: ${snippet.slice(0, 200)}` : ""}`);
+      return null;
+    }
+    const data = (await r.json()) as {
+      type?: string;
+      features?: Array<{
+        type?: string;
+        geometry?: { type?: string; coordinates?: unknown };
+        properties?: { summary?: { distance?: number; duration?: number } };
+      }>;
+    };
+    const feature = data.features?.[0];
+    const summary = feature?.properties?.summary;
+    const geometry = feature?.geometry;
+    if (
+      !geometry ||
+      geometry.type !== "LineString" ||
+      !Array.isArray(geometry.coordinates) ||
+      !summary ||
+      typeof summary.distance !== "number"
+    ) {
+      console.warn("[maps] ORS route: respuesta inesperada (sin LineString/summary)");
+      return null;
+    }
+    const tookMs = Date.now() - t0;
+    console.log(`[maps] route ok via openrouteservice in ${tookMs}ms`);
+    return {
+      distanceM: summary.distance,
+      durationSec: Math.max(0, Math.round(Number(summary.duration) || 0)),
+      geometry,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[maps] ORS route failed: ${msg}`);
+    return null;
+  }
+}
+
+async function fetchRouteFromBase(
+  base: string,
+  urlPath: string
+): Promise<{ route: { distance?: number; duration?: number; geometry?: unknown }; base: string; tookMs: number }> {
+  const url = `${base}${urlPath}`;
+  const t0 = Date.now();
+  const r = await fetchWithTimeout(
+    url,
+    { headers: { "User-Agent": MAPS_USER_AGENT, Accept: "application/json" } },
+    MAPS_ROUTE_FETCH_TIMEOUT_MS
+  );
+  if (!r.ok) {
+    throw new Error(`HTTP ${r.status} (${base})`);
+  }
+  const data = (await r.json()) as {
+    code?: string;
+    routes?: Array<{ distance?: number; duration?: number; geometry?: unknown }>;
+  };
+  if (data.code !== "Ok" || !data.routes?.[0]) {
+    throw new Error(`OSRM code ${String(data.code)} (${base})`);
+  }
+  return { route: data.routes[0], base, tookMs: Date.now() - t0 };
+}
+
+/** Intenta varios hosts OSRM en paralelo: evita esperar timeout+timeout en serie cuando uno colgaba. */
+async function fetchFirstWorkingRoute(urlPath: string) {
+  const tasks = OSRM_BASES.map((base) =>
+    fetchRouteFromBase(base, urlPath).catch((e) => {
+      const name = (e as any)?.name ? String((e as any).name) : "Error";
+      const msg = (e as any)?.message ? String((e as any).message) : String(e);
+      console.warn(`[maps] route backend failed via ${base}: ${name} ${msg}`);
+      throw e;
+    })
+  );
+  try {
+    const { route, base, tookMs } = await Promise.any(tasks);
+    if (tookMs > 2000) {
+      console.log(`[maps] route ok via ${base} in ${tookMs}ms`);
+    }
+    return route;
+  } catch (e) {
+    if (e instanceof AggregateError && Array.isArray(e.errors) && e.errors.length) {
+      throw e.errors[e.errors.length - 1];
+    }
+    throw e;
+  }
+}
+
+export function registerMapRoutes(app: Express): void {
+  /** Búsqueda de direcciones (proxy Nominatim → evita CORS y fija User-Agent). */
+  app.get("/api/maps/geocode", async (req: Request, res: Response) => {
+    const q = String(req.query.q ?? "").trim();
+    if (q.length < 2) return res.status(400).json({ message: "Escribe al menos 2 caracteres" });
+    if (q.length > 280) return res.status(400).json({ message: "Consulta demasiado larga" });
+    const limit = Math.min(10, Math.max(1, Number(req.query.limit) || 6));
+    const url = new URL(`${NOMINATIM_BASE}/search`);
+    url.searchParams.set("format", "json");
+    url.searchParams.set("q", q);
+    url.searchParams.set("limit", String(limit));
+    url.searchParams.set("addressdetails", "1");
+    try {
+      const cacheKey = `q=${q.toLowerCase()}&limit=${limit}`;
+      const cached = cacheGet(geocodeCache, cacheKey);
+      if (cached) return res.json(cached);
+
+      const r = await fetchWithTimeout(url.toString(), { headers: nominatimHeaders() }, MAPS_FETCH_TIMEOUT_MS);
+      if (!r.ok) return res.status(502).json({ message: "Servicio de búsqueda no disponible" });
+      const raw = (await r.json()) as unknown;
+      if (!Array.isArray(raw)) return res.json([]);
+      const out = raw.map((item: any) => ({
+        lat: parseFloat(item.lat),
+        lon: parseFloat(item.lon),
+        label: String(item.display_name ?? ""),
+      }));
+      const filtered = out.filter((x) => Number.isFinite(x.lat) && Number.isFinite(x.lon));
+      cacheSet(geocodeCache, cacheKey, filtered, 60_000);
+      res.json(filtered);
+    } catch {
+      res.status(502).json({ message: "No se pudo contactar el servicio de mapas" });
+    }
+  });
+
+  /** Dirección a partir de coordenadas (geocodificación inversa). */
+  app.get("/api/maps/reverse", async (req: Request, res: Response) => {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return res.status(400).json({ message: "Coordenadas inválidas" });
+    }
+    const url = new URL(`${NOMINATIM_BASE}/reverse`);
+    url.searchParams.set("format", "json");
+    url.searchParams.set("lat", String(lat));
+    url.searchParams.set("lon", String(lon));
+    try {
+      const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+      const cached = cacheGet(reverseCache, cacheKey);
+      if (cached) return res.json(cached);
+
+      const r = await fetchWithTimeout(url.toString(), { headers: nominatimHeaders() }, MAPS_FETCH_TIMEOUT_MS);
+      if (!r.ok) return res.status(502).json({ message: "Servicio inverso no disponible" });
+      const data = (await r.json()) as { display_name?: string; lat?: string; lon?: string };
+      const outLat = parseFloat(String(data.lat ?? lat));
+      const outLon = parseFloat(String(data.lon ?? lon));
+      const payload = {
+        lat: outLat,
+        lon: outLon,
+        label: String(data.display_name ?? `${outLat.toFixed(5)}, ${outLon.toFixed(5)}`),
+      };
+      cacheSet(reverseCache, cacheKey, payload, REVERSE_CACHE_TTL_MS);
+      res.json(payload);
+    } catch {
+      res.status(502).json({ message: "No se pudo contactar el servicio de mapas" });
+    }
+  });
+
+  /**
+   * Ruta en coche (ORS si hay `OPENROUTESERVICE_API_KEY`, si no OSRM público): distancia, duración y geometría Leaflet.
+   * Parámetros: from=lon,lat y to=lon,lat
+   */
+  app.get("/api/maps/route", async (req: Request, res: Response) => {
+    const from = parseLonLatPair(String(req.query.from ?? ""));
+    const to = parseLonLatPair(String(req.query.to ?? ""));
+    if (!from || !to) return res.status(400).json({ message: "Usa from=lon,lat y to=lon,lat" });
+    const path = `${from.lon},${from.lat};${to.lon},${to.lat}`;
+    try {
+      const cacheKey = `from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
+      const cached = cacheGet(routeCache, cacheKey);
+      if (cached) return res.json(cached);
+
+      const ors = await fetchOpenRouteServiceRoute(from, to);
+      if (ors) {
+        const payload = {
+          distanceM: ors.distanceM,
+          durationSec: ors.durationSec,
+          geometry: ors.geometry,
+          source: "openrouteservice" as const,
+        };
+        cacheSet(routeCache, cacheKey, payload, ROUTE_CACHE_TTL_MS);
+        return res.json(payload);
+      }
+
+      const urlPath = `/route/v1/driving/${path}?overview=full&geometries=geojson`;
+      const route = await fetchFirstWorkingRoute(urlPath);
+      const payload = {
+        distanceM: route.distance ?? 0,
+        durationSec: route.duration ?? 0,
+        geometry: route.geometry ?? null,
+        source: "osrm" as const,
+      };
+      cacheSet(routeCache, cacheKey, payload, ROUTE_CACHE_TTL_MS);
+      res.json(payload);
+    } catch (e) {
+      console.error("[maps] route failed", e);
+      const payload = fallbackRoute(from, to);
+      // Cache corto: el backend real puede recuperarse pronto.
+      cacheSet(routeCache, `fb|from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`, payload, 30_000);
+      res.json(payload);
+    }
+  });
+}
