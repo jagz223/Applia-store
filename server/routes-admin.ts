@@ -16,6 +16,7 @@ import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
 import { getMobilityFares, setMobilityFares } from "./mobility-fares";
+import { getPackFares, setPackFares } from "./pack-fares";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
@@ -109,6 +110,17 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  /** Lectura pública de tarifas Pack Go (UI). */
+  app.get("/api/platform/pack-fares", async (_req, res) => {
+    try {
+      const fares = await getPackFares();
+      return res.json({ fares });
+    } catch (e) {
+      console.error("[pack-fares] GET", e);
+      return res.status(500).json({ message: "Error al leer tarifas" });
+    }
+  });
+
   /** Solo administrador completo: actualizar porcentaje de comisión de plataforma. */
   app.patch(
     "/api/admin/platform-commission-rate",
@@ -152,6 +164,26 @@ export function registerAdminRoutes(app: Express): void {
       return res.json({ fares: saved });
     } catch (e) {
       console.error("[mobility-fares] PATCH", e);
+      return res.status(500).json({ message: "Error al guardar tarifas" });
+    }
+  });
+
+  const packFaresPatchSchema = z.object({
+    fares: z.object({
+      moto: z.object({ baseUsd: z.number().min(0).max(100), perKmUsd: z.number().min(0).max(20) }),
+      auto: z.object({ baseUsd: z.number().min(0).max(200), perKmUsd: z.number().min(0).max(50) }),
+      camioneta: z.object({ baseUsd: z.number().min(0).max(500), perKmUsd: z.number().min(0).max(80) }),
+    }),
+  });
+
+  app.patch("/api/admin/pack-fares", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const parsed = packFaresPatchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      const saved = await setPackFares(parsed.data.fares);
+      return res.json({ fares: saved });
+    } catch (e) {
+      console.error("[pack-fares] PATCH", e);
       return res.status(500).json({ message: "Error al guardar tarifas" });
     }
   });

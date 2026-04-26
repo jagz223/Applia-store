@@ -11,12 +11,13 @@
 export const HIDDEN_CATEGORY_SLUGS_IN_UI: ReadonlyArray<string> = ["delivery", "marketplace"];
 
 /**
- * Lista efectiva de slugs ocultos: incluye las marcas desactivadas por defecto (p. ej. Pack Go / Shop Go)
- * y lo que venga de la API o Firestore (p. ej. Car Go si el admin lo ocultó).
+ * Lista efectiva de slugs ocultos.
+ * - Si el backend devuelve una lista, esa lista manda (el admin puede activar Pack/Shop).
+ * - Si aún no hay configuración (o la API no está disponible), usamos el default oculto.
  */
 export function effectiveHiddenCategorySlugs(apiHidden: string[] | undefined | null): string[] {
-  const extra = Array.isArray(apiHidden) ? apiHidden : [];
-  return Array.from(new Set([...HIDDEN_CATEGORY_SLUGS_IN_UI, ...extra]));
+  if (Array.isArray(apiHidden)) return Array.from(new Set(apiHidden.map((s) => String(s ?? "").trim()).filter(Boolean)));
+  return [...HIDDEN_CATEGORY_SLUGS_IN_UI];
 }
 
 /** Nombres de marca para mostrar en la UI (Familia GenFeb). Solo afecta la visualización. */

@@ -39,9 +39,12 @@ export default function Login() {
   const onSubmit = (data: LoginForm) => {
     login(data, {
       onSuccess: (result) => {
+        const first = String((result.user as { name?: string }).name ?? "").trim();
+        const last = String((result.user as { lastName?: string }).lastName ?? "").trim();
+        const fullName = [first, last].filter(Boolean).join(" ").trim() || "Usuario";
         toast({
           title: "Bienvenido",
-          description: `Hola ${result.user.firstName}, has iniciado sesión correctamente`,
+          description: `Hola ${fullName}, has iniciado sesión correctamente`,
         });
         const redirect = sessionStorage.getItem("postLoginRedirect");
         if (redirect) {

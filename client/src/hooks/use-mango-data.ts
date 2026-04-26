@@ -96,6 +96,43 @@ export function useCategoryVisibility(options?: { enabled?: boolean }) {
   });
 }
 
+/** Tarifas Pack Go (envíos/delivery) */
+export function usePlatformPackFares(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["/api/platform/pack-fares"],
+    queryFn: async () => {
+      const res = await fetch("/api/platform/pack-fares");
+      if (!res.ok) throw new Error("No se pudo cargar las tarifas Pack Go");
+      return res.json() as Promise<{ fares: { moto: any; auto: any; camioneta: any } }>;
+    },
+    staleTime: 30_000,
+    enabled: options?.enabled !== false,
+  });
+}
+
+export function usePatchPlatformPackFares() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (fares: { moto: { baseUsd: number; perKmUsd: number }; auto: { baseUsd: number; perKmUsd: number }; camioneta: { baseUsd: number; perKmUsd: number } }) => {
+      const token = getToken();
+      const res = await fetch("/api/admin/pack-fares", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ fares }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { message?: string };
+      if (!res.ok) throw new Error(data.message || "No se pudo guardar tarifas Pack Go");
+      return data as { fares: any };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/platform/pack-fares"] });
+      debouncedRefetch(queryClient, ["/api/platform/pack-fares"]);
+      toast({ title: "Guardado", description: "Tarifas Pack Go actualizadas." });
+    },
+  });
+}
+
 export function useProviders(params?: { profession?: string; category?: string }) {
   const profession = params?.profession;
   const category = params?.category;

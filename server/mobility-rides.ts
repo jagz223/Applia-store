@@ -55,6 +55,8 @@ type RideRecord = {
   driverSearchingClient?: boolean;
   /** Evita doble asiento contable al completar */
   financialsSettled?: boolean;
+  /** Última vez que un driver rechazó/expiró esta oferta (para re-ofertar luego). */
+  declinedAtByDriverId?: Record<string, number>;
 };
 
 const rides = new Map<string, RideRecord>();
@@ -76,6 +78,14 @@ const onlineDrivers = new Map<string, DriverPresence>();
 
 const PRESENCE_TTL_MS = 45_000;
 const SEARCH_TTL_MS = 5 * 60_000;
+const REOFFER_COOLDOWN_MS = 75_000;
+
+function driverIsBusy(driverId: string): boolean {
+  for (const r of rides.values()) {
+    if (r.driverUserId === driverId && (r.status === "matched" || r.status === "in_progress")) return true;
+  }
+  return false;
+}
 
 async function driverCanAcceptOffPlatformRide(estimatedUsd: number, driverUserId: string): Promise<boolean> {
   const rate = await getPlatformCommissionRate();
@@ -111,6 +121,7 @@ function freshDriversForVehicle(taxiKind: TaxiVehicleKind): DriverPresence[] {
     if (d.vehicleType !== want) continue;
     if (requirePet && !d.isPetFriendly) continue;
     if (now - d.updatedAt > PRESENCE_TTL_MS) continue;
+    if (driverIsBusy(d.userId)) continue;
     list.push(d);
   }
   return list;
@@ -234,6 +245,9 @@ async function offerNextDriver(
   while (ride.offerIndex < ride.offeredDriverIds.length) {
     const nextId = ride.offeredDriverIds[ride.offerIndex];
     ride.offerIndex += 1;
+    if (driverIsBusy(nextId)) continue;
+    const declinedAt = ride.declinedAtByDriverId?.[nextId];
+    if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
     const isOff =
       ride.paymentMethod === "cash" || ride.paymentMethod === "bank_transfer";
     if (isOff) {
@@ -245,9 +259,8 @@ async function offerNextDriver(
   }
 
   if (driverId == null) {
-    if (ride.offerIndex >= ride.offeredDriverIds.length && ride.currentOfferDriverId == null) {
-      emitRideFailed(io, ride, ride.offeredDriverIds.length === 0 ? "no_driver" : "no_driver");
-    }
+    // No matamos la búsqueda solo porque "por ahora" no hay conductores disponibles.
+    // El ride seguirá en `searching` hasta el TTL, y la presencia de nuevos drivers disparará nuevas ofertas.
     return;
   }
 
@@ -275,6 +288,8 @@ async function offerNextDriver(
     const live = rides.get(ride.id);
     if (!live || live.status !== "searching") return;
     if (live.currentOfferDriverId !== fixedDriverId) return;
+    live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
+    live.declinedAtByDriverId[fixedDriverId] = Date.now();
     io.to(`user:${fixedDriverId}`).emit("cargo:ride:offer_expired", { rideId: live.id });
     live.currentOfferDriverId = null;
     live.offerExpiresAt = null;
@@ -293,12 +308,8 @@ async function buildRiderPublic(riderUserId: string) {
   const ln = String((u as any)?.lastName ?? "").trim();
   const nn = String((u as any)?.name ?? "").trim();
   const email = String((u as any)?.email ?? "").trim();
-  const name =
-    [fn, ln].filter(Boolean).join(" ").trim() ||
-    [nn, ln].filter(Boolean).join(" ").trim() ||
-    nn ||
-    email ||
-    "Pasajero";
+  // Mantener compatibilidad: el cliente arma el nombre completo como en el chat.
+  const name = nn || fn || "Pasajero";
   const profileImageUrl =
     (u?.profileImageUrl as string) ||
     (u?.profile_image_url as string) ||
@@ -309,7 +320,7 @@ async function buildRiderPublic(riderUserId: string) {
   const rating = safeNumber((u as any)?.rating, 0);
   const ratingCount = safeNumber((u as any)?.ratingCount, 0);
   const completedTrips = safeNumber((u as any)?.completedTrips, 0);
-  return { name, profileImageUrl, phone, rating, ratingCount, completedTrips };
+  return { name, lastName: ln, profileImageUrl, phone, rating, ratingCount, completedTrips, email };
 }
 
 async function buildDriverPublic(driverUserId: string) {
@@ -321,24 +332,29 @@ async function buildDriverPublic(driverUserId: string) {
   const fn = String((u as any)?.firstName ?? "").trim();
   const ln = String((u as any)?.lastName ?? "").trim();
   const nn = String((u as any)?.name ?? "").trim();
-  const name =
-    [fn, ln].filter(Boolean).join(" ").trim() ||
-    [nn, ln].filter(Boolean).join(" ").trim() ||
-    nn ||
-    "Conductor";
+  // Mantener compatibilidad: el cliente arma el nombre completo como en el chat.
+  const name = nn || fn || "Conductor";
   const profileImageUrl =
     (u?.profileImageUrl as string) ||
     (u?.profile_image_url as string) ||
     (u?.imageUrl as string) ||
     ((u as any)?.avatar as string) ||
     null;
-  const phone = String((u as any)?.phone ?? "").trim() || null;
+  const phone =
+    String(
+      (u as any)?.phone ??
+        (u as any)?.phoneNumber ??
+        (u as any)?.phone_number ??
+        (u as any)?.phone_number_e164 ??
+        ""
+    ).trim() || null;
   const rating = safeNumber((u as any)?.rating, 0);
   const ratingCount = safeNumber((u as any)?.ratingCount, 0);
   const completedTrips = safeNumber((u as any)?.completedTrips, 0);
   return {
     userId: driverUserId,
     name,
+    lastName: ln,
     profileImageUrl,
     phone,
     rating,
@@ -449,6 +465,7 @@ export function registerMobilityRideRoutes(app: Express) {
         offerExpiresAt: null,
         driverSearchingClient: false,
         financialsSettled: false,
+        declinedAtByDriverId: {},
       };
       rides.set(id, ride);
 
@@ -461,13 +478,9 @@ export function registerMobilityRideRoutes(app: Express) {
         candidateCount: candidates.length,
       });
 
-      const timers = ensureRideTimers(id);
-      if (timers.expireTimeoutId) clearTimeout(timers.expireTimeoutId);
-      timers.expireTimeoutId = setTimeout(() => {
-        const live = rides.get(id);
-        if (!live || live.status !== "searching") return;
-        emitRideFailed(io, live, live.offeredDriverIds.length === 0 ? "no_driver" : "timeout");
-      }, SEARCH_TTL_MS);
+      // Importante: NO cerramos la búsqueda automáticamente por TTL.
+      // El pasajero debe seguir buscando hasta cancelar manualmente.
+      // (Se evita el toast rojo "No hay drivers disponibles" cuando solo hubo rechazos o no había drivers en ese momento.)
 
       if (ride.offeredDriverIds.length > 0) {
         await offerNextDriver(io, ride, rider);
@@ -499,6 +512,8 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
 
       if (!accept) {
+        ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
+        ride.declinedAtByDriverId[driverUserId] = Date.now();
         ride.currentOfferDriverId = null;
         ride.offerExpiresAt = null;
         const rider = await buildRiderPublic(ride.riderUserId);
@@ -521,6 +536,15 @@ export function registerMobilityRideRoutes(app: Express) {
       /** Carrera: solo un conductor gana. */
       if (ride.driverUserId != null) {
         return res.status(409).json({ message: "Otro conductor ya tomó este viaje" });
+      }
+      if (driverIsBusy(driverUserId)) {
+        ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
+        ride.declinedAtByDriverId[driverUserId] = Date.now();
+        ride.currentOfferDriverId = null;
+        ride.offerExpiresAt = null;
+        const rider = await buildRiderPublic(ride.riderUserId);
+        await offerNextDriver(io, ride, rider);
+        return res.status(409).json({ message: "Estás en servicio. No puedes aceptar otra oferta." });
       }
       ride.driverUserId = driverUserId;
       ride.status = "matched";
@@ -629,6 +653,15 @@ export function registerMobilityRideRoutes(app: Express) {
 
       const cancelledBy: "rider" | "driver" = isDriver ? "driver" : "rider";
       emitRideCancelled(io, ride, cancelledBy, prevStatus);
+
+      // Ocultar conversación del historial de ambos (si existe), pero mantenerla en BD para auditoría/admin.
+      if (ride.conversationId != null && ride.driverUserId != null) {
+        try {
+          await genFebStorage.hideConversationForUsers(Number(ride.conversationId), [ride.riderUserId, ride.driverUserId]);
+        } catch (e) {
+          console.error("[mobility] hideConversationForUsers(cancel)", e);
+        }
+      }
 
       res.json({ ok: true, rideId, cancelledBy });
     } catch (e: any) {
@@ -778,6 +811,15 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.status = "expired";
       io.to(`user:${ride.riderUserId}`).emit("cargo:ride:completed", { rideId });
       io.to(`user:${driverUserId}`).emit("cargo:ride:completed", { rideId });
+
+      // Ocultar conversación del historial de ambos (si existe), pero mantenerla en BD para auditoría/admin.
+      if (ride.conversationId != null) {
+        try {
+          await genFebStorage.hideConversationForUsers(Number(ride.conversationId), [ride.riderUserId, driverUserId]);
+        } catch (e) {
+          console.error("[mobility] hideConversationForUsers(complete)", e);
+        }
+      }
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
         if (!pth || !pth.startsWith("/go/cargo")) {
@@ -900,7 +942,6 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
             const now = Date.now();
             for (const ride of rides.values()) {
               if (ride.status !== "searching") continue;
-              if (now - ride.createdAt > SEARCH_TTL_MS) continue;
               if (!rideWantsPresence(ride, pres)) continue;
               const inserted = insertDriverByDistance(ride, user.id);
               if (!inserted) continue;

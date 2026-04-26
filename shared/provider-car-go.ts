@@ -13,11 +13,14 @@ export function isCarGoProvider(
   provider: ProviderCategoryRef | null | undefined,
   categories?: readonly CategorySlugRow[]
 ): boolean {
-  if (!provider) return false;
-  const slug = String(provider.category ?? "").trim().toLowerCase();
+  // Back-compat: Car Go es el módulo "transport". Si el provider tiene `goBrands`, también lo respetamos.
+  const p = provider as (ProviderCategoryRef & { goBrands?: string[] | null }) | null | undefined;
+  if (!p) return false;
+  if (Array.isArray(p.goBrands) && p.goBrands.map((s) => String(s ?? "").trim().toLowerCase()).includes("transport")) return true;
+  const slug = String(p.category ?? "").trim().toLowerCase();
   if (slug === "transport") return true;
-  if (categories != null && provider.categoryId != null) {
-    const id = Number(provider.categoryId);
+  if (categories != null && p.categoryId != null) {
+    const id = Number(p.categoryId);
     if (!Number.isFinite(id)) return false;
     const row = categories.find((c) => c.id === id);
     if (String(row?.slug ?? "").trim().toLowerCase() === "transport") return true;

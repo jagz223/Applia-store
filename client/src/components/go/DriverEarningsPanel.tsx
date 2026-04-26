@@ -1,14 +1,18 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { AlertTriangle, Calendar, TrendingUp, Wallet } from "lucide-react";
+import { AlertTriangle, Calendar, HandCoins, TrendingUp, Wallet } from "lucide-react";
 import { api } from "@shared/routes";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
-import { useWallet } from "@/hooks/use-mango-data";
+import { useWallet, useWithdraw } from "@/hooks/use-mango-data";
 import { loadTripLog, type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 const money = (n: number) =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(n);
@@ -57,16 +61,22 @@ function groupTripsByLocalDay(
 
 type Props = {
   open: boolean;
+  configHref?: string;
 };
 
 /**
  * Mini panel de ingresos estilo asociado: cartera, piso de deuda, actividad por día (registro local Car Go).
  */
-export function DriverEarningsPanel({ open }: Props) {
+export function DriverEarningsPanel({ open, configHref }: Props) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { user } = useAuth();
   const { data: walletData, isLoading: walletLoading, isFetching } = useWallet({
     enabled: open,
   });
+  const withdraw = useWithdraw();
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
 
   const trips = useMemo(() => (open ? loadTripLog() : []), [open]);
   const byDay = useMemo(() => groupTripsByLocalDay(trips), [trips]);
@@ -82,6 +92,7 @@ export function DriverEarningsPanel({ open }: Props) {
 
   const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
   const totalPlatform = typeof walletData?.totalEarnings === "number" ? walletData.totalEarnings : 0;
+  const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number" ? (walletData as any).withdrawingFunds : 0;
   const floorUsd =
     typeof (walletData as { providerWalletFloorUsd?: number })?.providerWalletFloorUsd === "number"
       ? (walletData as { providerWalletFloorUsd: number }).providerWalletFloorUsd
@@ -89,10 +100,30 @@ export function DriverEarningsPanel({ open }: Props) {
   const debtCapped = !!(walletData as { isProviderDebtCapped?: boolean })?.isProviderDebtCapped;
   const walletLoadingAny = walletLoading || isFetching;
 
+  const bankName = String((user as any)?.bankName ?? "").trim();
+  const accountNumber = String((user as any)?.accountNumber ?? "").trim();
+  const hasBankData = !!bankName && !!accountNumber;
+
   useEffect(() => {
     if (!open) return;
     void queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
   }, [open, queryClient]);
+
+  const requestWithdraw = async () => {
+    const n = Number(withdrawAmount);
+    if (!Number.isFinite(n) || n <= 0) {
+      toast({ title: "Monto inválido", description: "Ingresa un monto mayor a 0.", variant: "destructive" });
+      return;
+    }
+    try {
+      await withdraw.mutateAsync(n);
+      setWithdrawOpen(false);
+      setWithdrawAmount("");
+      toast({ title: "Solicitud enviada", description: "Tu retiro quedó en proceso para aprobación." });
+    } catch (e) {
+      toast({ title: "No se pudo solicitar retiro", description: e instanceof Error ? e.message : "Intenta de nuevo.", variant: "destructive" });
+    }
+  };
 
   return (
     <div className="space-y-4 pb-2">
@@ -189,6 +220,45 @@ export function DriverEarningsPanel({ open }: Props) {
 
       <Card>
         <CardHeader className="p-3 pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <HandCoins className="h-5 w-5 text-primary" aria-hidden />
+            Retiros
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-3 pt-0 space-y-2 text-sm">
+          <p className="text-xs text-muted-foreground">
+            Retira tu Saldo GenFeb a tu cuenta bancaria. El retiro queda pendiente hasta aprobación.
+          </p>
+          {!hasBankData ? (
+            <Button asChild className="w-full">
+              <Link href={configHref ?? "/settings"}>Configurar cuenta bancaria</Link>
+            </Button>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Banco: <span className="font-medium text-foreground">{bankName}</span> · Cuenta:{" "}
+                <span className="font-mono font-medium text-foreground">{accountNumber}</span>
+              </p>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => setWithdrawOpen(true)}
+                disabled={withdraw.isPending || withdrawingFunds > 0}
+              >
+                {withdrawingFunds > 0 ? "Retiro en proceso" : "Solicitar retiro"}
+              </Button>
+              {withdrawingFunds > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Ya tienes un retiro pendiente por <span className="font-semibold text-foreground">{money(withdrawingFunds)}</span>.
+                </p>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="p-3 pb-2">
           <CardTitle className="text-sm">Resumen Car Go (estimado)</CardTitle>
           <p className="text-xs font-normal text-muted-foreground">Suma de viajes en este resumen: {money(localTotal)}</p>
         </CardHeader>
@@ -248,6 +318,34 @@ export function DriverEarningsPanel({ open }: Props) {
           Recargar saldo
         </Link>
       </Button>
+
+      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+        <DialogContent className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Solicitar retiro</DialogTitle>
+            <DialogDescription>Ingresa el monto a retirar. Se enviará a tu cuenta bancaria registrada.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Disponible: <span className="font-semibold text-foreground tabular-nums">{money(wallet)}</span>
+            </p>
+            <Input
+              inputMode="decimal"
+              placeholder="Monto (USD)"
+              value={withdrawAmount}
+              onChange={(e) => setWithdrawAmount(e.target.value)}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button type="button" variant="outline" onClick={() => setWithdrawOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void requestWithdraw()} disabled={withdraw.isPending}>
+              {withdraw.isPending ? "Enviando…" : "Enviar solicitud"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clock, ArrowLeft, Home } from "lucide-react";
@@ -7,6 +8,15 @@ const MESSAGE =
   "Se notificó exitosamente a nuestro staff sobre tu solicitud; en breve podremos reflejar el monto en tu Saldo Genfeb.";
 
 export default function RechargeConfirm() {
+  const returnTo = useMemo(() => {
+    try {
+      const q = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+      const v = q.get("return");
+      return v && v.startsWith("/") ? v : "/";
+    } catch {
+      return "/";
+    }
+  }, []);
   return (
     <div className="container max-w-xl py-8 sm:py-16 px-4">
       <Card className="border-border bg-card shadow-sm text-center overflow-hidden">
@@ -21,15 +31,15 @@ export default function RechargeConfirm() {
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
           <Button variant="outline" className="w-full sm:w-auto gap-2" asChild>
-            <Link href="/recharge">
+            <Link href={`/recharge?return=${encodeURIComponent(returnTo)}`}>
               <ArrowLeft className="h-4 w-4" />
               Volver a añadir saldo
             </Link>
           </Button>
           <Button className="w-full sm:w-auto gap-2" asChild>
-            <Link href="/">
+            <Link href={returnTo}>
               <Home className="h-4 w-4" />
-              Ir al inicio
+              Volver
             </Link>
           </Button>
         </CardContent>

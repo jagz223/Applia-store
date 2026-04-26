@@ -10,15 +10,25 @@ import { GoNotificationsDrawer } from "@/components/go/GoNotificationsDrawer";
 import { Button } from "@/components/ui/button";
 import { useEffect } from "react";
 import { useSocket } from "@/hooks/use-socket";
+import { GoChatAutoCloseOnRideEnd } from "@/components/go/GoChatAutoCloseOnRideEnd";
+import { GoChatBadgeOnMessage } from "@/components/go/GoChatBadgeOnMessage";
 
 export function GoShellLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { socket } = useSocket();
-  const headerTitle = location.startsWith("/go/cargo") ? "Car Go" : "Movilidad y envíos";
-  const wideDesktop = location.startsWith("/go/cargo");
+  const headerTitle = location.startsWith("/go/cargo")
+    ? "Car Go"
+    : location.startsWith("/go/pack")
+      ? "Pack Go"
+      : location.startsWith("/go/shop")
+        ? "Shop Go"
+        : "Movilidad y envíos";
+  const wideDesktop = location.startsWith("/go/cargo") || location.startsWith("/go/pack");
   /** En mapa/viaje hacemos overflow hidden; en ajustes el contenido debe desplazarse en móvil. */
-  const mainScrollOnMobile = location === "/go/cargo/driver/settings";
-  const isGoMapView = location === "/go/cargo" || location === "/go/cargo/driver";
+  const mainScrollOnMobile =
+    location === "/go/cargo/driver/settings" || location === "/go/pack/driver/settings";
+  const isGoMapView =
+    location === "/go/cargo" || location === "/go/cargo/driver" || location === "/go/pack" || location === "/go/pack/driver";
 
   useEffect(() => {
     if (!socket) return;
@@ -29,6 +39,8 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
     <GoChatProvider>
       <GoNotificationsProvider>
         <GoDriverUiProvider>
+          <GoChatAutoCloseOnRideEnd />
+          <GoChatBadgeOnMessage />
       <div className="min-h-screen bg-muted/20 font-sans">
         {/* Desktop: centramos un “phone frame” pero la sección funciona igual */}
         <div

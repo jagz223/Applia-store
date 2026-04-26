@@ -50,6 +50,8 @@ import {
   usePatchPlatformCommissionRate,
   usePlatformMobilityFares,
   usePatchPlatformMobilityFares,
+  usePlatformPackFares,
+  usePatchPlatformPackFares,
   type WithdrawalHistoryStatus,
   type WithdrawalHistoryItem,
 } from "@/hooks/use-mango-data";
@@ -612,6 +614,16 @@ export default function AdminPanel() {
   });
   const { data: mobilityFaresData } = usePlatformMobilityFares({ enabled: activeTab === "settings" });
   const patchMobilityFares = usePatchPlatformMobilityFares();
+  const { data: packFaresData } = usePlatformPackFares({ enabled: activeTab === "settings" });
+  const patchPackFares = usePatchPlatformPackFares();
+  const [packFaresDraft, setPackFaresDraft] = useState(() => ({
+    motoBase: 1.75,
+    motoPerKm: 0.5,
+    autoBase: 2.25,
+    autoPerKm: 0.85,
+    camionetaBase: 20.0,
+    camionetaPerKm: 1.25,
+  }));
   const [userPage, setUserPage] = useState(1);
   const [providersPage, setProvidersPage] = useState(1);
   const [overviewPendingProvidersPage, setOverviewPendingProvidersPage] = useState(1);
@@ -643,6 +655,19 @@ export default function AdminPanel() {
       camionetaPet: f.camioneta.petExtraUsd,
     });
   }, [mobilityFaresData?.fares]);
+
+  useEffect(() => {
+    const f = packFaresData?.fares as any;
+    if (!f) return;
+    setPackFaresDraft({
+      motoBase: f.moto.baseUsd,
+      motoPerKm: f.moto.perKmUsd,
+      autoBase: f.auto.baseUsd,
+      autoPerKm: f.auto.perKmUsd,
+      camionetaBase: f.camioneta.baseUsd,
+      camionetaPerKm: f.camioneta.perKmUsd,
+    });
+  }, [packFaresData?.fares]);
 
   useEffect(() => {
     const search = typeof window !== "undefined" ? window.location.search : "";
@@ -3131,6 +3156,88 @@ export default function AdminPanel() {
                         </>
                       ) : (
                         "Guardar tarifas"
+                      )}
+                    </Button>
+                  </div>
+                  {!fullAdmin ? <p className="text-xs text-muted-foreground">Solo administrador completo puede editar.</p> : null}
+                </CardContent>
+              </Card>
+
+              <Card className="border-border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Settings className="h-5 w-5 text-primary" />
+                    Tarifas predeterminadas — Pack Go
+                  </CardTitle>
+                  <CardDescription>
+                    Pack Go permite <strong>Moto</strong>, <strong>Auto</strong> y <strong>Camioneta</strong>. No hay Pet Car.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                    <p className="font-semibold">Moto</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Tarifa base (USD)</Label>
+                        <Input type="number" step="0.01" value={packFaresDraft.motoBase} onChange={(e) => setPackFaresDraft((s) => ({ ...s, motoBase: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Costo por km (USD)</Label>
+                        <Input type="number" step="0.01" value={packFaresDraft.motoPerKm} onChange={(e) => setPackFaresDraft((s) => ({ ...s, motoPerKm: Number(e.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                    <p className="font-semibold">Auto</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Tarifa base (USD)</Label>
+                        <Input type="number" step="0.01" value={packFaresDraft.autoBase} onChange={(e) => setPackFaresDraft((s) => ({ ...s, autoBase: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Costo por km (USD)</Label>
+                        <Input type="number" step="0.01" value={packFaresDraft.autoPerKm} onChange={(e) => setPackFaresDraft((s) => ({ ...s, autoPerKm: Number(e.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+                    <p className="font-semibold">Camioneta</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Tarifa base (USD)</Label>
+                        <Input type="number" step="0.01" value={packFaresDraft.camionetaBase} onChange={(e) => setPackFaresDraft((s) => ({ ...s, camionetaBase: Number(e.target.value) }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Costo por km (USD)</Label>
+                        <Input type="number" step="0.01" value={packFaresDraft.camionetaPerKm} onChange={(e) => setPackFaresDraft((s) => ({ ...s, camionetaPerKm: Number(e.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button
+                      disabled={!fullAdmin || patchPackFares.isPending}
+                      onClick={async () => {
+                        try {
+                          await patchPackFares.mutateAsync({
+                            moto: { baseUsd: packFaresDraft.motoBase, perKmUsd: packFaresDraft.motoPerKm },
+                            auto: { baseUsd: packFaresDraft.autoBase, perKmUsd: packFaresDraft.autoPerKm },
+                            camioneta: { baseUsd: packFaresDraft.camionetaBase, perKmUsd: packFaresDraft.camionetaPerKm },
+                          });
+                        } catch (e: any) {
+                          toast({ title: "Error", description: e?.message || "No se pudo guardar.", variant: "destructive" });
+                        }
+                      }}
+                    >
+                      {patchPackFares.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Guardando…
+                        </>
+                      ) : (
+                        "Guardar tarifas Pack Go"
                       )}
                     </Button>
                   </div>

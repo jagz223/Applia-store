@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Marker, ZoomControl, useMap, GeoJSON, CircleMarker } from "react-leaflet";
 import L from "leaflet";
 import { Loader2, Navigation } from "lucide-react";
@@ -86,30 +87,127 @@ function FitToService({
   return null;
 }
 
-function RecenterControl({ me }: { me: { lat: number; lon: number } }) {
+function leafletTopPx(receiving: boolean, searchingClient: boolean): number {
+  if (!receiving) return 10;
+  let t = 78;
+  if (searchingClient) t += 44;
+  return t;
+}
+
+/** Alinea la columna de +/− con el mismo `top` que usan el banner; el centrar va en el mismo contenedor, debajo del zoom. */
+function PositionLeafletZoomStack({
+  fullscreen,
+  receiving,
+  searchingClient,
+}: {
+  fullscreen: boolean;
+  receiving: boolean;
+  searchingClient: boolean;
+}) {
   const map = useMap();
-  return (
-    <div className="pointer-events-none absolute right-3 top-3 z-[400]">
+  const top = leafletTopPx(receiving, searchingClient);
+  useLayoutEffect(() => {
+    const root = map.getContainer();
+    const col = root.querySelector(
+      fullscreen ? ".leaflet-top.leaflet-right" : ".leaflet-top.leaflet-left"
+    ) as HTMLElement | null;
+    if (!col) return;
+    const prev = col.style.top;
+    col.style.top = `${top}px`;
+    return () => {
+      col.style.top = prev;
+    };
+  }, [map, fullscreen, top]);
+  return null;
+}
+
+/**
+ * Mismo apilado que +/−: nodo en `.leaflet-top` (z-index 1000 de Leaflet), justo *debajo* del control de zoom,
+ * no superpuesto en Z ni con cálculo frágil de `top`.
+ */
+function RecenterControl({ me, fullscreen }: { me: { lat: number; lon: number }; fullscreen: boolean }) {
+  const map = useMap();
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const root = map.getContainer();
+    const col = root.querySelector(
+      fullscreen ? ".leaflet-top.leaflet-right" : ".leaflet-top.leaflet-left"
+    ) as HTMLDivElement | null;
+    if (!col) return;
+
+    const el = document.createElement("div");
+    el.setAttribute("data-genfeb", "recenter");
+    el.className = "leaflet-control";
+
+    let raf = 0;
+    let frame = 0;
+    const maxFrames = 10;
+    let done = false;
+
+    const tryPlace = () => {
+      if (done) return;
+      if (!col.isConnected) return;
+      const zoom = col.querySelector(".leaflet-control-zoom, .leaflet-bar") as HTMLElement | null;
+      if (zoom) {
+        zoom.after(el);
+        setHost(el);
+        done = true;
+        return;
+      }
+      frame += 1;
+      if (frame < maxFrames) {
+        raf = requestAnimationFrame(tryPlace);
+      } else {
+        col.appendChild(el);
+        setHost(el);
+        done = true;
+      }
+    };
+
+    raf = requestAnimationFrame(tryPlace);
+
+    return () => {
+      done = true;
+      cancelAnimationFrame(raf);
+      el.remove();
+      setHost(null);
+    };
+  }, [map, fullscreen]);
+
+  if (!host) return null;
+
+  return createPortal(
+    <div className="!mt-3 w-full border-t border-foreground/20 pt-3">
       <Button
         type="button"
         size="icon"
         variant="secondary"
-        className="pointer-events-auto h-11 w-11 rounded-full border border-border bg-background/93 shadow-lg backdrop-blur-sm"
+        className={cn(
+          "h-12 w-12 rounded-full border-2 border-foreground/30 bg-background text-foreground",
+          "shadow-md ring-2 ring-foreground/10 hover:bg-muted hover:ring-foreground/25"
+        )}
         aria-label="Centrar mapa en mi posición"
         onClick={() => {
           map.setView(L.latLng(me.lat, me.lon), Math.max(map.getZoom(), 15), { animate: true });
           requestAnimationFrame(() => map.invalidateSize({ animate: false }));
         }}
       >
-        <Navigation className="h-5 w-5" />
+        <Navigation className="h-5 w-5 text-foreground" strokeWidth={2.5} />
       </Button>
-    </div>
+    </div>,
+    host
   );
 }
 
 export type DriverCargoMapProps = {
   vehicleType?: string | null;
   receiving?: boolean;
+  /**
+   * Conductor en fase de búsqueda del cliente: desplaza +/− y el botón de centrar hacia abajo
+   * (misma lógica que al estar “en línea” con el aviso verde).
+   */
+  searchingClient?: boolean;
   /** Contenedor al 100% del padre (vista conductor móvil a pantalla). */
   fullscreen?: boolean;
   /** En móvil a pantalla completa se oculta la brújula (no solapar con la cabecera). */
@@ -125,6 +223,7 @@ export type DriverCargoMapProps = {
 export function DriverCargoMap({
   vehicleType,
   receiving = false,
+  searchingClient = false,
   fullscreen = false,
   showRecenter = true,
   start = null,
@@ -200,6 +299,11 @@ export function DriverCargoMap({
             >
               {/* topright: evita solaparse con chips/banners en la esquina superior izquierda del overlay */}
               {fullscreen ? <ZoomControl position="topright" /> : null}
+              <PositionLeafletZoomStack
+                fullscreen={!!fullscreen}
+                receiving={receiving}
+                searchingClient={searchingClient}
+              />
               <MapPaneBearing degrees={bearingDeg} />
               <TileLayer
                 attribution={TAXI_TILE_ATTRIBUTION}
@@ -213,7 +317,7 @@ export function DriverCargoMap({
                 <>
                   <Marker position={[me.lat, me.lon]} icon={driverIcon} interactive={false} zIndexOffset={600} />
                   <FlyToFirstFix lat={me.lat} lon={me.lon} />
-                  {showRecenter ? <RecenterControl me={me} /> : null}
+                  {showRecenter ? <RecenterControl me={me} fullscreen={!!fullscreen} /> : null}
                 </>
               )}
               {end ? <FitToService start={start} end={end} me={me} /> : null}

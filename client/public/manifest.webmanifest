@@ -14,46 +14,53 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/genfeb-mark.svg",
+      "src": "/logo-GenFeb.jpg",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/jpeg",
       "purpose": "any"
     },
     {
-      "src": "/genfeb-mark.svg",
+      "src": "/logo-GenFeb.jpg",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/jpeg",
       "purpose": "maskable"
     }
   ],
   "shortcuts": [
     {
+      "name": "Pedir carro (Car Go)",
+      "short_name": "Car Go",
+      "description": "Pide un carro con Car Go",
+      "url": "/go/cargo",
+      "icons": [{ "src": "/logo-GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+    },
+    {
       "name": "Reservar servicio",
       "short_name": "Reservar",
       "description": "Reserva un nuevo servicio",
       "url": "/booking",
-      "icons": [{ "src": "/genfeb-mark.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/logo-GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
     },
     {
       "name": "Mis reservas",
       "short_name": "Reservas",
       "description": "Ver mis reservas",
       "url": "/dashboard",
-      "icons": [{ "src": "/genfeb-mark.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/logo-GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
     },
     {
       "name": "Mensajes",
       "short_name": "Chat",
       "description": "Ver mensajes",
       "url": "/chat",
-      "icons": [{ "src": "/genfeb-mark.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/logo-GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
     },
     {
       "name": "Configuración",
       "short_name": "Configuracion",
       "description": "Gestiona tu perfil y cuenta",
       "url": "/settings",
-      "icons": [{ "src": "/genfeb-mark.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/logo-GenFeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
     }
   ]
 }

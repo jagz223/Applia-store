@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Car, Loader2, Star, Route } from "lucide-react";
+import { ArrowLeft, Car, CreditCard, Loader2, Route, Star } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
@@ -9,7 +9,15 @@ import { resolveVehicleKind } from "@/components/driver/cargo-map-markers";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { loadTripLog } from "@/lib/cargo-driver-storage";
+import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
+
+/** Solo permite dígitos, espacios y guiones en número de cuenta. */
+function sanitizeAccountNumber(value: string): string {
+  return value.replace(/[^\d\s\-]/g, "").replace(/\s+/g, " ").trim();
+}
 
 const VEHICLE_LABEL: Record<string, string> = {
   motorcycle: "Moto",
@@ -21,9 +29,14 @@ const VEHICLE_LABEL: Record<string, string> = {
 export default function CargoDriverSettings() {
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
   const [localTrips, setLocalTrips] = useState(loadTripLog());
+  const [bankName, setBankName] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [bankSaving, setBankSaving] = useState(false);
 
   const allowed = !!provider?.isVerified && isCarGoProvider(provider, categories);
 
@@ -50,6 +63,12 @@ export default function CargoDriverSettings() {
   useEffect(() => {
     setLocalTrips(loadTripLog());
   }, []);
+
+  useEffect(() => {
+    const u = user as any;
+    setBankName(String(u?.bankName ?? ""));
+    setAccountNumber(String(u?.accountNumber ?? ""));
+  }, [user]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -188,6 +207,66 @@ export default function CargoDriverSettings() {
           <CardContent>
             <p className="text-3xl font-bold tabular-nums text-foreground">{tripCount}</p>
             <p className="text-xs text-muted-foreground mt-1">Viajes completados en Car Go.</p>
+          </CardContent>
+        </Card>
+
+        <Card className="mt-4">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CreditCard className="h-5 w-5 text-primary" />
+              Banco para retiros
+            </CardTitle>
+            <CardDescription>
+              Necesario para solicitar retiro de Saldo GenFeb. Se sincroniza con la configuración general.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-foreground">Banco</p>
+              <Input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Ej. Banco Pichincha" />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-foreground">Número de cuenta</p>
+              <Input
+                value={accountNumber}
+                onChange={(e) => setAccountNumber(e.target.value)}
+                placeholder="Ej. 2100-1234-5678-9012"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Solo dígitos, espacios y guiones.
+              </p>
+            </div>
+            <Button
+              type="button"
+              className="w-full"
+              disabled={bankSaving}
+              onClick={async () => {
+                const token = localStorage.getItem("token");
+                if (!token) return;
+                setBankSaving(true);
+                try {
+                  const body = {
+                    bankName: bankName.trim() || undefined,
+                    accountNumber: accountNumber ? sanitizeAccountNumber(accountNumber) : undefined,
+                  };
+                  const res = await fetch("/api/auth/profile", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                    body: JSON.stringify(body),
+                  });
+                  const data = (await res.json().catch(() => ({}))) as { user?: any; message?: string };
+                  if (!res.ok) throw new Error(data.message || "No se pudo guardar");
+                  if (data.user) queryClient.setQueryData(["user"], data.user);
+                  toast({ title: "Datos bancarios guardados", description: "Se actualizaron correctamente." });
+                } catch (e) {
+                  toast({ title: "Error", description: e instanceof Error ? e.message : "No se pudo guardar.", variant: "destructive" });
+                } finally {
+                  setBankSaving(false);
+                }
+              }}
+            >
+              {bankSaving ? "Guardando…" : "Guardar datos bancarios"}
+            </Button>
           </CardContent>
         </Card>
 

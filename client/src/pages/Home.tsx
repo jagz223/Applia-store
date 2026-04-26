@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
+import { HomeVideoCarousel } from "@/components/home/HomeVideoCarousel";
 
 type HomeServiceCategory = {
   name: string;
@@ -412,6 +413,97 @@ export default function HomePage() {
         </section>
       )}
 
+      {/* CATEGORIES SECTION */}
+      <section className="py-10 sm:py-14 bg-card/30">
+        <div className="container px-4 mx-auto max-w-7xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-8 sm:mb-12"
+          >
+            <Badge variant="outline" className="mb-3 sm:mb-4 border-accent/50 text-accent">
+              Categorías
+            </Badge>
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-bold mb-2 sm:mb-4">
+              Explora todos los servicios
+            </h2>
+            <p className="text-sm sm:text-lg text-muted-foreground max-w-2xl mx-auto">
+              Encuentra el asociado perfecto para cualquier necesidad
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6 max-w-5xl mx-auto">
+            {serviceCategories.map((category, index) => {
+              const n = homeCounts?.[category.countKey];
+              const c = n ?? 0;
+              const isGoBrand =
+                category.slug === "transport" || category.slug === "delivery" || category.slug === "marketplace";
+              const personWord = isGoBrand ? "conductores" : "asociados";
+              const countLabel = homeCountsLoading ? "…" : homeCountsError ? "—" : `${c} ${personWord}`;
+              const isBrandInactive = hiddenSlugs.has(category.slug);
+              const card = (
+                <Card
+                  className={cn(
+                    "card-industrial transition-all duration-300",
+                    isBrandInactive
+                      ? "cursor-not-allowed opacity-70 grayscale border-border/60"
+                      : "cursor-pointer group hover:border-primary/50",
+                  )}
+                >
+                  <CardContent className="p-3 sm:p-6 text-center">
+                    {isBrandInactive && (
+                      <Badge variant="secondary" className="mb-2 text-[10px] sm:text-xs">
+                        No disponible
+                      </Badge>
+                    )}
+                    <div
+                      className={cn(
+                        "p-3 sm:p-4 rounded-xl bg-primary/10 w-fit mx-auto mb-2 sm:mb-4 transition-transform",
+                        category.color,
+                        !isBrandInactive && "group-hover:scale-110",
+                      )}
+                    >
+                      <category.icon className="w-6 h-6 sm:w-8 sm:h-8" />
+                    </div>
+                    <h3 className="text-sm sm:text-lg font-bold mb-0.5 sm:mb-1">{category.name}</h3>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      {isBrandInactive ? "Servicio desactivado en la plataforma" : countLabel}
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+              return (
+                <motion.div
+                  key={category.countKey}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  viewport={{ once: true }}
+                >
+                  {isBrandInactive ? card : <Link href={category.href}>{card}</Link>}
+                </motion.div>
+              );
+            })}
+          </div>
+
+          <div className="text-center mt-8 sm:mt-10">
+            <Link href="/explore">
+              <Button
+                variant="outline"
+                size="lg"
+                className="border-primary/50 text-primary hover:bg-primary hover:text-white"
+              >
+                Ver todas las categorías
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <HomeVideoCarousel />
+
       {/* FEATURES SECTION */}
       <section className="py-20">
         <div className="container px-4 mx-auto max-w-7xl">
@@ -453,94 +545,6 @@ export default function HomePage() {
               </motion.div>
             ))}
           </motion.div>
-        </div>
-      </section>
-
-      {/* CATEGORIES SECTION */}
-      <section className="py-20 bg-card/30">
-        <div className="container px-4 mx-auto max-w-7xl">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <Badge variant="outline" className="mb-4 border-accent/50 text-accent">
-              Categorías
-            </Badge>
-            <h2 className="text-3xl md:text-4xl font-display font-bold mb-4">
-              Explora todos los servicios
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Encuentra el asociado perfecto para cualquier necesidad
-            </p>
-          </motion.div>
-
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {serviceCategories.map((category, index) => {
-              const n = homeCounts?.[category.countKey];
-              const c = n ?? 0;
-              const countLabel = homeCountsLoading
-                ? "…"
-                : homeCountsError
-                  ? "—"
-                  : c === 1
-                    ? "1 asociado"
-                    : `${c} asociados`;
-              const isBrandInactive = hiddenSlugs.has(category.slug);
-              const card = (
-                <Card
-                  className={cn(
-                    "card-industrial transition-all duration-300",
-                    isBrandInactive
-                      ? "cursor-not-allowed opacity-70 grayscale border-border/60"
-                      : "cursor-pointer group hover:border-primary/50",
-                  )}
-                >
-                  <CardContent className="p-6 text-center">
-                    {isBrandInactive && (
-                      <Badge variant="secondary" className="mb-2 text-xs">
-                        No disponible
-                      </Badge>
-                    )}
-                    <div
-                      className={cn(
-                        "p-4 rounded-xl bg-primary/10 w-fit mx-auto mb-4 transition-transform",
-                        category.color,
-                        !isBrandInactive && "group-hover:scale-110",
-                      )}
-                    >
-                      <category.icon className="w-8 h-8" />
-                    </div>
-                    <h3 className="text-lg font-bold mb-1">{category.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {isBrandInactive ? "Servicio desactivado en la plataforma" : countLabel}
-                    </p>
-                  </CardContent>
-                </Card>
-              );
-              return (
-                <motion.div
-                  key={category.countKey}
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  viewport={{ once: true }}
-                >
-                  {isBrandInactive ? card : <Link href={category.href}>{card}</Link>}
-                </motion.div>
-              );
-            })}
-          </div>
-
-          <div className="text-center mt-10">
-            <Link href="/explore">
-              <Button variant="outline" size="lg" className="border-primary/50 text-primary hover:bg-primary hover:text-white">
-                Ver todas las categorías
-                <ChevronRight className="ml-2 h-4 w-4" />
-              </Button>
-            </Link>
-          </div>
         </div>
       </section>
 
@@ -665,7 +669,7 @@ export default function HomePage() {
                           variant="secondary"
                           onClick={() => {
                             setGoQuickOpen(false);
-                            setLocation("/go/pack");
+                            setLocation("/go/pack/driver");
                           }}
                         >
                           <Package className="h-4 w-4" /> Pack Go

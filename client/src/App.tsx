@@ -47,9 +47,12 @@ import VerifyProfessional from "@/pages/VerifyProfessional";
 import VerifyProfessionalPayment from "@/pages/VerifyProfessionalPayment";
 import { GoShellLayout } from "@/components/go/GoShellLayout";
 import { GoCategoryGate } from "@/components/go/GoCategoryGate";
-import { CargoActiveRideResume } from "@/components/go/CargoActiveRideResume";
+import { GoActiveRideResume } from "@/components/go/GoActiveRideResume";
 import GoShop from "@/pages/go/GoShop";
 import GoPack from "@/pages/go/GoPack";
+import PackRide from "@/pages/PackRide";
+import DriverPackGenfeb from "@/pages/DriverPackGenfeb";
+import PackDriverSettings from "@/pages/PackDriverSettings";
 
 // Oculta pagos temporalmente (se configurará en el futuro).
 const SHOW_PAYMENTS = false;
@@ -111,6 +114,16 @@ function GoRouter() {
       <CargoDriverSettings />
     </GoCategoryGate>
   );
+  const GoPackDriver = () => (
+    <GoCategoryGate slug="delivery">
+      <DriverPackGenfeb />
+    </GoCategoryGate>
+  );
+  const GoPackDriverSettings = () => (
+    <GoCategoryGate slug="delivery">
+      <PackDriverSettings />
+    </GoCategoryGate>
+  );
   const GoShopRoute = () => (
     <GoCategoryGate slug="marketplace">
       <GoShop />
@@ -118,7 +131,7 @@ function GoRouter() {
   );
   const GoPackRoute = () => (
     <GoCategoryGate slug="delivery">
-      <GoPack />
+      <PackRide />
     </GoCategoryGate>
   );
   return (
@@ -130,6 +143,8 @@ function GoRouter() {
       <Route path="/go/cargo/driver/settings" component={GoCargoDriverSettings} />
       <Route path="/go/shop" component={GoShopRoute} />
       <Route path="/go/pack" component={GoPackRoute} />
+      <Route path="/go/pack/driver" component={GoPackDriver} />
+      <Route path="/go/pack/driver/settings" component={GoPackDriverSettings} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -145,7 +160,7 @@ function App() {
         <SocketProvider>
           <ExploreCategoryProvider>
             <PushForegroundHandler />
-            <CargoActiveRideResume />
+            <GoActiveRideResume />
             <RatingGate />
             <ProviderTermsGate />
             {inGoShell ? (

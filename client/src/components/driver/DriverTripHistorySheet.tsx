@@ -40,6 +40,7 @@ export function DriverTripHistorySheet({
   onOpenChange,
 }: Props) {
   const isControlled = onOpenChange !== undefined;
+  const moduleLabel = (t: CargoDriverTripLog): string => (t.goSlug === "pack" ? "Pack Go" : "Car Go");
 
   return (
     <Sheet
@@ -63,12 +64,12 @@ export function DriverTripHistorySheet({
       )}
       <SheetContent side="bottom" className="max-h-[min(85dvh,560px)] overflow-y-auto rounded-t-2xl">
         <SheetHeader>
-          <SheetTitle>Viajes recientes (Car Go)</SheetTitle>
+          <SheetTitle>Historial de servicios (Car Go · Pack Go)</SheetTitle>
         </SheetHeader>
         <div className="mt-4 space-y-3 pb-6">
           {trips.length === 0 ? (
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Aún no hay viajes registrados como conductor. Cuando completes carreras con Car Go, aquí verás la
+              Aún no hay servicios registrados. Cuando completes servicios con Car Go o Pack Go, aquí verás la
               duración, el monto y si el pago fue en efectivo o con saldo GenFeb.
             </p>
           ) : (
@@ -83,6 +84,9 @@ export function DriverTripHistorySheet({
                     <span className="tabular-nums font-semibold text-foreground">{formatMoney(t.amountUsd)}</span>
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground text-xs">
+                    <span>
+                      Servicio: <span className="font-medium text-foreground">{moduleLabel(t)}</span>
+                    </span>
                     <span>Duración: {t.durationMin} min</span>
                     <span>
                       Pago:{" "}
