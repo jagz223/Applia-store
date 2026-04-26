@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
-import { ArrowLeft, Bike, Car, Loader2, MapPin, Maximize2, Minimize2, Navigation, PawPrint, Phone, Star, Truck } from "lucide-react";
+import { ArrowLeft, Bike, Car, ChevronDown, ChevronUp, Loader2, MapPin, Maximize2, Minimize2, Navigation, PawPrint, Phone, Star, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,10 +24,11 @@ import { useGoChat } from "@/contexts/GoChatContext";
 import { addHiddenConversationId } from "@/lib/hidden-conversations";
 import { purgeConversationCache } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
+import { useWallet } from "@/hooks/use-mango-data";
 import { useSocket, useSocketChat } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { clearRiderActiveRideId, loadRiderActiveRideId, saveRiderActiveRideId } from "@/lib/cargo-rider-storage";
+import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
@@ -130,6 +131,7 @@ type MobilityRideHydration = {
   driver: {
     userId: string;
     name: string;
+    lastName?: string;
     profileImageUrl: string | null;
     phone: string;
     rating?: number;
@@ -145,7 +147,7 @@ type MobilityRideHydration = {
   } | null;
 };
 
-export default function TaxiRide() {
+export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pack" } = {}) {
   const queryClient = useQueryClient();
   const [rateDialogOpen, setRateDialogOpen] = useState(false);
   const [rateStars, setRateStars] = useState(5);
@@ -158,6 +160,17 @@ export default function TaxiRide() {
   const { toast } = useToast();
   const params = useMemo(() => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""), []);
   const fromCategories = params.get("from") === "categories";
+  const isPackGoClient = goSlug === "pack";
+  const uiWords = useMemo(
+    () => ({
+      service: isPackGoClient ? "envío" : "viaje",
+      Service: isPackGoClient ? "Envío" : "Viaje",
+      driver: isPackGoClient ? "repartidor" : "conductor",
+      Driver: isPackGoClient ? "Repartidor" : "Conductor",
+      pickupPoint: isPackGoClient ? "punto de retiro" : "punto de partida",
+    }),
+    [isPackGoClient]
+  );
 
   const [mapTarget, setMapTarget] = useState<"start" | "end">("start");
   const [start, setStart] = useState<Place | null>(null);
@@ -173,11 +186,17 @@ export default function TaxiRide() {
   const [routeMeta, setRouteMeta] = useState<{ distanceM: number; durationSec: number } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [vehiclePickerOpen, setVehiclePickerOpen] = useState(false);
+  const [ridePanelCollapsed, setRidePanelCollapsed] = useState(false);
   const [vehicleModalStep, setVehicleModalStep] = useState<TaxiVehicleModalStep>("pick");
   const [selectedVehicle, setSelectedVehicle] = useState<TaxiVehicleKind | null>(null);
   const [taxiPaymentMethod, setTaxiPaymentMethod] = useState<TaxiPaymentMethod | null>(null);
   const petEnabled = selectedVehicle === "pet_car";
   const [mobilityFares, setMobilityFares] = useState<MobilityFares | null>(null);
+  const [packFares, setPackFares] = useState<{ moto: { baseUsd: number; perKmUsd: number }; auto: { baseUsd: number; perKmUsd: number }; camioneta: { baseUsd: number; perKmUsd: number } } | null>(null);
+  const vehicleOptions = useMemo(
+    () => (goSlug === "pack" ? VEHICLE_OPTIONS.filter((o) => o.type !== "pet_car") : VEHICLE_OPTIONS),
+    [goSlug]
+  );
   const [nearbyDriverMarkers, setNearbyDriverMarkers] = useState<{ id: string; lat: number; lon: number }[]>([]);
   const [assignedDriverPos, setAssignedDriverPos] = useState<{ lat: number; lon: number } | null>(null);
   const assignedDriverPosRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -205,7 +224,7 @@ export default function TaxiRide() {
       userId: string;
       name: string;
       profileImageUrl: string | null;
-      phone: string;
+      phone?: string | null;
       rating?: number;
       ratingCount?: number;
       completedTrips?: number;
@@ -225,6 +244,10 @@ export default function TaxiRide() {
   useEffect(() => {
     matchedDriverInfoRef.current = matchedDriverInfo;
   }, [matchedDriverInfo]);
+
+  useEffect(() => {
+    if (!matchedDriverInfo) setRidePanelCollapsed(false);
+  }, [matchedDriverInfo]);
   const [searchRemainingSec, setSearchRemainingSec] = useState(VEHICLE_SEARCH_TOTAL_SEC);
   /** Solo en la ruta Go Car (cliente): mapa a pantalla completa para elegir puntos. */
   const [mapFullscreen, setMapFullscreen] = useState(false);
@@ -232,7 +255,32 @@ export default function TaxiRide() {
   const [cancelServiceBusy, setCancelServiceBusy] = useState(false);
   const [cancelServiceMode, setCancelServiceMode] = useState<"search" | "matched" | "progress">("search");
 
-  const isGoCargoClient = location === "/go/cargo";
+  const goBasePath = goSlug === "pack" ? "/go/pack" : "/go/cargo";
+  const rideApiBase = goSlug === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+  const rideApiRequestPath = goSlug === "pack" ? "/api/pack/rides/request" : "/api/mobility/rides/request";
+  const rideSocketPrefix = goSlug === "pack" ? "pack:ride:" : "cargo:ride:";
+
+  const isGoClient = location === goBasePath;
+  const { data: goWallet } = useWallet({ enabled: isGoClient && isAuthenticated });
+  const riderWalletBalance = typeof goWallet?.wallet === "number" ? goWallet.wallet : 0;
+  const matchedDriverFullName = useMemo(() => {
+    if (!matchedDriverInfo) return "";
+    const d = matchedDriverInfo.driver as unknown as { name?: string; lastName?: string; last_name?: string };
+    return [d?.name ?? "Usuario", d?.lastName ?? d?.last_name ?? ""].filter(Boolean).join(" ").trim();
+  }, [matchedDriverInfo]);
+
+  const matchedDriverPhone = useMemo(() => {
+    if (!matchedDriverInfo) return "";
+    const d = matchedDriverInfo.driver as unknown as {
+      phone?: unknown;
+      phoneNumber?: unknown;
+      phone_number?: unknown;
+      phone_number_e164?: unknown;
+    };
+    const v =
+      String(d?.phone ?? d?.phoneNumber ?? d?.phone_number ?? d?.phone_number_e164 ?? "").trim();
+    return v.length > 0 ? v : "";
+  }, [matchedDriverInfo]);
 
   /** Evita montar dos mapas Leaflet en Car Go (móvil vs escritorio). */
   const [isMdUp, setIsMdUp] = useState(() =>
@@ -247,11 +295,11 @@ export default function TaxiRide() {
   }, []);
 
   /** Pantalla completa extra solo en escritorio; en móvil el mapa ya llena el área útil. */
-  const showMapFullscreen = mapFullscreen && isGoCargoClient && isMdUp;
+  const showMapFullscreen = mapFullscreen && isGoClient && isMdUp;
 
   useEffect(() => {
-    if (isGoCargoClient && !isMdUp && mapFullscreen) setMapFullscreen(false);
-  }, [isGoCargoClient, isMdUp, mapFullscreen]);
+    if (isGoClient && !isMdUp && mapFullscreen) setMapFullscreen(false);
+  }, [isGoClient, isMdUp, mapFullscreen]);
 
   const debounceStart = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounceEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -260,15 +308,95 @@ export default function TaxiRide() {
   // Como usamos `window.*`, guardamos el id numérico del navegador.
   const searchTickRef = useRef<number | null>(null);
   const searchDoneTimeoutRef = useRef<number | null>(null);
+  const estimatedUsdRef = useRef<number>(0);
 
   const goBack = () => setLocation(fromCategories ? "/categories" : "/explore");
+
+  const riderDraftKey = useMemo(() => `genfeb-go-rider-draft:${goSlug}`, [goSlug]);
+  const saveRiderDraft = useCallback(
+    () => {
+      if (typeof window === "undefined") return;
+      try {
+        const payload = {
+          at: Date.now(),
+          goSlug,
+          start,
+          end,
+          startInput,
+          endInput,
+          routeGeometry,
+          routeMeta,
+          selectedVehicle,
+          taxiPaymentMethod,
+          vehicleModalStep,
+          vehiclePickerOpen,
+          mapTarget,
+        };
+        sessionStorage.setItem(riderDraftKey, JSON.stringify(payload));
+      } catch {
+        /* ignore */
+      }
+    },
+    [
+      riderDraftKey,
+      goSlug,
+      start,
+      end,
+      startInput,
+      endInput,
+      routeGeometry,
+      routeMeta,
+      selectedVehicle,
+      taxiPaymentMethod,
+      vehicleModalStep,
+      vehiclePickerOpen,
+      mapTarget,
+    ]
+  );
+
+  const goToRecharge = useCallback(
+    () => {
+      saveRiderDraft();
+      const ret = `${goBasePath}${typeof window !== "undefined" ? window.location.search : ""}`;
+      setLocation(`/recharge?return=${encodeURIComponent(ret)}`);
+    },
+    [goBasePath, saveRiderDraft, setLocation]
+  );
+
+  useEffect(() => {
+    if (!isGoClient) return;
+    if (activeRideIdRef.current || matchedDriverInfoRef.current) return;
+    try {
+      const raw = sessionStorage.getItem(riderDraftKey);
+      if (!raw) return;
+      sessionStorage.removeItem(riderDraftKey);
+      const p = JSON.parse(raw) as any;
+      if (!p || typeof p !== "object") return;
+      // caduca rápido (15 min)
+      if (typeof p.at === "number" && Date.now() - p.at > 15 * 60_000) return;
+      if (p.goSlug && p.goSlug !== goSlug) return;
+      if (p.start) setStart(p.start);
+      if (p.end) setEnd(p.end);
+      if (typeof p.startInput === "string") setStartInput(p.startInput);
+      if (typeof p.endInput === "string") setEndInput(p.endInput);
+      if (p.routeGeometry) setRouteGeometry(p.routeGeometry);
+      if (p.routeMeta) setRouteMeta(p.routeMeta);
+      if (typeof p.mapTarget === "string") setMapTarget(p.mapTarget);
+      if (p.selectedVehicle) setSelectedVehicle(p.selectedVehicle);
+      if (p.taxiPaymentMethod) setTaxiPaymentMethod(p.taxiPaymentMethod);
+      if (p.vehicleModalStep) setVehicleModalStep(p.vehicleModalStep);
+      if (typeof p.vehiclePickerOpen === "boolean") setVehiclePickerOpen(p.vehiclePickerOpen);
+    } catch {
+      /* ignore */
+    }
+  }, [isGoClient, riderDraftKey, goSlug]);
 
   useEffect(() => {
     activeRideIdRef.current = activeRideId;
   }, [activeRideId]);
 
   useSocketChat(
-    isGoCargoClient && matchedDriverInfo?.conversationId != null
+    isGoClient && matchedDriverInfo?.conversationId != null
       ? String(matchedDriverInfo.conversationId)
       : null
   );
@@ -297,7 +425,7 @@ export default function TaxiRide() {
     setActiveRideId(null);
     activeRideIdRef.current = null;
     setRiderTripInProgress(false);
-    clearRiderActiveRideId();
+    clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
     resetChat();
   }, [clearVehicleSearchTimers, resetChat, queryClient]);
 
@@ -322,7 +450,7 @@ export default function TaxiRide() {
     }
     setCancelServiceBusy(true);
     try {
-      const res = await fetch(`/api/mobility/rides/${encodeURIComponent(rideId)}/cancel`, {
+      const res = await fetch(`${rideApiBase}/${encodeURIComponent(rideId)}/cancel`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -343,7 +471,7 @@ export default function TaxiRide() {
     } finally {
       setCancelServiceBusy(false);
     }
-  }, [applyCarGoRideEnded, toast]);
+  }, [applyCarGoRideEnded, toast, rideApiBase]);
 
   const loadDriverEtaRoute = useCallback(async (driverPos: { lat: number; lon: number }, target: Place) => {
     setDriverEtaLoading(true);
@@ -392,7 +520,7 @@ export default function TaxiRide() {
     activeRideIdRef.current = null;
     setMatchedDriverInfo(null);
     setRiderTripInProgress(false);
-    clearRiderActiveRideId();
+    clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
   }, [clearVehicleSearchTimers]);
 
   const handleVehicleModalOpenChange = useCallback(
@@ -410,7 +538,7 @@ export default function TaxiRide() {
         activeRideIdRef.current = null;
         setMatchedDriverInfo(null);
         setRiderTripInProgress(false);
-        clearRiderActiveRideId();
+        clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       }
       setVehiclePickerOpen(open);
     },
@@ -435,17 +563,36 @@ export default function TaxiRide() {
 
   const handlePaymentContinue = useCallback(() => {
     if (!taxiPaymentMethod) return;
+    if (taxiPaymentMethod === "genfeb") {
+      const need = typeof estimatedUsdRef.current === "number" && Number.isFinite(estimatedUsdRef.current) ? estimatedUsdRef.current : 0;
+      if (need > riderWalletBalance) {
+        toast({
+          title: "Saldo insuficiente",
+          description: "Te llevaremos a recargar para poder pagar con Saldo GenFeb. Al volver, tu ruta y selección quedarán guardadas.",
+          variant: "destructive",
+        });
+        goToRecharge();
+        return;
+      }
+    }
     setVehicleModalStep("ready");
-  }, [taxiPaymentMethod, selectedVehicle, vehicleModalStep]);
+  }, [taxiPaymentMethod, riderWalletBalance, toast, goToRecharge]);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const res = await fetch("/api/platform/mobility-fares");
-        const data = res.ok ? ((await res.json()) as { fares?: MobilityFares }) : {};
-        if (!alive) return;
-        if (data?.fares) setMobilityFares(data.fares);
+        if (goSlug === "pack") {
+          const res = await fetch("/api/platform/pack-fares");
+          const data = res.ok ? ((await res.json()) as { fares?: any }) : {};
+          if (!alive) return;
+          if (data?.fares) setPackFares(data.fares);
+        } else {
+          const res = await fetch("/api/platform/mobility-fares");
+          const data = res.ok ? ((await res.json()) as { fares?: MobilityFares }) : {};
+          if (!alive) return;
+          if (data?.fares) setMobilityFares(data.fares);
+        }
       } catch {
         // silencioso: UI seguirá con fallback (sin cálculo exacto)
       }
@@ -453,7 +600,7 @@ export default function TaxiRide() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [goSlug]);
 
   useEffect(() => {
     if (!showMapFullscreen) return;
@@ -479,11 +626,27 @@ export default function TaxiRide() {
   }, []);
 
   const faresEffective = mobilityFares ?? FALLBACK_MOBILITY_FARES;
+  const packFaresEffective =
+    packFares ??
+    ({
+      moto: { baseUsd: FALLBACK_MOBILITY_FARES.moto.baseUsd, perKmUsd: FALLBACK_MOBILITY_FARES.moto.perKmUsd },
+      auto: { baseUsd: FALLBACK_MOBILITY_FARES.auto.baseDayUsd, perKmUsd: FALLBACK_MOBILITY_FARES.auto.perKmUsd },
+      camioneta: { baseUsd: FALLBACK_MOBILITY_FARES.camioneta.baseUsd, perKmUsd: FALLBACK_MOBILITY_FARES.camioneta.perKmUsd },
+    } as const);
 
   /** Tarifa estimada por tipo (sin mascota) para el paso “elegir vehículo” — antes no había `selectedVehicle` y todo salía $0. */
   const fareByVehicleKind = useMemo((): Record<TaxiVehicleKind, number> | null => {
     if (!routeMeta) return null;
     const km = Math.max(0, routeMeta.distanceM / 1000);
+    if (goSlug === "pack") {
+      const f = packFaresEffective;
+      return {
+        moto: f.moto.baseUsd + f.moto.perKmUsd * km,
+        auto: f.auto.baseUsd + f.auto.perKmUsd * km,
+        pet_car: f.auto.baseUsd + f.auto.perKmUsd * km, // no aplica en Pack; se oculta en UI
+        camioneta: f.camioneta.baseUsd + f.camioneta.perKmUsd * km,
+      };
+    }
     const f = faresEffective;
     return {
       moto: f.moto.baseUsd + f.moto.perKmUsd * km,
@@ -496,12 +659,18 @@ export default function TaxiRide() {
         f.auto.petExtraUsd,
       camioneta: f.camioneta.baseUsd + f.camioneta.perKmUsd * km,
     };
-  }, [faresEffective, routeMeta, isNight]);
+  }, [faresEffective, packFaresEffective, routeMeta, isNight, goSlug]);
 
   const estimatedUsd = useMemo(() => {
     if (!selectedVehicle) return null;
     if (!routeMeta) return null;
     const km = Math.max(0, routeMeta.distanceM / 1000);
+    if (goSlug === "pack") {
+      const f = packFaresEffective;
+      if (selectedVehicle === "moto") return f.moto.baseUsd + f.moto.perKmUsd * km;
+      if (selectedVehicle === "auto") return f.auto.baseUsd + f.auto.perKmUsd * km;
+      return f.camioneta.baseUsd + f.camioneta.perKmUsd * km;
+    }
     const f = faresEffective;
     if (selectedVehicle === "moto") {
       return f.moto.baseUsd + f.moto.perKmUsd * km;
@@ -515,7 +684,29 @@ export default function TaxiRide() {
       return base + f.auto.perKmUsd * km + f.auto.petExtraUsd;
     }
     return f.camioneta.baseUsd + f.camioneta.perKmUsd * km;
-  }, [faresEffective, selectedVehicle, routeMeta, isNight]);
+  }, [faresEffective, packFaresEffective, selectedVehicle, routeMeta, isNight, goSlug]);
+
+  useEffect(() => {
+    estimatedUsdRef.current = typeof estimatedUsd === "number" && Number.isFinite(estimatedUsd) ? estimatedUsd : 0;
+  }, [estimatedUsd]);
+
+  /**
+   * El handler de `cargo:ride:completed` vive en un useEffect que no re-incluye `estimatedUsd` en deps
+   * (no queremos re-suscribir el socket a cada cambio). Sin ref, el closure suele leer `estimatedUsd` viejo (null) => $0 en historial.
+   */
+  const riderTripSnapshotRef = useRef<{
+    amountUsd: number;
+    durationSec: number;
+    payment: "genfeb" | "cash" | "bank_transfer";
+  }>({ amountUsd: 0, durationSec: 0, payment: "cash" });
+  useEffect(() => {
+    const pay = taxiPaymentMethod ?? "cash";
+    riderTripSnapshotRef.current = {
+      amountUsd: estimatedUsd ?? 0,
+      durationSec: routeMeta?.durationSec ?? 0,
+      payment: pay === "genfeb" || pay === "cash" || pay === "bank_transfer" ? pay : "cash",
+    };
+  }, [estimatedUsd, routeMeta, taxiPaymentMethod]);
 
   /** Con conductor asignado: en “viaje en curso” el mapa sigue al driver como en DriverCargoMap (solo destino + ruta GPS→destino). */
   const matchedRideMap = useMemo(() => {
@@ -551,26 +742,29 @@ export default function TaxiRide() {
         if (step !== "searching") return step;
         toast({
           title: "Sin respuesta a tiempo",
-          description: "Ningún conductor aceptó. Puedes intentar de nuevo.",
+          description: `Ningún ${uiWords.driver} aceptó. Puedes intentar de nuevo.`,
           variant: "destructive",
         });
         setActiveRideId(null);
         activeRideIdRef.current = null;
-        clearRiderActiveRideId();
+        clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
         return "ready";
       });
     }, VEHICLE_SEARCH_MAX_MS);
 
     const token = localStorage.getItem("token");
     if (!token) {
-      toast({ title: "Inicia sesión para pedir un viaje", variant: "destructive" });
+      toast({
+        title: isPackGoClient ? "Inicia sesión para pedir un envío" : "Inicia sesión para pedir un viaje",
+        variant: "destructive",
+      });
       clearVehicleSearchTimers();
       setVehicleModalStep("ready");
       return;
     }
 
     try {
-      const res = await fetch("/api/mobility/rides/request", {
+      const res = await fetch(rideApiRequestPath, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -588,7 +782,7 @@ export default function TaxiRide() {
       const data = (await res.json().catch(() => ({}))) as { rideId?: string; message?: string; code?: string };
       if (!res.ok) {
         toast({
-          title: "No se pudo buscar conductor",
+          title: isPackGoClient ? "No se pudo buscar repartidor" : "No se pudo buscar conductor",
           description: data.message ?? "Intenta más tarde.",
           variant: "destructive",
         });
@@ -599,7 +793,7 @@ export default function TaxiRide() {
       if (data.rideId) {
         setActiveRideId(data.rideId);
         activeRideIdRef.current = data.rideId;
-        saveRiderActiveRideId(data.rideId);
+        saveGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo", data.rideId);
       }
     } catch {
       toast({ title: "Error de red", variant: "destructive" });
@@ -678,21 +872,54 @@ export default function TaxiRide() {
     const onDriverSearching = (p: { rideId: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       toast({
-        title: "Tu conductor te está buscando",
+        title: isPackGoClient ? "Tu repartidor está en camino" : "Tu conductor te está buscando",
         description: "Mantente atento: verás su ubicación en el mapa mientras se acerca.",
       });
     };
-    const onCompleted = (p: { rideId: string }) => {
+    const onCompleted = async (p: { rideId: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
+      const snap = riderTripSnapshotRef.current;
+      let amountUsd = snap.amountUsd;
+      let durationSec = snap.durationSec;
+      let payment: "genfeb" | "cash" | "bank_transfer" = snap.payment;
+
+      const token = localStorage.getItem("token");
+      if (token) {
+        try {
+        const res = await fetch(`${rideApiBase}/${encodeURIComponent(p.rideId)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const r = (await res.json()) as {
+              estimatedUsd?: number;
+              durationSec?: number;
+              paymentMethod?: string;
+            };
+            if (typeof r.estimatedUsd === "number" && !Number.isNaN(r.estimatedUsd)) {
+              amountUsd = r.estimatedUsd;
+            }
+            if (typeof r.durationSec === "number" && r.durationSec > 0) {
+              durationSec = r.durationSec;
+            }
+            if (r.paymentMethod === "genfeb" || r.paymentMethod === "cash" || r.paymentMethod === "bank_transfer") {
+              payment = r.paymentMethod;
+            }
+          }
+        } catch {
+          /* usar snap */
+        }
+      }
+
       // Guardar historial del pasajero antes de limpiar estado.
       if (matchedDriverInfoRef.current) {
         appendRiderTripLog({
           id: p.rideId,
           endedAt: new Date().toISOString(),
-          durationMin: Math.max(1, Math.round((routeMeta?.durationSec ?? 0) / 60)),
-          amountUsd: estimatedUsd ?? 0,
-          payment: taxiPaymentMethod ?? "cash",
+          durationMin: Math.max(1, Math.round(durationSec / 60)),
+          amountUsd,
+          payment,
           driverName: matchedDriverInfoRef.current.driver?.name ?? "Conductor",
+          goSlug: goSlug === "pack" ? "pack" : "cargo",
         });
         rateTargetRef.current = {
           rideId: p.rideId,
@@ -703,51 +930,59 @@ export default function TaxiRide() {
         setRateDialogOpen(true);
       }
       applyCarGoRideEnded();
-      toast({ title: "Viaje finalizado", description: "Gracias por usar Car Go." });
+      toast({
+        title: isPackGoClient ? "Envío finalizado" : "Viaje finalizado",
+        description: isPackGoClient ? "Gracias por usar Pack Go." : "Gracias por usar Car Go.",
+      });
     };
     const onCancelled = (p: { rideId: string; cancelledBy: "rider" | "driver" }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       applyCarGoRideEnded();
       if (p.cancelledBy === "driver") {
         toast({
-          title: "El conductor canceló",
+          title: isPackGoClient ? "El repartidor canceló" : "El conductor canceló",
           description: "Puedes volver a buscar cuando quieras.",
           variant: "destructive",
         });
       } else {
-        toast({ title: "Viaje cancelado", description: "El servicio ya no está activo." });
+        toast({
+          title: isPackGoClient ? "Envío cancelado" : "Viaje cancelado",
+          description: "El servicio ya no está activo.",
+        });
       }
     };
-    socket.on("cargo:ride:matched", onMatched);
-    socket.on("cargo:ride:driver_location", onDriverLoc);
-    socket.on("cargo:ride:driver_searching", onDriverSearching);
-    socket.on("cargo:ride:started", onStarted);
-    socket.on("cargo:ride:completed", onCompleted);
-    socket.on("cargo:ride:cancelled", onCancelled);
+    socket.on(`${rideSocketPrefix}matched`, onMatched);
+    socket.on(`${rideSocketPrefix}driver_location`, onDriverLoc);
+    socket.on(`${rideSocketPrefix}driver_searching`, onDriverSearching);
+    socket.on(`${rideSocketPrefix}started`, onStarted);
+    socket.on(`${rideSocketPrefix}completed`, onCompleted);
+    socket.on(`${rideSocketPrefix}cancelled`, onCancelled);
     const onFailed = (p: { rideId: string; reason: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       clearVehicleSearchTimers();
       setVehicleModalStep("ready");
       setActiveRideId(null);
       activeRideIdRef.current = null;
-      clearRiderActiveRideId();
+      clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       toast({
-        title: "No hay conductores disponibles",
-        description: "Por ahora no hay drivers para ese vehículo. Puedes intentar otro (p. ej. moto).",
+        title: isPackGoClient ? "No hay repartidores disponibles" : "No hay conductores disponibles",
+        description: isPackGoClient
+          ? "Por ahora no hay repartidores para ese vehículo. Puedes intentar otro (p. ej. moto)."
+          : "Por ahora no hay drivers para ese vehículo. Puedes intentar otro (p. ej. moto).",
         variant: "destructive",
       });
     };
-    socket.on("cargo:ride:failed", onFailed);
+    socket.on(`${rideSocketPrefix}failed`, onFailed);
     return () => {
-      socket.off("cargo:ride:matched", onMatched);
-      socket.off("cargo:ride:driver_location", onDriverLoc);
-      socket.off("cargo:ride:driver_searching", onDriverSearching);
-      socket.off("cargo:ride:started", onStarted);
-      socket.off("cargo:ride:completed", onCompleted);
-      socket.off("cargo:ride:cancelled", onCancelled);
-      socket.off("cargo:ride:failed", onFailed);
+      socket.off(`${rideSocketPrefix}matched`, onMatched);
+      socket.off(`${rideSocketPrefix}driver_location`, onDriverLoc);
+      socket.off(`${rideSocketPrefix}driver_searching`, onDriverSearching);
+      socket.off(`${rideSocketPrefix}started`, onStarted);
+      socket.off(`${rideSocketPrefix}completed`, onCompleted);
+      socket.off(`${rideSocketPrefix}cancelled`, onCancelled);
+      socket.off(`${rideSocketPrefix}failed`, onFailed);
     };
-  }, [socket, clearVehicleSearchTimers, applyCarGoRideEnded, primeCarGoConversation, toast, start, end, loadDriverEtaRoute]);
+  }, [socket, clearVehicleSearchTimers, applyCarGoRideEnded, primeCarGoConversation, toast, start, end, loadDriverEtaRoute, rideSocketPrefix]);
 
   const submitRideRating = useCallback(async () => {
     const tgt = rateTargetRef.current;
@@ -756,7 +991,8 @@ export default function TaxiRide() {
     if (!token) return;
     setRateBusy(true);
     try {
-      const res = await fetch(`/api/mobility/rides/${encodeURIComponent(tgt.rideId)}/rate`, {
+      const base = goSlug === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+      const res = await fetch(`${base}/${encodeURIComponent(tgt.rideId)}/rate`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ stars: rateStars, target: "driver" }),
@@ -771,7 +1007,7 @@ export default function TaxiRide() {
     } finally {
       setRateBusy(false);
     }
-  }, [rateStars, toast]);
+  }, [rateStars, toast, goSlug]);
 
   useEffect(() => {
     if (!riderTripInProgress || !assignedDriverPos || !end) return;
@@ -779,30 +1015,74 @@ export default function TaxiRide() {
   }, [riderTripInProgress, assignedDriverPos, end, loadDriverEtaRoute]);
 
   useEffect(() => {
-    if (!isGoCargoClient || authLoading || !isAuthenticated) return;
-    const stored = loadRiderActiveRideId();
+    if (!isGoClient || authLoading || !isAuthenticated) return;
+    const stored = loadGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
     if (!stored) return;
     const token = localStorage.getItem("token");
     if (!token) {
-      clearRiderActiveRideId();
+      clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       return;
     }
     let alive = true;
     (async () => {
       try {
-        const res = await fetch(`/api/mobility/rides/${encodeURIComponent(stored)}`, {
+        const res = await fetch(`${rideApiBase}/${encodeURIComponent(stored)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!alive) return;
         if (!res.ok) {
-          clearRiderActiveRideId();
+          clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
           return;
         }
         const ride = (await res.json()) as MobilityRideHydration;
-        if (ride.status !== "matched" && ride.status !== "in_progress") {
-          clearRiderActiveRideId();
+        // Importante: si el ride sigue en búsqueda, NO limpiar el estado.
+        // El usuario debe seguir viendo "buscando" sin tener que reiniciar.
+        if (ride.status === "searching") {
+          setActiveRideId(ride.id);
+          activeRideIdRef.current = ride.id;
+          setStart(ride.start);
+          setEnd(ride.end);
+          setStartInput(ride.start.label);
+          setEndInput(ride.end.label);
+          setMatchedDriverInfo(null);
+          setAssignedDriverPos(null);
+          setRiderTripInProgress(false);
+          setVehiclePickerOpen(true);
+          setVehicleModalStep("searching");
+          // Reiniciamos timers de búsqueda local (5 min) al rehidratar.
+          clearVehicleSearchTimers();
+          setSearchRemainingSec(VEHICLE_SEARCH_TOTAL_SEC);
+          searchEndAtRef.current = Date.now() + VEHICLE_SEARCH_MAX_MS;
+          const tickRemaining = () => {
+            const left = Math.max(0, Math.ceil((searchEndAtRef.current - Date.now()) / 1000));
+            setSearchRemainingSec(left);
+          };
+          tickRemaining();
+          searchTickRef.current = window.setInterval(tickRemaining, 1000);
+          searchDoneTimeoutRef.current = window.setTimeout(() => {
+            setSearchRemainingSec(0);
+            clearVehicleSearchTimers();
+            setVehicleModalStep((step) => {
+              if (step !== "searching") return step;
+              toast({
+                title: "Sin respuesta a tiempo",
+                description: `Ningún ${uiWords.driver} aceptó. Puedes intentar de nuevo.`,
+                variant: "destructive",
+              });
+              setActiveRideId(null);
+              activeRideIdRef.current = null;
+              clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+              return "ready";
+            });
+          }, VEHICLE_SEARCH_MAX_MS);
           return;
         }
+
+        if (ride.status !== "matched" && ride.status !== "in_progress") {
+          clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+          return;
+        }
+
         setActiveRideId(ride.id);
         activeRideIdRef.current = ride.id;
         setStart(ride.start);
@@ -819,13 +1099,13 @@ export default function TaxiRide() {
         setVehiclePickerOpen(false);
         setVehicleModalStep("done");
       } catch {
-        if (alive) clearRiderActiveRideId();
+        if (alive) clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       }
     })();
     return () => {
       alive = false;
     };
-  }, [isGoCargoClient, authLoading, isAuthenticated]);
+  }, [isGoClient, authLoading, isAuthenticated, rideApiBase]);
 
   useEffect(() => () => clearVehicleSearchTimers(), [clearVehicleSearchTimers]);
 
@@ -898,6 +1178,8 @@ export default function TaxiRide() {
   };
 
   const onMapPick = async (lat: number, lon: number) => {
+    // Con servicio activo, el mapa NO debe permitir re-seleccionar puntos (evita reset/cancel accidental).
+    if (matchedDriverInfoRef.current || activeRideIdRef.current) return;
     const place = await reverseAt(lat, lon);
     if (mapTarget === "start") {
       setStart(place);
@@ -1017,38 +1299,49 @@ export default function TaxiRide() {
     <div
       className={cn(
         "bg-gradient-to-b from-muted/30 to-background",
-        isGoCargoClient ? "flex min-h-0 min-w-0 flex-1 flex-col max-md:overflow-hidden max-md:pb-0 md:pb-12" : "min-h-screen pb-12"
+        isGoClient ? "flex min-h-0 min-w-0 flex-1 flex-col max-md:overflow-hidden max-md:pb-0 md:pb-12" : "min-h-screen pb-12"
       )}
     >
       <div
         className={cn(
           "container mx-auto max-w-4xl px-4 pt-6",
-          isGoCargoClient &&
+          isGoClient &&
             "flex min-h-0 min-w-0 flex-1 flex-col max-md:overflow-hidden max-md:max-w-none max-md:px-3 max-md:pb-0 max-md:pt-2 md:max-w-6xl"
         )}
       >
         <Button
           variant="ghost"
-          className={cn("mb-4 -ml-2 gap-2", isGoCargoClient && "hidden md:inline-flex")}
+          className={cn("mb-4 -ml-2 gap-2", isGoClient && "hidden md:inline-flex")}
           onClick={goBack}
         >
           <ArrowLeft className="h-4 w-4" />
           {fromCategories ? "Volver a categorías" : "Volver a Explorar"}
         </Button>
 
-        <div className={cn("mb-6", isGoCargoClient && "hidden md:block")}>
-          <h1 className="text-3xl font-display font-bold text-foreground">Car Go</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Primero fija el <strong className="text-foreground">punto de partida</strong> (puedes afinarlo en el mapa).
-            Cuando esté bien, elige <strong className="text-foreground">2. Llegada</strong> y marca el destino. Con ambos
-            puntos listos, pulsa <strong className="text-foreground">Continuar</strong> para elegir el tipo de vehículo.
-          </p>
+        <div className={cn("mb-6", isGoClient && "hidden md:block")}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <div className="min-w-0">
+              <h1 className="text-3xl font-display font-bold text-foreground">{isPackGoClient ? "Pack Go" : "Car Go"}</h1>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                Primero fija el{" "}
+                <strong className="text-foreground">{goSlug === "pack" ? "punto de retiro" : "origen"}</strong> (puedes
+                afinarlo en el mapa). Cuando esté bien, elige{" "}
+                <strong className="text-foreground">2. {goSlug === "pack" ? "Entrega" : "Destino"}</strong> y marca el{" "}
+                {goSlug === "pack" ? "punto de entrega" : "destino"}. Con ambos puntos listos, pulsa{" "}
+                <strong className="text-foreground">Continuar</strong> para elegir el tipo de vehículo.
+              </p>
+            </div>
+            {/*
+              Wallet/Recargar ahora viven en `GoBottomNav` para que se vean igual en móvil y PC (barra inferior).
+            */}
+          </div>
         </div>
 
         {/* Go / Car: móvil — mapa llena main (sin scroll); overlay encima. */}
-        {isGoCargoClient && !isMdUp && (
+        {isGoClient && !isMdUp && (
           <div className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden md:hidden max-md:h-[calc(100vh-8.25rem)] max-md:h-[calc(100svh-8.25rem)] max-md:min-h-[calc(100vh-8.25rem)] max-md:min-h-[calc(100svh-8.25rem)]">
             <div className="pointer-events-auto absolute inset-0 z-0 overflow-hidden bg-muted/30">
+              {/* Wallet/Recargar ahora viven en `GoBottomNav` (barra inferior). */}
               <TaxiRouteMap
                 fullscreen
                 zoomPosition="bottomleft"
@@ -1062,7 +1355,7 @@ export default function TaxiRide() {
                 routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
                 onMapPick={onMapPick}
                 nearbyDemoVehicles={nearbyDriverMarkers}
-                suppressMapPick={vehicleModalStep === "searching"}
+                suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
                 wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full"
               />
               {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
@@ -1086,7 +1379,7 @@ export default function TaxiRide() {
                       <div className="space-y-2">
                 {!matchedDriverInfo ? (
                   <>
-                    <div className="flex items-center gap-1.5">
+                    {!matchedDriverInfo ? <div className="flex items-center gap-1.5">
                       <Button
                         type="button"
                         variant="secondary"
@@ -1095,7 +1388,7 @@ export default function TaxiRide() {
                         onClick={goBack}
                         aria-label={fromCategories ? "Volver a categorías" : "Volver a Explorar"}
                       >
-                        <img src="/genfeb-mark.svg" alt="" className="h-full w-full scale-110 object-contain" />
+                        <img src="/logo-GenFeb.jpg" alt="" className="h-full w-full scale-110 object-contain" />
                       </Button>
                       <div className="min-w-0 flex-1 rounded-xl border border-border/60 bg-background/88 p-1.5 shadow-md backdrop-blur-md">
                         <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium leading-none sm:text-xs">
@@ -1112,7 +1405,7 @@ export default function TaxiRide() {
                             )}
                           >
                             <span className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-green-600" aria-hidden />
-                            1. Partida
+                            1. {goSlug === "pack" ? "Retiro" : "Origen"}
                             {start ? " ✓" : ""}
                           </button>
                           <span className="text-muted-foreground" aria-hidden>
@@ -1132,12 +1425,12 @@ export default function TaxiRide() {
                             )}
                           >
                             <span className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-red-600" aria-hidden />
-                            2. Llegada
+                            2. {goSlug === "pack" ? "Entrega" : "Destino"}
                             {end ? " ✓" : ""}
                           </button>
                         </div>
                       </div>
-                    </div>
+                    </div> : null}
 
                     <div
                       className={cn(
@@ -1150,8 +1443,9 @@ export default function TaxiRide() {
                       {mapTarget === "start" ? (
                         <div className="flex flex-col gap-1.5">
                           <p className="text-foreground/90">
-                            <span className="font-medium text-foreground">Partida:</span> mapa o texto; luego{" "}
-                            <span className="font-medium">2. Llegada</span>.
+                            <span className="font-medium text-foreground">{goSlug === "pack" ? "Retiro:" : "Origen:"}</span>{" "}
+                            mapa o texto; luego{" "}
+                            <span className="font-medium">2. {goSlug === "pack" ? "Entrega" : "Destino"}</span>.
                           </p>
                           <Button
                             type="button"
@@ -1166,7 +1460,8 @@ export default function TaxiRide() {
                         </div>
                       ) : (
                         <p className="text-foreground/90">
-                          <span className="font-medium text-foreground">Llegada:</span> mapa o texto. Pin rojo = destino.
+                          <span className="font-medium text-foreground">{goSlug === "pack" ? "Entrega:" : "Destino:"}</span>{" "}
+                          mapa o texto. Pin rojo = {goSlug === "pack" ? "entrega" : "destino"}.
                         </p>
                       )}
                     </div>
@@ -1176,7 +1471,8 @@ export default function TaxiRide() {
                         className="line-clamp-2 rounded-lg border border-border/50 bg-background/80 px-2 py-1 text-[10px] leading-snug text-muted-foreground shadow-sm backdrop-blur-sm"
                         title={start.label}
                       >
-                        <span className="font-medium text-foreground">Salida:</span> {start.label}
+                        <span className="font-medium text-foreground">{goSlug === "pack" ? "Retiro:" : "Origen:"}</span>{" "}
+                        {start.label}
                       </p>
                     )}
 
@@ -1185,7 +1481,7 @@ export default function TaxiRide() {
                         <div className="space-y-1">
                           <Label htmlFor="taxi-start-mobile" className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
                             <MapPin className="h-3.5 w-3.5 shrink-0 text-green-600" />
-                            Partida
+                            {goSlug === "pack" ? "Retiro" : "Origen"}
                           </Label>
                           <div className="relative">
                             <Input
@@ -1217,7 +1513,7 @@ export default function TaxiRide() {
                         <div className="space-y-1">
                           <Label htmlFor="taxi-end-mobile" className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
                             <MapPin className="h-3.5 w-3.5 shrink-0 text-red-600" />
-                            Llegada
+                            {goSlug === "pack" ? "Entrega" : "Destino"}
                           </Label>
                           <div className="relative">
                             <Input
@@ -1269,16 +1565,34 @@ export default function TaxiRide() {
                 )}
                 {routeError && <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{routeError}</p>}
 
-                {matchedDriverInfo && (
+                {matchedDriverInfo && !ridePanelCollapsed && (
                   <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/[0.08] px-3 py-3 text-[11px] shadow-md backdrop-blur-md">
-                    <p className="font-semibold text-foreground">Te aceptó el viaje</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-foreground">{isPackGoClient ? "Aceptó tu envío" : "Te aceptó el viaje"}</p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => setRidePanelCollapsed(true)}
+                        aria-label="Ocultar panel del servicio"
+                      >
+                        <ChevronDown className="h-4 w-4" aria-hidden />
+                      </Button>
+                    </div>
                     <p className="mt-0.5 text-muted-foreground">
-                      <span className="font-medium text-foreground">{matchedDriverInfo.driver.name}</span>
-                      {riderTripInProgress ? " · Viaje en curso" : " · En camino hacia ti"}
+                      <span className="font-medium text-foreground">{matchedDriverFullName || "Usuario"}</span>
+                      {riderTripInProgress
+                        ? isPackGoClient
+                          ? " · Envío en curso"
+                          : " · Viaje en curso"
+                        : isPackGoClient
+                          ? " · En camino"
+                          : " · En camino hacia ti"}
                     </p>
                     {driverToPickupMeta ? (
                       <p className="mt-0.5 text-muted-foreground">
-                        {riderTripInProgress ? "Ruta hacia destino" : "Hacia tu punto de partida"}:{" "}
+                        {riderTripInProgress ? "Ruta hacia destino" : `Hacia tu ${uiWords.pickupPoint}`}:{" "}
                         <span className="font-medium text-foreground">
                           {formatDuration(driverToPickupMeta.durationSec)}
                         </span>
@@ -1299,7 +1613,7 @@ export default function TaxiRide() {
                         />
                       ) : (
                         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-bold text-muted-foreground">
-                          {matchedDriverInfo.driver.name.slice(0, 1).toUpperCase()}
+                          {(matchedDriverFullName || matchedDriverInfo.driver.name || "U").slice(0, 1).toUpperCase()}
                         </div>
                       )}
                       <div className="min-w-0 flex-1 space-y-1">
@@ -1334,14 +1648,19 @@ export default function TaxiRide() {
                             {matchedDriverInfo.driver.vehicle.color ? ` · Color: ${matchedDriverInfo.driver.vehicle.color}` : ""}
                           </p>
                         ) : null}
-                        {matchedDriverInfo.driver.phone ? (
+                        {matchedDriverPhone ? (
                           <a
-                            href={`tel:${matchedDriverInfo.driver.phone}`}
+                            href={`tel:${matchedDriverPhone}`}
                             className="mt-1 inline-flex w-full max-w-[220px] items-center justify-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-semibold text-primary"
                           >
                             <Phone className="h-4 w-4 shrink-0" aria-hidden />
-                            Llamar al conductor
+                            {isPackGoClient ? "Llamar al repartidor" : "Llamar al conductor"}
                           </a>
+                        ) : null}
+                        {matchedDriverPhone ? (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Tel: <span className="font-medium text-foreground">{matchedDriverPhone}</span>
+                          </p>
                         ) : null}
                         <Button
                           type="button"
@@ -1350,7 +1669,7 @@ export default function TaxiRide() {
                           className="mt-2 w-full max-w-[220px] border-destructive/40 text-destructive hover:bg-destructive/10"
                           onClick={openCancelServiceDialog}
                         >
-                          Cancelar viaje
+                          {isPackGoClient ? "Cancelar envío" : "Cancelar viaje"}
                         </Button>
                       </div>
                     </div>
@@ -1458,10 +1777,10 @@ export default function TaxiRide() {
           </div>
         )}
 
-        {(!isGoCargoClient || isMdUp) && (
+        {(!isGoClient || isMdUp) && (
         <div
           className={cn(
-            isGoCargoClient && isMdUp
+            isGoClient && isMdUp
               ? // Altura explícita en la fila: si el mapa solo tiene height:100% sin padre con alto, Leaflet queda en 0px.
                 "grid min-h-0 w-full flex-1 grid-cols-12 gap-6 items-stretch [grid-template-rows:minmax(0,1fr)]"
               : null
@@ -1471,51 +1790,53 @@ export default function TaxiRide() {
             className={cn(
               "space-y-5 rounded-2xl border border-border bg-card p-4 shadow-sm md:p-6",
               // Car Go escritorio: mismo alto que el mapa (viewport), scroll interno en el panel.
-              isGoCargoClient && isMdUp
+              isGoClient && isMdUp
                 ? "col-span-4 xl:col-span-4 flex min-h-0 h-[min(900px,calc(100svh-11rem))] max-h-[calc(100svh-11rem)] flex-col overflow-y-auto [scrollbar-width:thin] md:sticky md:top-24 md:self-start"
                 : null
             )}
           >
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <button
-              type="button"
-              onClick={() => setMapTarget("start")}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-medium transition-colors",
-                "hover:bg-green-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                mapTarget === "start"
-                  ? "border-green-600/60 bg-green-500/10 text-foreground"
-                  : start
-                    ? "border-border bg-muted/40 text-muted-foreground"
-                    : "border-green-600/40 bg-green-500/5 text-foreground"
-              )}
-            >
-              <span className="inline-flex h-2 w-2 rounded-full bg-green-600 shrink-0" aria-hidden />
-              1. Partida
-              {start ? " ✓" : ""}
-            </button>
-            <span className="text-muted-foreground" aria-hidden>
-              →
-            </span>
-            <button
-              type="button"
-              disabled={!start}
-              onClick={() => setMapTarget("end")}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-medium transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                !start && "cursor-not-allowed opacity-50",
-                start && "hover:bg-red-500/10",
-                mapTarget === "end"
-                  ? "border-red-600/60 bg-red-500/10 text-foreground"
-                  : "border-border bg-muted/30 text-muted-foreground"
-              )}
-            >
-              <span className="inline-flex h-2 w-2 rounded-full bg-red-600 shrink-0" aria-hidden />
-              2. Llegada
-              {end ? " ✓" : ""}
-            </button>
-          </div>
+          {!matchedDriverInfo ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => setMapTarget("start")}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-medium transition-colors",
+                  "hover:bg-green-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  mapTarget === "start"
+                    ? "border-green-600/60 bg-green-500/10 text-foreground"
+                    : start
+                      ? "border-border bg-muted/40 text-muted-foreground"
+                      : "border-green-600/40 bg-green-500/5 text-foreground"
+                )}
+              >
+                <span className="inline-flex h-2 w-2 rounded-full bg-green-600 shrink-0" aria-hidden />
+                1. {goSlug === "pack" ? "Retiro" : "Origen"}
+                {start ? " ✓" : ""}
+              </button>
+              <span className="text-muted-foreground" aria-hidden>
+                →
+              </span>
+              <button
+                type="button"
+                disabled={!start}
+                onClick={() => setMapTarget("end")}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-medium transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  !start && "cursor-not-allowed opacity-50",
+                  start && "hover:bg-red-500/10",
+                  mapTarget === "end"
+                    ? "border-red-600/60 bg-red-500/10 text-foreground"
+                    : "border-border bg-muted/30 text-muted-foreground"
+                )}
+              >
+                <span className="inline-flex h-2 w-2 rounded-full bg-red-600 shrink-0" aria-hidden />
+                2. {goSlug === "pack" ? "Entrega" : "Destino"}
+                {end ? " ✓" : ""}
+              </button>
+            </div>
+          ) : null}
 
           <div
             className={cn(
@@ -1528,9 +1849,12 @@ export default function TaxiRide() {
             {mapTarget === "start" ? (
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-foreground/90 pr-2">
-                  <span className="font-medium text-foreground">Paso 1 — Partida:</span> GPS, toca el mapa o escribe la
-                  dirección. Puedes mover el punto tocando de nuevo; cuando esté bien, pulsa{" "}
-                  <span className="font-medium">2. Llegada</span>.
+                  <span className="font-medium text-foreground">
+                    Paso 1 — {goSlug === "pack" ? "Retiro" : "Origen"}:
+                  </span>{" "}
+                  GPS, toca el mapa o escribe la dirección. Puedes mover el punto tocando de nuevo; cuando esté bien,
+                  pulsa{" "}
+                  <span className="font-medium">2. {goSlug === "pack" ? "Entrega" : "Destino"}</span>.
                 </p>
                 <Button
                   type="button"
@@ -1545,15 +1869,18 @@ export default function TaxiRide() {
               </div>
             ) : (
               <p className="text-foreground/90">
-                <span className="font-medium text-foreground">Paso 2 — Llegada:</span> toca el mapa o escribe la
-                dirección encima. El marcador rojo es tu destino.
+                <span className="font-medium text-foreground">
+                  Paso 2 — {goSlug === "pack" ? "Entrega" : "Destino"}:
+                </span>{" "}
+                toca el mapa o escribe la dirección encima. El marcador rojo es tu {goSlug === "pack" ? "entrega" : "destino"}.
               </p>
             )}
           </div>
 
           {mapTarget === "end" && start && (
             <p className="text-xs text-muted-foreground rounded-lg border border-border bg-muted/30 px-3 py-2">
-              <span className="font-medium text-foreground">Salida:</span> {start.label}
+              <span className="font-medium text-foreground">{goSlug === "pack" ? "Retiro:" : "Origen:"}</span>{" "}
+              {start.label}
             </p>
           )}
 
@@ -1561,7 +1888,7 @@ export default function TaxiRide() {
             <div className="space-y-2 z-[5]">
               <Label htmlFor="taxi-start" className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-green-600" />
-                Dirección de partida
+                {goSlug === "pack" ? "Dirección de retiro" : "Dirección de origen"}
               </Label>
               <div className="relative">
                 <Input
@@ -1592,7 +1919,7 @@ export default function TaxiRide() {
             <div className="space-y-2 z-[5]">
               <Label htmlFor="taxi-end" className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-red-600" />
-                Dirección de llegada
+                {goSlug === "pack" ? "Dirección de entrega" : "Dirección de destino"}
               </Label>
               <div className="relative">
                 <Input
@@ -1622,7 +1949,7 @@ export default function TaxiRide() {
           )}
 
           {/* En Car Go escritorio el mapa vive en la columna derecha; aquí no renderizamos un “placeholder” */}
-          {!(isGoCargoClient && isMdUp) ? (
+          {!(isGoClient && isMdUp) ? (
             <div
               className={cn(
                 "relative z-[1] rounded-xl ring-2 ring-offset-2 ring-offset-background transition-shadow",
@@ -1642,7 +1969,7 @@ export default function TaxiRide() {
                     routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
                     onMapPick={onMapPick}
                     nearbyDemoVehicles={nearbyDriverMarkers}
-                    suppressMapPick={vehicleModalStep === "searching"}
+                    suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
                   />
                   {(reverseLoading || routeLoading) && (
                     <div className="absolute bottom-3 left-3 z-[55] flex items-center gap-2 rounded-lg border bg-background/90 px-3 py-2 text-xs shadow">
@@ -1654,9 +1981,10 @@ export default function TaxiRide() {
               ) : (
                 <div className="flex min-h-[min(52vh,420px)] flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center">
                   <p className="text-sm text-muted-foreground">
-                    El mapa está en <span className="font-medium text-foreground">pantalla completa</span>. Toca el mapa para
-                    colocar el punto; luego pulsa <span className="font-medium text-foreground">Reducir</span> para seguir
-                    con el formulario.
+                    El mapa está en <span className="font-medium text-foreground">pantalla completa</span>.
+                    {matchedDriverInfo
+                      ? " Durante un servicio, el mapa es solo para ver la ruta."
+                      : " Toca el mapa para colocar el punto; luego pulsa Reducir para seguir con el formulario."}
                   </p>
                   <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setMapFullscreen(false)}>
                     <Minimize2 className="h-4 w-4" aria-hidden />
@@ -1686,12 +2014,30 @@ export default function TaxiRide() {
           )}
           {routeError && <p className="text-sm text-destructive">{routeError}</p>}
 
-          {matchedDriverInfo && (
+          {matchedDriverInfo && !ridePanelCollapsed && (
             <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/[0.08] px-4 py-3 text-sm shadow-sm">
-              <p className="font-semibold text-foreground">Te aceptó el viaje</p>
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-semibold text-foreground">{isPackGoClient ? "Aceptó tu envío" : "Te aceptó el viaje"}</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => setRidePanelCollapsed(true)}
+                  aria-label="Ocultar panel del servicio"
+                >
+                  <ChevronDown className="h-4 w-4" aria-hidden />
+                </Button>
+              </div>
               <p className="mt-1 text-muted-foreground">
-                <span className="font-medium text-foreground">{matchedDriverInfo.driver.name}</span>
-                {riderTripInProgress ? " · Viaje en curso" : " · En camino hacia ti"}
+                <span className="font-medium text-foreground">{matchedDriverFullName || "Usuario"}</span>
+                {riderTripInProgress
+                  ? isPackGoClient
+                    ? " · Envío en curso"
+                    : " · Viaje en curso"
+                  : isPackGoClient
+                    ? " · En camino"
+                    : " · En camino hacia ti"}
               </p>
               <div className="mt-3 flex gap-3">
                 {matchedDriverInfo.driver.profileImageUrl ? (
@@ -1702,11 +2048,11 @@ export default function TaxiRide() {
                   />
                 ) : (
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-muted text-lg font-bold text-muted-foreground">
-                    {matchedDriverInfo.driver.name.slice(0, 1).toUpperCase()}
+                    {(matchedDriverFullName || matchedDriverInfo.driver.name || "U").slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="font-medium text-foreground">{matchedDriverInfo.driver.name}</p>
+                  <p className="font-medium text-foreground">{matchedDriverFullName || "Usuario"}</p>
                   {matchedDriverInfo.driver.vehicle ? (
                     <p className="text-muted-foreground">
                       {vehicleTypeLabel(matchedDriverInfo.driver.vehicle.type) ? (
@@ -1720,14 +2066,19 @@ export default function TaxiRide() {
                       {matchedDriverInfo.driver.vehicle.color ? ` · Color: ${matchedDriverInfo.driver.vehicle.color}` : ""}
                     </p>
                   ) : null}
-                  {matchedDriverInfo.driver.phone ? (
+                  {matchedDriverPhone ? (
                     <a
-                      href={`tel:${matchedDriverInfo.driver.phone}`}
+                      href={`tel:${matchedDriverPhone}`}
                       className="mt-2 inline-flex w-full max-w-xs items-center justify-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-semibold text-primary"
                     >
                       <Phone className="h-4 w-4 shrink-0" aria-hidden />
-                      Llamar al conductor
+                      {isPackGoClient ? "Llamar al repartidor" : "Llamar al conductor"}
                     </a>
+                  ) : null}
+                  {matchedDriverPhone ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Tel: <span className="font-medium text-foreground">{matchedDriverPhone}</span>
+                    </p>
                   ) : null}
                   <Button
                     type="button"
@@ -1736,7 +2087,7 @@ export default function TaxiRide() {
                     className="mt-3 w-full max-w-xs border-destructive/40 text-destructive hover:bg-destructive/10"
                     onClick={openCancelServiceDialog}
                   >
-                    Cancelar viaje
+                    {isPackGoClient ? "Cancelar envío" : "Cancelar viaje"}
                   </Button>
                 </div>
               </div>
@@ -1836,7 +2187,7 @@ export default function TaxiRide() {
           </AnimatePresence>
           </div>
 
-          {isGoCargoClient && isMdUp ? (
+          {isGoClient && isMdUp ? (
             <div className="col-span-8 xl:col-span-8 flex h-[min(900px,calc(100svh-11rem))] max-h-[calc(100svh-11rem)] min-h-[480px] flex-col">
               <div className="relative z-[1] flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-muted/10 shadow-sm md:sticky md:top-24">
                 <TaxiRouteMap
@@ -1852,7 +2203,7 @@ export default function TaxiRide() {
                   routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
                   onMapPick={onMapPick}
                   nearbyDemoVehicles={nearbyDriverMarkers}
-                  suppressMapPick={vehicleModalStep === "searching"}
+                  suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
                   wrapperClassName="!rounded-none !border-0 !shadow-none h-full min-h-0 w-full flex-1"
                 />
                 {(reverseLoading || routeLoading) && (
@@ -1949,7 +2300,7 @@ export default function TaxiRide() {
         open={vehiclePickerOpen}
         onOpenChange={handleVehicleModalOpenChange}
         step={vehicleModalStep}
-        vehicleOptions={VEHICLE_OPTIONS}
+        vehicleOptions={vehicleOptions}
         vehicleFareByType={fareByVehicleKind}
         vehicleUsd={estimatedUsd ?? 0}
         selectedType={selectedVehicle}
@@ -1965,6 +2316,23 @@ export default function TaxiRide() {
         onRequestCancelSearch={openCancelServiceDialog}
       />
 
+      {/* Wallet/Recargar ahora viven en `GoBottomNav` (barra inferior). */}
+
+      {isGoClient && matchedDriverInfo && ridePanelCollapsed ? (
+        <Button
+          type="button"
+          className={cn(
+            "fixed bottom-[calc(5.75rem+env(safe-area-inset-bottom,0px))] right-3 z-[200] h-12 w-12 rounded-full p-0",
+            "bg-primary text-primary-foreground shadow-xl ring-2 ring-primary/35",
+            "hover:bg-primary/90 active:scale-[0.97]"
+          )}
+          onClick={() => setRidePanelCollapsed(false)}
+          aria-label="Mostrar panel del servicio"
+        >
+          <ChevronUp className="h-5 w-5" aria-hidden />
+        </Button>
+      ) : null}
+
       <Dialog open={cancelServiceDialogOpen} onOpenChange={setCancelServiceDialogOpen}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
@@ -1972,15 +2340,25 @@ export default function TaxiRide() {
               {cancelServiceMode === "search"
                 ? "¿Cancelar la búsqueda?"
                 : cancelServiceMode === "matched"
-                  ? "¿Cancelar este viaje?"
-                  : "¿Cancelar el viaje en curso?"}
+                  ? isPackGoClient
+                    ? "¿Cancelar este envío?"
+                    : "¿Cancelar este viaje?"
+                  : isPackGoClient
+                    ? "¿Cancelar el envío en curso?"
+                    : "¿Cancelar el viaje en curso?"}
             </DialogTitle>
             <DialogDescription>
               {cancelServiceMode === "search"
-                ? "Dejarás de buscar conductor para este trayecto. Podrás volver a intentarlo cuando quieras."
+                ? isPackGoClient
+                  ? "Dejarás de buscar repartidor para este envío. Podrás volver a intentarlo cuando quieras."
+                  : "Dejarás de buscar conductor para este trayecto. Podrás volver a intentarlo cuando quieras."
                 : cancelServiceMode === "matched"
-                  ? "El conductor será notificado y el viaje quedará anulado. ¿Seguro que deseas continuar?"
-                  : "Si ya van en marcha, conviene avisar al conductor por teléfono o chat. ¿Seguro que deseas cancelar?"}
+                  ? isPackGoClient
+                    ? "El repartidor será notificado y el envío quedará anulado. ¿Seguro que deseas continuar?"
+                    : "El conductor será notificado y el viaje quedará anulado. ¿Seguro que deseas continuar?"
+                  : isPackGoClient
+                    ? "Si ya van en marcha, conviene avisar al repartidor por teléfono o chat. ¿Seguro que deseas cancelar?"
+                    : "Si ya van en marcha, conviene avisar al conductor por teléfono o chat. ¿Seguro que deseas cancelar?"}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">
@@ -2014,11 +2392,15 @@ export default function TaxiRide() {
       <Dialog open={rateDialogOpen} onOpenChange={() => { /* bloqueado */ }}>
         <DialogContent hideClose className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>¿Cómo se portó el Driver?</DialogTitle>
+            <DialogTitle>¿Cómo se portó el {uiWords.Driver}?</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Califica a <span className="font-medium text-foreground">{rateTargetRef.current?.targetName ?? "tu conductor"}</span>.
+              Califica a{" "}
+              <span className="font-medium text-foreground">
+                {rateTargetRef.current?.targetName ?? `tu ${uiWords.driver}`}
+              </span>
+              .
             </p>
             <div className="flex items-center justify-center gap-2">
               {[1,2,3,4,5].map((v) => {

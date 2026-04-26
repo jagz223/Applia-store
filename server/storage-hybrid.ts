@@ -22,6 +22,9 @@ const FIRESTORE_METHODS = new Set([
   "setVerifyingStatusTransaction",
   "getNotifications", "createNotification", "markNotificationAsRead",
   "createAccountChangeRequest", "getMyAccountChangeRequests", "getPendingAccountChangeRequests", "resolveAccountChangeRequest",
+  // Chat: debe persistir en Firestore para auditoría/admin.
+  "getConversationsByUser", "createConversation", "getMessagesByConversation", "getLastMessageByConversation", "getUnreadCountByConversation",
+  "createMessage", "markMessageAsRead", "markConversationAsRead", "hideConversationForUsers",
 ]);
 
 export class HybridStorage implements IStorage {
@@ -121,14 +124,15 @@ export class HybridStorage implements IStorage {
   getDocumentsByUser(userId: string, type?: string) { return this.memory.getDocumentsByUser(userId, type); }
   createDocument(doc: any) { return this.memory.createDocument(doc); }
   deleteDocument(id: number, userId: string) { return this.memory.deleteDocument(id, userId); }
-  getConversationsByUser(userId: string) { return this.memory.getConversationsByUser(userId); }
-  createConversation(conv: any) { return this.memory.createConversation(conv); }
-  getMessagesByConversation(conversationId: number, options: { limit: number; before?: number }) { return this.memory.getMessagesByConversation(conversationId, options); }
-  getLastMessageByConversation(conversationId: number) { return this.memory.getLastMessageByConversation(conversationId); }
-  getUnreadCountByConversation(conversationId: number, userId: string) { return this.memory.getUnreadCountByConversation(conversationId, userId); }
-  createMessage(msg: any) { return this.memory.createMessage(msg); }
-  markMessageAsRead(messageId: number) { return this.memory.markMessageAsRead(messageId); }
-  markConversationAsRead(conversationId: number, userId: string) { return this.memory.markConversationAsRead(conversationId, userId); }
+  getConversationsByUser(userId: string) { return this.delegate("getConversationsByUser", [userId]); }
+  createConversation(conv: any) { return this.delegate("createConversation", [conv]); }
+  getMessagesByConversation(conversationId: number, options: { limit: number; before?: number }) { return this.delegate("getMessagesByConversation", [conversationId, options]); }
+  getLastMessageByConversation(conversationId: number) { return this.delegate("getLastMessageByConversation", [conversationId]); }
+  getUnreadCountByConversation(conversationId: number, userId: string) { return this.delegate("getUnreadCountByConversation", [conversationId, userId]); }
+  createMessage(msg: any) { return this.delegate("createMessage", [msg]); }
+  markMessageAsRead(messageId: number) { return this.delegate("markMessageAsRead", [messageId]); }
+  markConversationAsRead(conversationId: number, userId: string) { return this.delegate("markConversationAsRead", [conversationId, userId]); }
+  hideConversationForUsers(conversationId: number, userIds: string[]) { return this.delegate("hideConversationForUsers", [conversationId, userIds]); }
   getFinancialReports(userId: string, period?: string) { return this.memory.getFinancialReports(userId, period); }
   getKPIs(userId: string) { return this.memory.getKPIs(userId); }
   getNotifications(userId: string, unreadOnly?: boolean) { return this.delegate("getNotifications", [userId, unreadOnly]); }

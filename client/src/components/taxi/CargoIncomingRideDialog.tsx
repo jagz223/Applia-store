@@ -1,4 +1,5 @@
 import type { GeoJsonObject } from "geojson";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Ban, CheckCircle2, Loader2, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ export type CargoRideOfferPayload = {
   rideId: string;
   rider: {
     name: string;
+    lastName?: string;
     profileImageUrl: string | null;
     phone?: string;
     rating?: number;
@@ -22,11 +24,13 @@ export type CargoRideOfferPayload = {
   paymentMethod: string;
   estimatedUsd: number;
   petEnabled?: boolean;
+  expiresAt?: number;
 };
 
 type Props = {
   open: boolean;
   offer: CargoRideOfferPayload | null;
+  module?: "cargo" | "pack";
   busy?: boolean;
   driverPos?: { lat: number; lon: number } | null;
   onAccept: () => void;
@@ -55,24 +59,53 @@ function twoWords(label: string): string {
   return parts.slice(0, 2).join(" ") || "Punto";
 }
 
-export function CargoIncomingRideDialog({ open, offer, busy, driverPos, onAccept, onDecline }: Props) {
+export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, onAccept, onDecline }: Props) {
   if (!open || !offer) return null;
   if (typeof document === "undefined") return null;
   const riderStars = typeof offer.rider.rating === "number" ? offer.rider.rating : null;
   const riderTrips = typeof offer.rider.completedTrips === "number" ? offer.rider.completedTrips : null;
+  const title = module === "pack" ? "Pack Go" : "Car Go";
+
+  const ttlMsRef = useRef<number>(18_000);
+  const [remainingMs, setRemainingMs] = useState<number>(() => {
+    const exp = typeof offer.expiresAt === "number" ? offer.expiresAt : null;
+    return exp ? Math.max(0, exp - Date.now()) : ttlMsRef.current;
+  });
+
+  useEffect(() => {
+    const exp = typeof offer.expiresAt === "number" ? offer.expiresAt : null;
+    const ttl = exp ? Math.max(1000, exp - Date.now()) : 18_000;
+    ttlMsRef.current = ttl;
+    setRemainingMs(ttl);
+    const t = window.setInterval(() => {
+      if (!exp) {
+        setRemainingMs((prev) => Math.max(0, prev - 120));
+        return;
+      }
+      setRemainingMs(Math.max(0, exp - Date.now()));
+    }, 120);
+    return () => window.clearInterval(t);
+    // al cambiar offer.rideId/expiresAt reiniciar el timer
+  }, [offer.rideId, offer.expiresAt]);
+
+  const progress = useMemo(() => {
+    const ttl = Math.max(1, ttlMsRef.current);
+    return Math.max(0, Math.min(1, remainingMs / ttl));
+  }, [remainingMs]);
+  const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[2147483000] flex flex-col justify-end bg-black/55 pb-[calc(env(safe-area-inset-bottom,0px)+3.75rem)] backdrop-blur-sm md:justify-center md:p-4 md:pb-4"
+      className="fixed inset-0 z-[2147483000] flex flex-col justify-end bg-black/55 pb-[calc(env(safe-area-inset-bottom,0px)+10.5rem)] backdrop-blur-sm md:justify-center md:p-4 md:pb-4"
       role="dialog"
       aria-modal
       aria-labelledby="cargo-offer-title"
     >
-      <div className="max-h-[min(92dvh,760px)] w-full overflow-hidden rounded-t-2xl border border-border bg-background shadow-2xl md:mx-auto md:max-w-lg md:rounded-2xl">
+      <div className="flex max-h-[min(88dvh,740px)] w-full flex-col overflow-hidden rounded-t-2xl border border-border bg-background shadow-2xl md:mx-auto md:max-w-lg md:rounded-2xl">
         <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
           <div className="min-w-0">
             <h2 id="cargo-offer-title" className="font-display text-lg font-bold text-foreground">
-              Nueva solicitud Car Go
+              Nueva solicitud · {title}
             </h2>
             <p className="text-sm text-muted-foreground">Solo lo esencial para decidir</p>
           </div>
@@ -128,7 +161,7 @@ export function CargoIncomingRideDialog({ open, offer, busy, driverPos, onAccept
           </div>
         </div>
 
-        <div className="h-[min(52vh,420px)] min-h-[260px] w-full border-b border-border">
+        <div className="h-[min(42vh,360px)] min-h-[200px] w-full border-b border-border">
           <TaxiRouteMap
             fullscreen
             zoomPosition="bottomleft"
@@ -156,7 +189,22 @@ export function CargoIncomingRideDialog({ open, offer, busy, driverPos, onAccept
           </div>
         </div>
 
-        <div className="flex gap-2 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col gap-2 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div
+            className="h-1.5 w-full overflow-hidden rounded-full bg-muted/40"
+            role="progressbar"
+            aria-label="Tiempo restante para responder"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+            title={`Expira en ${remainingSec}s`}
+          >
+            <div
+              className="h-full bg-primary transition-[width] duration-100 ease-linear"
+              style={{ width: `${Math.round(progress * 100)}%` }}
+            />
+          </div>
+          <div className="flex gap-2">
           <Button
             type="button"
             variant="destructive"
@@ -177,6 +225,7 @@ export function CargoIncomingRideDialog({ open, offer, busy, driverPos, onAccept
             {!busy ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : null}
             Aceptar
           </Button>
+          </div>
         </div>
       </div>
     </div>,

@@ -1,6 +1,7 @@
 /**
  * Visibilidad de marcas/categorías (Fix Go / Man Go / Pro Go / Pack Go / Shop Go / Car Go).
- * Pack Go y Shop Go siguen forzadas ocultas por defecto en código; Car Go solo obedece Firestore + acciones admin.
+ * Default: Pack Go y Shop Go arrancan ocultos (si no hay configuración aún).
+ * Cuando el admin los activa, deben poder mostrarse aunque no tengan usuarios/servicios activos.
  * Persistencia: Firestore (platform_settings/global). Fallback: valores por defecto en memoria.
  */
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
@@ -66,9 +67,9 @@ export async function getHiddenCategorySlugs(): Promise<string[]> {
     }
     const raw = (snap.data() as Record<string, unknown> | undefined)?.[FIELD];
     const v = normalizeSlugs(raw);
-    const effective = withDefaultHiddenSlugs(v);
-    cache = { value: effective, at: Date.now() };
-    return effective;
+    // Si existe config, respetamos exactamente lo guardado (el admin puede “des-ocultar” Pack/Shop).
+    cache = { value: v, at: Date.now() };
+    return v;
   } catch {
     return [...HIDDEN_CATEGORY_SLUGS_IN_UI];
   }
@@ -115,7 +116,6 @@ export function invalidateHiddenCategorySlugsByRoleCache(): void {
 
 export async function setHiddenCategorySlugs(slugs: string[]): Promise<string[]> {
   const normalized = normalizeSlugs(slugs);
-  const effective = withDefaultHiddenSlugs(normalized);
   const db = getFirestore();
   if (db) {
     await db.collection(FIRESTORE_COLLECTIONS.PLATFORM_SETTINGS).doc(DOC_ID).set(
@@ -126,11 +126,11 @@ export async function setHiddenCategorySlugs(slugs: string[]): Promise<string[]>
       { merge: true },
     );
   } else {
-    memoryOnlyHidden = effective;
+    memoryOnlyHidden = normalized;
   }
   invalidateHiddenCategorySlugsCache();
   invalidateHiddenCategorySlugsByRoleCache();
-  cache = { value: effective, at: Date.now() };
+  cache = { value: normalized, at: Date.now() };
   return normalized;
 }
 

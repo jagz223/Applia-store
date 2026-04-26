@@ -9,6 +9,8 @@ const THRESHOLD = 0.82;
 type Props = {
   receiving: boolean;
   onReceivingChange: (next: boolean) => void;
+  /** Car Go (viajes) vs Pack Go (envíos). */
+  goSlug?: "cargo" | "pack";
   className?: string;
   disabled?: boolean;
   style?: React.CSSProperties;
@@ -22,6 +24,7 @@ type Props = {
 export function SlideToCargoOnline({
   receiving,
   onReceivingChange,
+  goSlug = "cargo",
   className,
   disabled = false,
   style,
@@ -106,9 +109,14 @@ export function SlideToCargoOnline({
     finishDrag();
   };
 
-  const label = receiving
-    ? "Desliza para dejar de recibir viajes Car Go"
-    : "Desliza para recibir viajes Car Go";
+  const label =
+    goSlug === "pack"
+      ? receiving
+        ? "Desliza para dejar de recibir envíos Pack Go"
+        : "Desliza para recibir envíos Pack Go"
+      : receiving
+        ? "Desliza para dejar de recibir viajes Car Go"
+        : "Desliza para recibir viajes Car Go";
 
   return (
     <div
@@ -126,7 +134,8 @@ export function SlideToCargoOnline({
       <div ref={trackRef} className="relative h-[64px] w-full flex items-center" role="presentation">
         <p
           className={cn(
-            "pointer-events-none absolute inset-0 flex items-center justify-center px-14 text-center text-sm font-semibold leading-tight",
+            // Importante UX: el texto va arriba para no quedar debajo del knob.
+            "pointer-events-none absolute inset-x-0 top-1.5 flex items-start justify-center px-6 text-center text-[13px] font-semibold leading-tight",
             disabled
               ? "text-muted-foreground"
               : receiving
@@ -134,12 +143,24 @@ export function SlideToCargoOnline({
                 : "text-primary/90"
           )}
         >
-            {disabled ? "Completa verificación y registra tu vehículo para recibir viajes" : label}
+            {disabled
+              ? goSlug === "pack"
+                ? "Completa verificación y registra tu vehículo para recibir envíos"
+                : "Completa verificación y registra tu vehículo para recibir viajes"
+              : label}
         </p>
         <div style={{ paddingBottom: slideNeedsExtraPush ? "10px" : "55px" }}>
           <button
             type="button"
-            aria-label={receiving ? "Control para dejar de recibir viajes" : "Control para empezar a recibir viajes"}
+            aria-label={
+              goSlug === "pack"
+                ? receiving
+                  ? "Control para dejar de recibir envíos"
+                  : "Control para empezar a recibir envíos"
+                : receiving
+                  ? "Control para dejar de recibir viajes"
+                  : "Control para empezar a recibir viajes"
+            }
             className={cn(
               "absolute top-1/2 z-[2] flex h-[52px] w-[52px] items-center justify-center rounded-full border-2 bg-background shadow-lg ring-1 ring-black/10",
               disabled

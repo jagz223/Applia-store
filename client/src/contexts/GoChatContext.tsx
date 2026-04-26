@@ -13,6 +13,7 @@ type GoChatState = {
    */
   primeCarGoConversation: (conversationId: number) => void;
   closeChat: () => void;
+  bumpChatBadge: (delta?: number) => void;
   /** Cierra el chat y limpia la conversación seleccionada (p. ej. al cancelar/terminar un viaje). */
   resetChat: () => void;
   setSelectedConversationId: (id: number | null) => void;
@@ -42,6 +43,11 @@ export function GoChatProvider({ children }: { children: React.ReactNode }) {
     setChatBadge(0);
   }, []);
   const closeChat = useCallback(() => setIsOpen(false), []);
+  const bumpChatBadge = useCallback((delta = 1) => {
+    const d = Number(delta);
+    if (!Number.isFinite(d) || d === 0) return;
+    setChatBadge((prev) => Math.min(99, Math.max(0, prev + d)));
+  }, []);
   const resetChat = useCallback(() => {
     setIsOpen(false);
     setSelectedConversationId(null);
@@ -57,10 +63,11 @@ export function GoChatProvider({ children }: { children: React.ReactNode }) {
       openChatWithConversation,
       primeCarGoConversation,
       closeChat,
+      bumpChatBadge,
       resetChat,
       setSelectedConversationId,
     }),
-    [isOpen, selectedConversationId, chatBadge, openChat, openChatWithConversation, primeCarGoConversation, closeChat, resetChat]
+    [isOpen, selectedConversationId, chatBadge, openChat, openChatWithConversation, primeCarGoConversation, closeChat, bumpChatBadge, resetChat]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -582,6 +582,7 @@ class FirestoreStorageImpl implements IStorage {
       categoryId: (provider as { categoryId?: number }).categoryId ?? null,
       category: provider.category ?? null,
       subcategoryId: (provider as { subcategoryId?: number | null }).subcategoryId ?? null,
+      goBrands: (provider as any).goBrands ?? null,
       isVerified: provider.isVerified ?? false,
       rating: provider.rating ?? "0",
       reviewCount: provider.reviewCount ?? 0,
@@ -2144,13 +2145,18 @@ class FirestoreStorageImpl implements IStorage {
     const snap2 = await this.db.collection(FIRESTORE_COLLECTIONS.CONVERSATIONS).where("participant2Id", "==", userId).get();
     const map = new Map<string, any>();
     [...snap1.docs, ...snap2.docs].forEach(d => map.set(d.id, { id: parseInt(d.id) || d.id, ...d.data() }));
-    return Array.from(map.values());
+    const uid = String(userId ?? "");
+    const list = Array.from(map.values());
+    return list.filter((c: any) => {
+      const hiddenFor = Array.isArray(c?.hiddenForUserIds) ? c.hiddenForUserIds.map((x: any) => String(x)) : [];
+      return !hiddenFor.includes(uid);
+    });
   }
   async createConversation(conv: any): Promise<any> {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("conversations");
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.CONVERSATIONS).doc(id.toString());
-    const data = { id, ...conv, createdAt: new Date(), lastMessageAt: new Date() };
+    const data = { id, ...conv, createdAt: new Date(), lastMessageAt: new Date(), hiddenForUserIds: [] };
     await docRef.set(data);
     return data;
   }
@@ -2242,6 +2248,23 @@ class FirestoreStorageImpl implements IStorage {
       }
     });
     if (hasWrites) await batch.commit();
+  }
+
+  async hideConversationForUsers(conversationId: number, userIds: string[]): Promise<void> {
+    if (!this.db) return;
+    const id = Number(conversationId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.CONVERSATIONS).doc(String(id));
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    const current = snap.data() as any;
+    const prev = Array.isArray(current?.hiddenForUserIds) ? current.hiddenForUserIds.map((x: any) => String(x)) : [];
+    const next = new Set<string>(prev);
+    for (const u of userIds ?? []) {
+      const s = String(u ?? "").trim();
+      if (s) next.add(s);
+    }
+    await ref.update({ hiddenForUserIds: Array.from(next), hiddenAt: new Date() });
   }
 
   // ============ REPORTES FINANCIEROS ============

@@ -1,9 +1,11 @@
 /** Estado local del conductor Car Go hasta que exista API dedicada. */
 
 export const CARGO_DRIVER_RECEIVING_KEY = "cargo-driver-receiving";
+export const PACK_DRIVER_RECEIVING_KEY = "pack-driver-receiving";
 export const CARGO_DRIVER_TRIP_LOG_KEY = "cargo-driver-trip-log";
 /** Viaje Car Go activo (matched / in_progress) para reanudar al reabrir la app. */
 export const CARGO_DRIVER_ACTIVE_RIDE_KEY = "cargo-driver-active-ride-id";
+export const PACK_DRIVER_ACTIVE_RIDE_KEY = "pack-driver-active-ride-id";
 
 export type CargoDriverTripLog = {
   id: string;
@@ -11,6 +13,8 @@ export type CargoDriverTripLog = {
   durationMin: number;
   amountUsd: number;
   payment: "genfeb" | "cash";
+  /** Módulo Go: transport (Car Go) o delivery (Pack Go). */
+  goSlug?: "cargo" | "pack";
 };
 
 export function loadReceiving(): boolean {
@@ -24,6 +28,24 @@ export function loadReceiving(): boolean {
 export function saveReceiving(on: boolean): void {
   try {
     localStorage.setItem(CARGO_DRIVER_RECEIVING_KEY, on ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadGoReceiving(goSlug: "cargo" | "pack"): boolean {
+  try {
+    const key = goSlug === "pack" ? PACK_DRIVER_RECEIVING_KEY : CARGO_DRIVER_RECEIVING_KEY;
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveGoReceiving(goSlug: "cargo" | "pack", on: boolean): void {
+  try {
+    const key = goSlug === "pack" ? PACK_DRIVER_RECEIVING_KEY : CARGO_DRIVER_RECEIVING_KEY;
+    localStorage.setItem(key, on ? "1" : "0");
   } catch {
     /* ignore */
   }
@@ -54,6 +76,34 @@ export function clearDriverActiveRideId(): void {
   }
 }
 
+export function loadGoDriverActiveRideId(goSlug: "cargo" | "pack"): string | null {
+  try {
+    const key = goSlug === "pack" ? PACK_DRIVER_ACTIVE_RIDE_KEY : CARGO_DRIVER_ACTIVE_RIDE_KEY;
+    const v = localStorage.getItem(key);
+    return v && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveGoDriverActiveRideId(goSlug: "cargo" | "pack", rideId: string): void {
+  try {
+    const key = goSlug === "pack" ? PACK_DRIVER_ACTIVE_RIDE_KEY : CARGO_DRIVER_ACTIVE_RIDE_KEY;
+    localStorage.setItem(key, rideId);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearGoDriverActiveRideId(goSlug: "cargo" | "pack"): void {
+  try {
+    const key = goSlug === "pack" ? PACK_DRIVER_ACTIVE_RIDE_KEY : CARGO_DRIVER_ACTIVE_RIDE_KEY;
+    localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function loadTripLog(): CargoDriverTripLog[] {
   try {
     const raw = localStorage.getItem(CARGO_DRIVER_TRIP_LOG_KEY);
@@ -67,7 +117,10 @@ export function loadTripLog(): CargoDriverTripLog[] {
         typeof (t as CargoDriverTripLog).id === "string" &&
         typeof (t as CargoDriverTripLog).durationMin === "number" &&
         typeof (t as CargoDriverTripLog).amountUsd === "number" &&
-        ((t as CargoDriverTripLog).payment === "genfeb" || (t as CargoDriverTripLog).payment === "cash")
+        ((t as CargoDriverTripLog).payment === "genfeb" || (t as CargoDriverTripLog).payment === "cash") &&
+        ((t as CargoDriverTripLog).goSlug === undefined ||
+          (t as CargoDriverTripLog).goSlug === "cargo" ||
+          (t as CargoDriverTripLog).goSlug === "pack")
     );
   } catch {
     return [];

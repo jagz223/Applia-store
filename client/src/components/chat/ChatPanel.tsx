@@ -370,9 +370,10 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
           <Card className="h-full overflow-hidden rounded-none border-0 shadow-none">
             <div className="h-full min-h-0">
               {isMobile ? (
-                <div className="h-full min-h-0 w-full">
+                /* Padre flex: sin esto, flex-1 en ChatWindow/MessageList no coge altura (drawer Car Go se ve “chato”). */
+                <div className="flex h-full min-h-0 w-full flex-col">
                   {selectedConversation && user ? (
-                    <div className="h-full min-h-0">
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                       <ChatWindow
                         conversation={selectedConversation}
                         messages={messages}
@@ -391,7 +392,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                       />
                     </div>
                   ) : (
-                    <div className="h-full min-h-0">
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                       <ConversationList
                         conversations={conversations}
                         searchQuery={searchQuery}

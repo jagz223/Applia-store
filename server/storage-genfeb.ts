@@ -75,6 +75,8 @@ export interface IStorage
   createMessage(msg: any): Promise<any>;
   markMessageAsRead(messageId: number): Promise<void>;
   markConversationAsRead(conversationId: number, userId: string): Promise<void>;
+  /** Oculta una conversación del historial de usuarios (sin borrar BD). */
+  hideConversationForUsers(conversationId: number, userIds: string[]): Promise<void>;
   
   // Roles de Usuario (perfil del usuario, no catálogo de roles)
   getUserRole(userId: string): Promise<any | undefined>;
@@ -878,9 +880,12 @@ export class InMemoryStorage implements IStorage {
   // ============== CONVERSACIONES ==============
   
   async getConversationsByUser(userId: string): Promise<any[]> {
-    return this.conversations.filter(c => 
-      c.participant1Id === userId || c.participant2Id === userId
-    );
+    const uid = String(userId ?? "");
+    return this.conversations.filter((c: any) => {
+      if (c.participant1Id !== uid && c.participant2Id !== uid) return false;
+      const hiddenFor = Array.isArray(c.hiddenForUserIds) ? c.hiddenForUserIds.map((x: any) => String(x)) : [];
+      return !hiddenFor.includes(uid);
+    });
   }
   
   async createConversation(conv: any): Promise<any> {
@@ -888,7 +893,8 @@ export class InMemoryStorage implements IStorage {
       ...conv, 
       id: this.conversationIdCounter++,
       createdAt: new Date(),
-      lastMessageAt: new Date()
+      lastMessageAt: new Date(),
+      hiddenForUserIds: [],
     };
     this.conversations.push(newConv);
     return newConv;
@@ -961,6 +967,22 @@ export class InMemoryStorage implements IStorage {
         m.status = 'read';
         (m as any).readAt = new Date();
       });
+  }
+
+  async hideConversationForUsers(conversationId: number, userIds: string[]): Promise<void> {
+    const id = Number(conversationId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const conv = this.conversations.find((c: any) => Number(c?.id) === id);
+    if (!conv) return;
+    const next = new Set<string>(
+      Array.isArray((conv as any).hiddenForUserIds) ? (conv as any).hiddenForUserIds.map((x: any) => String(x)) : [],
+    );
+    for (const u of userIds ?? []) {
+      const s = String(u ?? "").trim();
+      if (s) next.add(s);
+    }
+    (conv as any).hiddenForUserIds = Array.from(next);
+    (conv as any).hiddenAt = new Date();
   }
 
   // ============== ROLES ==============
@@ -1254,6 +1276,7 @@ export class InMemoryStorage implements IStorage {
       categoryId: (insertProvider as any).categoryId ?? null,
       category: insertProvider.category ?? null,
       subcategoryId: (insertProvider as any).subcategoryId ?? null,
+      goBrands: (insertProvider as any).goBrands ?? null,
       profession: insertProvider.profession,
       bio: insertProvider.bio || "",
       yearsExperience: insertProvider.yearsExperience || 0,

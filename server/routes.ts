@@ -24,6 +24,7 @@ import { registerRoleRoutes } from "./routes-roles";
 import { registerAdminRoutes } from "./routes-admin";
 import { registerMapRoutes } from "./routes-maps";
 import { registerMobilityRideRoutes } from "./mobility-rides";
+import { registerPackRideRoutes } from "./pack-rides";
 import { registerSeoRoutes } from "./seo";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
@@ -42,6 +43,7 @@ export async function registerRoutes(
   registerRoleRoutes(app);
   registerMapRoutes(app);
   registerMobilityRideRoutes(app);
+  registerPackRideRoutes(app);
 
   // GET /api/me/provider — perfil de proveedor del usuario autenticado (Create Service, Dashboard). Ruta explícita y temprana.
   app.get("/api/me/provider", authenticateJWT, async (req: any, res) => {
@@ -537,6 +539,8 @@ export async function registerRoutes(
     .extend({
       bio: z.string().trim().max(700),
       skills: providerSkillsSchema,
+      /** Módulos Go extra habilitados (Pack/Shop). */
+      goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).optional(),
       serviceTitle: z.string().trim().max(500).optional(),
       serviceDescription: z.string().trim().max(5000).optional(),
       vehicle: z.any().optional(),
@@ -582,14 +586,32 @@ export async function registerRoutes(
       const preCat = Number.isFinite(preCategoryId)
         ? allCatsForSignup.find((c) => c.id === preCategoryId)
         : undefined;
-      const isCarGoSignup = preCat?.slug === "transport";
-      const data = (isCarGoSignup ? createProviderBodySchemaCarGo : createProviderBodySchemaStrict).parse(req.body);
+      const isGoDriverSignup = preCat?.slug === "transport" || preCat?.slug === "delivery";
+      const data = (isGoDriverSignup ? createProviderBodySchemaCarGo : createProviderBodySchemaStrict).parse(req.body);
       const {
         serviceTitle: serviceTitleFromClient,
         serviceDescription: serviceDescriptionFromClient,
         vehicle: vehicleFromBody,
+        goBrands,
         ...providerInsert
       } = data;
+
+      // Validar vehículo ANTES de crear provider para evitar dejar registros creados si el vehículo falla.
+      const catForSignup = allCatsForSignup.find((c) => c.id === Number(providerInsert.categoryId ?? preCategoryId));
+      const isGoDriverCategory = catForSignup?.slug === "transport" || catForSignup?.slug === "delivery";
+      let parsedVehicle: ReturnType<typeof insertProviderVehicleSchema.safeParse> | null = null;
+      if (vehicleFromBody != null && !isGoDriverCategory) {
+        return res.status(400).json({ message: "Los datos de vehículo solo aplican a Car Go y Pack Go." });
+      }
+      if (isGoDriverCategory) {
+        parsedVehicle = insertProviderVehicleSchema.safeParse(vehicleFromBody);
+        if (!parsedVehicle.success) {
+          return res.status(400).json({
+            message: "Datos de vehículo inválidos o incompletos.",
+            issues: parsedVehicle.error.flatten(),
+          });
+        }
+      }
       const dbUser = await genFebStorage.getUserById(userId);
       const effectiveRole = (dbUser as { role?: string } | undefined)?.role ?? req.user?.role;
       /** Admin o Soporte TI: no degradar a professional; misma regla que requireStaffFromDb (BD primero). */
@@ -610,6 +632,7 @@ export async function registerRoutes(
         categoryId: providerInsert.categoryId ?? undefined,
         category: providerInsert.category ?? null,
         subcategoryId: providerInsert.subcategoryId ?? undefined,
+        goBrands: Array.isArray(goBrands) ? Array.from(new Set(["transport", ...goBrands])) : ["transport"],
         profession: providerInsert.profession,
         bio: providerInsert.bio ?? "",
         yearsExperience: providerInsert.yearsExperience ?? 0,
@@ -660,19 +683,7 @@ export async function registerRoutes(
         } as any);
       }
 
-      const catForProvider = allCatsForSignup.find((c) => c.id === Number((provider as { categoryId?: number }).categoryId));
-      const isTransportCategory = catForProvider?.slug === "transport";
-      if (vehicleFromBody != null && !isTransportCategory) {
-        return res.status(400).json({ message: "Los datos de vehículo solo aplican a la categoría Car Go." });
-      }
-      if (isTransportCategory) {
-        const parsedVehicle = insertProviderVehicleSchema.safeParse(vehicleFromBody);
-        if (!parsedVehicle.success) {
-          return res.status(400).json({
-            message: "Datos de vehículo inválidos o incompletos.",
-            issues: parsedVehicle.error.flatten(),
-          });
-        }
+      if (parsedVehicle?.success) {
         await genFebStorage.createProviderVehicle({
           providerId: (provider as { id: number }).id,
           userId,

@@ -9,6 +9,8 @@ export type CargoRiderTripLog = {
   amountUsd: number;
   payment: "genfeb" | "cash" | "bank_transfer";
   driverName: string;
+  /** Módulo Go: transport (Car Go) o delivery (Pack Go). */
+  goSlug?: "cargo" | "pack";
 };
 
 export function loadRiderTripLog(): CargoRiderTripLog[] {
@@ -26,7 +28,8 @@ export function loadRiderTripLog(): CargoRiderTripLog[] {
         typeof x.durationMin === "number" &&
         typeof x.amountUsd === "number" &&
         (x.payment === "genfeb" || x.payment === "cash" || x.payment === "bank_transfer") &&
-        typeof x.driverName === "string"
+        typeof x.driverName === "string" &&
+        (x.goSlug === undefined || x.goSlug === "cargo" || x.goSlug === "pack")
       );
     });
   } catch {

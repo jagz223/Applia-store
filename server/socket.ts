@@ -3,6 +3,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import { isFullAdmin } from "@shared/roles";
 import { registerCargoMobilitySocket } from "./mobility-rides";
+import { registerPackMobilitySocket } from "./pack-rides";
 
 const JWT_SECRET = process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024";
 
@@ -47,6 +48,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
   });
 
   registerCargoMobilitySocket(io);
+  registerPackMobilitySocket(io);
 
   io.on("connection", (socket: Socket) => {
     const user = socket.data.user;

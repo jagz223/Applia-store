@@ -21,7 +21,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ProviderSkillsField } from "@/components/ProviderSkillsField";
 import {
   BiographyOnboardingInfoButton,
@@ -91,7 +91,7 @@ const becomeProCategoryFields = {
   subcategoryId: z.number().int().positive().optional().nullable(),
 };
 
-/** Car Go: bloque de perfil/servicio no se muestra; no exigimos título ni biografía (superRefine). */
+/** Car Go + Pack Go: bloque de perfil/servicio no se muestra; no exigimos título ni biografía (superRefine). */
 function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
   return insertProviderSchema
     .extend(becomeProCategoryFields)
@@ -108,7 +108,7 @@ function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
     .merge(z.object({ vehicle: z.any().optional() }))
     .superRefine((data, ctx) => {
       const slug = categories.find((c) => c.id === data.categoryId)?.slug;
-      if (slug === "transport") return;
+      if (slug === "transport" || slug === "delivery") return;
       const title = data.serviceTitle.trim();
       if (title.length < 2) {
         ctx.addIssue({
@@ -178,10 +178,21 @@ export default function BecomePro() {
   const selectedCategorySlug =
     selectedCategoryId != null ? categories.find((c) => c.id === selectedCategoryId)?.slug : undefined;
   const isCarGo = selectedCategorySlug === "transport";
+  const isPackGo = selectedCategorySlug === "delivery";
+  const isGoDriverCategory = isCarGo || isPackGo;
+  const [enablePackGoSoon, setEnablePackGoSoon] = useState(true);
+  const [enableShopGoSoon, setEnableShopGoSoon] = useState(true);
+  const [enableCarGoAlso, setEnableCarGoAlso] = useState(true);
+  const goOfferKind = useMemo(() => {
+    if (!isGoDriverCategory) return "carro" as const;
+    if (vehicleType === "motorcycle") return "moto" as const;
+    if (vehicleType === "pickup_truck") return "camion" as const;
+    return "carro" as const;
+  }, [isGoDriverCategory, vehicleType]);
 
-  /** Al elegir Car Go ocultamos el bloque de perfil; limpiamos valores por si el usuario cambió de otra categoría. */
+  /** Al elegir Car Go / Pack Go ocultamos el bloque de perfil; limpiamos valores por si el usuario cambió de otra categoría. */
   useEffect(() => {
-    if (!isCarGo) return;
+    if (!isGoDriverCategory) return;
     form.setValue("profession", "");
     form.setValue("bio", "");
     form.setValue("serviceTitle", "");
@@ -189,14 +200,19 @@ export default function BecomePro() {
     form.setValue("yearsExperience", 0);
     form.setValue("hourlyRate", "");
     form.setValue("skills", []);
-  }, [isCarGo, form]);
+  }, [isGoDriverCategory, form]);
+
+  // Si elige Pack Go, por defecto sugerimos habilitar Car Go también (el usuario puede desmarcar).
+  useEffect(() => {
+    if (isPackGo) setEnableCarGoAlso(true);
+  }, [isPackGo]);
 
   const { data: nhtsaMakes = [], isLoading: nhtsaMakesLoading, isError: nhtsaMakesError } = useNhtsaMakes();
   const { data: nhtsaModels = [], isLoading: nhtsaModelsLoading, isError: nhtsaModelsError } =
-    useNhtsaModelsForMake(isCarGo ? vehicleBrand : null);
+    useNhtsaModelsForMake(isGoDriverCategory ? vehicleBrand : null);
   const { data: nhtsaYears = [], isLoading: nhtsaYearsLoading, isError: nhtsaYearsError } = useNhtsaYearsForMakeModel(
-    isCarGo ? vehicleBrand : null,
-    isCarGo ? vehicleModelWatch : null
+    isGoDriverCategory ? vehicleBrand : null,
+    isGoDriverCategory ? vehicleModelWatch : null
   );
   const yearOptionsStrings = useMemo(() => nhtsaYears.map(String), [nhtsaYears]);
 
@@ -218,7 +234,7 @@ export default function BecomePro() {
 
   /** Ajustar año cuando el catálogo vPIC devuelve años válidos para marca+modelo. */
   useEffect(() => {
-    if (!isCarGo) return;
+    if (!isGoDriverCategory) return;
     if (!vehicleBrand?.trim() || !vehicleModelWatch?.trim()) {
       form.setValue("vehicle.model_year", new Date().getFullYear());
       return;
@@ -228,7 +244,7 @@ export default function BecomePro() {
     if (!Number.isFinite(cur) || !nhtsaYears.includes(cur)) {
       form.setValue("vehicle.model_year", nhtsaYears[0]!);
     }
-  }, [isCarGo, vehicleBrand, vehicleModelWatch, nhtsaYears, form.setValue, form.getValues]);
+  }, [isGoDriverCategory, vehicleBrand, vehicleModelWatch, nhtsaYears, form.setValue, form.getValues]);
 
   useEffect(() => {
     if (existingProfile) {
@@ -259,9 +275,11 @@ export default function BecomePro() {
   function onSubmit(data: BecomeProForm) {
     const slug = data.categoryId != null ? categories?.find((c) => c.id === data.categoryId)?.slug : undefined;
     const transport = slug === "transport";
+    const delivery = slug === "delivery";
+    const goDriver = transport || delivery;
 
     let vehiclePayload: ReturnType<typeof insertProviderVehicleSchema.parse> | undefined;
-    if (transport) {
+    if (goDriver) {
       const raw = buildVehiclePayload(data.vehicle ?? DEFAULT_VEHICLE_FORM);
       const parsed = insertProviderVehicleSchema.safeParse(raw);
       if (!parsed.success) {
@@ -282,11 +300,20 @@ export default function BecomePro() {
         ...rest,
         categoryId: data.categoryId,
         category: slug ?? data.category ?? undefined,
+        ...(goDriver
+          ? {
+              goBrands: [
+                transport || enableCarGoAlso ? "transport" : null,
+                delivery || enablePackGoSoon ? "delivery" : null,
+                enableShopGoSoon ? "marketplace" : null,
+              ].filter(Boolean),
+            }
+          : {}),
         subcategoryId: data.subcategoryId ?? undefined,
-        skills: transport ? [] : data.skills,
+        skills: goDriver ? [] : data.skills,
         serviceTitle: data.serviceTitle,
         serviceDescription: data.serviceDescription,
-        ...(transport && vehiclePayload ? { vehicle: vehiclePayload } : {}),
+        ...(goDriver && vehiclePayload ? { vehicle: vehiclePayload } : {}),
       } as InsertProvider & { serviceTitle?: string; serviceDescription?: string; vehicle?: typeof vehiclePayload },
       {
         onSuccess: () => {
@@ -309,10 +336,10 @@ export default function BecomePro() {
     <div className="container max-w-2xl py-12 px-4">
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-display font-bold text-primary mb-2">
-          {isCarGo ? "Registro Car Go" : "Datos de proveedor"}
+          {isCarGo ? "Registro Car Go" : isPackGo ? "Registro Pack Go" : "Datos de proveedor"}
         </h1>
         <p className="text-muted-foreground">
-          {isCarGo ? (
+          {isGoDriverCategory ? (
             <>
               Completa los datos del <strong className="text-foreground">vehículo</strong>. Se guardará tu perfil y la
               unidad asociada. Al terminar, te llevaremos a{" "}
@@ -332,9 +359,9 @@ export default function BecomePro() {
 
       <Card className="border-border/50 shadow-xl">
         <CardHeader>
-          <CardTitle>{isCarGo ? "Conductor y vehículo" : "Perfil de proveedor"}</CardTitle>
+          <CardTitle>{isGoDriverCategory ? "Conductor y vehículo" : "Perfil de proveedor"}</CardTitle>
           <CardDescription>
-            {isCarGo
+            {isGoDriverCategory
               ? "Placa, tipo y estado del vehículo son obligatorios. Puedes completar título del servicio, tarifa y biografía más adelante en tu panel. Tu cuenta debe ser verificada: al guardar, te pediremos identificación y licencia (u otro documento según categoría)."
               : "Indica tu categoría, profesión, experiencia y tarifa. No se publica nada hasta la verificación: al guardar, te llevamos a subir tus archivos para que el equipo revise tu solicitud."}
           </CardDescription>
@@ -375,20 +402,44 @@ export default function BecomePro() {
                 )}
               />
 
-              {subcategories.length > 0 && (
+              {isGoDriverCategory ? (
+                <FormItem>
+                  <FormLabel>Tipo de oferta (subcategoría)</FormLabel>
+                  <Select
+                    onValueChange={(v) => {
+                      const kind = (v as "moto" | "carro" | "camion") ?? "carro";
+                      const wanted: VehicleType =
+                        kind === "moto" ? "motorcycle" : kind === "camion" ? "pickup_truck" : "car";
+                      form.setValue("vehicle.vehicle_type", wanted);
+                    }}
+                    value={goOfferKind}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona una opción" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="moto">Moto</SelectItem>
+                      <SelectItem value="carro">Carro</SelectItem>
+                      <SelectItem value="camion">Camión</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormItem>
+              ) : subcategories.length > 0 ? (
                 <FormField
                   control={form.control}
                   name="subcategoryId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{isCarGo ? "Tipo de oferta (subcategoría)" : "Subcategoría (opcional)"}</FormLabel>
+                      <FormLabel>Subcategoría (opcional)</FormLabel>
                       <Select
                         onValueChange={(v) => field.onChange(v === "none" || !v ? undefined : Number(v))}
                         value={field.value != null ? String(field.value) : "none"}
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder={isCarGo ? "Selecciona una opción" : "Selecciona una subcategoría"} />
+                            <SelectValue placeholder="Selecciona una subcategoría" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
@@ -404,18 +455,61 @@ export default function BecomePro() {
                     </FormItem>
                   )}
                 />
-              )}
+              ) : null}
 
-              {isCarGo && (
+              {isGoDriverCategory ? (
+                <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-2">
+                  <p className="font-semibold">También habilitar</p>
+                  <p className="text-sm text-muted-foreground">
+                    {isCarGo
+                      ? "Los conductores Car Go pueden operar también en Pack Go y Shop Go."
+                      : "Los repartidores Pack Go pueden operar también en Car Go y Shop Go."}
+                  </p>
+                  {isCarGo ? (
+                    <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
+                      <span className="min-w-0">
+                        <span className="font-medium">Pack Go</span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={enablePackGoSoon}
+                        onChange={(e) => setEnablePackGoSoon(e.target.checked)}
+                      />
+                    </label>
+                  ) : (
+                    <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
+                      <span className="min-w-0">
+                        <span className="font-medium">Car Go</span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={enableCarGoAlso}
+                        onChange={(e) => setEnableCarGoAlso(e.target.checked)}
+                      />
+                    </label>
+                  )}
+                  <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
+                    <span className="min-w-0">
+                      <span className="font-medium">Shop Go</span>{" "}
+                      <span className="text-xs text-muted-foreground">(Próximamente activo)</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={enableShopGoSoon}
+                      onChange={(e) => setEnableShopGoSoon(e.target.checked)}
+                    />
+                  </label>
+                </div>
+              ) : null}
+
+              {isGoDriverCategory && (
                 <div className="space-y-4 rounded-lg border border-border/60 bg-muted/30 p-4">
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">Datos del vehículo</h3>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Marca, modelo y año: datos{" "}
-                      <span className="whitespace-nowrap">NHTSA vPIC (EE. UU.)</span>. En cada lista se muestran como máximo
-                      20 opciones; escribe en el buscador para acotar y encontrar el resto. El año depende de la combinación
-                      marca + modelo.
-                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Elige bien el tipo de vehículo que vas a usar.</p>
                     {(nhtsaMakesError || nhtsaModelsError || nhtsaYearsError) && (
                       <p className="text-xs text-destructive mt-2">
                         No se pudo cargar el catálogo. Comprueba tu conexión e inténtalo de nuevo.
@@ -443,7 +537,12 @@ export default function BecomePro() {
                               ))}
                             </SelectContent>
                           </Select>
-                          <FormDescription>Define primero el tipo de unidad que ofreces (Car Go).</FormDescription>
+                          <FormDescription className="text-xs">
+                            Seleccionado:{" "}
+                            <span className="font-medium text-foreground">
+                              {VEHICLE_TYPE_OPTIONS.find((o) => o.value === (field.value ?? "car"))?.label ?? "Carro"}
+                            </span>
+                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -663,7 +762,7 @@ export default function BecomePro() {
                 </div>
               )}
 
-              {!isCarGo && (
+              {!isGoDriverCategory && (
                 <>
                   <FormField
                     control={form.control}

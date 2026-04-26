@@ -41,6 +41,15 @@ export default function Recharge() {
   const [transferCode, setTransferCode] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const returnTo = useMemo(() => {
+    try {
+      const q = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+      const v = q.get("return");
+      return v && v.startsWith("/") ? v : "/";
+    } catch {
+      return "/";
+    }
+  }, []);
 
   const isFormValid = useMemo(() => {
     const amountNum = parseFloat(amount);
@@ -81,7 +90,7 @@ export default function Recharge() {
       {
         onSuccess: () => {
           setConfirmModalOpen(false);
-          setLocation("/recharge/confirm");
+          setLocation(`/recharge/confirm?return=${encodeURIComponent(returnTo)}`);
         },
         onError: (err: Error) => {
           toast({
@@ -116,7 +125,7 @@ export default function Recharge() {
       <div className="container max-w-6xl py-8 sm:py-12 px-4">
         <div className="mb-6">
           <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-primary" asChild>
-            <Link href="/">
+            <Link href={returnTo}>
               <ArrowLeft className="h-4 w-4" />
               Volver
             </Link>
