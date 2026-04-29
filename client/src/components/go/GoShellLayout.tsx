@@ -47,14 +47,14 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
           className={[
             "mx-auto flex h-screen h-[100svh] max-h-screen max-h-[100svh] min-h-0 w-full flex-col overflow-hidden bg-background",
             "max-md:overscroll-none",
-            // En /go/cargo (PC) queremos layout real de escritorio, no “phone frame”.
+            // Escritorio Car/Pack Go: Marco amplio pero no “tubo”; barra inferior flota dentro (GoBottomNav md).
             wideDesktop
-              ? "sm:my-6 sm:max-w-6xl sm:rounded-2xl sm:border sm:border-border/60 sm:shadow-lg"
+              ? "sm:my-4 sm:max-w-[min(1200px,96vw)] md:my-6 md:max-w-[min(1340px,94vw)] lg:rounded-3xl lg:border lg:border-border/55 lg:shadow-xl"
               : "max-w-md sm:my-6 sm:h-auto sm:max-h-[calc(100vh-3rem)] sm:max-h-[calc(100svh-3rem)] sm:min-h-[calc(100vh-3rem)] sm:min-h-[calc(100svh-3rem)] sm:rounded-2xl sm:border sm:border-border/60 sm:shadow-lg",
           ].join(" ")}
         >
-          <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-            <div className="flex items-center justify-between px-3 py-2">
+          <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70 md:rounded-t-[inherit]">
+            <div className="flex items-center justify-between px-4 py-2.5 md:px-6 md:py-3">
               <Button asChild variant="ghost" size="sm" className="gap-2">
                 <Link href="/">
                   <Home className="h-4 w-4" />
@@ -69,8 +69,8 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
           <main
             className={[
               "flex min-h-0 min-w-0 flex-1 flex-col",
-              // En vistas de mapa, no dejar “franja” encima de la barra inferior.
-              isGoMapView ? "pb-0" : "pb-16",
+              // En mapa: espacio inferior en PC para que el dock no tape contenido pegado abajo.
+              isGoMapView ? "pb-0 md:pb-1" : "pb-16",
               mainScrollOnMobile
                 ? "max-md:h-full max-md:min-h-0 max-md:overflow-y-auto max-md:overscroll-y-contain"
                 : "max-md:h-full max-md:overflow-hidden",

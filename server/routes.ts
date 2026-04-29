@@ -30,6 +30,7 @@ import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
+import { MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -383,11 +384,40 @@ export async function registerRoutes(
     res.json(provider);
   });
   app.get(api.services.list.path, async (req, res) => {
-    const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
+    const categoryIdRaw = req.query.categoryId != null ? Number(req.query.categoryId) : undefined;
     const search = (req.query.search as string) || undefined;
-    const providerCategoryId = req.query.providerCategoryId ? Number(req.query.providerCategoryId) : undefined;
+    const providerCategoryIdRaw =
+      req.query.providerCategoryId != null ? Number(req.query.providerCategoryId) : undefined;
     const subcategoryId = req.query.subcategoryId ? Number(req.query.subcategoryId) : undefined;
-    const list = await catalogService.getAllServices(categoryId, search, providerCategoryId, subcategoryId);
+
+    const categoryId =
+      categoryIdRaw != null && !Number.isNaN(categoryIdRaw) ? categoryIdRaw : undefined;
+    const providerCategoryId =
+      providerCategoryIdRaw != null && !Number.isNaN(providerCategoryIdRaw) ? providerCategoryIdRaw : undefined;
+
+    let list = await catalogService.getAllServices(categoryId, search, providerCategoryId, subcategoryId);
+
+    /** Vista general (Explorar “Todos”, sin categoría explícita): no mezclar conductores/comercios/delivery Go. */
+    const isGeneralCatalogExplore = categoryId == null && providerCategoryId == null;
+    if (isGeneralCatalogExplore && list?.length) {
+      const mobilitySlugs = new Set(MOBILITY_GO_PROVIDER_SLUGS.map((s) => String(s).toLowerCase()));
+      const cats = await catalogService.getCategories();
+      list = list.filter((s: any) => {
+        const p = s?.provider as { category?: string; categoryId?: number } | undefined;
+        if (!p) return true;
+        const fromField =
+          typeof p.category === "string" ? p.category.trim().toLowerCase() : "";
+        if (mobilitySlugs.has(fromField)) return false;
+        if (p.categoryId != null && !Number.isNaN(Number(p.categoryId))) {
+          const cat = cats.find((c: { id?: number }) => Number(c.id) === Number(p.categoryId));
+          const slug = (cat as { slug?: string } | undefined)?.slug;
+          const sl = slug != null ? String(slug).trim().toLowerCase() : "";
+          if (mobilitySlugs.has(sl)) return false;
+        }
+        return true;
+      });
+    }
+
     // Catálogo público: no exponer servicios desactivados.
     res.json((list ?? []).filter((s: any) => s?.isActive !== false));
   });

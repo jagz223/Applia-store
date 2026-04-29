@@ -43,6 +43,18 @@ export function GoBottomNav() {
   const [riderWalletOpen, setRiderWalletOpen] = useState(false);
   const [driverEarningsOpen, setDriverEarningsOpen] = useState(false);
   const unreadNotif = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+
+  /** En escritorio: barra compacta centrada tipo “dock”, sin estirar 6 ítems a todo el ancho. */
+  const [desktopNav, setDesktopNav] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(min-width: 768px)").matches : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const fn = () => setDesktopNav(mq.matches);
+    fn();
+    mq.addEventListener("change", fn);
+    return () => mq.removeEventListener("change", fn);
+  }, []);
   const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
   const showShop = !hiddenSlugs.has("marketplace");
@@ -175,8 +187,29 @@ export function GoBottomNav() {
 
   return (
     <>
-      <nav className="sticky bottom-0 z-50 border-t border-border/90 bg-background/98 shadow-[0_-6px_28px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md supports-[backdrop-filter]:bg-background/92 dark:shadow-[0_-6px_32px_-4px_rgba(0,0,0,0.45)]">
-        <div className="grid gap-1 px-2 py-2" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+      <div
+        className={cn(
+          "sticky bottom-0 z-50 shrink-0",
+          desktopNav &&
+            "pointer-events-none md:bg-gradient-to-t md:from-background/85 md:to-transparent md:pb-5 md:pt-4"
+        )}
+      >
+        <nav
+          className={cn(
+            "border-t border-border/90 bg-background/98 shadow-[0_-6px_28px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md supports-[backdrop-filter]:bg-background/92 dark:shadow-[0_-6px_32px_-4px_rgba(0,0,0,0.45)]",
+            desktopNav &&
+              "pointer-events-auto md:mx-auto md:max-h-none md:max-w-[min(760px,calc(100vw-4rem))] md:rounded-2xl md:border md:border-border/65 md:bg-background/95 md:shadow-2xl dark:md:border-white/15"
+          )}
+        >
+        <div
+          className={cn(
+            "gap-1 px-2 py-2",
+            desktopNav
+              ? "flex flex-nowrap justify-center gap-1 overflow-x-auto overscroll-x-contain px-4 py-2.5 [scrollbar-width:thin]"
+              : "grid"
+          )}
+          style={!desktopNav ? { gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` } : undefined}
+        >
           {tabs.map((t) => {
             const active = tabIsActive(location, t.href, !!t.onClick);
             const isChatTab = t.href === "__go_chat__";
@@ -200,7 +233,10 @@ export function GoBottomNav() {
                 variant="ghost"
                 disabled={blockedByService || blockedByRiderService}
                 className={cn(
-                  "h-12 w-full touch-manipulation flex-col gap-0.5 rounded-xl border-0 shadow-none transition-[transform,background-color,color,box-shadow] duration-150 ease-out",
+                  "touch-manipulation flex-col gap-0.5 rounded-xl border-0 shadow-none transition-[transform,background-color,color,box-shadow] duration-150 ease-out",
+                  desktopNav
+                    ? "h-auto min-h-[3.35rem] w-[4.75rem] max-w-[5.5rem] shrink-0 px-2 py-2"
+                    : "h-12 w-full",
                   "active:scale-[0.94] active:bg-muted/95",
                   (blockedByService || blockedByRiderService) && "opacity-55 pointer-events-auto active:scale-100",
                   active
@@ -247,12 +283,13 @@ export function GoBottomNav() {
                     </span>
                   ) : null}
                 </span>
-                <span className="text-[11px] leading-none">{t.label}</span>
+                <span className="text-[11px] leading-tight">{t.label}</span>
               </Button>
             );
           })}
         </div>
       </nav>
+      </div>
 
       <Sheet open={driverEarningsOpen} onOpenChange={setDriverEarningsOpen}>
         <SheetContent

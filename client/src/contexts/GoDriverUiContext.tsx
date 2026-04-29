@@ -13,6 +13,8 @@ type GoDriverUiState = {
   pushOffer: (module: "cargo" | "pack", offer: CargoRideOfferPayload) => void;
   /** Cierra la oferta actual (si coincide rideId) y muestra la siguiente en cola. */
   resolveOfferAndShowNext: (rideId: string) => void;
+  /** Limpia modal + cola de ofertas (ej. al aceptar un servicio). */
+  clearOffers: () => void;
 };
 
 const Ctx = createContext<GoDriverUiState | null>(null);
@@ -53,9 +55,14 @@ export function GoDriverUiProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const clearOffers = useCallback(() => {
+    setCurrentOffer(null);
+    setOfferQueue([]);
+  }, []);
+
   const value = useMemo(
-    () => ({ registerOpenHistory, openHistory, currentOffer, offerQueue, pushOffer, resolveOfferAndShowNext }),
-    [registerOpenHistory, openHistory, currentOffer, offerQueue, pushOffer, resolveOfferAndShowNext]
+    () => ({ registerOpenHistory, openHistory, currentOffer, offerQueue, pushOffer, resolveOfferAndShowNext, clearOffers }),
+    [registerOpenHistory, openHistory, currentOffer, offerQueue, pushOffer, resolveOfferAndShowNext, clearOffers]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

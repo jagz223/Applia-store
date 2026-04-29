@@ -56,6 +56,7 @@ import {
   PLATFORM_COMMISSION_RATE,
   commissionDisplayPercents,
 } from "@shared/platform-commission";
+import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 
 const formatUsd = (n: number) =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
@@ -1499,7 +1500,7 @@ function ProfessionalDashboardInner() {
   const providerWalletFloorUsd =
     typeof (walletData as { providerWalletFloorUsd?: number })?.providerWalletFloorUsd === "number"
       ? (walletData as { providerWalletFloorUsd: number }).providerWalletFloorUsd
-      : -20;
+      : PROVIDER_WALLET_FLOOR_USD;
   const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number"
     ? (walletData as { withdrawingFunds: number }).withdrawingFunds
     : 0;
@@ -1897,7 +1898,7 @@ function ProfessionalDashboardInner() {
         <ResumenActividad />
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6 gap-4 mb-6">
           <Card className={cn(wallet < 0 && "border-amber-500/40")}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Saldo GenFeb (cartera)</CardTitle>
@@ -1915,9 +1916,7 @@ function ProfessionalDashboardInner() {
                 )}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Piso permitido:{" "}
-                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(providerWalletFloorUsd)}
-                . En efectivo/transfer, GenFeb retiene comisión; puede quedar deuda.
+                Cartera en plataforma. Con efectivo/transfer, GenFeb retiene comisión; puede quedar deuda.
               </p>
               {isProviderDebtCapped ? (
                 <p className="text-xs text-amber-800 dark:text-amber-200 mt-2 flex items-start gap-1.5">
@@ -1928,6 +1927,29 @@ function ProfessionalDashboardInner() {
               ) : null}
             </CardContent>
           </Card>
+
+          <Card className="border-amber-500/35 bg-amber-500/[0.06] dark:bg-amber-500/10 dark:border-amber-500/40">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden />
+                Máx. saldo negativo
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold tabular-nums leading-tight">
+                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(
+                  providerWalletFloorUsd,
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Piso mínimo en efectivo o transferencia</p>
+              {isProviderDebtCapped ? (
+                <p className="text-xs text-amber-800 dark:text-amber-200 mt-2 leading-snug">
+                  Estás en el tope permitido hasta regularizar la cartera.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Ingresos Totales</CardTitle>

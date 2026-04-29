@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { useEffect, useLayoutEffect, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -10,7 +11,7 @@ import {
 } from "react-leaflet";
 import type { GeoJsonObject } from "geojson";
 import L from "leaflet";
-import { Loader2 } from "lucide-react";
+import { Loader2, Navigation } from "lucide-react";
 import {
   TAXI_TILE_ATTRIBUTION,
   TAXI_TILE_LAYER_URL,
@@ -20,6 +21,7 @@ import {
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import {
   MAP_PERSPECTIVE_CONTROLS_VISIBLE,
   MapPaneBearing,
@@ -99,6 +101,116 @@ function SyncBootstrapView({ center, zoom }: { center: [number, number]; zoom: n
   return null;
 }
 
+function RecenterControl({
+  onClick,
+  zoomPosition,
+}: {
+  onClick: () => void;
+  zoomPosition: TaxiRouteMapProps["zoomPosition"];
+}) {
+  const map = useMap();
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+
+  const selector = (() => {
+    switch (zoomPosition) {
+      case "topright":
+        return ".leaflet-top.leaflet-right";
+      case "bottomleft":
+        return ".leaflet-bottom.leaflet-left";
+      case "bottomright":
+        return ".leaflet-bottom.leaflet-right";
+      default:
+        return ".leaflet-top.leaflet-left";
+    }
+  })();
+
+  useLayoutEffect(() => {
+    const root = map.getContainer();
+    const col = root.querySelector(selector) as HTMLDivElement | null;
+    if (!col) return;
+
+    const el = document.createElement("div");
+    el.setAttribute("data-genfeb", "taxi-recenter");
+    el.className = "leaflet-control";
+    // Importante: evita que el click se propague al mapa (y dispare onMapPick / arrastre).
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+
+    let raf = 0;
+    let frame = 0;
+    const maxFrames = 10;
+    let done = false;
+
+    const tryPlace = () => {
+      if (done) return;
+      if (!col.isConnected) return;
+      const zoom = col.querySelector(".leaflet-control-zoom, .leaflet-bar") as HTMLElement | null;
+      if (zoom) {
+        zoom.after(el);
+        setHost(el);
+        done = true;
+        return;
+      }
+      frame += 1;
+      if (frame < maxFrames) raf = requestAnimationFrame(tryPlace);
+      else {
+        col.appendChild(el);
+        setHost(el);
+        done = true;
+      }
+    };
+
+    raf = requestAnimationFrame(tryPlace);
+
+    return () => {
+      done = true;
+      cancelAnimationFrame(raf);
+      el.remove();
+      setHost(null);
+    };
+  }, [map, selector]);
+
+  if (!host) return null;
+
+  return createPortal(
+    <div
+      className="!mt-3 w-full border-t border-foreground/20 pt-3"
+      onMouseDown={(e) => {
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+      }}
+      onTouchStart={(e) => {
+        e.stopPropagation();
+      }}
+    >
+      <Button
+        type="button"
+        size="icon"
+        variant="secondary"
+        className={cn(
+          "h-12 w-12 rounded-full border-2 border-foreground/30 bg-background text-foreground",
+          "shadow-md ring-2 ring-foreground/10 hover:bg-muted hover:ring-foreground/25"
+        )}
+        aria-label="Usar mi ubicación"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+          try {
+            requestAnimationFrame(() => map.invalidateSize({ animate: false }));
+          } catch {
+            /* mapa desmontándose */
+          }
+        }}
+      >
+        <Navigation className="h-5 w-5 text-foreground" strokeWidth={2.5} />
+      </Button>
+    </div>,
+    host
+  );
+}
+
 export interface TaxiRouteMapProps {
   defaultCenter: [number, number];
   defaultZoom: number;
@@ -126,6 +238,8 @@ export interface TaxiRouteMapProps {
    * Posición del +/- de Leaflet. En Car Go móvil conviene `bottomleft` para no taparse con la cabecera ni tarjetas superiores.
    */
   zoomPosition?: "default" | "topright" | "bottomleft" | "bottomright";
+  /** Botón flotante tipo “recenter” como drivers (ej. usar GPS para origen). */
+  onRecenter?: (() => void) | null;
 }
 
 export function TaxiRouteMap({
@@ -144,6 +258,7 @@ export function TaxiRouteMap({
   fullscreen = false,
   syncDefaultView = false,
   zoomPosition = "default",
+  onRecenter = null,
 }: TaxiRouteMapProps) {
   const singleFocus = start && !end ? start : !start && end ? end : null;
   const pickHandler = suppressMapPick ? () => {} : onMapPick;
@@ -223,6 +338,7 @@ export function TaxiRouteMap({
               <LeafletMapLayoutFix />
               {syncDefaultView ? <SyncBootstrapView center={defaultCenter} zoom={defaultZoom} /> : null}
               <MapClickLayer onPick={pickHandler} />
+              {onRecenter ? <RecenterControl onClick={onRecenter} zoomPosition={zoomPosition} /> : null}
               {fitStart && fitEnd ? <FitRouteBounds start={fitStart} end={fitEnd} extra={markers} /> : null}
               {singleFocus && <FocusSinglePoint point={singleFocus} />}
               {start && (

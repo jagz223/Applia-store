@@ -55,6 +55,12 @@ type RideRecord = {
 const rides = new Map<string, RideRecord>();
 const rideTimers = new Map<string, { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }>();
 
+/** Oferta pendiente por driver (recovery al abrir /go/pack/driver tras push). */
+const pendingOfferByDriverId = new Map<
+  string,
+  { rideId: string; expiresAt: number; module: "pack" }
+>();
+
 type DriverPresence = {
   userId: string;
   vehicleType: string;
@@ -222,6 +228,20 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
       expiresAt: ride.offerExpiresAt,
     });
 
+    pendingOfferByDriverId.set(driverId, { rideId: ride.id, expiresAt: ride.offerExpiresAt!, module: "pack" });
+
+    // Push al driver si no está viendo la vista de driver.
+    try {
+      const pth = getUserActivePath(String(driverId));
+      if (!pth || !pth.startsWith("/go/pack/driver")) {
+        void notificationService.sendPushToUser(driverId, {
+          title: "Pack Go",
+          body: "Tienes un envío disponible. Abre para aceptar o rechazar.",
+          data: { url: "/go/pack/driver", type: "pack_ride_offer", rideId: ride.id },
+        });
+      }
+    } catch {}
+
     const fixedDriverId = driverId;
     timers.offerTimeoutId = setTimeout(() => {
       const live = rides.get(ride.id);
@@ -230,6 +250,7 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
       live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
       live.declinedAtByDriverId[fixedDriverId] = Date.now();
       io.to(`user:${fixedDriverId}`).emit("pack:ride:offer_expired", { rideId: live.id });
+      pendingOfferByDriverId.delete(fixedDriverId);
       live.currentOfferDriverId = null;
       live.offerExpiresAt = null;
       void offerNextDriver(io, live, rider);
@@ -302,6 +323,42 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
 }
 
 export function registerPackRideRoutes(app: Express) {
+  // GET /api/pack/driver/pending-offer - Recupera una oferta pendiente (si existe) para el driver autenticado.
+  app.get("/api/pack/driver/pending-offer", authenticateJWT, async (req: any, res) => {
+    try {
+      const driverUserId = req.user?.id as string;
+      if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const p = pendingOfferByDriverId.get(driverUserId);
+      if (!p) return res.json({ offer: null });
+      if (Date.now() > p.expiresAt) {
+        pendingOfferByDriverId.delete(driverUserId);
+        return res.json({ offer: null });
+      }
+      const ride = rides.get(p.rideId);
+      if (!ride || ride.status !== "searching" || ride.currentOfferDriverId !== driverUserId) {
+        pendingOfferByDriverId.delete(driverUserId);
+        return res.json({ offer: null });
+      }
+      const rider = await buildRiderPublic(ride.riderUserId);
+      return res.json({
+        offer: {
+          rideId: ride.id,
+          rider,
+          start: ride.start,
+          end: ride.end,
+          routeGeometry: ride.routeGeometry,
+          distanceM: ride.distanceM,
+          durationSec: ride.durationSec,
+          vehicleType: ride.vehicleType,
+          paymentMethod: ride.paymentMethod,
+          estimatedUsd: ride.estimatedUsd,
+          expiresAt: ride.offerExpiresAt,
+        },
+      });
+    } catch (e: any) {
+      return res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
   const rateSchema = z.object({
     stars: z.number().min(1).max(5),
     target: z.enum(["driver", "rider"]),
@@ -612,7 +669,8 @@ export function registerPackRideRoutes(app: Express) {
       ride.offerExpiresAt = null;
       const io = getIO();
       if (io) {
-        const payload = { rideId };
+        const cancelledBy: "rider" | "driver" = isDriver ? "driver" : "rider";
+        const payload = { rideId, cancelledBy };
         const notify = new Set<string>();
         notify.add(ride.riderUserId);
         if (ride.driverUserId) notify.add(ride.driverUserId);
@@ -633,7 +691,7 @@ export function registerPackRideRoutes(app: Express) {
           console.error("[pack] hideConversationForUsers(cancel)", e);
         }
       }
-      res.json({ ok: true });
+      res.json({ ok: true, rideId, cancelledBy: isDriver ? "driver" : "rider" });
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
     }

@@ -1306,7 +1306,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         className={cn(
           "container mx-auto max-w-4xl px-4 pt-6",
           isGoClient &&
-            "flex min-h-0 min-w-0 flex-1 flex-col max-md:overflow-hidden max-md:max-w-none max-md:px-3 max-md:pb-0 max-md:pt-2 md:max-w-6xl"
+            "flex min-h-0 min-w-0 flex-1 flex-col max-md:overflow-hidden max-md:max-w-none max-md:px-3 max-md:pb-0 max-md:pt-2 md:max-w-[min(1320px,96vw)] md:px-6 lg:px-8"
         )}
       >
         <Button
@@ -1340,6 +1340,19 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         {/* Go / Car: móvil — mapa llena main (sin scroll); overlay encima. */}
         {isGoClient && !isMdUp && (
           <div className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden md:hidden max-md:h-[calc(100vh-8.25rem)] max-md:h-[calc(100svh-8.25rem)] max-md:min-h-[calc(100vh-8.25rem)] max-md:min-h-[calc(100svh-8.25rem)]">
+            {/* Botón flotante: volver (siempre visible, no pegado a inputs) */}
+            {!vehiclePickerOpen && !matchedDriverInfo ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="pointer-events-auto absolute left-3 top-3 z-30 h-10 w-10 overflow-hidden rounded-full border border-border/60 bg-background/90 p-0 shadow-md backdrop-blur-sm"
+                onClick={goBack}
+                aria-label={fromCategories ? "Volver a categorías" : "Volver a Explorar"}
+              >
+                <img src="/logo-genfeb.jpg" alt="" className="h-full w-full scale-110 object-contain" />
+              </Button>
+            ) : null}
             <div className="pointer-events-auto absolute inset-0 z-0 overflow-hidden bg-muted/30">
               {/* Wallet/Recargar ahora viven en `GoBottomNav` (barra inferior). */}
               <TaxiRouteMap
@@ -1356,6 +1369,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 onMapPick={onMapPick}
                 nearbyDemoVehicles={nearbyDriverMarkers}
                 suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
+                onRecenter={
+                  matchedDriverInfo
+                    ? null
+                    : () => {
+                        setMapTarget("start");
+                        useMyLocationAsStart();
+                      }
+                }
                 wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full"
               />
               {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
@@ -1372,112 +1393,25 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
             {!vehiclePickerOpen ? (
               <div className="relative z-10 flex min-h-0 flex-1 flex-col pointer-events-none">
-                {/* Panel flotante: solo esta tarjeta captura taps/scroll; el resto deja arrastrar el mapa. */}
-                <div className="pointer-events-none flex min-h-0 flex-1 flex-col px-2 pt-0">
-                  <div className="pointer-events-auto max-h-[min(60vh,520px)] overflow-hidden rounded-2xl border border-border/60 bg-background/70 shadow-lg backdrop-blur-md ring-1 ring-black/5">
-                    <div className="min-h-0 max-h-[min(60vh,520px)] overflow-y-auto overscroll-y-contain p-2 pb-3 [scrollbar-width:thin]">
+                {/* Panel flotante: sin “caja” de fondo; solo cards internas. */}
+                <div
+                  className={cn(
+                    "pointer-events-none flex min-h-0 flex-1 flex-col px-2",
+                    matchedDriverInfo
+                      ? // Sin botón flotante (logo): no dejar hueco alto; sólo notch/safe-area
+                        "pt-[max(0.35rem,env(safe-area-inset-top))]"
+                      : // Botón logo arriba-izquierda: reserva para no pisar inputs/cards
+                        "pt-14"
+                  )}
+                >
+                  <div className="pointer-events-auto max-h-[min(60vh,520px)] overflow-visible bg-transparent shadow-none ring-0">
+                    <div className="min-h-0 max-h-[min(60vh,520px)] overflow-y-auto overscroll-y-contain p-0 pb-3 [scrollbar-width:thin]">
                       <div className="space-y-2">
                 {!matchedDriverInfo ? (
                   <>
-                    {!matchedDriverInfo ? <div className="flex items-center gap-1.5">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="icon"
-                        className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-border/60 bg-background/90 p-0 shadow-md backdrop-blur-sm"
-                        onClick={goBack}
-                        aria-label={fromCategories ? "Volver a categorías" : "Volver a Explorar"}
-                      >
-                        <img src="/logo-GenFeb.jpg" alt="" className="h-full w-full scale-110 object-contain" />
-                      </Button>
-                      <div className="min-w-0 flex-1 rounded-xl border border-border/60 bg-background/88 p-1.5 shadow-md backdrop-blur-md">
-                        <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium leading-none sm:text-xs">
-                          <button
-                            type="button"
-                            onClick={() => setMapTarget("start")}
-                            className={cn(
-                              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition-colors",
-                              mapTarget === "start"
-                                ? "border-green-600/60 bg-green-500/15 text-foreground"
-                                : start
-                                  ? "border-border bg-muted/50 text-muted-foreground"
-                                  : "border-green-600/40 bg-green-500/10 text-foreground"
-                            )}
-                          >
-                            <span className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-green-600" aria-hidden />
-                            1. {goSlug === "pack" ? "Retiro" : "Origen"}
-                            {start ? " ✓" : ""}
-                          </button>
-                          <span className="text-muted-foreground" aria-hidden>
-                            →
-                          </span>
-                          <button
-                            type="button"
-                            disabled={!start}
-                            onClick={() => setMapTarget("end")}
-                            className={cn(
-                              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition-colors",
-                              !start && "cursor-not-allowed opacity-50",
-                              start && "hover:bg-red-500/10",
-                              mapTarget === "end"
-                                ? "border-red-600/60 bg-red-500/15 text-foreground"
-                                : "border-border bg-muted/40 text-muted-foreground"
-                            )}
-                          >
-                            <span className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-red-600" aria-hidden />
-                            2. {goSlug === "pack" ? "Entrega" : "Destino"}
-                            {end ? " ✓" : ""}
-                          </button>
-                        </div>
-                      </div>
-                    </div> : null}
-
-                    <div
-                      className={cn(
-                        "rounded-xl border px-2.5 py-2 text-[11px] leading-snug shadow-md backdrop-blur-md transition-colors md:text-sm",
-                        mapTarget === "start"
-                          ? "border-green-600/35 bg-background/88"
-                          : "border-red-600/35 bg-background/88"
-                      )}
-                    >
-                      {mapTarget === "start" ? (
-                        <div className="flex flex-col gap-1.5">
-                          <p className="text-foreground/90">
-                            <span className="font-medium text-foreground">{goSlug === "pack" ? "Retiro:" : "Origen:"}</span>{" "}
-                            mapa o texto; luego{" "}
-                            <span className="font-medium">2. {goSlug === "pack" ? "Entrega" : "Destino"}</span>.
-                          </p>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="h-8 w-full gap-1.5 px-2 text-xs sm:w-auto"
-                            onClick={useMyLocationAsStart}
-                          >
-                            <Navigation className="h-3.5 w-3.5" />
-                            Mi ubicación
-                          </Button>
-                        </div>
-                      ) : (
-                        <p className="text-foreground/90">
-                          <span className="font-medium text-foreground">{goSlug === "pack" ? "Entrega:" : "Destino:"}</span>{" "}
-                          mapa o texto. Pin rojo = {goSlug === "pack" ? "entrega" : "destino"}.
-                        </p>
-                      )}
-                    </div>
-
-                    {mapTarget === "end" && start && (
-                      <p
-                        className="line-clamp-2 rounded-lg border border-border/50 bg-background/80 px-2 py-1 text-[10px] leading-snug text-muted-foreground shadow-sm backdrop-blur-sm"
-                        title={start.label}
-                      >
-                        <span className="font-medium text-foreground">{goSlug === "pack" ? "Retiro:" : "Origen:"}</span>{" "}
-                        {start.label}
-                      </p>
-                    )}
-
                     <div className="rounded-xl border border-border/60 bg-background/88 p-2 shadow-md backdrop-blur-md">
-                      {mapTarget === "start" ? (
+                      <div className="space-y-2">
+                        {/* Origen arriba */}
                         <div className="space-y-1">
                           <Label htmlFor="taxi-start-mobile" className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
                             <MapPin className="h-3.5 w-3.5 shrink-0 text-green-600" />
@@ -1488,9 +1422,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                               id="taxi-start-mobile"
                               placeholder="Buscar o tocar mapa"
                               value={startInput}
+                              onFocus={() => setMapTarget("start")}
                               onChange={(e) => onStartInput(e.target.value)}
                               autoComplete="off"
-                              className="h-8 rounded-lg border-border/70 bg-background/95 py-1.5 text-sm"
+                              className={cn(
+                                "h-8 rounded-lg border-border/70 bg-background/95 py-1.5 text-sm",
+                                mapTarget === "start" && "ring-1 ring-green-600/30"
+                              )}
                             />
                             {suggestStart.length > 0 && (
                               <ul className="absolute top-full z-[2000] mt-1 max-h-48 w-full overflow-auto rounded-xl border bg-popover text-sm shadow-md">
@@ -1509,7 +1447,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                             )}
                           </div>
                         </div>
-                      ) : (
+
+                        {/* Destino abajo */}
                         <div className="space-y-1">
                           <Label htmlFor="taxi-end-mobile" className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
                             <MapPin className="h-3.5 w-3.5 shrink-0 text-red-600" />
@@ -1520,9 +1459,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                               id="taxi-end-mobile"
                               placeholder="Buscar o tocar mapa"
                               value={endInput}
+                              onFocus={() => setMapTarget("end")}
                               onChange={(e) => onEndInput(e.target.value)}
                               autoComplete="off"
-                              className="h-8 rounded-lg border-border/70 bg-background/95 py-1.5 text-sm"
+                              className={cn(
+                                "h-8 rounded-lg border-border/70 bg-background/95 py-1.5 text-sm",
+                                mapTarget === "end" && "ring-1 ring-red-600/30"
+                              )}
                             />
                             {suggestEnd.length > 0 && (
                               <ul className="absolute top-full z-[2000] mt-1 max-h-48 w-full overflow-auto rounded-xl border bg-popover text-sm shadow-md">
@@ -1541,7 +1484,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                             )}
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   </>
                 ) : null}
@@ -1554,7 +1497,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 )}
 
                 {routeMeta && !routeError && (
-                  <div className="rounded-xl border border-border/60 bg-background/88 px-3 py-2 text-[11px] shadow-md backdrop-blur-md">
+                  <div className="mt-2 rounded-xl border border-border/60 bg-background/88 px-3 py-2 text-[11px] shadow-md backdrop-blur-md">
                     <p className="font-semibold text-foreground">Ruta estimada</p>
                     <p className="mt-0.5 text-muted-foreground">
                       <span className="font-medium text-foreground">{formatKm(routeMeta.distanceM)}</span>
@@ -1781,62 +1724,59 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         <div
           className={cn(
             isGoClient && isMdUp
-              ? // Altura explícita en la fila: si el mapa solo tiene height:100% sin padre con alto, Leaflet queda en 0px.
-                "grid min-h-0 w-full flex-1 grid-cols-12 gap-6 items-stretch [grid-template-rows:minmax(0,1fr)]"
+              ? // Dos columnas: strech vertical para que Leaflet reciba alto real (fullscreen + height 100%).
+                "grid min-h-0 w-full flex-1 grid-cols-1 gap-8 md:min-h-[min(640px,calc(100dvh-12rem))] md:[grid-template-columns:minmax(340px,420px)_minmax(0,1fr)] md:gap-x-10 md:gap-y-0 md:items-stretch [grid-template-rows:minmax(0,auto)]"
               : null
           )}
         >
           <div
             className={cn(
               "space-y-5 rounded-2xl border border-border bg-card p-4 shadow-sm md:p-6",
-              // Car Go escritorio: mismo alto que el mapa (viewport), scroll interno en el panel.
               isGoClient && isMdUp
-                ? "col-span-4 xl:col-span-4 flex min-h-0 h-[min(900px,calc(100svh-11rem))] max-h-[calc(100svh-11rem)] flex-col overflow-y-auto [scrollbar-width:thin] md:sticky md:top-24 md:self-start"
+                ? "min-h-0 w-full md:max-h-[min(880px,calc(100svh-10rem))] md:flex md:flex-col md:overflow-y-auto md:[scrollbar-width:thin]"
                 : null
             )}
           >
-          {!matchedDriverInfo ? (
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <button
+          {/* Se elimina la franja superior de pasos (1→2). */}
+
+          {isGoClient && isMdUp && (
+            <div className="flex w-full gap-2" role="group" aria-label="Elegir qué punto editar en el mapa">
+              <Button
                 type="button"
+                variant={mapTarget === "start" ? "default" : "outline"}
+                className={cn(
+                  "h-11 flex-1 rounded-xl shadow-sm gap-2",
+                  mapTarget !== "start" && "border-green-700/35 bg-muted/40 text-foreground hover:bg-muted/70"
+                )}
                 onClick={() => setMapTarget("start")}
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-medium transition-colors",
-                  "hover:bg-green-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                  mapTarget === "start"
-                    ? "border-green-600/60 bg-green-500/10 text-foreground"
-                    : start
-                      ? "border-border bg-muted/40 text-muted-foreground"
-                      : "border-green-600/40 bg-green-500/5 text-foreground"
-                )}
               >
-                <span className="inline-flex h-2 w-2 rounded-full bg-green-600 shrink-0" aria-hidden />
-                1. {goSlug === "pack" ? "Retiro" : "Origen"}
-                {start ? " ✓" : ""}
-              </button>
-              <span className="text-muted-foreground" aria-hidden>
-                →
-              </span>
-              <button
+                <MapPin
+                  className={cn("h-4 w-4 shrink-0", mapTarget === "start" ? "text-primary-foreground" : "text-green-600")}
+                  aria-hidden
+                />
+                <span>{goSlug === "pack" ? "1 · Retiro" : "1 · Origen"}</span>
+              </Button>
+              <Button
                 type="button"
+                variant={mapTarget === "end" ? "default" : "outline"}
                 disabled={!start}
-                onClick={() => setMapTarget("end")}
                 className={cn(
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-medium transition-colors",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                  !start && "cursor-not-allowed opacity-50",
-                  start && "hover:bg-red-500/10",
-                  mapTarget === "end"
-                    ? "border-red-600/60 bg-red-500/10 text-foreground"
-                    : "border-border bg-muted/30 text-muted-foreground"
+                  "h-11 flex-1 rounded-xl shadow-sm gap-2 disabled:opacity-60",
+                  mapTarget !== "end" && "border-red-700/35 bg-muted/40 text-foreground hover:bg-muted/70"
                 )}
+                title={!start ? "Primero define el punto de salida" : undefined}
+                onClick={() => {
+                  if (start) setMapTarget("end");
+                }}
               >
-                <span className="inline-flex h-2 w-2 rounded-full bg-red-600 shrink-0" aria-hidden />
-                2. {goSlug === "pack" ? "Entrega" : "Destino"}
-                {end ? " ✓" : ""}
-              </button>
+                <MapPin
+                  className={cn("h-4 w-4 shrink-0", mapTarget === "end" ? "text-primary-foreground" : "text-red-600")}
+                  aria-hidden
+                />
+                <span>{goSlug === "pack" ? "2 · Entrega" : "2 · Destino"}</span>
+              </Button>
             </div>
-          ) : null}
+          )}
 
           <div
             className={cn(
@@ -1846,35 +1786,24 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 : "border-red-600/50 bg-red-500/5"
             )}
           >
-            {mapTarget === "start" ? (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-foreground/90 pr-2">
+            {/* Se elimina “Mi ubicación” aquí: se usa el botón típico del mapa (control flotante). */}
+            <p className="text-foreground/90">
+              {mapTarget === "start" ? (
+                <>
                   <span className="font-medium text-foreground">
-                    Paso 1 — {goSlug === "pack" ? "Retiro" : "Origen"}:
-                  </span>{" "}
-                  GPS, toca el mapa o escribe la dirección. Puedes mover el punto tocando de nuevo; cuando esté bien,
-                  pulsa{" "}
-                  <span className="font-medium">2. {goSlug === "pack" ? "Entrega" : "Destino"}</span>.
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="shrink-0 gap-2 whitespace-nowrap"
-                  onClick={useMyLocationAsStart}
-                >
-                  <Navigation className="h-4 w-4" />
-                  Usar mi ubicación actual
-                </Button>
-              </div>
-            ) : (
-              <p className="text-foreground/90">
-                <span className="font-medium text-foreground">
-                  Paso 2 — {goSlug === "pack" ? "Entrega" : "Destino"}:
-                </span>{" "}
-                toca el mapa o escribe la dirección encima. El marcador rojo es tu {goSlug === "pack" ? "entrega" : "destino"}.
-              </p>
-            )}
+                    {goSlug === "pack" ? "Retiro:" : "Origen"}{" "}
+                  </span>
+                  toca el mapa o escribe la dirección.
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-foreground">
+                    {goSlug === "pack" ? "Entrega:" : "Destino"}{" "}
+                  </span>
+                  toca el mapa o escribe la dirección.
+                </>
+              )}
+            </p>
           </div>
 
           {mapTarget === "end" && start && (
@@ -2188,8 +2117,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           </div>
 
           {isGoClient && isMdUp ? (
-            <div className="col-span-8 xl:col-span-8 flex h-[min(900px,calc(100svh-11rem))] max-h-[calc(100svh-11rem)] min-h-[480px] flex-col">
-              <div className="relative z-[1] flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-muted/10 shadow-sm md:sticky md:top-24">
+            <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-muted/10 shadow-sm md:min-h-[min(480px,calc(100dvh-14rem))] md:h-full">
+              <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
                 <TaxiRouteMap
                   fullscreen
                   zoomPosition="bottomleft"
