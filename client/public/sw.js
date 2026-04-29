@@ -11,7 +11,7 @@ const PRECACHE_ASSETS = [
   '/manifest.webmanifest',
   '/favicon.png',
   '/favicon.png',
-  '/logo-genfeb.jpg',
+  '/logo-Genfeb.jpg',
 ];
 
 // Install event - cache essential assets
