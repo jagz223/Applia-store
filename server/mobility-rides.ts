@@ -65,6 +65,15 @@ const rideTimers = new Map<
   { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }
 >();
 
+/**
+ * Oferta pendiente por driver (para recuperar si el driver no estaba en la vista de driver
+ * cuando se emitió el socket event). TTL = offerExpiresAt.
+ */
+const pendingOfferByDriverId = new Map<
+  string,
+  { rideId: string; expiresAt: number; module: "cargo" }
+>();
+
 /** Conductores en línea (recibiendo) con posición reciente. */
 type DriverPresence = {
   userId: string;
@@ -283,6 +292,21 @@ async function offerNextDriver(
     expiresAt: ride.offerExpiresAt,
   });
 
+  // Guardar oferta pendiente para “recovery” si el driver no estaba en /go/cargo/driver.
+  pendingOfferByDriverId.set(driverId, { rideId: ride.id, expiresAt: ride.offerExpiresAt!, module: "cargo" });
+
+  // Push al driver si no está viendo la vista de driver (o no reportó ruta).
+  try {
+    const pth = getUserActivePath(String(driverId));
+    if (!pth || !pth.startsWith("/go/cargo/driver")) {
+      void notificationService.sendPushToUser(driverId, {
+        title: "Car Go",
+        body: "Tienes un servicio disponible. Abre para aceptar o rechazar.",
+        data: { url: "/go/cargo/driver", type: "cargo_ride_offer", rideId: ride.id },
+      });
+    }
+  } catch {}
+
   const fixedDriverId = driverId;
   timers.offerTimeoutId = setTimeout(() => {
     const live = rides.get(ride.id);
@@ -291,6 +315,7 @@ async function offerNextDriver(
     live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
     live.declinedAtByDriverId[fixedDriverId] = Date.now();
     io.to(`user:${fixedDriverId}`).emit("cargo:ride:offer_expired", { rideId: live.id });
+    pendingOfferByDriverId.delete(fixedDriverId);
     live.currentOfferDriverId = null;
     live.offerExpiresAt = null;
     void offerNextDriver(io, live, rider);
@@ -373,6 +398,43 @@ async function buildDriverPublic(driverUserId: string) {
 }
 
 export function registerMobilityRideRoutes(app: Express) {
+  // GET /api/mobility/driver/pending-offer - Recupera una oferta pendiente (si existe) para el driver autenticado.
+  app.get("/api/mobility/driver/pending-offer", authenticateJWT, async (req: any, res) => {
+    try {
+      const driverUserId = req.user?.id as string;
+      if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const p = pendingOfferByDriverId.get(driverUserId);
+      if (!p) return res.json({ offer: null });
+      if (Date.now() > p.expiresAt) {
+        pendingOfferByDriverId.delete(driverUserId);
+        return res.json({ offer: null });
+      }
+      const ride = rides.get(p.rideId);
+      if (!ride || ride.status !== "searching" || ride.currentOfferDriverId !== driverUserId) {
+        pendingOfferByDriverId.delete(driverUserId);
+        return res.json({ offer: null });
+      }
+      const rider = await buildRiderPublic(ride.riderUserId);
+      return res.json({
+        offer: {
+          rideId: ride.id,
+          rider,
+          start: ride.start,
+          end: ride.end,
+          routeGeometry: ride.routeGeometry,
+          distanceM: ride.distanceM,
+          durationSec: ride.durationSec,
+          vehicleType: ride.vehicleType,
+          paymentMethod: ride.paymentMethod,
+          estimatedUsd: ride.estimatedUsd,
+          petEnabled: ride.petEnabled,
+          expiresAt: ride.offerExpiresAt,
+        },
+      });
+    } catch (e: any) {
+      return res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
   const rateSchema = z.object({
     stars: z.number().min(1).max(5),
     target: z.enum(["driver", "rider"]),

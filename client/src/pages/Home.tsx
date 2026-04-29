@@ -136,6 +136,13 @@ export default function HomePage() {
   ];
 
   const serviceCategories = useMemo((): HomeServiceCategory[] => {
+    /** Listado filtrado en Explorar por categoría de asociado (incluye todas las subcategorías, p. ej. legal y consultoría). */
+    const exploreHrefForProviderSlug = (slug: "technical" | "professional" | "maintenance") => {
+      const cat = categories.find((c) => String((c as { slug?: string }).slug ?? "") === slug);
+      const id = cat && typeof (cat as { id?: number }).id === "number" ? (cat as { id: number }).id : null;
+      return id != null ? `/explore?providerCategoryId=${id}` : "/explore";
+    };
+
     const all: HomeServiceCategory[] = [
       {
         name: getCategoryDisplayName({ slug: "technical" }),
@@ -143,7 +150,7 @@ export default function HomePage() {
         icon: Wrench,
         countKey: "fixGo",
         color: "text-primary",
-        href: "/explore",
+        href: exploreHrefForProviderSlug("technical"),
       },
       {
         name: getCategoryDisplayName({ slug: "professional" }),
@@ -151,7 +158,7 @@ export default function HomePage() {
         icon: Briefcase,
         countKey: "proGo",
         color: "text-secondary",
-        href: "/explore",
+        href: exploreHrefForProviderSlug("professional"),
       },
       {
         name: getCategoryDisplayName({ slug: "maintenance" }),
@@ -159,7 +166,7 @@ export default function HomePage() {
         icon: Home,
         countKey: "manGo",
         color: "text-primary",
-        href: "/explore",
+        href: exploreHrefForProviderSlug("maintenance"),
       },
     ];
 
@@ -195,7 +202,7 @@ export default function HomePage() {
     }
 
     return all;
-  }, [mobilityAllowed.delivery, mobilityAllowed.marketplace, mobilityAllowed.transport]);
+  }, [categories, mobilityAllowed.delivery, mobilityAllowed.marketplace, mobilityAllowed.transport]);
 
   const stats = [
     { value: "10,000+", label: "Usuarios Activos" },

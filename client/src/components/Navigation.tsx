@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
@@ -5,6 +6,7 @@ import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
+import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { 
@@ -35,6 +37,7 @@ import {
   Banknote,
   Star,
   Smartphone,
+  AlertTriangle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -74,12 +77,19 @@ export function Navigation() {
   });
   const { data: walletData } = useWallet({ enabled: isAuthenticated });
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
+  const providerWalletFloorUsd =
+    typeof (walletData as { providerWalletFloorUsd?: number })?.providerWalletFloorUsd === "number"
+      ? (walletData as { providerWalletFloorUsd: number }).providerWalletFloorUsd
+      : PROVIDER_WALLET_FLOOR_USD;
+  const isProviderDebtCapped = !!(walletData as { isProviderDebtCapped?: boolean })?.isProviderDebtCapped;
   const userRating =
     typeof (walletData as { rating?: number } | undefined)?.rating === "number"
       ? (walletData as { rating: number }).rating
       : 5;
   const formatWallet = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+  const formatWalletDetailed = (n: number) =>
+    new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
   const [location] = useLocation();
   const { exploreCategoryDisplayName: exploreCategoryFromContext } = useExploreCategoryDisplayName();
   const { data: categories = [] } = useCategories();
@@ -283,7 +293,7 @@ export function Navigation() {
         <div className="flex items-center gap-8">
           <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-1.5 min-[400px]:gap-2 shrink-0">
             <img
-              src="/logo-GenFeb.jpg"
+              src="/logo-genfeb.jpg"
               alt=""
               className="h-7 w-7 min-[400px]:h-8 min-[400px]:w-8 shrink-0 bg-white object-contain"
               width={32}
@@ -680,6 +690,44 @@ export function Navigation() {
             <h2 className="text-xl font-bold text-foreground tracking-tight">Mi Servicio</h2>
             <p className="text-sm text-muted-foreground mt-1">Tu publicación destacada</p>
           </div>
+
+          {providerProfile ? (
+            <div className="mt-5 rounded-xl border border-border/70 bg-muted/30 p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Cartera GenFeb</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-border/60 bg-background/80 px-3 py-2.5">
+                  <p className="text-[10px] font-medium text-muted-foreground">Saldo actual</p>
+                  <p
+                    className={cn(
+                      "mt-0.5 text-base font-bold tabular-nums leading-tight",
+                      walletBalance < 0 && "text-amber-600 dark:text-amber-400"
+                    )}
+                  >
+                    {walletData === undefined ? "—" : formatWalletDetailed(walletBalance)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.07] px-3 py-2.5 dark:bg-amber-500/10">
+                  <p className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                    <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600" aria-hidden />
+                    Máx. saldo negativo
+                  </p>
+                  <p className="mt-0.5 text-base font-bold tabular-nums leading-tight text-foreground">
+                    {walletData === undefined ? "—" : formatWalletDetailed(providerWalletFloorUsd)}
+                  </p>
+                </div>
+              </div>
+              {isProviderDebtCapped ? (
+                <p className="mt-3 text-[11px] leading-snug text-amber-950 dark:text-amber-100 border-t border-amber-500/25 pt-3">
+                  Llegaste al límite de deuda: no podrás aceptar más servicios pagados en efectivo o transferencia hasta
+                  recargar (donde aplique). Podrás seguir con pago en Saldo GenFeb.
+                </p>
+              ) : (
+                <p className="mt-3 text-[10px] text-muted-foreground leading-snug">
+                  Con efectivo o transferencia, GenFeb retiene comisión; el saldo no puede bajar de este piso.
+                </p>
+              )}
+            </div>
+          ) : null}
 
           <div className="mt-5 space-y-4">
             {myServicesLoading ? (

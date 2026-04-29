@@ -7,12 +7,18 @@ type PushPayload = {
   data?: Record<string, string>;
 };
 
+type DevicePlatform = "web" | "android" | "ios" | "unknown";
+
 class NotificationService {
   private normalizeUserId(userId: string | number): string {
     return String(userId);
   }
 
-  async registerDeviceToken(userId: string | number, token: string): Promise<void> {
+  async registerDeviceToken(
+    userId: string | number,
+    token: string,
+    platform: DevicePlatform = "unknown"
+  ): Promise<void> {
     const uid = this.normalizeUserId(userId);
     const db = getFirestore();
     if (!db) {
@@ -38,7 +44,7 @@ class NotificationService {
       token,
       createdAt: new Date(),
       updatedAt: new Date(),
-      platform: "web",
+      platform: platform || "unknown",
     });
     console.log("[push] Token registrado correctamente para usuario:", uid);
   }
@@ -129,9 +135,26 @@ class NotificationService {
         notification: {
           title: payload.title,
           body: payload.body,
-          icon: "/genfeb-mark.svg",
+          icon: "/favicon.png",
         },
         fcmOptions: data.url ? { link: data.url } : undefined,
+      },
+      // Android / iOS: importante para que el mismo envío funcione con tokens de teléfono.
+      android: {
+        priority: "high",
+        notification: {
+          title: payload.title,
+          body: payload.body,
+          icon: "ic_launcher",
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            alert: { title: payload.title, body: payload.body },
+            sound: "default",
+          },
+        },
       },
     };
 

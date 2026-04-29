@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Link, useLocation } from "wouter";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, Phone, Radio, Settings, Star, Wallet, XCircle } from "lucide-react";
+import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, Phone, Radio, Settings, Star, XCircle } from "lucide-react";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider, useWallet } from "@/hooks/use-mango-data";
@@ -256,8 +256,15 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 
   useEffect(() => {
     if (!socket) return;
-    const onCargoOffer = (p: CargoRideOfferPayload) => goDriverUi?.pushOffer("cargo", p);
-    const onPackOffer = (p: CargoRideOfferPayload) => goDriverUi?.pushOffer("pack", p);
+    const onCargoOffer = (p: CargoRideOfferPayload) => {
+      // Si ya hay un servicio activo, ignorar ofertas nuevas (evita modal pegado/sonido).
+      if (activeRideIdRef.current) return;
+      goDriverUi?.pushOffer("cargo", p);
+    };
+    const onPackOffer = (p: CargoRideOfferPayload) => {
+      if (activeRideIdRef.current) return;
+      goDriverUi?.pushOffer("pack", p);
+    };
     const onCargoTaken = (p: { rideId: string }) => {
       if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
     };
@@ -296,6 +303,38 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       socket.off("pack:ride:cancelled", onPackCancelled);
     };
   }, [socket, goDriverUi]);
+
+  // Recovery: si el driver estaba en otra vista cuando llegó la oferta, al abrir esta vista consultamos el backend.
+  useEffect(() => {
+    if (!goDriverUi) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const auth = localStorage.getItem("token");
+        const headers: Record<string, string> = auth ? { Authorization: `Bearer ${auth}` } : {};
+        const [cargoRes, packRes] = await Promise.all([
+          fetch("/api/mobility/driver/pending-offer", { headers }),
+          fetch("/api/pack/driver/pending-offer", { headers }),
+        ]);
+        const cargo = cargoRes.ok ? await cargoRes.json().catch(() => null) : null;
+        const pack = packRes.ok ? await packRes.json().catch(() => null) : null;
+        if (cancelled) return;
+        const cargoOffer = cargo?.offer ?? null;
+        const packOffer = pack?.offer ?? null;
+        if (cargoOffer && !activeRideIdRef.current) {
+          goDriverUi.pushOffer("cargo", cargoOffer);
+        } else if (packOffer && !activeRideIdRef.current) {
+          goDriverUi.pushOffer("pack", packOffer);
+        }
+      } catch {
+        // silencio: solo es recovery
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [goDriverUi]);
 
   useEffect(() => {
     if (!incomingOpen) return;
@@ -370,9 +409,19 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       resetChat();
       setActiveConversationId(null);
     };
-    const onCancelled = (p: { rideId: string; cancelledBy: "rider" | "driver" }) => {
+    const onCancelled = (p: { rideId: string; cancelledBy?: "rider" | "driver" }) => {
       if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
-      if (p.rideId !== activeRideIdRef.current) return;
+      // Si era una oferta (búsqueda) y el usuario cancela, cerrar al instante y avisar.
+      if (p.rideId !== activeRideIdRef.current) {
+        const offerId = goDriverUi?.currentOffer?.offer?.rideId ?? null;
+        const by = p.cancelledBy ?? "rider";
+        if (offerId === p.rideId && by === "rider") {
+          toast({
+            description: "El usuario canceló la búsqueda de vehículo.",
+          });
+        }
+        return;
+      }
       clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       setActiveRideId(null);
       setActiveRideOffer(null);
@@ -385,7 +434,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       if (activeConversationId != null) purgeConversationCache(queryClient, activeConversationId);
       resetChat();
       setActiveConversationId(null);
-      if (p.cancelledBy === "rider") {
+      if ((p.cancelledBy ?? "rider") === "rider") {
         toast({
           title: "El pasajero canceló",
           description: "El viaje quedó anulado. Puedes seguir recibiendo pedidos.",
@@ -484,7 +533,15 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const respondToOffer = async (accept: boolean) => {
     if (!incomingOffer) return;
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) {
+      toast({
+        title: "Sesión expirada",
+        description: "Vuelve a iniciar sesión para poder aceptar o rechazar servicios.",
+        variant: "destructive",
+      });
+      setLocation("/login");
+      return;
+    }
     setRespondBusy(true);
     try {
       const base = incomingModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
@@ -494,11 +551,24 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         body: JSON.stringify({ accept }),
       });
       const data = (await res.json().catch(() => ({}))) as { conversationId?: number; message?: string };
-      if (!res.ok) throw new Error(data.message || "No se pudo responder");
+      if (!res.ok) {
+        const msg = data.message || "No se pudo responder";
+        // Si la oferta ya expiró o se reasignó, cerrar el modal y seguir con la cola.
+        if (
+          msg.toLowerCase().includes("expir") ||
+          msg.toLowerCase().includes("reasign") ||
+          msg.toLowerCase().includes("ya no") ||
+          msg.toLowerCase().includes("no está disponible")
+        ) {
+          goDriverUi?.resolveOfferAndShowNext(incomingOffer.rideId);
+        }
+        throw new Error(msg);
+      }
       const snapOffer = incomingOffer;
-      goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
-      if (accept && data.conversationId != null) {
-        setActiveConversationId(data.conversationId);
+      // Al responder, cerrar el modal y limpiar cola para que no siga sonando.
+      goDriverUi?.clearOffers?.();
+      if (accept) {
+        if (data.conversationId != null) setActiveConversationId(data.conversationId);
         setActiveRideId(snapOffer.rideId);
         setActiveRideOffer(snapOffer);
         setActiveRideStarted(false);
@@ -822,23 +892,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const formatUsdLocal = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(n);
 
-  const driverWalletButton = (
-    <Button
-      type="button"
-      variant="secondary"
-      className="w-full justify-between border-border/80 bg-background/90 text-left text-xs h-auto min-h-10 py-2.5 gap-2"
-      onClick={() => setDriverWalletOpen(true)}
-    >
-      <span className="flex min-w-0 items-center gap-2">
-        <Wallet className="h-4 w-4 shrink-0" aria-hidden />
-        <span className="truncate">{goSlug === "pack" ? "Saldo y deuda (Pack Go)" : "Saldo y deuda (Car Go)"}</span>
-      </span>
-      <span className={cn("shrink-0 font-semibold tabular-nums", walletBalance < 0 && "text-amber-600")}>
-        {formatUsdLocal(walletBalance)}
-      </span>
-    </Button>
-  );
-
   /** Móvil: solo deslizante; historial, chat y ajustes van en la barra inferior Go. */
   const controlsBlockMobile = (
     <div className="space-y-1.5">
@@ -871,7 +924,11 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     </div>
   );
 
-  const activeServicePanel = activeRideOffer && !activeRidePanelCollapsed ? (
+  /** En escritorio el panel sigue visible aunque se haya ocultado en móvil (evita vista vacía). */
+  const showRidePanel =
+    !!activeRideOffer && (!activeRidePanelCollapsed || isMdUp);
+
+  const activeServicePanel = showRidePanel ? (
     <div className="rounded-2xl border border-border/70 bg-background/92 px-3 py-3 text-[11px] shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10">
       {(() => {
         const r = activeRideOffer.rider as unknown as { name?: string; lastName?: string; last_name?: string };
@@ -994,8 +1051,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     </div>
   ) : null;
 
-  const controlsBlockDesktop = (
-    <div className="space-y-3">
+  const controlsBlockDesktopSlides = (
+    <div className="space-y-4">
       {goSlug === "cargo" ? (
         <SlideToCargoOnline
           receiving={receivingCargo}
@@ -1006,6 +1063,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           disabled={!canReceive}
           slideNeedsExtraPush={false}
           goSlug="cargo"
+          className="border-border/60 bg-background/95 shadow-md ring-1 ring-black/[0.06] dark:bg-card/95 dark:ring-white/10"
         />
       ) : (
         <SlideToCargoOnline
@@ -1017,12 +1075,13 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           disabled={!canReceive}
           slideNeedsExtraPush={false}
           goSlug="pack"
+          className="border-border/60 bg-background/95 shadow-md ring-1 ring-black/[0.06] dark:bg-card/95 dark:ring-white/10"
         />
       )}
-      {driverWalletButton}
-
       {!receiving || !canReceive ? (
-        <p className="px-1 text-center text-[11px] text-muted-foreground">La brújula centra el mapa en tu posición.</p>
+        <p className="px-1 text-[11px] leading-relaxed text-muted-foreground lg:text-left lg:text-xs">
+          La brújula centra el mapa en tu posición.
+        </p>
       ) : null}
     </div>
   );
@@ -1153,41 +1212,55 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           {activeRideOffer && activeRidePanelCollapsed ? (
             <Button
               type="button"
-              variant="secondary"
-              className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] right-3 z-[120] h-11 w-11 rounded-full border border-border/70 bg-background/90 p-0 shadow-lg backdrop-blur-md"
+              variant="ghost"
+              className={cn(
+                "fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] right-3 z-[120] flex h-12 min-h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-white/95 p-0 shadow-none",
+                "bg-emerald-600 text-white shadow-[0_6px_20px_-2px_rgba(5,150,105,0.55),0_2px_8px_rgba(15,118,110,0.35)]",
+                "hover:bg-emerald-700 hover:text-white hover:shadow-lg",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
+                "[&_svg]:pointer-events-none [&_svg]:!h-6 [&_svg]:!w-6 [&_svg]:shrink-0",
+              )}
               onClick={() => setActiveRidePanelCollapsed(false)}
               aria-label="Mostrar panel del servicio"
             >
-              <ChevronUp className="h-5 w-5" aria-hidden />
+              <ChevronUp className="h-6 w-6 shrink-0" strokeWidth={2.5} aria-hidden />
             </Button>
           ) : null}
         </div>
       )}
 
-      {/* Escritorio / tablet: layout en columna clásico. */}
+      {/* Escritorio / tablet: mapa ancho + columna de controles (sin saldo fijo inferior). */}
       <div
-        className={cn(
-          "container mx-auto flex max-w-3xl flex-1 flex-col px-3 pt-4 sm:px-4",
-          !isMdUp && "hidden md:flex"
-        )}
+        className="container mx-auto hidden w-full max-w-full flex-1 flex-col gap-6 px-4 pb-10 pt-4 md:flex md:max-w-5xl md:gap-7 lg:max-w-6xl lg:gap-10 lg:px-6 xl:max-w-[88rem]"
       >
         {headerBlock}
 
-        <div className="min-h-0 flex-1">
-          <DriverCargoMap
-            vehicleType={providerVehicle?.vehicle_type}
-            receiving={receiving}
-            searchingClient={searchingClient}
-            start={null}
-            end={activeRideOffer ? serviceNavTarget : null}
-            routeGeometry={activeRideOffer ? serviceRouteGeometry : null}
-            routeRenderKey={serviceRouteRenderKey}
-          />
-        </div>
+        <div className="flex min-h-0 w-full flex-1 flex-col gap-5 lg:flex-row lg:items-stretch lg:gap-10">
+          <div className="relative flex min-h-[min(52vh,520px)] w-full min-w-0 flex-[1.4] flex-col overflow-hidden rounded-2xl border border-border/50 bg-muted/20 shadow-inner ring-1 ring-black/[0.04] dark:bg-muted/10 dark:ring-white/10 lg:min-h-[min(560px,calc(100vh-12rem))]">
+            <DriverCargoMap
+              fullscreen
+              showRecenter
+              vehicleType={providerVehicle?.vehicle_type}
+              receiving={receiving}
+              searchingClient={searchingClient}
+              start={null}
+              end={activeRideOffer ? serviceNavTarget : null}
+              routeGeometry={activeRideOffer ? serviceRouteGeometry : null}
+              routeRenderKey={serviceRouteRenderKey}
+            />
+          </div>
 
-        <div className="sticky bottom-16 z-20 mt-4 shrink-0 space-y-3 bg-background/85 pb-3 pt-2 backdrop-blur-sm">
-          {activeRideOffer ? activeServicePanel : null}
-          {controlsBlockDesktop}
+          <aside className="flex w-full min-w-0 shrink-0 flex-col gap-4 lg:max-w-[22rem] lg:flex-[0_1_340px] lg:sticky lg:top-20 xl:max-w-sm">
+            {activeRideOffer ? activeServicePanel : null}
+            {controlsBlockDesktopSlides}
+            <button
+              type="button"
+              className="-mt-1 w-full rounded-lg px-1 py-1.5 text-left text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground lg:text-xs"
+              onClick={() => setDriverWalletOpen(true)}
+            >
+              Saldo GenFeb · ver detalle de deuda / recarga
+            </button>
+          </aside>
         </div>
       </div>
 

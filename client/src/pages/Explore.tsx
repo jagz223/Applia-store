@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { useCategories, useCategoryVisibility, useServices, useSubcategories } from "@/hooks/use-mango-data";
 import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
@@ -15,20 +15,23 @@ const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
 
 export default function Explore() {
   const [, setLocation] = useLocation();
+  const searchQs = useSearch();
+  /** Query string sincronizada con wouter (incluye deep-links y navegación interna desde la home). */
+  const qp = useMemo(() => new URLSearchParams(searchQs || ""), [searchQs]);
+  /** Si el usuario llegó desde /categories, el botón atrás vuelve allí; si no, a /explore (todos los servicios). */
+  const exploreFrom = qp.get("from");
+  const providerCategoryFromUrl = qp.get("providerCategoryId");
+  const subcategoryFromUrl = qp.get("subcategoryId");
+  const parsedCatUrl = providerCategoryFromUrl ? Number(providerCategoryFromUrl) : NaN;
+  const parsedSubUrl = subcategoryFromUrl ? Number(subcategoryFromUrl) : NaN;
+
   const { setExploreCategoryDisplayName } = useExploreCategoryDisplayName();
   const [search, setSearch] = useState("");
-  const params = new URLSearchParams(window.location.search);
-  /** Si el usuario llegó desde /categories, el botón atrás vuelve allí; si no, a /explore (todos los servicios). */
-  const exploreFrom = params.get("from");
-  const initialProviderCategoryId = params.get("providerCategoryId");
-  const initialSubcategoryId = params.get("subcategoryId");
-  const parsedCatId = initialProviderCategoryId ? Number(initialProviderCategoryId) : undefined;
-  const parsedSubId = initialSubcategoryId ? Number(initialSubcategoryId) : undefined;
   const [selectedProviderCategoryId, setSelectedProviderCategoryId] = useState<number | undefined>(
-    !Number.isNaN(parsedCatId) ? parsedCatId : undefined
+    !Number.isNaN(parsedCatUrl) ? parsedCatUrl : undefined
   );
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<number | undefined>(
-    !Number.isNaN(parsedSubId) ? parsedSubId : undefined
+    !Number.isNaN(parsedSubUrl) ? parsedSubUrl : undefined
   );
   /** Panel de filtros (chips): expandido; al guardar o al bajar con scroll se pliega; al subir cerca del tope se despliega de nuevo */
   const [filtersPanelExpanded, setFiltersPanelExpanded] = useState(true);
@@ -79,10 +82,24 @@ export default function Explore() {
     refetch();
   }, [refetch]);
 
+  /** Al cambiar la URL (deep link o mismo patrín /explore?… desde la SPA), mantener filtros alineados. */
+  useEffect(() => {
+    if (!Number.isNaN(parsedCatUrl)) {
+      setSelectedProviderCategoryId(parsedCatUrl);
+    } else {
+      setSelectedProviderCategoryId(undefined);
+    }
+    if (!Number.isNaN(parsedSubUrl)) {
+      setSelectedSubcategoryId(parsedSubUrl);
+    } else {
+      setSelectedSubcategoryId(undefined);
+    }
+  }, [parsedCatUrl, parsedSubUrl]);
+
   /** Categorías con flujo propio: movilidad/tienda/delivery se abren en esta sección. */
   useEffect(() => {
-    if (!initialProviderCategoryId) return;
-    const id = Number(initialProviderCategoryId);
+    if (!providerCategoryFromUrl) return;
+    const id = Number(providerCategoryFromUrl);
     if (Number.isNaN(id) || categories.length === 0) return;
     const cat = categories.find((c) => c.id === id);
     if (!cat) return;
@@ -92,7 +109,7 @@ export default function Explore() {
     if (slug === "transport") return setLocation(`/go/cargo${fromQs}`);
     if (slug === "marketplace") return setLocation(`/go/shop${fromQs}`);
     if (slug === "delivery") return setLocation(`/go/pack${fromQs}`);
-  }, [categories, initialProviderCategoryId, exploreFrom, setLocation, hiddenSlugs]);
+  }, [categories, providerCategoryFromUrl, exploreFrom, setLocation, hiddenSlugs]);
 
   const verifiedServices = useMemo(
     () => (services ?? []).filter((s) => Boolean(s?.provider?.isVerified)),

@@ -28,12 +28,13 @@ import { useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
   DEFAULT_CATEGORIES,
+  MOBILITY_GO_PROVIDER_SLUGS,
   effectiveHiddenCategorySlugs,
   getCategoryDisplayName,
 } from "@shared/default-categories";
 
 /** Marcas con flujo propio (p. ej. taxi / mapa); no se reservan desde esta página. */
-const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set(["transport", "marketplace", "delivery"]);
+const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set(MOBILITY_GO_PROVIDER_SLUGS);
 import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { isBeforeToday } from "@/lib/date-utils";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";

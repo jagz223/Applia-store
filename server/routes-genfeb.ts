@@ -1593,8 +1593,10 @@ export async function registerGenFebRoutes(
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const token = (req.body?.token as string | undefined)?.trim();
       if (!token) return res.status(400).json({ message: "token es requerido" });
+      const platformRaw = (req.body?.platform as string | undefined) ?? "web";
+      const platform = ["web", "android", "ios"].includes(String(platformRaw)) ? String(platformRaw) : "unknown";
       console.log("[push] Usuario aceptó notificaciones push — userId:", String(userId));
-      await notificationService.registerDeviceToken(userId, token);
+      await notificationService.registerDeviceToken(userId, token, platform as any);
       res.status(204).send();
     } catch (error) {
       console.error("Error registering push token:", error);
