@@ -444,10 +444,16 @@ export default function HomePage() {
             {serviceCategories.map((category, index) => {
               const n = homeCounts?.[category.countKey];
               const c = n ?? 0;
-              const isGoBrand =
+              /** Car Go / Pack Go / Shop Go: sin número de conductores; texto fijo de disponibilidad. */
+              const isMobilityBrandSubtitle =
                 category.slug === "transport" || category.slug === "delivery" || category.slug === "marketplace";
-              const personWord = isGoBrand ? "conductores" : "asociados";
-              const countLabel = homeCountsLoading ? "…" : homeCountsError ? "—" : `${c} ${personWord}`;
+              const countLabel = isMobilityBrandSubtitle
+                ? "Conductores siempre disponibles para ti"
+                : homeCountsLoading
+                  ? "…"
+                  : homeCountsError
+                    ? "—"
+                    : `${c} asociados`;
               const isBrandInactive = hiddenSlugs.has(category.slug);
               const card = (
                 <Card
