@@ -293,7 +293,7 @@ export function Navigation() {
         <div className="flex items-center gap-8">
           <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-1.5 min-[400px]:gap-2 shrink-0">
             <img
-              src="/logo-genfeb.jpg"
+              src="/logo-Genfeb.jpg"
               alt=""
               className="h-7 w-7 min-[400px]:h-8 min-[400px]:w-8 shrink-0 bg-white object-contain"
               width={32}

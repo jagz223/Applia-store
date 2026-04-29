@@ -1350,7 +1350,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 onClick={goBack}
                 aria-label={fromCategories ? "Volver a categorías" : "Volver a Explorar"}
               >
-                <img src="/logo-genfeb.jpg" alt="" className="h-full w-full scale-110 object-contain" />
+                <img src="/logo-Genfeb.jpg" alt="" className="h-full w-full scale-110 object-contain" />
               </Button>
             ) : null}
             <div className="pointer-events-auto absolute inset-0 z-0 overflow-hidden bg-muted/30">
