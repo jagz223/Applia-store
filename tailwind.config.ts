@@ -103,7 +103,8 @@ export default {
         ring: "hsl(var(--ring) / <alpha-value>)",
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
+        /** Cuerpo alineado con service-hub (Quicksand) */
+        sans: ["Quicksand", "Inter", "system-ui", "sans-serif"],
         display: ["Orbitron", "system-ui", "sans-serif"],
         /** Hero marketing — mismas fuentes que service-hub (Fredoka / Quicksand) */
         hero: ["Fredoka", "Inter", "system-ui", "sans-serif"],

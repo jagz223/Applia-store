@@ -64,20 +64,9 @@ export function ProviderTermsOfUseContent() {
           </li>
         </ul>
         <p>
-          <strong>4.1. Saldo Genfeb (créditos en la plataforma):</strong>
+          <strong>4.1. Cláusula de Actualización de Valores:</strong>
           <br />
-          La denominación «Saldo Genfeb» designa el saldo electrónico registrado en la cuenta del usuario dentro de La
-          Plataforma, expresado en la moneda indicada en la aplicación, y destinado exclusivamente a operar en el
-          marketplace: reservas, pagos de servicios, liquidaciones pactadas con asociados y abonos verificados por el
-          operador. El Saldo Genfeb no constituye cuenta bancaria, depósito a la vista, billetera de dinero electrónico
-          regulada como tal ni instrumento de ahorro; La Plataforma no devenga ni paga intereses sobre dicho saldo. Las
-          reglas de uso, retención y liberación de montos (incluido el pago con reserva hasta la confirmación del
-          servicio) son las publicadas en la aplicación GenFeb y forman parte integrante de estas condiciones.
-        </p>
-        <p>
-          <strong>4.2. Cláusula de Actualización de Valores:</strong>
-          <br />
-          GenFeb se reserva la facultad de ajustar las tarifas, comisiones o suscripciones descritas bajo los
+          GenFeb se reserva la facultad de ajustar las tarifas o suscripciones descritas bajo los
           siguientes justificativos:
         </p>
         <ul className="list-disc pl-5 space-y-1">
@@ -104,10 +93,6 @@ export function ProviderTermsOfUseContent() {
           </li>
         </ul>
         <ul className="list-disc pl-5 ml-4 space-y-1">
-          <li>
-            <strong>Evasión (Desvío de Clientes):</strong> Intentar o concretar transacciones fuera de la plataforma
-            con clientes contactados vía GenFeb para evitar el pago del 10% de comisión o la suscripción.
-          </li>
           <li>
             <strong>Fraude:</strong> Suplantación de identidad o entrega de productos falsificados.
           </li>
@@ -139,9 +124,9 @@ export function ProviderTermsOfUseContent() {
           </li>
         </ul>
         <p>
-          <strong>⚠️ ADVERTENCIA:</strong> Aceptar tratos o intercambiar contactos personales para evadir la plataforma
-          anula automáticamente cualquier garantía, seguro o responsabilidad de GenFeb. No pongas en riesgo tu seguridad
-          ni tus pagos por acuerdos externos.
+          <strong>⚠️ ADVERTENCIA:</strong> Los acuerdos cerrados fuera de los canales oficiales de GenFeb pueden quedar
+          fuera del alcance de las garantías y medidas de soporte que la plataforma ofrece cuando la relación se gestiona
+          íntegramente a través de la aplicación.
         </p>
       </section>
 
