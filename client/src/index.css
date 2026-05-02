@@ -6,56 +6,56 @@
 
 @layer base {
   /**
-   * Paleta alineada con service-hub (mango + teal + neutros fríos).
-   * Referencia: service-hub/client/src/index.css
+   * Paleta marca GenFeb — azul marino + teal + lima (logo genfeb-logo-new.png).
+   * Primary = navy UI; Secondary = teal #00A896; Accent = lima #70E000.
    */
   :root {
-    --primary: 35 100% 55%;
+    --primary: 216 58% 24%;
     --primary-foreground: 0 0% 100%;
-    --primary-light: 35 100% 65%;
-    --primary-dark: 35 100% 45%;
+    --primary-light: 216 45% 38%;
+    --primary-dark: 216 66% 14%;
 
-    --secondary: 174 63% 47%;
+    --secondary: 172 100% 33%;
     --secondary-foreground: 0 0% 100%;
-    --secondary-light: 174 63% 57%;
-    --secondary-dark: 174 63% 37%;
+    --secondary-light: 172 78% 42%;
+    --secondary-dark: 172 100% 26%;
 
-    --accent: 34 100% 71%;
-    --accent-foreground: 30 40% 20%;
-    --accent-light: 34 100% 81%;
-    --accent-dark: 34 100% 61%;
+    --accent: 84 100% 42%;
+    --accent-foreground: 216 66% 14%;
+    --accent-light: 84 100% 52%;
+    --accent-dark: 84 100% 34%;
 
-    --background: 140 14% 99%;
-    --foreground: 220 25% 15%;
+    --background: 210 40% 99%;
+    --foreground: 216 35% 16%;
 
-    --muted: 210 20% 96%;
-    --muted-foreground: 220 10% 45%;
+    --muted: 215 28% 96%;
+    --muted-foreground: 216 18% 42%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 25% 15%;
-    --card-border: 220 15% 92%;
+    --card-foreground: 216 35% 16%;
+    --card-border: 215 22% 91%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 25% 15%;
-    --popover-border: 220 15% 92%;
+    --popover-foreground: 216 35% 16%;
+    --popover-border: 215 22% 91%;
 
-    --border: 220 15% 90%;
-    --input: 220 15% 90%;
-    --ring: 35 100% 55%;
+    --border: 215 20% 88%;
+    --input: 215 20% 88%;
+    --ring: 172 100% 33%;
 
-    --sidebar: 140 14% 97%;
-    --sidebar-foreground: 220 25% 15%;
-    --sidebar-border: 220 15% 90%;
-    --sidebar-primary: 35 100% 55%;
+    --sidebar: 215 32% 97%;
+    --sidebar-foreground: 216 35% 16%;
+    --sidebar-border: 215 20% 90%;
+    --sidebar-primary: 216 58% 24%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 35 100% 90%;
-    --sidebar-accent-foreground: 35 80% 25%;
-    --sidebar-ring: 35 100% 55%;
+    --sidebar-accent: 172 45% 94%;
+    --sidebar-accent-foreground: 172 100% 28%;
+    --sidebar-ring: 172 100% 33%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 174 63% 47%;
+    --success: 172 100% 33%;
     --success-foreground: 0 0% 100%;
 
     --warning: 38 92% 50%;
@@ -63,11 +63,11 @@
 
     --radius: 1rem;
 
-    --chart-1: 35 100% 55%;
-    --chart-2: 174 63% 47%;
-    --chart-3: 34 100% 71%;
-    --chart-4: 220 70% 50%;
-    --chart-5: 280 65% 60%;
+    --chart-1: 216 58% 28%;
+    --chart-2: 172 100% 33%;
+    --chart-3: 84 100% 42%;
+    --chart-4: 215 70% 50%;
+    --chart-5: 280 55% 58%;
 
     --button-outline: rgba(0, 0, 0, 0.1);
     --badge-outline: rgba(0, 0, 0, 0.05);
@@ -77,62 +77,62 @@
   }
 
   .dark {
-    --primary: 35 100% 55%;
+    --primary: 172 62% 52%;
     --primary-foreground: 0 0% 100%;
-    --primary-light: 35 100% 65%;
-    --primary-dark: 35 100% 45%;
+    --primary-light: 172 55% 62%;
+    --primary-dark: 172 65% 40%;
 
-    --secondary: 174 63% 50%;
+    --secondary: 172 48% 46%;
     --secondary-foreground: 0 0% 100%;
-    --secondary-light: 174 63% 58%;
-    --secondary-dark: 174 63% 38%;
+    --secondary-light: 172 42% 58%;
+    --secondary-dark: 172 52% 36%;
 
-    --accent: 34 100% 65%;
-    --accent-foreground: 30 80% 10%;
-    --accent-light: 34 100% 72%;
-    --accent-dark: 34 100% 55%;
+    --accent: 84 85% 54%;
+    --accent-foreground: 216 66% 12%;
+    --accent-light: 84 90% 62%;
+    --accent-dark: 84 80% 46%;
 
-    --background: 220 20% 10%;
-    --foreground: 220 10% 95%;
+    --background: 216 28% 9%;
+    --foreground: 210 25% 96%;
 
-    --muted: 220 15% 18%;
-    --muted-foreground: 220 10% 60%;
+    --muted: 216 22% 16%;
+    --muted-foreground: 215 15% 62%;
 
-    --card: 220 15% 14%;
-    --card-foreground: 220 10% 95%;
-    --card-border: 220 15% 22%;
+    --card: 216 24% 12%;
+    --card-foreground: 210 25% 96%;
+    --card-border: 216 18% 22%;
 
-    --popover: 220 15% 12%;
-    --popover-foreground: 220 10% 95%;
-    --popover-border: 220 15% 22%;
+    --popover: 216 26% 11%;
+    --popover-foreground: 210 25% 96%;
+    --popover-border: 216 18% 22%;
 
-    --border: 220 15% 25%;
-    --input: 220 15% 25%;
-    --ring: 35 100% 55%;
+    --border: 216 18% 22%;
+    --input: 216 18% 22%;
+    --ring: 172 62% 52%;
 
-    --sidebar: 220 20% 12%;
-    --sidebar-foreground: 220 10% 95%;
-    --sidebar-border: 220 15% 22%;
-    --sidebar-primary: 35 100% 55%;
+    --sidebar: 216 26% 10%;
+    --sidebar-foreground: 210 25% 96%;
+    --sidebar-border: 216 18% 20%;
+    --sidebar-primary: 172 62% 52%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 35 100% 20%;
-    --sidebar-accent-foreground: 35 100% 80%;
-    --sidebar-ring: 35 100% 55%;
+    --sidebar-accent: 172 35% 18%;
+    --sidebar-accent-foreground: 172 70% 78%;
+    --sidebar-ring: 172 62% 52%;
 
     --destructive: 0 70% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 174 63% 50%;
+    --success: 172 58% 48%;
     --success-foreground: 0 0% 100%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 0%;
 
-    --chart-1: 35 100% 55%;
-    --chart-2: 174 63% 50%;
-    --chart-3: 34 100% 65%;
-    --chart-4: 220 70% 60%;
-    --chart-5: 280 65% 65%;
+    --chart-1: 172 62% 52%;
+    --chart-2: 216 45% 58%;
+    --chart-3: 84 85% 54%;
+    --chart-4: 215 70% 60%;
+    --chart-5: 280 55% 62%;
 
     --button-outline: rgba(255, 255, 255, 0.1);
     --badge-outline: rgba(255, 255, 255, 0.05);
@@ -181,7 +181,9 @@
   
   .card-mango:hover {
     @apply border-primary/50;
-    box-shadow: 0 4px 30px rgba(255, 159, 28, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow:
+      0 4px 30px hsl(172 100% 33% / 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
   
   /* Glassmorphism effect */
@@ -191,22 +193,28 @@
   
   /* Glow effects with mango colors */
   .glow-primary {
-    box-shadow: 0 0 20px rgba(255, 159, 28, 0.4), 0 0 40px rgba(255, 159, 28, 0.2);
+    box-shadow:
+      0 0 20px hsl(216 58% 24% / 0.35),
+      0 0 40px hsl(216 58% 24% / 0.18);
   }
-  
+
   .glow-secondary {
-    box-shadow: 0 0 20px rgba(46, 196, 182, 0.4), 0 0 40px rgba(46, 196, 182, 0.2);
+    box-shadow:
+      0 0 20px hsl(172 100% 33% / 0.4),
+      0 0 40px hsl(172 100% 33% / 0.2);
   }
-  
+
   .glow-accent {
-    box-shadow: 0 0 20px rgba(255, 191, 105, 0.4), 0 0 40px rgba(255, 191, 105, 0.2);
+    box-shadow:
+      0 0 20px hsl(84 100% 42% / 0.35),
+      0 0 40px hsl(84 100% 42% / 0.18);
   }
   
   /* Grid background pattern */
   .grid-pattern {
-    background-image: 
-      linear-gradient(rgba(255, 159, 28, 0.1) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 159, 28, 0.1) 1px, transparent 1px);
+    background-image:
+      linear-gradient(hsl(172 100% 33% / 0.09) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(172 100% 33% / 0.09) 1px, transparent 1px);
     background-size: 40px 40px;
   }
   
@@ -411,21 +419,30 @@
   }
 
   /**
-   * «profesional» — mismo gradiente que service-hub (.gradient-text):
-   * primary → secondary en diagonal 135deg.
+   * «profesional» — gradiente marca (logo): navy → teal → lima.
    */
   .text-gradient-hero {
     @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+    background-image: linear-gradient(
+      105deg,
+      hsl(216 66% 22%) 0%,
+      hsl(172 100% 34%) 46%,
+      hsl(84 100% 40%) 100%
+    );
   }
 
   .dark .text-gradient-hero {
-    background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+    background-image: linear-gradient(
+      105deg,
+      hsl(210 75% 82%) 0%,
+      hsl(172 72% 58%) 48%,
+      hsl(84 88% 62%) 100%
+    );
   }
 
   /** service-hub: puntos sutiles sobre el hero */
   .pattern-dots {
-    background-image: radial-gradient(circle, hsl(var(--primary) / 0.1) 1px, transparent 1px);
+    background-image: radial-gradient(circle, hsl(var(--secondary) / 0.14) 1px, transparent 1px);
     background-size: 20px 20px;
   }
 
@@ -440,13 +457,13 @@
   }
 
   .btn-glow {
-    box-shadow: 0 0 30px -5px hsl(35 100% 55% / 0.4);
+    box-shadow: 0 0 28px -4px hsl(172 100% 33% / 0.45);
   }
   
   .bg-grid {
-    background-image: 
-      linear-gradient(rgba(255, 159, 28, 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 159, 28, 0.05) 1px, transparent 1px);
+    background-image:
+      linear-gradient(hsl(216 58% 24% / 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(216 58% 24% / 0.06) 1px, transparent 1px);
     background-size: 30px 30px;
   }
   
