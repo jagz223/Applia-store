@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { Banknote, Building2, Loader2, Wallet, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 
 export type TaxiVehicleKind = "moto" | "auto" | "pet_car" | "camioneta";
 
@@ -243,6 +244,7 @@ export function TaxiVehicleSearchModal({
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
                   <button
                     type="button"
                     onClick={() => onSelectPayment("genfeb")}
@@ -260,6 +262,7 @@ export function TaxiVehicleSearchModal({
                       Se te descontará de tu <strong className="text-foreground">Saldo</strong>.
                     </p>
                   </button>
+                  )}
 
                   <button
                     type="button"

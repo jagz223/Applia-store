@@ -6,6 +6,7 @@ import { useGoChat } from "@/contexts/GoChatContext";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useCategoryVisibility, useWallet, useWalletTransfers } from "@/hooks/use-mango-data";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DriverEarningsPanel } from "@/components/go/DriverEarningsPanel";
@@ -17,6 +18,7 @@ import { loadGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { getTransferTypeLabel } from "@/lib/invoice-pdf";
+import { QuickSettingsPanel } from "@/components/settings/QuickSettingsPanel";
 
 type Tab = {
   href: string;
@@ -42,6 +44,7 @@ export function GoBottomNav() {
   const [riderHistoryOpen, setRiderHistoryOpen] = useState(false);
   const [riderWalletOpen, setRiderWalletOpen] = useState(false);
   const [driverEarningsOpen, setDriverEarningsOpen] = useState(false);
+  const [goQuickSettingsOpen, setGoQuickSettingsOpen] = useState(false);
   const unreadNotif = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
 
   /** En escritorio: barra compacta centrada tipo “dock”, sin estirar 6 ítems a todo el ancho. */
@@ -103,12 +106,14 @@ export function GoBottomNav() {
     return () => window.clearInterval(t);
   }, [isDriverView, isRiderGoView]);
 
-  const { data: walletData } = useWallet({ enabled: riderWalletOpen && isRiderGoView && isAuthenticated });
+  const { data: walletData } = useWallet({
+    enabled: riderWalletOpen && isRiderGoView && isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED,
+  });
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
   const { data: walletTransfersData, isLoading: walletTransfersLoading } = useWalletTransfers({
     page: 1,
     limit: 12,
-    enabled: riderWalletOpen && isRiderGoView && isAuthenticated,
+    enabled: riderWalletOpen && isRiderGoView && isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED,
   });
 
   const tabs: Tab[] = useMemo(
@@ -125,7 +130,7 @@ export function GoBottomNav() {
               onClick: () => setRiderHistoryOpen(true),
             }
           : null,
-        !isDriverView && isRiderGoView
+        !isDriverView && isRiderGoView && FEATURE_WALLET_RECHARGE_UI_ENABLED
           ? {
               href: "__go_rider_wallet__",
               label: "Saldo",
@@ -137,6 +142,14 @@ export function GoBottomNav() {
                 }
                 setRiderWalletOpen(true);
               },
+            }
+          : null,
+        !isDriverView && isRiderGoView
+          ? {
+              href: "__go_quick_settings__",
+              label: "Config",
+              icon: <Settings className="h-5 w-5" aria-hidden />,
+              onClick: () => setGoQuickSettingsOpen(true),
             }
           : null,
         isDriverView && goDriverUi
@@ -182,6 +195,7 @@ export function GoBottomNav() {
       isAuthenticated,
       toast,
       setLocation,
+      FEATURE_WALLET_RECHARGE_UI_ENABLED,
     ]
   );
 
@@ -350,7 +364,7 @@ export function GoBottomNav() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={riderWalletOpen} onOpenChange={setRiderWalletOpen}>
+      <Sheet open={FEATURE_WALLET_RECHARGE_UI_ENABLED && riderWalletOpen} onOpenChange={setRiderWalletOpen}>
         <SheetContent side="bottom" className="max-h-[min(92dvh,720px)] overflow-y-auto rounded-t-2xl">
           <SheetHeader className="text-left space-y-1.5">
             <SheetTitle>Saldo GenFeb</SheetTitle>
@@ -436,6 +450,26 @@ export function GoBottomNav() {
                 )}
               </div>
             </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={goQuickSettingsOpen} onOpenChange={setGoQuickSettingsOpen}>
+        <SheetContent
+          side="bottom"
+          className="max-h-[min(90dvh,680px)] overflow-y-auto rounded-t-2xl sm:mx-auto sm:max-w-lg"
+        >
+          <SheetHeader className="text-left space-y-1.5 sm:pr-6">
+            <SheetTitle className="font-display text-lg">Configuración</SheetTitle>
+            <SheetDescription>
+              Preferencias rápidas; el perfil completo sigue en la misma sección Configuración del sitio.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-5">
+            <QuickSettingsPanel
+              returnPath={location.split("?")[0] || "/go/cargo"}
+              onNavigate={() => setGoQuickSettingsOpen(false)}
+            />
           </div>
         </SheetContent>
       </Sheet>

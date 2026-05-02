@@ -647,7 +647,7 @@ export function useUpdateBookingSchedule() {
   });
 }
 
-/** Confirmación del cliente (handshake/escrow): debita wallet y retiene en pendingBalance del profesional. */
+/** Confirmación del cliente (pago seguro): debita wallet y retiene en pendingBalance del profesional. */
 export function useConfirmBookingByClient() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -903,7 +903,7 @@ export function useRechargeRequest() {
   });
 }
 
-/** Solicitar retiro: mueve fondos de wallet a “en proceso de retiro” (escrow). Falla si ya hay retiro pendiente o saldo insuficiente. */
+/** Solicitar retiro: mueve fondos de wallet a “en proceso de retiro” (retención hasta aprobación). Falla si ya hay retiro pendiente o saldo insuficiente. */
 export function useWithdraw() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -99,8 +99,8 @@ export default function HomePage() {
     },
     {
       icon: CreditCard,
-      title: "Pagos Escrow",
-      description: "Pagos seguros con Stripe/PayPal. El dinero se libera tras confirmar el servicio.",
+      title: "Pagos seguros",
+      description: "El dinero queda protegido hasta confirmar el servicio. Pagos seguros con Stripe/PayPal.",
       color: "text-accent",
       bgColor: "bg-accent/10"
     },
@@ -229,53 +229,49 @@ export default function HomePage() {
   return (
     <div className="relative flex flex-col min-h-screen overflow-x-hidden">
       
-      {/* HERO SECTION */}
-      <section className="relative overflow-hidden pt-8 pb-20 md:pt-16 md:pb-32">
-        {/* Background decorations */}
-        <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/10 via-background to-accent/10"></div>
-        <div className="absolute top-20 right-10 -z-10 h-[400px] w-[400px] bg-primary/20 blur-[120px] rounded-full"></div>
-        <div className="absolute bottom-20 left-10 -z-10 h-[300px] w-[300px] bg-accent/20 blur-[100px] rounded-full"></div>
-        <div className="absolute inset-0 -z-10 grid-pattern opacity-30"></div>
-        
-        <div className="container px-4 sm:px-6 lg:px-8 mx-auto max-w-7xl">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
-            
-            {/* Hero Text */}
-            <motion.div 
-              initial={{ opacity: 0, y: 30 }}
+      {/* HERO SECTION — mismas fuentes / gradiente / fondo que service-hub */}
+      <section className="relative overflow-hidden pt-8 pb-16 md:pt-14 md:pb-24">
+        <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/5 via-background to-secondary/5" />
+        <div className="pointer-events-none absolute top-20 right-10 -z-10 h-[400px] w-[400px] rounded-full bg-primary/20 blur-[120px]" />
+        <div className="pointer-events-none absolute bottom-20 left-10 -z-10 h-[300px] w-[300px] rounded-full bg-secondary/20 blur-[100px]" />
+        <div className="absolute inset-0 -z-10 pattern-dots opacity-30" />
+
+        <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-20">
+            {/* Columna texto */}
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.7, ease: "easeOut" }}
+              transition={{ duration: 0.65, ease: "easeOut" }}
               className="space-y-8"
             >
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.2 }}
-                className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-bold text-primary shadow-lg shadow-primary/10"
+                transition={{ delay: 0.1 }}
+                className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 font-marketing text-sm font-bold text-primary shadow-lg shadow-primary/10"
               >
-                <span className="flex h-2.5 w-2.5 rounded-full bg-primary animate-pulse"></span>
-                Ecosystem GENFECORP
+                <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-primary" aria-hidden />
+                Tu plataforma de servicios #1
               </motion.div>
-              
-              <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-display font-bold text-foreground leading-[1.1]">
-                Genfeb: la plataforma de <span className="text-gradient-primary">servicios</span> más avanzada
+
+              <h1 className="font-hero text-4xl font-bold leading-[1.1] text-foreground sm:text-5xl md:text-6xl lg:text-7xl">
+                Encuentra al <span className="text-gradient-hero">profesional</span> perfecto
               </h1>
-              
-              <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-lg">
-                Conecta con asociados verificados para servicios técnicos, legales, financieros y mantenimiento. 
-                Todo en un solo lugar con la garantía de GenFeb.
+
+              <p className="font-marketing max-w-lg text-lg leading-relaxed text-muted-foreground md:text-xl">
+                Conecta con expertos verificados para cualquier tarea. Desde reparaciones del hogar hasta servicios digitales.
               </p>
 
-              {/* Quick Search */}
               {SHOW_HOME_SEARCH_PANEL && (
-                <div className="p-4 rounded-xl bg-card/80 backdrop-blur border border-border">
-                  <div className="flex flex-col sm:flex-row gap-3">
+                <div className="rounded-2xl border border-border bg-card/90 p-4 backdrop-blur">
+                  <div className="flex flex-col gap-3 sm:flex-row">
                     <div className="relative flex-1">
                       <Search className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
                       <input
                         type="text"
                         placeholder="¿Qué servicio necesitas?"
-                        className="w-full h-12 pl-10 pr-4 rounded-lg bg-background border border-border focus:border-primary focus:outline-none"
+                        className="h-12 w-full rounded-xl border border-border bg-background pl-10 pr-4 focus:border-primary focus:outline-none"
                       />
                     </div>
                     <div className="relative sm:w-48">
@@ -283,113 +279,131 @@ export default function HomePage() {
                       <input
                         type="text"
                         placeholder="Ubicación"
-                        className="w-full h-12 pl-10 pr-4 rounded-lg bg-background border border-border focus:border-primary focus:outline-none"
+                        className="h-12 w-full rounded-xl border border-border bg-background pl-10 pr-4 focus:border-primary focus:outline-none"
                       />
                     </div>
-                    <Button className="h-12 px-8 bg-primary hover:bg-primary/90">
-                      Buscar
-                    </Button>
+                    <Button className="h-12 shrink-0 rounded-xl px-8">Buscar</Button>
                   </div>
                 </div>
               )}
 
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Link href="/explore">
-                  <Button size="lg" className="h-14 px-8 rounded-full text-lg shadow-xl shadow-primary/25 hover:scale-105 transition-all duration-300 btn-shine btn-glow">
-                    Explorar Servicios <ArrowRight className="ml-2 h-5 w-5" />
+              <div className="flex flex-col gap-4 sm:flex-row">
+                <Link href="/explore" className="w-full sm:w-auto">
+                  <Button
+                    size="lg"
+                    className="font-marketing h-14 w-full rounded-full px-8 text-lg shadow-xl shadow-primary/30 transition-all duration-300 hover:scale-105 sm:w-auto btn-shine btn-glow"
+                  >
+                    Explorar Servicios
+                    <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                 </Link>
-                <Link href="/booking">
-                  <Button size="lg" variant="outline" className="h-14 px-8 rounded-full text-lg border-2 border-accent text-accent hover:bg-accent hover:text-white transition-all duration-300">
-                    <Calendar className="mr-2 h-5 w-5" />
-                    Reservar Ahora
+                <Link
+                  href={showBecomePro ? "/become-pro" : "/register"}
+                  className="w-full sm:w-auto"
+                >
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                  >
+                    Ofrecer Servicios
                   </Button>
                 </Link>
               </div>
 
-              {/* Trust indicators */}
-              <div className="flex flex-wrap items-center gap-6 pt-4">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle className="h-5 w-5 text-accent" />
-                  <span>Asociados verificados</span>
+              <div className="flex flex-wrap items-center gap-6 pt-4 font-marketing text-sm text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 shrink-0 text-secondary" aria-hidden />
+                  <span>Profesionales verificados</span>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Shield className="h-5 w-5 text-accent" />
-                  <span>Pagos seguros Escrow</span>
+                <div className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 shrink-0 text-secondary" aria-hidden />
+                  <span>Pagos seguros</span>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Users className="h-5 w-5 text-accent" />
-                  <span>+10,000 usuarios</span>
+                <div className="flex items-center gap-2">
+                  <Users className="h-5 w-5 shrink-0 text-secondary" aria-hidden />
+                  <span>+1.000 usuarios</span>
                 </div>
               </div>
             </motion.div>
 
-            {/* Hero Visual */}
-            <motion.div 
-              initial={{ opacity: 0, x: 50 }}
+            {/* Columna visual — rejilla 2 columnas como service-hub */}
+            <motion.div
+              initial={{ opacity: 0, x: 28 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.7, delay: 0.3 }}
-              className="relative hidden lg:block"
+              transition={{ duration: 0.65, delay: 0.15 }}
+              className="relative mx-auto hidden w-full max-w-xl md:mx-0 md:block md:max-w-none"
             >
-              <div className="relative w-full aspect-square max-w-[500px] mx-auto">
-                {/* Main circle */}
-                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-primary/30 to-accent/30 blur-3xl"></div>
-                
-                {/* Floating cards */}
-                <motion.div 
-                  animate={{ y: [0, -10, 0] }}
-                  transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute top-10 right-0 card-industrial p-4 w-48"
-                >
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 rounded-lg bg-accent/10">
-                      <CreditCard className="w-5 h-5 text-accent" />
+              <div className="relative z-10 grid grid-cols-2 gap-5">
+                <div className="space-y-5 translate-y-10">
+                  <motion.div
+                    whileHover={{ rotate: 0, scale: 1.02 }}
+                    className="-rotate-2 overflow-hidden rounded-3xl shadow-2xl shadow-primary/20 ring-4 ring-white dark:ring-background sm:-rotate-[4deg]"
+                  >
+                    <img
+                      src="https://images.unsplash.com/photo-1621905252507-b35492cc74b4?w=400&h=500&fit=crop"
+                      alt="Profesional de servicios"
+                      className="h-56 w-full object-cover sm:h-64"
+                      width={400}
+                      height={500}
+                      loading="eager"
+                      decoding="async"
+                    />
+                  </motion.div>
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.55 }}
+                    className="glass-card ml-auto max-w-[220px] rounded-2xl p-5"
+                  >
+                    <div className="mb-3 flex items-center gap-3">
+                      <div className="rounded-xl bg-green-100 p-2 text-green-600 dark:bg-emerald-950/50 dark:text-emerald-400">
+                        <Shield className="h-5 w-5" aria-hidden />
+                      </div>
+                      <span className="font-bold text-foreground">100% Verificados</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Pago Escrow</p>
-                      <p className="font-bold text-accent">$450</p>
-                    </div>
-                  </div>
-                  <div className="h-2 bg-accent/20 rounded-full overflow-hidden">
-                    <div className="h-full bg-accent w-3/4 rounded-full"></div>
-                  </div>
-                </motion.div>
+                    <p className="text-sm text-muted-foreground">
+                      Todos los proveedores pasan por un proceso de verificación.
+                    </p>
+                  </motion.div>
+                </div>
 
-                <motion.div 
-                  animate={{ y: [0, 10, 0] }}
-                  transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
-                  className="absolute bottom-20 left-0 card-industrial p-4 w-52"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-primary/10">
-                      <Shield className="w-5 h-5 text-primary" />
+                <div className="space-y-5">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.45 }}
+                    className="glass-card max-w-[220px] rounded-2xl p-5"
+                  >
+                    <div className="mb-3 flex items-center gap-3">
+                      <div className="rounded-xl bg-amber-100 p-2 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
+                        <Star className="h-5 w-5 fill-current" aria-hidden />
+                      </div>
+                      <span className="font-bold text-foreground">4.9/5 Estrellas</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Documentos</p>
-                      <p className="font-bold">Cifrados AES-256</p>
-                    </div>
-                  </div>
-                </motion.div>
-
-                <motion.div 
-                  animate={{ y: [0, -15, 0] }}
-                  transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 card-industrial p-6 w-64"
-                >
-                  <div className="text-center">
-                    <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-3 glow-primary">
-                      <Star className="w-8 h-8 text-primary" />
-                    </div>
-                    <p className="text-2xl font-bold font-display">4.9</p>
-                    <p className="text-sm text-muted-foreground">Calificación promedio</p>
-                    <div className="flex justify-center gap-1 mt-2">
-                      {[1,2,3,4,5].map((s) => (
-                        <Star key={s} className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                      ))}
-                    </div>
-                  </div>
-                </motion.div>
+                    <p className="text-sm text-muted-foreground">
+                      Calificación promedio de nuestros profesionales.
+                    </p>
+                  </motion.div>
+                  <motion.div
+                    whileHover={{ rotate: 0, scale: 1.02 }}
+                    className="rotate-2 overflow-hidden rounded-3xl shadow-2xl shadow-secondary/20 ring-4 ring-white dark:ring-background sm:rotate-[4deg]"
+                  >
+                    <img
+                      src="https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&h=500&fit=crop"
+                      alt="Servicio profesional"
+                      className="h-56 w-full object-cover sm:h-64"
+                      width={400}
+                      height={500}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  </motion.div>
+                </div>
               </div>
+
+              <div className="pointer-events-none absolute -right-10 -top-10 z-0 h-40 w-40 rounded-full bg-accent/40 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-10 -left-10 z-0 h-32 w-32 rounded-full bg-secondary/40 blur-3xl" />
             </motion.div>
           </div>
         </div>
@@ -432,7 +446,7 @@ export default function HomePage() {
             <Badge variant="outline" className="mb-3 sm:mb-4 border-accent/50 text-accent">
               Categorías
             </Badge>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-bold mb-2 sm:mb-4">
+            <h2 className="font-hero text-2xl font-bold tracking-tight text-foreground sm:text-3xl md:text-4xl mb-2 sm:mb-4">
               Explora todos los servicios
             </h2>
             <p className="text-sm sm:text-lg text-muted-foreground max-w-2xl mx-auto">

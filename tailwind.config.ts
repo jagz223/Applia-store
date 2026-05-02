@@ -105,6 +105,9 @@ export default {
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
         display: ["Orbitron", "system-ui", "sans-serif"],
+        /** Hero marketing — mismas fuentes que service-hub (Fredoka / Quicksand) */
+        hero: ["Fredoka", "Inter", "system-ui", "sans-serif"],
+        marketing: ["Quicksand", "Inter", "system-ui", "sans-serif"],
         mono: ["JetBrains Mono", "monospace"],
       },
       boxShadow: {

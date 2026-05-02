@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Pencil,
   Banknote,
+  Building2,
   Cog,
   Lightbulb,
   LineChart,
@@ -52,22 +53,18 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
+import { cn } from "@/lib/utils";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED, FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 
 const SKILL_ICONS = [Cog, Lightbulb, LineChart, Wrench, Sparkles, Target, Award] as const;
 
-/** Paleta alineada al diseño de referencia (crema, dorado/naranja, verde éxito). */
-const cream = {
-  page: "#FDFBF7",
-  box: "#F2F2F2",
-};
+/** Acentos fijos para CTAs; fondos siempre desde tokens tema (modo oscuro/claro). */
 const gold = {
   accent: "#D48806",
   darkGoldenrod: "#B8860B",
   ctaFrom: "#F39C12",
   ctaTo: "#E67E22",
 };
-const success = "#27AE60";
-
 export default function ServiceDetails() {
   const [, params] = useRoute("/service/:id");
   const [, setLocation] = useLocation();
@@ -78,7 +75,9 @@ export default function ServiceDetails() {
   // ... rest of the component
   const { data: myProviderProfile } = useCurrentProvider();
   const { data: myBookings } = useBookings();
-  const { data: walletData, isLoading: walletLoading } = useWallet({ enabled: isAuthenticated });
+  const { data: walletData, isLoading: walletLoading } = useWallet({
+    enabled: isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED,
+  });
   const providerId = Number((service as any)?.providerId ?? (service as any)?.provider?.id);
   const {
     data: completedCount,
@@ -91,7 +90,9 @@ export default function ServiceDetails() {
   const [notes, setNotes] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"wallet" | "cash">("wallet");
+  const [paymentMethod, setPaymentMethod] = useState<"wallet" | "cash" | "bank_transfer">(
+    FEATURE_WALLET_RECHARGE_UI_ENABLED ? "wallet" : "cash"
+  );
   const { toast } = useToast();
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
 
@@ -107,7 +108,7 @@ export default function ServiceDetails() {
       return;
     }
     
-    if (walletLoading) {
+    if (FEATURE_WALLET_RECHARGE_UI_ENABLED && walletLoading) {
       toast({
         title: "Validando Saldo Genfeb",
         description: "Estamos cargando tu Saldo Genfeb, intenta de nuevo en un momento.",
@@ -116,7 +117,14 @@ export default function ServiceDetails() {
     }
 
     const servicePrice = Number(service?.price ?? 0);
-    if (service && paymentMethod === "wallet" && Number.isFinite(servicePrice) && servicePrice > 0 && walletBalance < servicePrice) {
+    if (
+      FEATURE_WALLET_RECHARGE_UI_ENABLED &&
+      service &&
+      paymentMethod === "wallet" &&
+      Number.isFinite(servicePrice) &&
+      servicePrice > 0 &&
+      walletBalance < servicePrice
+    ) {
       setInsufficientFundsOpen(true);
       return;
     }
@@ -212,37 +220,36 @@ export default function ServiceDetails() {
   const showChatButton = isAuthenticated && (isOwnService || hasBookingForThisService);
 
   return (
-    <div
-      className="min-h-screen overflow-x-hidden dark:bg-background"
-      style={{ backgroundColor: cream.page }}
-    >
+    <div className="min-h-screen overflow-x-hidden bg-[#FDFBF7] text-foreground dark:bg-background dark:text-foreground">
     <div className="container mx-auto max-w-6xl px-4 py-8">
-      <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Saldo Genfeb insuficiente</AlertDialogTitle>
-            <AlertDialogDescription>
-              No tienes suficiente Saldo Genfeb para pedir este servicio. Añade saldo para continuar.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setInsufficientFundsOpen(false);
-                setDialogOpen(false);
-                setLocation("/recharge");
-              }}
-            >
-              Añadir saldo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+        <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Saldo Genfeb insuficiente</AlertDialogTitle>
+              <AlertDialogDescription>
+                No tienes suficiente Saldo Genfeb para pedir este servicio. Añade saldo para continuar.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setInsufficientFundsOpen(false);
+                  setDialogOpen(false);
+                  setLocation("/recharge");
+                }}
+              >
+                Añadir saldo
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
 
       <Link
         href="/explore"
-        className="mb-6 inline-flex items-center text-neutral-600 transition-colors hover:text-[#D48806] dark:text-muted-foreground dark:hover:text-primary"
+        className="mb-6 inline-flex items-center text-muted-foreground transition-colors hover:text-primary"
       >
         <ArrowLeft className="mr-2 h-4 w-4" /> Volver a los servicios
       </Link>
@@ -255,13 +262,10 @@ export default function ServiceDetails() {
         {/* COLUMNA IZQUIERDA: perfil + contenido */}
         <div className="min-w-0 max-w-full space-y-10 break-words">
           {/* Hero perfil (estilo referencia) */}
-          <section className="relative isolate rounded-2xl border border-neutral-200/90 bg-white p-6 shadow-sm md:p-8 dark:border-border dark:bg-card/80">
+          <section className="relative isolate rounded-2xl border border-border bg-card p-6 shadow-sm md:p-8">
             <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
               <div className="relative shrink-0">
-                <Avatar
-                  className="h-32 w-32 border-2 border-white shadow-md ring-4 ring-[#C9A227]/90 md:h-40 md:w-40"
-                  style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}
-                >
+                <Avatar className="h-32 w-32 border-2 border-background shadow-md ring-4 ring-[#C9A227]/90 dark:border-card md:h-40 md:w-40">
                   <AvatarImage src={avatarUrl ?? undefined} alt="" className="object-cover" />
                   <AvatarFallback className="bg-muted text-3xl font-semibold text-muted-foreground md:text-4xl">
                     {initials}
@@ -270,7 +274,7 @@ export default function ServiceDetails() {
               </div>
 
               <div className="min-w-0 flex-1 text-center sm:text-left">
-                <h1 className="font-display text-2xl font-bold tracking-tight text-neutral-950 md:text-3xl dark:text-foreground">
+                <h1 className="font-display text-2xl font-bold tracking-tight text-foreground md:text-3xl">
                   {displayName}
                 </h1>
                 {providerProfile?.isVerified ? (
@@ -287,24 +291,24 @@ export default function ServiceDetails() {
                   <div className="flex items-center gap-1.5" style={{ color: gold.accent }}>
                     <Star className="h-5 w-5 fill-current" aria-hidden />
                     {reviewTotal === 0 && ratingNum === 0 ? (
-                      <span className="font-medium text-neutral-600 dark:text-muted-foreground">Sin reseñas aún</span>
+                      <span className="font-medium text-muted-foreground">Sin reseñas aún</span>
                     ) : (
                       <>
-                        <span className="text-lg font-bold tabular-nums text-neutral-950 dark:text-foreground">
+                        <span className="text-lg font-bold tabular-nums text-foreground">
                           {ratingNum.toFixed(1)}
                         </span>
-                        <span className="text-neutral-600 dark:text-muted-foreground">
+                        <span className="text-muted-foreground">
                           ({reviewTotal === 1 ? "1 reseña" : `${reviewTotal} reseñas`})
                         </span>
                       </>
                     )}
                   </div>
-                  <p className="text-neutral-600 dark:text-muted-foreground">
+                  <p className="text-muted-foreground">
                     {completedCountLoading ? (
                       "…"
                     ) : (
                       <>
-                        <span className="font-semibold tabular-nums text-neutral-950 dark:text-foreground">
+                        <span className="font-semibold tabular-nums text-foreground">
                           {completedCount ?? 0}
                         </span>{" "}
                         servicios completados
@@ -313,8 +317,8 @@ export default function ServiceDetails() {
                   </p>
                 </div>
 
-                <p className="mt-3 text-sm text-neutral-600 dark:text-muted-foreground">
-                  <span className="font-medium text-neutral-950 dark:text-foreground">{providerProfile?.profession}</span>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">{providerProfile?.profession}</span>
                   {providerProfile?.yearsExperience != null ? (
                     <>
                       <span className="mx-2 text-border">·</span>
@@ -334,15 +338,15 @@ export default function ServiceDetails() {
             >
               {getCategoryDisplayName(service.category)}
             </Badge>
-            <h2 className="font-display text-2xl font-bold text-neutral-950 md:text-3xl dark:text-foreground">{service.title}</h2>
-            <p className="text-base leading-relaxed text-neutral-700 dark:text-muted-foreground">{service.description}</p>
+            <h2 className="font-display text-2xl font-bold text-foreground md:text-3xl">{service.title}</h2>
+            <p className="text-base leading-relaxed text-muted-foreground">{service.description}</p>
           </section>
 
           {/* Biografía */}
           {providerProfile?.bio ? (
             <section className="space-y-3">
-              <h3 className="text-lg font-bold text-neutral-950 dark:text-foreground">Biografía y enfoque profesional</h3>
-              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-neutral-700 dark:text-muted-foreground">
+              <h3 className="text-lg font-bold text-foreground">Biografía y enfoque profesional</h3>
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-muted-foreground">
                 {providerProfile.bio}
               </p>
             </section>
@@ -350,21 +354,19 @@ export default function ServiceDetails() {
 
           {/* Competencias (datos estructurados; sin campo extra en BD) */}
           <section className="space-y-3">
-            <h3 className="text-lg font-bold text-neutral-950 dark:text-foreground">Competencias principales</h3>
-            <ul
-              className="list-disc space-y-2 pl-5 text-[15px] text-neutral-700 marker:text-[#D48806] dark:text-muted-foreground dark:marker:text-amber-600"
-            >
+            <h3 className="text-lg font-bold text-foreground">Competencias principales</h3>
+            <ul className="list-disc space-y-2 pl-5 text-[15px] text-muted-foreground marker:text-primary">
               <li>
-                <span className="font-medium text-neutral-950 dark:text-foreground">Categoría:</span>{" "}
+                <span className="font-medium text-foreground">Categoría:</span>{" "}
                 {getCategoryDisplayName(service.category)}
               </li>
               <li>
-                <span className="font-medium text-neutral-950 dark:text-foreground">Especialidad:</span>{" "}
+                <span className="font-medium text-foreground">Especialidad:</span>{" "}
                 {providerProfile?.profession ?? "—"}
               </li>
               {providerProfile?.yearsExperience != null ? (
                 <li>
-                  <span className="font-medium text-neutral-950 dark:text-foreground">Experiencia:</span>{" "}
+                  <span className="font-medium text-foreground">Experiencia:</span>{" "}
                   {providerProfile.yearsExperience} años
                 </li>
               ) : null}
@@ -374,20 +376,16 @@ export default function ServiceDetails() {
           {/* Habilidades con iconos */}
           {Array.isArray(providerProfile?.skills) && providerProfile.skills.length > 0 ? (
             <section className="space-y-3">
-              <h3 className="text-lg font-bold text-neutral-950 dark:text-foreground">Habilidades clave</h3>
+              <h3 className="text-lg font-bold text-foreground">Habilidades clave</h3>
               <div className="flex flex-wrap gap-2.5">
                 {providerProfile.skills.map((skill, index) => {
                   const Icon = SKILL_ICONS[index % SKILL_ICONS.length];
                   return (
                     <div
                       key={`${skill}-${index}`}
-                      className="inline-flex items-center gap-2.5 rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm font-medium text-neutral-900 shadow-sm dark:border-border dark:bg-muted/20 dark:text-foreground"
+                      className="inline-flex items-center gap-2.5 rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm font-medium text-foreground shadow-sm dark:bg-muted/40"
                     >
-                      <Icon
-                        className="h-4 w-4 shrink-0 dark:text-amber-500"
-                        style={{ color: gold.darkGoldenrod }}
-                        aria-hidden
-                      />
+                      <Icon className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden />
                       {skill}
                     </div>
                   );
@@ -399,44 +397,40 @@ export default function ServiceDetails() {
 
         {/* COLUMNA DERECHA: tarjeta de servicio (ancho fijado por la grid, sin solapar la izquierda) */}
         <aside className="relative z-0 min-w-0 w-full max-w-full lg:sticky lg:top-24 lg:self-start">
-          <div className="space-y-6 rounded-2xl border border-neutral-200/90 bg-white p-6 shadow-[0_8px_30px_rgba(0,0,0,0.06)] dark:border-border dark:bg-card">
+          <div className="space-y-6 rounded-2xl border border-border bg-card p-6 shadow-[0_8px_30px_rgba(0,0,0,0.06)] dark:shadow-black/40">
             <div>
-              <p className="text-sm font-medium text-neutral-600 dark:text-muted-foreground">Precio</p>
-              <p
-                className="mt-0.5 text-4xl font-bold tabular-nums dark:text-amber-500"
-                style={{ color: gold.accent }}
-              >
+              <p className="text-sm font-medium text-muted-foreground">Precio</p>
+              <p className="mt-0.5 text-4xl font-bold tabular-nums text-[#D48806] dark:text-primary">
                 ${Number(service.price).toFixed(0)}
               </p>
             </div>
 
-            <div
-              className="rounded-xl border border-neutral-200/90 p-4 dark:border-border dark:bg-muted/10"
-              style={{ backgroundColor: cream.box }}
-            >
+            <div className="rounded-xl border border-border bg-muted/50 p-4 dark:bg-muted/25">
               <div className="flex gap-3">
-                <Clock className="mt-0.5 h-5 w-5 shrink-0 text-neutral-500 dark:text-muted-foreground" />
+                <Clock className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
                 <div>
-                  <p className="text-sm font-semibold text-neutral-950 dark:text-foreground">Tiempo de respuesta</p>
-                  <p className="text-sm text-neutral-600 dark:text-muted-foreground">Suele responder en 1 hora</p>
+                  <p className="text-sm font-semibold text-foreground">Tiempo de respuesta</p>
+                  <p className="text-sm text-muted-foreground">Suele responder en 1 hora</p>
                 </div>
               </div>
             </div>
 
-            <div className="space-y-2 rounded-xl border border-dashed border-neutral-200 bg-white px-4 py-3 dark:border-border dark:bg-muted/5">
-              <p className="text-sm font-semibold text-neutral-950 dark:text-foreground">Incluye</p>
-              <ul className="space-y-2 text-sm text-neutral-600 dark:text-muted-foreground">
+            <div className="space-y-2 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 dark:bg-muted/20">
+              <p className="text-sm font-semibold text-foreground">Incluye</p>
+              <ul className="space-y-2 text-sm text-muted-foreground">
                 <li className="flex gap-2">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0" style={{ color: success }} aria-hidden />
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
                   Reserva con fecha acordada en la app
                 </li>
                 <li className="flex gap-2">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0" style={{ color: success }} aria-hidden />
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
                   Chat con el asociado tras la reserva
                 </li>
                 <li className="flex gap-2">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0" style={{ color: success }} aria-hidden />
-                  Pago con Saldo Genfeb o en efectivo al finalizar
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                  {FEATURE_WALLET_RECHARGE_UI_ENABLED
+                    ? "Saldo Genfeb, efectivo o transferencia (según el método elegido)"
+                    : "Efectivo o transferencia bancaria (según el método elegido)"}
                 </li>
               </ul>
             </div>
@@ -444,7 +438,7 @@ export default function ServiceDetails() {
             {showChatButton && (
               <Button
                 variant="outline"
-                className="h-11 w-full rounded-lg border-[#E0E0E0] bg-white font-medium text-neutral-900 shadow-sm hover:bg-[#F9F9F9] hover:text-neutral-950 dark:border-neutral-600 dark:bg-card dark:text-foreground dark:hover:bg-muted/50 [&_svg]:text-neutral-500"
+                className="h-11 w-full rounded-lg border-border bg-card font-medium text-foreground shadow-sm hover:bg-muted/60 [&_svg]:text-muted-foreground"
                 asChild
               >
                 <Link
@@ -463,7 +457,7 @@ export default function ServiceDetails() {
             {isOwnService && (
               <Button
                 variant="outline"
-                className="h-11 w-full rounded-lg border-[#E0E0E0] bg-white font-medium text-neutral-900 shadow-sm hover:bg-[#F9F9F9] hover:text-neutral-950 dark:border-neutral-600 dark:bg-card dark:text-foreground dark:hover:bg-muted/50 [&_svg]:text-neutral-500"
+                className="h-11 w-full rounded-lg border-border bg-card font-medium text-foreground shadow-sm hover:bg-muted/60 [&_svg]:text-muted-foreground"
                 asChild
               >
                 <Link href={`/edit-service/${id}`} className="gap-2">
@@ -475,10 +469,9 @@ export default function ServiceDetails() {
             {isAuthenticated ? (
                isOwnService ? (
                  <Button
-                   className="h-auto min-h-12 w-full rounded-lg border-0 px-3 py-3 text-center text-sm font-semibold leading-snug text-white shadow-sm whitespace-normal [text-wrap:balance] disabled:opacity-90 sm:px-4 sm:text-base dark:bg-teal-900"
+                   className="h-auto min-h-12 w-full rounded-lg border border-secondary/30 bg-secondary px-3 py-3 text-center text-sm font-semibold leading-snug text-secondary-foreground shadow-sm whitespace-normal [text-wrap:balance] disabled:opacity-90 sm:px-4 sm:text-base dark:border-secondary/40"
                    variant="ghost"
                    disabled
-                   style={{ backgroundColor: "#33B8A6" }}
                  >
                    No puedes reservar tu propio servicio
                  </Button>
@@ -518,8 +511,12 @@ export default function ServiceDetails() {
                         <RadioGroup 
                           value={paymentMethod} 
                           onValueChange={(val: any) => setPaymentMethod(val)}
-                          className="grid grid-cols-2 gap-4"
+                          className={cn(
+                            "grid gap-3",
+                            FEATURE_WALLET_RECHARGE_UI_ENABLED ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"
+                          )}
                         >
+                          {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
                           <div>
                             <RadioGroupItem value="wallet" id="wallet" className="peer sr-only" />
                             <Label
@@ -531,6 +528,7 @@ export default function ServiceDetails() {
                               <span className="text-[10px] text-muted-foreground mt-1">${walletBalance.toFixed(2)}</span>
                             </Label>
                           </div>
+                          )}
                           <div>
                             <RadioGroupItem value="cash" id="cash" className="peer sr-only" />
                             <Label
@@ -542,12 +540,31 @@ export default function ServiceDetails() {
                               <span className="text-[10px] text-muted-foreground mt-1">Pago físico</span>
                             </Label>
                           </div>
+                          <div>
+                            <RadioGroupItem value="bank_transfer" id="bank_transfer" className="peer sr-only" />
+                            <Label
+                              htmlFor="bank_transfer"
+                              className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all"
+                            >
+                              <Building2 className="mb-2 h-6 w-6" />
+                              <span className="text-xs font-medium text-center">Transferencia</span>
+                              <span className="text-[10px] text-muted-foreground mt-1 text-center">Datos con el asociado</span>
+                            </Label>
+                          </div>
                         </RadioGroup>
                         {paymentMethod === "wallet" && walletBalance < Number(service.price) && (
                           <p className="text-[11px] text-red-500 font-medium">Saldo Genfeb insuficiente para este método.</p>
                         )}
                         {paymentMethod === "cash" && (
                           <p className="text-[11px] text-muted-foreground">Paga directamente al asociado al finalizar el servicio.</p>
+                        )}
+                        {paymentMethod === "bank_transfer" && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Coordina con el asociado los datos bancarios; el pago acordado es fuera de la app.
+                            {FEATURE_OFF_PLATFORM_COMMISSION_ENABLED
+                              ? " La comisión de la plataforma se aplicará al Saldo Genfeb del asociado al completar."
+                              : ""}
+                          </p>
                         )}
                       </div>
 
@@ -563,10 +580,17 @@ export default function ServiceDetails() {
                     <DialogFooter>
                       <Button
                         variant="ghost"
-                        disabled={createBooking.isPending}
+                        onClick={handleBooking}
+                        disabled={
+                          createBooking.isPending ||
+                          !date ||
+                          (FEATURE_WALLET_RECHARGE_UI_ENABLED &&
+                            paymentMethod === "wallet" &&
+                            walletBalance < Number(service.price))
+                        }
                         className={
                           createBooking.isPending
-                            ? "h-11 w-full rounded-lg border border-neutral-200 bg-muted font-semibold text-muted-foreground shadow-sm sm:w-auto"
+                            ? "h-11 w-full rounded-lg border border-border bg-muted font-semibold text-muted-foreground shadow-sm sm:w-auto"
                             : "h-11 w-full rounded-lg border-0 font-semibold text-white shadow-md shadow-orange-500/20 hover:opacity-95 sm:w-auto"
                         }
                         style={
@@ -584,7 +608,7 @@ export default function ServiceDetails() {
             ) : (
               <Button
                 variant="outline"
-                className="h-12 w-full rounded-lg border-[#E0E0E0] bg-white text-lg font-semibold text-neutral-900 shadow-sm hover:bg-[#F9F9F9] dark:border-neutral-600 dark:bg-card dark:text-foreground dark:hover:bg-muted/50"
+                className="h-12 w-full rounded-lg border-border bg-card text-lg font-semibold text-foreground shadow-sm hover:bg-muted/60"
                 asChild
               >
                 <Link href="/login">Inicia sesión para reservar</Link>

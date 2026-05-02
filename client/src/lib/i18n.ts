@@ -106,11 +106,11 @@ export interface Translations {
     subtitle: string;
     balance: string;
     available: string;
-    escrow: string;
+    securePayments: string;
     pending: string;
     withdraw: string;
     addCard: string;
-    escrowInfo: string;
+    securePaymentsHelp: string;
     methods: string;
     transactions: string;
   };
@@ -235,11 +235,11 @@ const translations: Record<Language, Translations> = {
       subtitle: "Gestiona tus pagos con seguridad",
       balance: "Saldo",
       available: "Disponible",
-      escrow: "En Garantía",
+      securePayments: "Pago seguro",
       pending: "Pendiente",
       withdraw: "Retirar",
       addCard: "Agregar Tarjeta",
-      escrowInfo: "¿Cómo funciona el Pago Escrow?",
+      securePaymentsHelp: "¿Cómo funcionan los pagos seguros?",
       methods: "Métodos de Pago",
       transactions: "Transacciones",
     },
@@ -360,11 +360,11 @@ const translations: Record<Language, Translations> = {
       subtitle: "Manage your payments securely",
       balance: "Balance",
       available: "Available",
-      escrow: "In Escrow",
+      securePayments: "Secure payment",
       pending: "Pending",
       withdraw: "Withdraw",
       addCard: "Add Card",
-      escrowInfo: "How does Escrow Payment work?",
+      securePaymentsHelp: "How do secure payments work?",
       methods: "Payment Methods",
       transactions: "Transactions",
     },
@@ -485,11 +485,11 @@ const translations: Record<Language, Translations> = {
       subtitle: "Gerencie seus pagamentos com segurança",
       balance: "Saldo",
       available: "Disponível",
-      escrow: "Em Garantia",
+      securePayments: "Pagamento seguro",
       pending: "Pendente",
       withdraw: "Sacar",
       addCard: "Adicionar Cartão",
-      escrowInfo: "Como funciona o Pagamento em Garantia?",
+      securePaymentsHelp: "Como funcionam os pagamentos seguros?",
       methods: "Métodos de Pagamento",
       transactions: "Transações",
     },

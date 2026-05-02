@@ -72,7 +72,7 @@ export const documents = pgTable("documents", {
   metadata: jsonb("metadata"),
 });
 
-// === PAGOS ESCROW ===
+// === Pagos retenidos (legado: escrow_payments en migraciones) ===
 export const escrowPayments = pgTable("escrow_payments", {
   id: serial("id").primaryKey(),
   bookingId: integer("booking_id"),

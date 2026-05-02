@@ -7,7 +7,7 @@ import {
   Star, Clock, CreditCard, FileText, Download,
   BarChart3, PieChart, Activity, Loader2, MessageSquare,
   CheckCircle2, XCircle, Banknote, CircleDollarSign, Inbox, PlayCircle, History, UserPlus, Receipt,
-  AlertTriangle, ShieldCheck, Wallet
+  AlertTriangle, ShieldCheck, Wallet, Building2
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { isCarGoProvider } from "@shared/provider-car-go";
+import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED, FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { useCategories } from "@/hooks/use-mango-data";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
 import { useSocketBookings } from "@/hooks/use-socket";
@@ -529,6 +531,12 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 EFECTIVO
               </Badge>
             )}
+            {booking.paymentMethod === "bank_transfer" && (
+              <Badge variant="outline" className="bg-sky-50 text-sky-800 border-sky-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
+                <Building2 className="h-3 w-3" />
+                TRANSFERENCIA
+              </Badge>
+            )}
             {booking.paymentMethod === "wallet" && (
               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
                 <CircleDollarSign className="h-3 w-3" />
@@ -588,7 +596,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                 {!hasValidCost && (
                   <span className="text-xs text-amber-600 dark:text-amber-500">Asigna el monto y guarda antes de confirmar la reserva.</span>
                 )}
-                {costForCommission > 0 && (
+                {FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && costForCommission > 0 && (
                   <span className="text-xs text-muted-foreground">
                     Neto asociado: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> ({provUiPct}%) ·
                     Comisión: <span className="font-medium text-foreground">${commission.toFixed(2)}</span> ({platUiPct}%)
@@ -629,7 +637,11 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                       <Select
                       value={booking.status}
                       onValueChange={(value) => {
-                        if (value === "in_progress" && booking.paymentMethod === "cash") {
+                        if (
+                          value === "in_progress" &&
+                          isOffPlatformServiceBookingPayment(booking.paymentMethod) &&
+                          FEATURE_OFF_PLATFORM_COMMISSION_ENABLED
+                        ) {
                           setCashWarningBooking(booking);
                         } else {
                           executeStatusUpdate(booking.id, value);
@@ -724,19 +736,31 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 
   return (
     <>
-      <Dialog open={cashWarningBooking !== null} onOpenChange={(open) => (!open ? setCashWarningBooking(null) : undefined)}>
+      <Dialog open={cashWarningBooking !== null && FEATURE_OFF_PLATFORM_COMMISSION_ENABLED} onOpenChange={(open) => (!open ? setCashWarningBooking(null) : undefined)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <div className="flex items-center gap-2 text-amber-600 mb-2">
               <AlertTriangle className="h-5 w-5" />
-              <DialogTitle>Servicio en Efectivo</DialogTitle>
+              <DialogTitle>
+                {cashWarningBooking?.paymentMethod === "bank_transfer"
+                  ? "Pago por transferencia"
+                  : "Servicio en efectivo"}
+              </DialogTitle>
             </div>
             <DialogDescription className="text-foreground">
-              Como este servicio se pagará en <strong>Efectivo</strong>, la plataforma descontará automáticamente una comisión del <strong>10%</strong> de tu Saldo Genfeb cuando finalices el trabajo.
+              {cashWarningBooking?.paymentMethod === "bank_transfer" ? (
+                <>
+                  Acordaste cobrar <strong>fuera del saldo de la app</strong> (transferencia). Al marcar el servicio como completado, la plataforma descontará la comisión del <strong>10%</strong> de tu Saldo Genfeb.
+                </>
+              ) : (
+                <>
+                  Como este servicio se pagará en <strong>efectivo</strong>, la plataforma descontará automáticamente una comisión del <strong>10%</strong> de tu Saldo Genfeb cuando finalices el trabajo.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
 
-          {cashWarningBooking && (
+          {cashWarningBooking && FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && (
             <div className="bg-muted p-4 rounded-lg space-y-2">
               <div className="flex justify-between text-sm">
                 <span>Costo del servicio:</span>
@@ -1482,6 +1506,8 @@ function ProfessionalDashboardInner() {
   const { user } = useAuth();
   const { data: commissionRateInfo } = usePlatformCommissionRate();
   const dashboardCommissionRate = commissionRateInfo?.commissionRate ?? PLATFORM_COMMISSION_RATE;
+  const earningNetForDashboard = (cost: number) =>
+    FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? calcProviderNet(cost, dashboardCommissionRate) : cost;
   const { data: providerProfile, isLoading: providerProfileLoading } = useCurrentProvider();
   const queryClient = useQueryClient();
   const { notifyBookingUpdate } = useSocketBookings();
@@ -1491,7 +1517,7 @@ function ProfessionalDashboardInner() {
   const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
-  const { data: walletData } = useWallet({ enabled: true });
+  const { data: walletData } = useWallet({ enabled: FEATURE_WALLET_RECHARGE_UI_ENABLED });
   const isProfessionalRole = (user as { role?: string } | null)?.role === "professional";
   const showBecomeProBanner = isProfessionalRole && !providerProfileLoading && !providerProfile;
   const withdrawMutation = useWithdraw();
@@ -1512,7 +1538,10 @@ function ProfessionalDashboardInner() {
   const getTabFromUrl = () => {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const tab = new URLSearchParams(search).get("tab");
-    return tab && DASHBOARD_TABS.includes(tab as (typeof DASHBOARD_TABS)[number]) ? tab : "overview";
+    const t =
+      tab && DASHBOARD_TABS.includes(tab as (typeof DASHBOARD_TABS)[number]) ? tab : "overview";
+    if (t === "transactions" && !FEATURE_WALLET_RECHARGE_UI_ENABLED) return "overview";
+    return t;
   };
   const [currentTab, setCurrentTabState] = useState(getTabFromUrl);
   const [highlightedBookingId, setHighlightedBookingId] = useState<number | null>(null);
@@ -1627,9 +1656,23 @@ function ProfessionalDashboardInner() {
   }>;
 
   const completedBookings = useMemo(
-    () => bookingsSafe.filter((b) => b.status === "completed"),
+    () => bookingsSafe.filter((b) => b.status === "completed") as BookingItem[],
     [bookingsSafe],
   );
+
+  const offPlatformCompletedEarnings = useMemo(() => {
+    const list = completedBookings.filter((b) => isOffPlatformServiceBookingPayment(b.paymentMethod));
+    let cash = 0;
+    let transfer = 0;
+    for (const b of list) {
+      const raw = typeof b.cost === "number" ? b.cost : Number(b.cost);
+      const cost = Number.isFinite(raw) ? raw : 0;
+      const net = FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? calcProviderNet(cost, dashboardCommissionRate) : cost;
+      if (b.paymentMethod === "cash") cash += net;
+      else if (b.paymentMethod === "bank_transfer") transfer += net;
+    }
+    return { count: list.length, cash, transfer, total: cash + transfer };
+  }, [completedBookings, dashboardCommissionRate]);
 
   const bookingPendingCount = useMemo(
     () => bookingsSafe.filter((b) => b.status === "pending").length,
@@ -1670,7 +1713,7 @@ function ProfessionalDashboardInner() {
         const completedAt = toDate((b as any).completedAt ?? (b as any).date);
         if (Number.isNaN(completedAt.getTime())) return sum;
         if (completedAt.getFullYear() !== year || completedAt.getMonth() !== month) return sum;
-        return sum + calcProviderNet(toCost((b as any).cost), dashboardCommissionRate);
+        return sum + earningNetForDashboard(toCost((b as any).cost));
       }, 0);
       return { month: computeMonthLabel(monthDate), earnings };
     });
@@ -1697,8 +1740,12 @@ function ProfessionalDashboardInner() {
     },
   });
 
-  const ratingAverage = Number(reviewStats?.averageRating ?? walletData?.rating ?? 0);
-  const ratingTotalReviews = Number(reviewStats?.totalReviews ?? walletData?.ratingCount ?? 0);
+  const ratingAverage = Number(
+    reviewStats?.averageRating ?? (FEATURE_WALLET_RECHARGE_UI_ENABLED ? walletData?.rating : undefined) ?? 0,
+  );
+  const ratingTotalReviews = Number(
+    reviewStats?.totalReviews ?? (FEATURE_WALLET_RECHARGE_UI_ENABLED ? walletData?.ratingCount : undefined) ?? 0,
+  );
   const ratingDistribution = reviewStats?.distribution ?? { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
   const ratingStarsTotal = ratingTotalReviews || 0;
   const ratingPercentage = ratingStarsTotal > 0 ? (ratingAverage / 5) * 100 : 0;
@@ -1720,7 +1767,7 @@ function ProfessionalDashboardInner() {
         (b as any).serviceId?.toString?.() ||
         "Servicio";
       const prev = map.get(categoryName) ?? 0;
-      map.set(categoryName, prev + calcProviderNet(toCost((b as any).cost), dashboardCommissionRate));
+      map.set(categoryName, prev + earningNetForDashboard(toCost((b as any).cost)));
     }
 
     const total = Array.from(map.values()).reduce((sum, v) => sum + v, 0);
@@ -1753,7 +1800,7 @@ function ProfessionalDashboardInner() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-4 sm:px-6 py-4">
+      <div className="bg-background border-b border-border px-4 sm:px-6 py-4">
         <div className="container mx-auto max-w-full flex flex-col sm:flex-row items-center justify-center sm:justify-between gap-4 text-center sm:text-left">
           <div className="flex items-center gap-3 flex-shrink-0">
             <div className="p-2 bg-mango-orange/10 rounded-lg">
@@ -1761,14 +1808,21 @@ function ProfessionalDashboardInner() {
             </div>
             <div>
               <h1 className="text-xl sm:text-2xl font-bold">Mi actividad</h1>
-              <p className="text-gray-500 text-sm sm:text-base">Resumen de servicios, ingresos y movimientos</p>
+              <p className="text-gray-500 text-sm sm:text-base">
+                {FEATURE_WALLET_RECHARGE_UI_ENABLED
+                  ? "Resumen de servicios, ingresos y movimientos"
+                  : "Resumen de servicios e ingresos (efectivo y transferencias completados)"}
+              </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full sm:w-auto">
+            {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
             <Button variant="outline" size="sm" className="flex-1 sm:flex-initial min-w-0" onClick={() => setReportDialogOpen(true)}>
               <FileText className="h-4 w-4 mr-2 shrink-0" />
               <span className="truncate">Exportar resumen</span>
             </Button>
+            )}
+            {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1789,11 +1843,13 @@ function ProfessionalDashboardInner() {
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+            )}
           </div>
         </div>
       </div>
 
       {/* Dialog cobrar ingresos */}
+      {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
       <Dialog open={withdrawDialogOpen} onOpenChange={setWithdrawDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -1869,9 +1925,12 @@ function ProfessionalDashboardInner() {
           )}
         </DialogContent>
       </Dialog>
+      )}
 
       {/* Dialog Generar Reporte */}
+      {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
       <EconomicReportDialog open={reportDialogOpen} onOpenChange={setReportDialogOpen} walletData={walletData} />
+      )}
 
       <div className="container mx-auto max-w-full py-6 px-4 overflow-x-hidden">
         {/* Banner: completar perfil profesional si el paso se omitió */}
@@ -1899,6 +1958,8 @@ function ProfessionalDashboardInner() {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6 gap-4 mb-6">
+          {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+          <>
           <Card className={cn(wallet < 0 && "border-amber-500/40")}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Saldo GenFeb (cartera)</CardTitle>
@@ -1949,6 +2010,29 @@ function ProfessionalDashboardInner() {
               ) : null}
             </CardContent>
           </Card>
+          </>
+          )}
+
+          {!FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+            <Card className="border-emerald-600/30 bg-emerald-50/90 dark:border-emerald-500/35 dark:bg-emerald-950/25">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium leading-snug">Ganancias en efectivo y transferencias</CardTitle>
+                <Banknote className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold tabular-nums">{formatUsd(offPlatformCompletedEarnings.total)}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {offPlatformCompletedEarnings.count} servicio(s) completado(s) · Efectivo{" "}
+                  {formatUsd(offPlatformCompletedEarnings.cash)} · Transferencia{" "}
+                  {formatUsd(offPlatformCompletedEarnings.transfer)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-2 leading-snug">
+                  Total al marcar como completadas las reservas pagadas fuera de saldo digital. Sin cartera ni
+                  movimientos de wallet.
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -2011,7 +2095,9 @@ function ProfessionalDashboardInner() {
           <TabsList className="w-full flex flex-nowrap justify-start sm:justify-center overflow-x-auto h-auto min-h-10 gap-1 p-2 sm:p-1 sm:flex-wrap sm:h-10 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
             <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
             <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>
+            {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
             <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Movimientos</TabsTrigger>
+            )}
             <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Facturas</TabsTrigger>
           </TabsList>
 
@@ -2085,7 +2171,7 @@ function ProfessionalDashboardInner() {
                       <div className="text-2xl font-bold text-green-600">{completedBookings.length}</div>
                       <div className="text-sm text-gray-500">Completadas</div>
                     </div>
-                    <div className="p-4 bg-orange-50 rounded-lg">
+                    <div className="p-4 bg-orange-50 dark:bg-orange-950/35 dark:border dark:border-orange-900/40 rounded-lg">
                       <div className="text-2xl font-bold text-orange-600">{bookingPendingCount}</div>
                       <div className="text-sm text-gray-500">Pendientes</div>
                     </div>
@@ -2125,6 +2211,7 @@ function ProfessionalDashboardInner() {
             <ProviderBookingsTab highlightedBookingId={highlightedBookingId} />
           </TabsContent>
 
+          {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
           <TabsContent value="transactions">
             <Card>
               <CardHeader>
@@ -2136,6 +2223,7 @@ function ProfessionalDashboardInner() {
               </CardContent>
             </Card>
           </TabsContent>
+          )}
 
           <TabsContent value="invoices">
             <InvoicesTabContent />

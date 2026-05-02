@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { AlertTriangle, Calendar, HandCoins, TrendingUp, Wallet } from "lucide-react";
 import { api } from "@shared/routes";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
+import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED, FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { useWallet, useWithdraw } from "@/hooks/use-mango-data";
 import { loadTripLog, type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,17 +73,21 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
   const { toast } = useToast();
   const { user } = useAuth();
   const { data: walletData, isLoading: walletLoading, isFetching } = useWallet({
-    enabled: open,
+    enabled: open && FEATURE_WALLET_RECHARGE_UI_ENABLED,
   });
   const withdraw = useWithdraw();
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
-  const trips = useMemo(() => (open ? loadTripLog() : []), [open]);
-  const byDay = useMemo(() => groupTripsByLocalDay(trips), [trips]);
+  const tripsForPanel = useMemo(() => {
+    const all = open ? loadTripLog() : [];
+    if (FEATURE_WALLET_RECHARGE_UI_ENABLED) return all;
+    return all.filter((t) => t.payment === "cash" || t.payment === "bank_transfer");
+  }, [open]);
+  const byDay = useMemo(() => groupTripsByLocalDay(tripsForPanel), [tripsForPanel]);
   const localTotal = useMemo(
-    () => trips.reduce((a, t) => a + (typeof t.amountUsd === "number" ? t.amountUsd : 0), 0),
-    [trips]
+    () => tripsForPanel.reduce((a, t) => a + (typeof t.amountUsd === "number" ? t.amountUsd : 0), 0),
+    [tripsForPanel]
   );
 
   const tKey = todayLocalKey();
@@ -105,7 +110,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
   const hasBankData = !!bankName && !!accountNumber;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !FEATURE_WALLET_RECHARGE_UI_ENABLED) return;
     void queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
   }, [open, queryClient]);
 
@@ -127,7 +132,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
 
   return (
     <div className="space-y-4 pb-2">
-      {debtCapped ? (
+      {FEATURE_WALLET_RECHARGE_UI_ENABLED && FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && debtCapped ? (
         <div
           className="flex items-start gap-2 rounded-xl border border-amber-500/50 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-950 dark:text-amber-100"
         >
@@ -139,43 +144,67 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2">
-        <Card className={cn(wallet < 0 && "border-amber-500/35")}>
+      {!FEATURE_WALLET_RECHARGE_UI_ENABLED ? (
+        <Card className="border-emerald-600/30 bg-gradient-to-br from-emerald-500/10 to-transparent">
           <CardHeader className="p-3 pb-1">
-            <CardTitle className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-              <Wallet className="h-3.5 w-3.5 text-primary" aria-hidden />
-              Saldo GenFeb
-            </CardTitle>
+            <CardTitle className="text-sm font-semibold">Ganancias en efectivo y transferencias</CardTitle>
+            <p className="text-xs font-normal text-muted-foreground">
+              Total según viajes terminados en este dispositivo (Car Go / Pack Go). Se actualiza al completar cada
+              servicio.
+            </p>
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            {walletLoadingAny ? (
-              <div className="h-8 w-24 animate-pulse rounded bg-muted" />
-            ) : (
-              <p
-                className={cn(
-                  "text-lg font-bold leading-tight tabular-nums",
-                  wallet < 0 && "text-amber-600 dark:text-amber-400"
-                )}
-              >
-                {money(wallet)}
-              </p>
-            )}
-            <p className="text-[10px] text-muted-foreground mt-1">Cartera plataforma</p>
+            <p className="text-2xl font-bold tabular-nums text-foreground">{money(localTotal)}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {tripsForPanel.length === 0
+                ? "Aún no hay viajes con estos medios de pago en el registro local."
+                : `${tripsForPanel.length} ${tripsForPanel.length === 1 ? "servicio" : "servicios"} sumados.`}
+            </p>
           </CardContent>
         </Card>
+      ) : null}
 
-        <Card>
-          <CardHeader className="p-3 pb-1">
-            <CardTitle className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-600" aria-hidden />
-              Piso mínimo
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-3 pt-0">
-            <p className="text-lg font-bold leading-tight tabular-nums text-foreground">{money(floorUsd)}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">Efectivo / transfer</p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 gap-2">
+        {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+          <>
+            <Card className={cn(wallet < 0 && "border-amber-500/35")}>
+              <CardHeader className="p-3 pb-1">
+                <CardTitle className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                  <Wallet className="h-3.5 w-3.5 text-primary" aria-hidden />
+                  Saldo GenFeb
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                {walletLoadingAny ? (
+                  <div className="h-8 w-24 animate-pulse rounded bg-muted" />
+                ) : (
+                  <p
+                    className={cn(
+                      "text-lg font-bold leading-tight tabular-nums",
+                      wallet < 0 && "text-amber-600 dark:text-amber-400"
+                    )}
+                  >
+                    {money(wallet)}
+                  </p>
+                )}
+                <p className="text-[10px] text-muted-foreground mt-1">Cartera plataforma</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="p-3 pb-1">
+                <CardTitle className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600" aria-hidden />
+                  Piso mínimo
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <p className="text-lg font-bold leading-tight tabular-nums text-foreground">{money(floorUsd)}</p>
+                <p className="text-[10px] text-muted-foreground mt-1">Efectivo / transfer</p>
+              </CardContent>
+            </Card>
+          </>
+        )}
 
         <Card>
           <CardHeader className="p-3 pb-1">
@@ -204,63 +233,71 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
         </Card>
       </div>
 
-      <Card className="border-primary/15 bg-gradient-to-br from-primary/5 to-transparent">
-        <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-sm font-semibold">Ingresos en plataforma (total)</CardTitle>
-        </CardHeader>
-        <CardContent className="p-3 pt-0 space-y-1">
-          {walletLoadingAny ? (
-            <div className="h-7 w-32 animate-pulse rounded bg-muted" />
-          ) : (
-            <p className="text-xl font-bold tabular-nums text-foreground">{money(totalPlatform)}</p>
-          )}
-          <p className="text-xs text-muted-foreground">Acumulado de todos los servicios GenFeb vinculados a tu cuenta.</p>
-        </CardContent>
-      </Card>
+      {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+        <>
+          <Card className="border-primary/15 bg-gradient-to-br from-primary/5 to-transparent">
+            <CardHeader className="p-3 pb-1">
+              <CardTitle className="text-sm font-semibold">Ingresos en plataforma (total)</CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 pt-0 space-y-1">
+              {walletLoadingAny ? (
+                <div className="h-7 w-32 animate-pulse rounded bg-muted" />
+              ) : (
+                <p className="text-xl font-bold tabular-nums text-foreground">{money(totalPlatform)}</p>
+              )}
+              <p className="text-xs text-muted-foreground">Acumulado de todos los servicios GenFeb vinculados a tu cuenta.</p>
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader className="p-3 pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <HandCoins className="h-5 w-5 text-primary" aria-hidden />
-            Retiros
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-3 pt-0 space-y-2 text-sm">
-          <p className="text-xs text-muted-foreground">
-            Retira tu Saldo GenFeb a tu cuenta bancaria. El retiro queda pendiente hasta aprobación.
-          </p>
-          {!hasBankData ? (
-            <Button asChild className="w-full">
-              <Link href={configHref ?? "/settings"}>Configurar cuenta bancaria</Link>
-            </Button>
-          ) : (
-            <>
+          <Card>
+            <CardHeader className="p-3 pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <HandCoins className="h-5 w-5 text-primary" aria-hidden />
+                Retiros
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 pt-0 space-y-2 text-sm">
               <p className="text-xs text-muted-foreground">
-                Banco: <span className="font-medium text-foreground">{bankName}</span> · Cuenta:{" "}
-                <span className="font-mono font-medium text-foreground">{accountNumber}</span>
+                Retira tu Saldo GenFeb a tu cuenta bancaria. El retiro queda pendiente hasta aprobación.
               </p>
-              <Button
-                type="button"
-                className="w-full"
-                onClick={() => setWithdrawOpen(true)}
-                disabled={withdraw.isPending || withdrawingFunds > 0}
-              >
-                {withdrawingFunds > 0 ? "Retiro en proceso" : "Solicitar retiro"}
-              </Button>
-              {withdrawingFunds > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Ya tienes un retiro pendiente por <span className="font-semibold text-foreground">{money(withdrawingFunds)}</span>.
-                </p>
-              ) : null}
-            </>
-          )}
-        </CardContent>
-      </Card>
+              {!hasBankData ? (
+                <Button asChild className="w-full">
+                  <Link href={configHref ?? "/settings"}>Configurar cuenta bancaria</Link>
+                </Button>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Banco: <span className="font-medium text-foreground">{bankName}</span> · Cuenta:{" "}
+                    <span className="font-mono font-medium text-foreground">{accountNumber}</span>
+                  </p>
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={() => setWithdrawOpen(true)}
+                    disabled={withdraw.isPending || withdrawingFunds > 0}
+                  >
+                    {withdrawingFunds > 0 ? "Retiro en proceso" : "Solicitar retiro"}
+                  </Button>
+                  {withdrawingFunds > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Ya tienes un retiro pendiente por <span className="font-semibold text-foreground">{money(withdrawingFunds)}</span>.
+                    </p>
+                  ) : null}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       <Card>
         <CardHeader className="p-3 pb-2">
           <CardTitle className="text-sm">Resumen Car Go (estimado)</CardTitle>
-          <p className="text-xs font-normal text-muted-foreground">Suma de viajes en este resumen: {money(localTotal)}</p>
+          <p className="text-xs font-normal text-muted-foreground">
+            {FEATURE_WALLET_RECHARGE_UI_ENABLED
+              ? `Suma de viajes en este resumen: ${money(localTotal)}`
+              : `Solo efectivo y transferencias · total ${money(localTotal)}`}
+          </p>
         </CardHeader>
         <CardContent className="p-3 pt-0 space-y-0">
           {byDay.length === 0 ? (
@@ -297,7 +334,12 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
                           </span>
                           <span className="text-muted-foreground">
                             {" "}
-                            · {t.durationMin} min · {t.payment === "genfeb" ? "GenFeb" : "Efectivo"}
+                            · {t.durationMin} min ·{" "}
+                            {t.payment === "genfeb"
+                              ? "GenFeb"
+                              : t.payment === "bank_transfer"
+                                ? "Transferencia"
+                                : "Efectivo"}
                           </span>
                         </div>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
@@ -313,13 +355,15 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
         </CardContent>
       </Card>
 
-      <Button variant="secondary" className="w-full" asChild>
-        <Link href="/recharge" onClick={() => queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] })}>
-          Recargar saldo
-        </Link>
-      </Button>
+      {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+        <>
+          <Button variant="secondary" className="w-full" asChild>
+            <Link href="/recharge" onClick={() => queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] })}>
+              Recargar saldo
+            </Link>
+          </Button>
 
-      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+          <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
             <DialogTitle>Solicitar retiro</DialogTitle>
@@ -346,6 +390,8 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </div>
   );
 }

@@ -40,11 +40,11 @@ export function ServiceCard({ service }: ServiceCardProps) {
             
             {/* Category / subcategory badges */}
             <div className="absolute top-4 left-4 flex flex-wrap gap-1.5">
-              <Badge className="bg-white/95 text-foreground backdrop-blur-md shadow-lg font-bold border-0 px-3 py-1">
+              <Badge className="bg-card/95 dark:bg-card text-foreground backdrop-blur-md shadow-lg font-bold border-0 px-3 py-1">
                 {getCategoryDisplayName(service.category) || "Servicio"}
               </Badge>
               {service.subcategory?.name && (
-                <Badge variant="secondary" className="bg-white/90 text-muted-foreground backdrop-blur-md shadow-lg border-0 px-2.5 py-0.5 text-xs">
+                <Badge variant="secondary" className="bg-muted/95 dark:bg-muted/90 text-muted-foreground backdrop-blur-md shadow-lg border-0 px-2.5 py-0.5 text-xs">
                   {service.subcategory.name}
                 </Badge>
               )}

@@ -36,12 +36,12 @@ import { motion } from "framer-motion";
 const transactions = [
   { id: 1, type: "in", amount: 450, currency: "USD", status: "completed", description: "Pago por servicio - Carlos Mendoza", date: "22 Feb 2026", method: "stripe" },
   { id: 2, type: "out", amount: 150, currency: "USD", status: "completed", description: "Transferencia a cuenta bancaria", date: "21 Feb 2026", method: "bank" },
-  { id: 3, type: "escrow", amount: 300, currency: "USD", status: "pending", description: "Fondo en garantía - Servicio Legal", date: "20 Feb 2026", method: "escrow" },
+  { id: 3, type: "secure", amount: 300, currency: "USD", status: "pending", description: "Pago seguro — Servicio Legal", date: "20 Feb 2026", method: "secure" },
   { id: 4, type: "in", amount: 200, currency: "USD", status: "completed", description: "Pago por servicio - María García", date: "19 Feb 2026", method: "paypal" },
   { id: 5, type: "out", amount: 85, currency: "USD", status: "completed", description: "Retiro a Saldo Genfeb", date: "18 Feb 2026", method: "wallet" },
 ];
 
-const escrowPayments = [
+const securePaymentItems = [
   { id: 1, service: "Consulta Legal", client: "Carlos Mendoza", amount: 300, status: "held", date: "20 Feb 2026", releaseDate: "27 Feb 2026" },
   { id: 2, service: "Asesoría Financiera", client: "Ana López", amount: 500, status: "released", date: "15 Feb 2026", releaseDate: "18 Feb 2026" },
   { id: 3, service: "Mantenimiento", client: "Roberto Sánchez", amount: 150, status: "disputed", date: "10 Feb 2026", releaseDate: "-" },
@@ -65,7 +65,7 @@ export default function Payments() {
       case "pending":
         return <Badge className="badge-warning"><Clock className="w-3 h-3 mr-1" />Pendiente</Badge>;
       case "held":
-        return <Badge className="badge-info"><Shield className="w-3 h-3 mr-1" />En Garantía</Badge>;
+        return <Badge className="badge-info"><Shield className="w-3 h-3 mr-1" />Pago seguro</Badge>;
       case "released":
         return <Badge className="badge-success"><CheckCircle className="w-3 h-3 mr-1" />Liberado</Badge>;
       case "disputed":
@@ -77,7 +77,7 @@ export default function Payments() {
 
   const totalIn = transactions.filter(t => t.type === "in" && t.status === "completed").reduce((sum, t) => sum + t.amount, 0);
   const totalOut = transactions.filter(t => t.type === "out" && t.status === "completed").reduce((sum, t) => sum + t.amount, 0);
-  const escrowHeld = escrowPayments.filter(e => e.status === "held").reduce((sum, e) => sum + e.amount, 0);
+  const secureHeldTotal = securePaymentItems.filter(e => e.status === "held").reduce((sum, e) => sum + e.amount, 0);
 
   return (
     <div className="min-h-screen bg-background">
@@ -99,7 +99,7 @@ export default function Payments() {
                 </h1>
               </div>
               <p className="text-muted-foreground">
-                Gestiona tus pagos y transacciones con seguridad mediante sistema Escrow
+                Gestiona tus pagos y transacciones con el sistema de pagos seguros
               </p>
             </div>
             <div className="flex gap-3">
@@ -148,7 +148,7 @@ export default function Payments() {
               </Card>
             </motion.div>
 
-            {/* Escrow Balance */}
+            {/* Fondos en pago seguro */}
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -160,10 +160,10 @@ export default function Payments() {
                     <div className="p-2 rounded-lg bg-primary/10">
                       <Shield className="w-5 h-5 text-primary" />
                     </div>
-                    <Badge variant="outline" className="border-primary/50 text-primary">En Garantía</Badge>
+                    <Badge variant="outline" className="border-primary/50 text-primary">Pago seguro</Badge>
                   </div>
-                  <p className="text-3xl font-bold font-display">${escrowHeld}.00</p>
-                  <p className="text-sm text-muted-foreground">Fondos en Escrow</p>
+                  <p className="text-3xl font-bold font-display">${secureHeldTotal}.00</p>
+                  <p className="text-sm text-muted-foreground">Fondos en pagos seguros</p>
                   <div className="flex gap-2 mt-4">
                     <Button className="flex-1 bg-primary hover:bg-primary/90" size="sm">
                       Ver Detalles
@@ -216,9 +216,9 @@ export default function Payments() {
                 <History className="w-4 h-4 mr-2" />
                 Transacciones
               </TabsTrigger>
-              <TabsTrigger value="escrow" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <TabsTrigger value="secure" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
                 <Shield className="w-4 h-4 mr-2" />
-                Pagos Escrow
+                Pagos seguros
               </TabsTrigger>
               <TabsTrigger value="methods" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
                 <CreditCard className="w-4 h-4 mr-2" />
@@ -246,7 +246,7 @@ export default function Payments() {
                             ) : tx.type === 'out' ? (
                               <ArrowUpRight className="w-5 h-5 text-primary" />
                             ) : (
-                              <Shield className="w-5 h-5 text-warning" />
+                              <Shield className={`w-5 h-5 ${tx.type === 'secure' ? 'text-primary' : 'text-warning'}`} />
                             )}
                           </div>
                           <div>
@@ -271,22 +271,22 @@ export default function Payments() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="escrow">
+            <TabsContent value="secure">
               <Card className="card-industrial">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Shield className="w-5 h-5 text-primary" />
-                    Pagos en Garantía (Escrow)
+                    Pagos seguros
                   </CardTitle>
                   <CardDescription>
-                    Los fondos se liberan automáticamente después de confirmar el servicio
+                    Los fondos se liberan después de confirmar el servicio
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {escrowPayments.map((escrow) => (
+                    {securePaymentItems.map((item) => (
                       <div 
-                        key={escrow.id}
+                        key={item.id}
                         className="flex items-center justify-between p-4 rounded-lg bg-background/50 border border-border"
                       >
                         <div className="flex items-center gap-4">
@@ -294,22 +294,22 @@ export default function Payments() {
                             <Lock className="w-5 h-5 text-primary" />
                           </div>
                           <div>
-                            <p className="font-medium">{escrow.service}</p>
-                            <p className="text-sm text-muted-foreground">Cliente: {escrow.client}</p>
-                            <p className="text-xs text-muted-foreground">Fecha de retención: {escrow.date}</p>
+                            <p className="font-medium">{item.service}</p>
+                            <p className="text-sm text-muted-foreground">Cliente: {item.client}</p>
+                            <p className="text-xs text-muted-foreground">Fecha de retención: {item.date}</p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="font-bold text-lg">${escrow.amount}</p>
+                          <p className="font-bold text-lg">${item.amount}</p>
                           <p className="text-xs text-muted-foreground">
-                            {escrow.status === "released" 
-                              ? `Liberado: ${escrow.releaseDate}`
-                              : escrow.status === "held" 
-                                ? `Liberación: ${escrow.releaseDate}`
+                            {item.status === "released" 
+                              ? `Liberado: ${item.releaseDate}`
+                              : item.status === "held" 
+                                ? `Liberación: ${item.releaseDate}`
                                 : "En disputa"
                             }
                           </p>
-                          {getStatusBadge(escrow.status)}
+                          {getStatusBadge(item.status)}
                         </div>
                       </div>
                     ))}
@@ -319,7 +319,7 @@ export default function Payments() {
                     <div className="flex items-start gap-3">
                       <Shield className="w-5 h-5 text-primary mt-0.5" />
                       <div>
-                        <p className="font-medium">¿Cómo funciona el Pago Escrow?</p>
+                        <p className="font-medium">¿Cómo funcionan los pagos seguros?</p>
                         <p className="text-sm text-muted-foreground mt-1">
                           El cliente paga por adelantado y el dinero se retiene de forma segura. 
                           Una vez que confirmas la realización del servicio, el fondo se libera a tu cuenta.

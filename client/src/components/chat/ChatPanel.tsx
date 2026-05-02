@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -30,6 +30,7 @@ import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/Sin
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
+import { uploadChatPaymentProof } from "@/lib/firebase-client";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSocket } from "@/hooks/use-socket";
 
@@ -285,6 +286,24 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     setLocationDialogOpen(true);
   };
 
+  const handlePaymentProofFile = useCallback(
+    async (file: File) => {
+      if (!user?.id || selectedConversationId == null || sendMessage.isPending) return;
+      try {
+        const url = await uploadChatPaymentProof(user.id, selectedConversationId, file);
+        await sendMessage.mutateAsync({ content: url, type: "image" });
+        toast({ title: "Comprobante enviado", description: "La imagen se compartió en el chat." });
+      } catch (e) {
+        toast({
+          variant: "destructive",
+          title: "No se pudo enviar el comprobante",
+          description: e instanceof Error ? e.message : "Intenta con otra imagen o más tarde.",
+        });
+      }
+    },
+    [user?.id, selectedConversationId, sendMessage, toast],
+  );
+
   const confirmShareLocation = () => {
     if (!pendingShareLocation) {
       toast({
@@ -382,6 +401,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                         onMessageInputChange={setMessageInput}
                         onSendMessage={handleSendMessage}
                         onShareLocation={handleShareLocation}
+                        onPaymentProofFile={handlePaymentProofFile}
                         isSending={sendMessage.isPending}
                         isLoadingMessages={messagesQuery.isLoading}
                         hasMoreMessages={messagesQuery.hasNextPage ?? false}
@@ -435,6 +455,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                         onMessageInputChange={setMessageInput}
                         onSendMessage={handleSendMessage}
                         onShareLocation={handleShareLocation}
+                        onPaymentProofFile={handlePaymentProofFile}
                         isSending={sendMessage.isPending}
                         isLoadingMessages={messagesQuery.isLoading}
                         hasMoreMessages={messagesQuery.hasNextPage ?? false}
@@ -521,6 +542,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                             onMessageInputChange={setMessageInput}
                             onSendMessage={handleSendMessage}
                             onShareLocation={handleShareLocation}
+                            onPaymentProofFile={handlePaymentProofFile}
                             isSending={sendMessage.isPending}
                             isLoadingMessages={messagesQuery.isLoading}
                             hasMoreMessages={messagesQuery.hasNextPage ?? false}
@@ -574,6 +596,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                           onMessageInputChange={setMessageInput}
                           onSendMessage={handleSendMessage}
                           onShareLocation={handleShareLocation}
+                          onPaymentProofFile={handlePaymentProofFile}
                           isSending={sendMessage.isPending}
                           isLoadingMessages={messagesQuery.isLoading}
                           hasMoreMessages={messagesQuery.hasNextPage ?? false}

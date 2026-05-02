@@ -32,6 +32,7 @@ import {
   effectiveHiddenCategorySlugs,
   getCategoryDisplayName,
 } from "@shared/default-categories";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED, FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 
 /** Marcas con flujo propio (p. ej. taxi / mapa); no se reservan desde esta página. */
 const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set(MOBILITY_GO_PROVIDER_SLUGS);
@@ -133,7 +134,9 @@ export default function Booking() {
   const [, navigate] = useLocation();
   const createBooking = useCreateBooking();
   const { notifyNewBooking } = useSocketBookings();
-  const { data: walletData, isLoading: walletLoading } = useWallet({ enabled: !!user?.id });
+  const { data: walletData, isLoading: walletLoading } = useWallet({
+    enabled: !!user?.id && FEATURE_WALLET_RECHARGE_UI_ENABLED,
+  });
 
   const { data: categories } = useCategories();
   const { data: visibility } = useCategoryVisibility();
@@ -313,7 +316,7 @@ export default function Booking() {
       });
       return;
     }
-    if (walletLoading) {
+    if (FEATURE_WALLET_RECHARGE_UI_ENABLED && walletLoading) {
       toast({
         title: "Validando Saldo Genfeb",
         description: "Estamos cargando tu Saldo Genfeb, intenta de nuevo en un momento.",
@@ -327,9 +330,13 @@ export default function Booking() {
     setPaymentSelectionOpen(true);
   };
 
-  const confirmBookingWithMethod = (method: "wallet" | "cash") => {
+  const confirmBookingWithMethod = (method: "wallet" | "cash" | "bank_transfer") => {
     setPaymentSelectionOpen(false);
-    
+
+    if (!FEATURE_WALLET_RECHARGE_UI_ENABLED && method === "wallet") {
+      return;
+    }
+
     if (method === "wallet") {
       const selectedServicePrice = Number(selectedServiceForBooking?.price ?? 0);
       if (Number.isFinite(selectedServicePrice) && selectedServicePrice > 0 && walletBalance < selectedServicePrice) {
@@ -373,27 +380,29 @@ export default function Booking() {
 
   return (
     <div className="min-h-screen bg-background">
-      <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Saldo Genfeb insuficiente</AlertDialogTitle>
-            <AlertDialogDescription>
-              No tienes suficiente Saldo Genfeb para pedir este servicio. Añade saldo para continuar.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setInsufficientFundsOpen(false);
-                navigate("/recharge");
-              }}
-            >
-              Añadir saldo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+        <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Saldo Genfeb insuficiente</AlertDialogTitle>
+              <AlertDialogDescription>
+                No tienes suficiente Saldo Genfeb para pedir este servicio. Añade saldo para continuar.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setInsufficientFundsOpen(false);
+                  navigate("/recharge");
+                }}
+              >
+                Añadir saldo
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
       
       <AlertDialog open={paymentSelectionOpen} onOpenChange={setPaymentSelectionOpen}>
         <AlertDialogContent className="sm:max-w-md">
@@ -403,11 +412,18 @@ export default function Booking() {
               ¿Cómo deseas pagar este servicio?
               <br />
               <span className="text-sm text-muted-foreground">
-                (El pago con Saldo Genfeb queda reservado en la plataforma hasta confirmar el servicio. Efectivo se paga directamente al asociado).
+                {FEATURE_WALLET_RECHARGE_UI_ENABLED
+                  ? `Saldo Genfeb: retención en la plataforma hasta confirmar. Efectivo o transferencia: pago acordado fuera de la app con el asociado.${
+                      FEATURE_OFF_PLATFORM_COMMISSION_ENABLED
+                        ? " La comisión de la plataforma aplica al completar el servicio en efectivo o transferencia."
+                        : ""
+                    }`
+                  : "Efectivo o transferencia: acuerdas el pago fuera de la app con el asociado."}
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="grid grid-cols-1 gap-4 py-6">
+            {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
             <Button 
               size="lg" 
               className="h-16 text-lg font-semibold flex flex-col gap-1"
@@ -416,6 +432,7 @@ export default function Booking() {
               <span>Pagar con Saldo Genfeb</span>
               <span className="text-xs font-normal opacity-80">Saldo Genfeb: ${walletBalance.toFixed(2)}</span>
             </Button>
+            )}
             <Button 
               variant="outline" 
               size="lg" 
@@ -424,6 +441,15 @@ export default function Booking() {
             >
               <span>Pagar en Efectivo</span>
               <span className="text-xs font-normal text-muted-foreground">Pagas al finalizar el servicio</span>
+            </Button>
+            <Button 
+              variant="outline" 
+              size="lg" 
+              className="h-16 text-lg font-semibold hover:bg-accent/10 flex flex-col gap-1 border-primary/20"
+              onClick={() => confirmBookingWithMethod("bank_transfer")}
+            >
+              <span>Transferencia bancaria</span>
+              <span className="text-xs font-normal text-muted-foreground">Coordina datos con el asociado</span>
             </Button>
           </div>
           <AlertDialogFooter>

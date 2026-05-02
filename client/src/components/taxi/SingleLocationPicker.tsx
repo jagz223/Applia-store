@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, CircleMarker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
-import {
-  TAXI_TILE_ATTRIBUTION,
-  TAXI_TILE_LAYER_URL,
-  TAXI_TILE_MAX_ZOOM,
-  TAXI_TILE_SUBDOMAINS,
-} from "@/components/taxi/leaflet-config";
+import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
+import { useTheme } from "@/contexts/ThemeContext";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import "@/components/taxi/leaflet-config";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
@@ -62,6 +58,8 @@ export function SingleLocationPicker({
   mapSize = "default",
   className,
 }: SingleLocationPickerProps) {
+  const { theme } = useTheme();
+  const raster = getTaxiRasterLayerProps(theme === "dark");
   const { shellRef, ready } = useDeferredLeafletMount({
     minShellHeightPx: mapSize === "sm" ? 48 : 64,
   });
@@ -233,10 +231,11 @@ export function SingleLocationPicker({
             scrollWheelZoom
           >
             <TileLayer
-              attribution={TAXI_TILE_ATTRIBUTION}
-              url={TAXI_TILE_LAYER_URL}
-              subdomains={TAXI_TILE_SUBDOMAINS}
-              maxZoom={TAXI_TILE_MAX_ZOOM}
+              key={`tiles-${theme}`}
+              attribution={raster.attribution}
+              url={raster.url}
+              maxZoom={raster.maxZoom}
+              {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
             />
             <LeafletMapLayoutFix />
             <MapClickPick onPick={onMapPick} />

@@ -95,7 +95,9 @@ export function useSendMessage(conversationId: number | null, _recipientId?: str
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: (payload: string | { content: string; type?: "text" | "location" }) => {
+    mutationFn: (
+      payload: string | { content: string; type?: "text" | "image" | "file" | "location" },
+    ) => {
       const content = typeof payload === "string" ? payload : payload.content;
       const type = typeof payload === "string" ? "text" : (payload.type ?? "text");
       return chatApi.sendMessage({

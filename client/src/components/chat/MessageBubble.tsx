@@ -1,4 +1,4 @@
-import { Check, CheckCheck, MapPin } from "lucide-react";
+import { Check, CheckCheck, ImageIcon, MapPin } from "lucide-react";
 
 interface MessageBubbleProps {
   text: string;
@@ -26,6 +26,10 @@ function parseLocationContent(content: string): { lat: number; lng: number; labe
 }
 
 export function MessageBubble({ text, type, time, isOwn, status = "sent", avatarUrl }: MessageBubbleProps) {
+  const isImage = type === "image";
+  const isHttpUrl =
+    /^https?:\/\//i.test(text.trim()) && !text.includes(" ") && text.length <= 4096;
+
   const isLocation = type === "location";
   const location = isLocation ? parseLocationContent(text) : null;
   const mapsUrl = location
@@ -62,8 +66,29 @@ export function MessageBubble({ text, type, time, isOwn, status = "sent", avatar
               <p className="text-xs opacity-90 line-clamp-2">{location.label}</p>
             ) : null}
           </div>
+        ) : isImage && isHttpUrl ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium flex items-center gap-1 opacity-90">
+              <ImageIcon className="w-3.5 h-3.5 shrink-0" aria-hidden />
+              Comprobante de pago
+            </p>
+            <a
+              href={text.trim()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-lg overflow-hidden border border-white/20 max-w-[min(100%,280px)]"
+            >
+              <img
+                src={text.trim()}
+                alt="Comprobante de pago"
+                className="w-full max-h-56 object-contain bg-black/10"
+                loading="lazy"
+              />
+            </a>
+            <p className="text-[10px] opacity-75">Abre la imagen para verla en tamaño completo</p>
+          </div>
         ) : (
-          <p className="text-sm">{text}</p>
+          <p className="text-sm break-words">{text}</p>
         )}
         <div
           className={`flex items-center justify-end gap-1 mt-1 ${isOwn ? "text-primary-foreground/70" : "text-muted-foreground"}`}

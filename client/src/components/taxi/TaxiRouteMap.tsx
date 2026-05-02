@@ -12,12 +12,8 @@ import {
 import type { GeoJsonObject } from "geojson";
 import L from "leaflet";
 import { Loader2, Navigation } from "lucide-react";
-import {
-  TAXI_TILE_ATTRIBUTION,
-  TAXI_TILE_LAYER_URL,
-  TAXI_TILE_MAX_ZOOM,
-  TAXI_TILE_SUBDOMAINS,
-} from "@/components/taxi/leaflet-config";
+import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
+import { useTheme } from "@/contexts/ThemeContext";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { cn } from "@/lib/utils";
@@ -260,6 +256,8 @@ export function TaxiRouteMap({
   zoomPosition = "default",
   onRecenter = null,
 }: TaxiRouteMapProps) {
+  const { theme } = useTheme();
+  const raster = getTaxiRasterLayerProps(theme === "dark");
   const singleFocus = start && !end ? start : !start && end ? end : null;
   const pickHandler = suppressMapPick ? () => {} : onMapPick;
   const customZoom = zoomPosition !== "default";
@@ -330,10 +328,11 @@ export function TaxiRouteMap({
               {zoomPosition === "bottomright" ? <ZoomControl position="bottomright" /> : null}
               <MapPaneBearing degrees={bearingDeg} />
               <TileLayer
-                attribution={TAXI_TILE_ATTRIBUTION}
-                url={TAXI_TILE_LAYER_URL}
-                subdomains={TAXI_TILE_SUBDOMAINS}
-                maxZoom={TAXI_TILE_MAX_ZOOM}
+                key={`tiles-${theme}`}
+                attribution={raster.attribution}
+                url={raster.url}
+                maxZoom={raster.maxZoom}
+                {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
               />
               <LeafletMapLayoutFix />
               {syncDefaultView ? <SyncBootstrapView center={defaultCenter} zoom={defaultZoom} /> : null}

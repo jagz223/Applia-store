@@ -15,6 +15,7 @@ import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { roundToCents } from "@shared/platform-commission";
 import { canAffordOffPlatformCommission, minCommissionForEstimatedTrip } from "@shared/wallet-limits";
+import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 
 export type TaxiVehicleKind = "moto" | "auto" | "pet_car" | "camioneta";
 export type TaxiPaymentMethod = "genfeb" | "cash" | "bank_transfer";
@@ -259,7 +260,7 @@ async function offerNextDriver(
     if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
     const isOff =
       ride.paymentMethod === "cash" || ride.paymentMethod === "bank_transfer";
-    if (isOff) {
+    if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && isOff) {
       const ok = await driverCanAcceptOffPlatformRide(ride.estimatedUsd, nextId);
       if (!ok) continue;
     }
@@ -489,7 +490,7 @@ export function registerMobilityRideRoutes(app: Express) {
         if (w < need) {
           return res.status(400).json({ message: "Saldo insuficiente para pagar con Saldo GenFeb." });
         }
-      } else {
+      } else if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
         const rate = await getPlatformCommissionRate();
         const minC = minCommissionForEstimatedTrip(body.estimatedUsd, rate);
         if (minC > 0) {
@@ -585,7 +586,7 @@ export function registerMobilityRideRoutes(app: Express) {
 
       const isOff =
         ride.paymentMethod === "cash" || ride.paymentMethod === "bank_transfer";
-      if (isOff) {
+      if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && isOff) {
         const ok = await driverCanAcceptOffPlatformRide(ride.estimatedUsd, driverUserId);
         if (!ok) {
           return res.status(409).json({

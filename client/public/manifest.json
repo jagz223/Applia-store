@@ -14,15 +14,15 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/logo-Genfeb.jpg",
+      "src": "/genfeb-logo-new.png",
       "sizes": "192x192",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/logo-Genfeb.jpg",
+      "src": "/genfeb-logo-new.png",
       "sizes": "512x512",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "maskable"
     }
   ],
@@ -32,35 +32,35 @@
       "short_name": "Car Go",
       "description": "Pide un carro con Car Go",
       "url": "/go/cargo",
-      "icons": [{ "src": "/logo-Genfeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+      "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Reservar servicio",
       "short_name": "Reservar",
       "description": "Reserva un nuevo servicio",
       "url": "/booking",
-      "icons": [{ "src": "/logo-Genfeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+      "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Mis reservas",
       "short_name": "Reservas",
       "description": "Ver mis reservas",
       "url": "/dashboard",
-      "icons": [{ "src": "/logo-Genfeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+      "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Mensajes",
       "short_name": "Chat",
       "description": "Ver mensajes",
       "url": "/chat",
-      "icons": [{ "src": "/logo-Genfeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+      "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Configuración",
       "short_name": "Configuracion",
       "description": "Gestiona tu perfil y cuenta",
       "url": "/settings",
-      "icons": [{ "src": "/logo-Genfeb.jpg", "sizes": "192x192", "type": "image/jpeg" }]
+      "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }

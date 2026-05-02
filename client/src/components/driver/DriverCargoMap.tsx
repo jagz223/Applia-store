@@ -5,12 +5,8 @@ import L from "leaflet";
 import { Loader2, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { GeoJsonObject } from "geojson";
-import {
-  TAXI_TILE_ATTRIBUTION,
-  TAXI_TILE_LAYER_URL,
-  TAXI_TILE_MAX_ZOOM,
-  TAXI_TILE_SUBDOMAINS,
-} from "@/components/taxi/leaflet-config";
+import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
+import { useTheme } from "@/contexts/ThemeContext";
 import "@/components/taxi/leaflet-config";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
@@ -231,6 +227,8 @@ export function DriverCargoMap({
   routeGeometry = null,
   routeRenderKey = 0,
 }: DriverCargoMapProps) {
+  const { theme } = useTheme();
+  const raster = getTaxiRasterLayerProps(theme === "dark");
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: fullscreen ? 120 : 64 });
   const [me, setMe] = useState<{ lat: number; lon: number } | null>(null);
   const onPosition = useCallback((p: { lat: number; lon: number } | null) => setMe(p), []);
@@ -306,10 +304,11 @@ export function DriverCargoMap({
               />
               <MapPaneBearing degrees={bearingDeg} />
               <TileLayer
-                attribution={TAXI_TILE_ATTRIBUTION}
-                url={TAXI_TILE_LAYER_URL}
-                subdomains={TAXI_TILE_SUBDOMAINS}
-                maxZoom={TAXI_TILE_MAX_ZOOM}
+                key={`tiles-${theme}`}
+                attribution={raster.attribution}
+                url={raster.url}
+                maxZoom={raster.maxZoom}
+                {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
               />
               <LeafletMapLayoutFix />
               <WatchDriverPosition onPosition={onPosition} />

@@ -12,7 +12,7 @@ export type CargoDriverTripLog = {
   endedAt: string;
   durationMin: number;
   amountUsd: number;
-  payment: "genfeb" | "cash";
+  payment: "genfeb" | "cash" | "bank_transfer";
   /** Módulo Go: transport (Car Go) o delivery (Pack Go). */
   goSlug?: "cargo" | "pack";
 };

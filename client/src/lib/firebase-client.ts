@@ -70,6 +70,7 @@ export function getFirebaseStorage(): FirebaseStorage | null {
 
 const MAX_AVATAR_SIZE_MB = 5;
 const MAX_ID_DOC_SIZE_MB = 5;
+const MAX_CHAT_PAYMENT_PROOF_MB = 8;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 /** Documento de identidad en verificación: solo JPG o PNG. */
@@ -92,6 +93,38 @@ export async function uploadProfileImage(file: File): Promise<string> {
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
   const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
   const path = `avatars/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on(
+      "state_changed",
+      () => {},
+      (err) => reject(err),
+      () => resolve()
+    );
+  });
+
+  return getDownloadURL(storageRef);
+}
+
+/**
+ * Sube una captura de comprobante de pago desde el chat.
+ * Path: `chat_payment_proofs/{conversationId}/{uuid}.{ext}`
+ */
+export async function uploadChatPaymentProof(userId: string, conversationId: number, file: File): Promise<string> {
+  if (file.size > MAX_CHAT_PAYMENT_PROOF_MB * 1024 * 1024) {
+    throw new Error(`La imagen no debe superar ${MAX_CHAT_PAYMENT_PROOF_MB} MB`);
+  }
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+  const path = `chat_payment_proofs/${conversationId}/${userId}_${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
   const storageRef = ref(storage, path);
 
   await new Promise<void>((resolve, reject) => {

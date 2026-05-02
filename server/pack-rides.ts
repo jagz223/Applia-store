@@ -14,6 +14,7 @@ import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 // roundToCents no se usa en Pack Go; settlement usa applyMobilityRideSettlement.
 import { canAffordOffPlatformCommission, minCommissionForEstimatedTrip } from "@shared/wallet-limits";
+import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 
 export type PackVehicleKind = "moto" | "auto" | "camioneta";
 export type PackPaymentMethod = "genfeb" | "cash" | "bank_transfer";
@@ -211,7 +212,12 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
     if (driverIsBusy(driverId)) continue;
     const declinedAt = ride.declinedAtByDriverId?.[driverId];
     if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
-    if (!(await driverCanAcceptOffPlatformRide(ride.estimatedUsd, driverId)) && ride.paymentMethod !== "genfeb") continue;
+    if (
+      FEATURE_OFF_PLATFORM_COMMISSION_ENABLED &&
+      !(await driverCanAcceptOffPlatformRide(ride.estimatedUsd, driverId)) &&
+      ride.paymentMethod !== "genfeb"
+    )
+      continue;
     ride.currentOfferDriverId = driverId;
     ride.offerExpiresAt = Date.now() + ttlMs;
     io.to(`user:${driverId}`).emit("pack:ride:offer", {

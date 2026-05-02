@@ -8,22 +8,23 @@ export function Footer() {
   const hideNewsletterAlways = true;
 
   return (
-    <footer className="bg-white border-t border-border/50 mt-auto">
+    <footer className="bg-background border-t border-border/50 mt-auto">
       <div className="container mx-auto px-4 py-12 md:py-16 max-w-7xl">
         <div className={`grid grid-cols-1 gap-12 md:grid-cols-3`}>
           
           {/* Brand */}
           <div className="space-y-4">
             <Link href="/" className="flex items-center gap-2">
-              <img
-                src="/logo-Genfeb.jpg"
-                alt=""
-                className="h-8 w-8 shrink-0 bg-white object-contain"
-                width={32}
-                height={32}
-                decoding="async"
-                aria-hidden
-              />
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background p-0.5 ring-1 ring-border" aria-hidden>
+                <img
+                  src="/genfeb-logo-new.png"
+                  alt=""
+                  className="h-full w-full object-contain"
+                  width={32}
+                  height={32}
+                  decoding="async"
+                />
+              </span>
               <span className="text-xl font-bold font-display text-primary">GENFEB</span>
             </Link>
             <p className="text-muted-foreground text-sm leading-relaxed max-w-xs">
