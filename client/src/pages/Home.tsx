@@ -87,6 +87,8 @@ export default function HomePage() {
   const SHOW_HOME_STATS_SECTION = false;
   // Oculta links del footer (Acerca de / Términos / Privacidad / Contacto).
   const SHOW_HOME_FOOTER_LINKS = false;
+  /** Carrusel de vídeos en la home. Desactivado por ahora; en el futuro enlazar a lista configurable (CMS / config). */
+  const SHOW_HOME_VIDEO_CAROUSEL = false;
 
   const features: HomeFeature[] = [
     {
@@ -517,7 +519,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <HomeVideoCarousel />
+      {SHOW_HOME_VIDEO_CAROUSEL ? <HomeVideoCarousel /> : null}
 
       {/* FEATURES SECTION */}
       <section className="py-20">
