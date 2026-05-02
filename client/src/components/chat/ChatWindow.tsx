@@ -1,7 +1,8 @@
+import { useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { User, ArrowLeft, MapPin, Bell, BellOff, Loader2, Info } from "lucide-react";
+import { User, ArrowLeft, MapPin, Bell, BellOff, Loader2, Info, Receipt } from "lucide-react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useAuth } from "@/hooks/use-auth";
 import { MessageList } from "./MessageList";
@@ -18,6 +19,8 @@ interface ChatWindowProps {
   onMessageInputChange: (value: string) => void;
   onSendMessage: () => void;
   onShareLocation?: () => void;
+  /** Elige imagen del dispositivo y envía como comprobante de pago (sube a almacenamiento y envía mensaje tipo imagen). */
+  onPaymentProofFile?: (file: File) => void | Promise<void>;
   isSending: boolean;
   isLoadingMessages: boolean;
   hasMoreMessages?: boolean;
@@ -36,6 +39,7 @@ export function ChatWindow({
   onMessageInputChange,
   onSendMessage,
   onShareLocation,
+  onPaymentProofFile,
   isSending,
   isLoadingMessages,
   hasMoreMessages,
@@ -44,6 +48,7 @@ export function ChatWindow({
   onBack,
   reminderText,
 }: ChatWindowProps) {
+  const proofInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const push = usePushNotifications();
   const otherAvatarUrl = conversation.otherParticipant?.profileImageUrl ?? null;
@@ -67,6 +72,15 @@ export function ChatWindow({
   }));
 
   const firstDate = messages[0]?.createdAt;
+
+  const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !onPaymentProofFile) return;
+    void Promise.resolve(onPaymentProofFile(file));
+  };
+
+  const attachDisabled = isSending || !!conversation.otherParticipant?.isDeleted;
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
@@ -151,11 +165,32 @@ export function ChatWindow({
           size="sm"
           className="text-xs h-7 border-border shrink-0"
           onClick={onShareLocation}
-          disabled={!onShareLocation || isSending}
+          disabled={!onShareLocation || attachDisabled}
         >
           <MapPin className="w-3 h-3 mr-1" />
           Ubicación
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="text-xs h-7 border-border shrink-0 gap-1"
+          onClick={() => proofInputRef.current?.click()}
+          disabled={!onPaymentProofFile || attachDisabled}
+          title="Adjuntar captura de comprobante de pago"
+        >
+          <Receipt className="w-3 h-3 shrink-0" />
+          Comprobante
+        </Button>
+        <input
+          ref={proofInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          capture="environment"
+          className="hidden"
+          tabIndex={-1}
+          onChange={handleProofFileChange}
+        />
       </div>
 
       <MessageList

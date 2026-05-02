@@ -1110,7 +1110,7 @@ export default function AdminPanel() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header: compacto en móvil */}
-      <div className="bg-white border-b px-4 sm:px-6 py-3 sm:py-4">
+      <div className="bg-background border-b border-border px-4 sm:px-6 py-3 sm:py-4">
         <div className="container mx-auto flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-mango-orange shrink-0" />
@@ -1293,7 +1293,7 @@ export default function AdminPanel() {
                               const identEnabled = assoc.identification_verified === "pending";
                               const txEnabled = assoc.transacction_verified === "pending";
                               return (
-                                <div key={assoc.userId} className="flex min-w-0 flex-col gap-3 rounded-lg border bg-white p-4">
+                                <div key={assoc.userId} className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4">
                                   <div className="flex items-center justify-between gap-3">
                                     <div className="flex items-center gap-3 min-w-0">
                                       <Avatar>
@@ -1702,7 +1702,7 @@ export default function AdminPanel() {
                         <>
                           <div className="space-y-4">
                             {paged.map((p) => (
-                              <div key={p.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border rounded-lg bg-white">
+                              <div key={p.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border border-border rounded-lg bg-card">
                                 <div className="flex items-center gap-3 min-w-0">
                                   <Avatar>
                                     <AvatarFallback>{(p.userName || p.userEmail || "S")[0] ?? "S"}</AvatarFallback>
@@ -1795,7 +1795,7 @@ export default function AdminPanel() {
                                 : { scale: 1, boxShadow: "0 0 0 0px rgba(249,115,22,0)" }
                             }
                             transition={{ type: "spring", stiffness: 280, damping: 22 }}
-                            className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 border rounded-lg bg-white transition-colors ${
+                            className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 border border-border rounded-lg bg-card transition-colors ${
                               selected ? "border-primary/40 bg-primary/5" : ""
                             } ${isBusy ? "opacity-80" : ""}`}
                           >
@@ -1943,7 +1943,7 @@ export default function AdminPanel() {
                                 : { scale: 1, boxShadow: "0 0 0 0px rgba(249,115,22,0)" }
                             }
                             transition={{ type: "spring", stiffness: 280, damping: 22 }}
-                            className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 border rounded-lg bg-white ${
+                            className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 border border-border rounded-lg bg-card ${
                               isBusy ? "opacity-80" : ""
                             }`}
                           >
@@ -2461,7 +2461,7 @@ export default function AdminPanel() {
                           <DialogDescription>
                             {pendingAdminChange?.summary}
                             <br />
-                            Esto puede afectar el flujo normal y balances (escrow/wallet) si cambias estados como “Completada” o “Cancelada”.
+                            Esto puede afectar el flujo normal y balances (pagos seguros / cartera) si cambias estados como “Completada” o “Cancelada”.
                           </DialogDescription>
                         </DialogHeader>
                         <DialogFooter className="gap-2 sm:gap-0">

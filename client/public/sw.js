@@ -11,7 +11,7 @@ const PRECACHE_ASSETS = [
   '/manifest.webmanifest',
   '/favicon.png',
   '/favicon.png',
-  '/logo-Genfeb.jpg',
+  '/genfeb-logo-new.png',
 ];
 
 // Install event - cache essential assets
@@ -131,8 +131,8 @@ self.addEventListener('push', (event) => {
   const data = event.data.json();
   const options = {
     body: data.body || 'Nueva notificación de GenFeb',
-    icon: '/genfeb-mark.svg',
-    badge: '/genfeb-mark.svg',
+    icon: '/genfeb-logo-new.png',
+    badge: '/genfeb-logo-new.png',
     vibrate: [100, 50, 100],
     data: {
       url: data.url || '/',

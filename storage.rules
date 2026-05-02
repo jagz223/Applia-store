@@ -27,5 +27,12 @@ service firebase.storage {
             || request.resource.contentType == 'image/png'
             || request.resource.contentType == 'application/pdf');
     }
+
+    // Capturas de comprobante de pago en chat (solo imágenes, máx. 9 MB)
+    match /chat_payment_proofs/{conversationId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 9 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
   }
 }

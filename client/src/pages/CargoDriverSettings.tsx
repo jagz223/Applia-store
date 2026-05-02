@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { loadTripLog } from "@/lib/cargo-driver-storage";
+import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -158,6 +159,8 @@ export default function CargoDriverSettings() {
           </CardHeader>
         </Card>
 
+        <ThemeAppearanceCard className="mb-4" />
+
         <Card className="mb-4">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -212,12 +215,12 @@ export default function CargoDriverSettings() {
 
         <Card className="mt-4">
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CreditCard className="h-5 w-5 text-primary" />
-              Banco para retiros
+            <CardTitle className="flex items-center gap-2 text-base leading-snug">
+              <CreditCard className="h-5 w-5 shrink-0 text-primary" />
+              Datos de cuenta bancaria para pagos de servicio
             </CardTitle>
             <CardDescription>
-              Necesario para solicitar retiro de Saldo GenFeb. Se sincroniza con la configuración general.
+              Misma cuenta que en Configuración general: aquí puedes editarla y queda enlazada a tu perfil.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

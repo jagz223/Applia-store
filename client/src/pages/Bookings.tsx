@@ -23,6 +23,7 @@ import {
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
+import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
 
 const listItemMotion = {
   initial: { opacity: 0, y: 10 },
@@ -84,6 +85,7 @@ export default function Bookings() {
     const Icon = config.icon;
     const date = toDate(booking.date);
     const needsClientConfirmation = booking.status === "confirmed" && !booking.confirmedByClient;
+    const offPlatformPay = isOffPlatformServiceBookingPayment(booking.paymentMethod);
     const cost = typeof booking.cost === "number" ? booking.cost : (booking.service?.price != null ? Number(booking.service.price) : 0);
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
 
@@ -121,14 +123,18 @@ export default function Bookings() {
               <div className="rounded-lg bg-primary/10 border border-primary/20 p-4 space-y-3">
                 <p className="font-medium flex items-center gap-2 text-primary">
                   <ShieldCheck className="h-5 w-5" />
-                  {booking.paymentMethod === "cash" 
-                    ? "Confirmar inicio de servicio (Efectivo)" 
+                  {offPlatformPay
+                    ? booking.paymentMethod === "bank_transfer"
+                      ? "Confirmar acuerdo (Transferencia)"
+                      : "Confirmar acuerdo (Efectivo)"
                     : "Confirmar pago y retener fondos"}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {booking.paymentMethod === "cash" 
-                    ? `El asociado ha confirmado esta reserva. Al confirmar, aceptas que el servicio se pagará en Efectivo ($${Number(cost).toFixed(2)} USD) directamente al profesional.`
-                    : `El asociado ha confirmado esta reserva. Para retener el monto en escrow y permitir que complete el trabajo, confirma el pago. Se descontará $${Number(cost).toFixed(2)} USD de tu Saldo Genfeb.`}
+                  {offPlatformPay
+                    ? booking.paymentMethod === "bank_transfer"
+                      ? `El asociado confirmó la reserva. Al confirmar, aceptas pagar $${Number(cost).toFixed(2)} USD por transferencia bancaria según lo acordes con el profesional.`
+                      : `El asociado ha confirmado esta reserva. Al confirmar, aceptas que el servicio se pagará en efectivo ($${Number(cost).toFixed(2)} USD) directamente al profesional.`
+                    : `El asociado ha confirmado esta reserva. Con los pagos seguros, el monto queda retenido hasta que el trabajo avance correctamente; confirma el pago para proceder. Se descontará $${Number(cost).toFixed(2)} USD de tu Saldo Genfeb.`}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -291,13 +297,17 @@ export default function Bookings() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {bookingToConfirm?.paymentMethod === "cash" 
-                ? "¿Confirmar servicio en efectivo?" 
+              {bookingToConfirm && isOffPlatformServiceBookingPayment(bookingToConfirm.paymentMethod)
+                ? bookingToConfirm.paymentMethod === "bank_transfer"
+                  ? "¿Confirmar pago por transferencia?"
+                  : "¿Confirmar servicio en efectivo?"
                 : "¿El monto es el correcto?"}
             </DialogTitle>
             <DialogDescription>
-              {bookingToConfirm?.paymentMethod === "cash"
-                ? "Confirma si estás de acuerdo con iniciar este servicio. El pago se realizará en efectivo directamente al profesional al finalizar el trabajo."
+              {bookingToConfirm && isOffPlatformServiceBookingPayment(bookingToConfirm.paymentMethod)
+                ? bookingToConfirm.paymentMethod === "bank_transfer"
+                  ? "Confirma si estás de acuerdo con el monto y con pagar por transferencia según coordines con el profesional. No se descontará saldo de la app por esta confirmación."
+                  : "Confirma si estás de acuerdo con iniciar este servicio. El pago se realizará en efectivo directamente al profesional al finalizar el trabajo."
                 : "Confirma solo si estás de acuerdo con que este sea el monto decidido para el trabajo acordado. Al confirmar, se descontará el monto de tu Saldo Genfeb y se retendrán los fondos para este servicio."}
             </DialogDescription>
           </DialogHeader>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
+import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED, FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, Phone, Radio, Settings, Star, XCircle } from "lucide-react";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
@@ -121,11 +122,17 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
-  const { data: walletData } = useWallet({ enabled: isAuthenticated });
+  const { data: walletData } = useWallet({ enabled: isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED });
   const [driverWalletOpen, setDriverWalletOpen] = useState(false);
   const [receivingCargo, setReceivingCargo] = useState(false);
   const [receivingPack, setReceivingPack] = useState(false);
   const [trips, setTrips] = useState<CargoDriverTripLog[]>([]);
+  const tripsForHistory = useMemo(() => {
+    if (FEATURE_WALLET_RECHARGE_UI_ENABLED) return trips;
+    return trips.filter((t) => t.payment === "cash" || t.payment === "bank_transfer");
+  }, [trips]);
+  const hasOnlyHiddenWalletTrips =
+    !FEATURE_WALLET_RECHARGE_UI_ENABLED && trips.length > 0 && tripsForHistory.length === 0;
   const [historySheetOpen, setHistorySheetOpen] = useState(false);
   const [geoPos, setGeoPos] = useState<{ lat: number; lon: number } | null>(null);
   const incomingOffer = goDriverUi?.currentOffer?.offer ?? null;
@@ -388,8 +395,13 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           endedAt: new Date().toISOString(),
           durationMin: Math.max(1, Math.round((snap.durationSec ?? 0) / 60)),
           amountUsd: snap.estimatedUsd ?? 0,
-          payment: snap.paymentMethod === "genfeb" ? "genfeb" : "cash",
-            goSlug: goSlug === "pack" ? "pack" : "cargo",
+          payment:
+            snap.paymentMethod === "genfeb"
+              ? "genfeb"
+              : snap.paymentMethod === "bank_transfer"
+                ? "bank_transfer"
+                : "cash",
+          goSlug: goSlug === "pack" ? "pack" : "cargo",
         });
         setTrips(loadTripLog());
         rateTargetRef.current = { rideId: p.rideId, targetName: snap.rider?.name ?? "Cliente" };
@@ -573,7 +585,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setActiveRideOffer(snapOffer);
         setActiveRideStarted(false);
         setSearchingClient(false);
-        setPaymentConfirmed(snapOffer.paymentMethod === "genfeb");
+        setPaymentConfirmed(snapOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED);
         // Guardar según módulo para reanudar correctamente.
         saveGoDriverActiveRideId(incomingModule === "pack" ? "pack" : "cargo", snapOffer.rideId);
         lastServiceRouteFetchRef.current = null;
@@ -819,7 +831,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setActiveRideOffer(mapApiRideToOffer(ride));
         setActiveRideStarted(ride.status === "in_progress");
         setSearchingClient(!!ride.driverSearchingClient);
-        setPaymentConfirmed(ride.paymentMethod === "genfeb" || !!ride.paymentConfirmed);
+        setPaymentConfirmed(
+          (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
+        );
       } catch {
         if (alive) clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       }
@@ -1002,7 +1016,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               </Button>
             )
           ) : null}
-          {activeRideStarted && activeRideOffer.paymentMethod !== "genfeb" ? (
+          {activeRideStarted &&
+          !(activeRideOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) ? (
             paymentConfirmed ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-emerald-600/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-200">
                 <BadgeCheck className="h-4 w-4" aria-hidden />
@@ -1014,7 +1029,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               </Button>
             )
           ) : null}
-          {activeRideStarted && (activeRideOffer.paymentMethod === "genfeb" || paymentConfirmed) ? (
+          {activeRideStarted &&
+          ((activeRideOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || paymentConfirmed) ? (
             <Button type="button" size="sm" className="h-9 rounded-full px-3 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void completeRide()}>
               Terminar viaje
             </Button>
@@ -1205,9 +1221,14 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             </div>
           </div>
           <DriverTripHistorySheet
-            trips={trips}
+            trips={tripsForHistory}
             open={historySheetOpen}
             onOpenChange={setHistorySheetOpen}
+            emptyHint={
+              hasOnlyHiddenWalletTrips
+                ? "Solo se listan efectivo y transferencias. Viajes con otros medios no se muestran mientras la cartera no está activa."
+                : undefined
+            }
           />
           {activeRideOffer && activeRidePanelCollapsed ? (
             <Button
@@ -1253,25 +1274,36 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           <aside className="flex w-full min-w-0 shrink-0 flex-col gap-4 lg:max-w-[22rem] lg:flex-[0_1_340px] lg:sticky lg:top-20 xl:max-w-sm">
             {activeRideOffer ? activeServicePanel : null}
             {controlsBlockDesktopSlides}
-            <button
-              type="button"
-              className="-mt-1 w-full rounded-lg px-1 py-1.5 text-left text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground lg:text-xs"
-              onClick={() => setDriverWalletOpen(true)}
-            >
-              Saldo GenFeb · ver detalle de deuda / recarga
-            </button>
+            {FEATURE_WALLET_RECHARGE_UI_ENABLED ? (
+              <button
+                type="button"
+                className="-mt-1 w-full rounded-lg px-1 py-1.5 text-left text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground lg:text-xs"
+                onClick={() => setDriverWalletOpen(true)}
+              >
+                Saldo GenFeb · ver detalle de deuda / recarga
+              </button>
+            ) : null}
           </aside>
         </div>
       </div>
 
-      <Dialog open={driverWalletOpen} onOpenChange={setDriverWalletOpen}>
+      <Dialog open={FEATURE_WALLET_RECHARGE_UI_ENABLED && driverWalletOpen} onOpenChange={setDriverWalletOpen}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
             <DialogTitle>Saldo GenFeb · Car Go</DialogTitle>
             <DialogDescription>
-              Con pagos en efectivo o transferencia, GenFeb descuenta su comisión de tu cartera. Puedes quedar con saldo
-              negativo hasta un límite; al alcanzarlo, solo se te ofrecerán viajes con pago en Saldo GenFeb hasta
-              regularizar.
+              {FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? (
+                <>
+                  Con pagos en efectivo o transferencia, GenFeb descuenta su comisión de tu cartera. Puedes quedar con
+                  saldo negativo hasta un límite; al alcanzarlo, solo se te ofrecerán viajes con pago en Saldo GenFeb
+                  hasta regularizar.
+                </>
+              ) : (
+                <>
+                  Consulta tu saldo en cartera, el piso de deuda y opciones de recarga cuando la cartera esté habilitada
+                  en la app.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">

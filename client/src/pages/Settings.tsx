@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { ArrowLeft, Loader2, User, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,8 +20,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useState } from "react";
-import { useLocation } from "wouter";
 import { Trash2 } from "lucide-react";
+import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,6 +59,26 @@ export default function Settings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+  const searchQs = useSearch();
+  const settingsBackHref = useMemo(() => {
+    try {
+      const qp = new URLSearchParams(searchQs || "");
+      const raw = qp.get("return");
+      if (!raw) return "/dashboard";
+      let decoded = raw;
+      try {
+        decoded = decodeURIComponent(raw);
+      } catch {
+        /* noop */
+      }
+      if (typeof decoded === "string" && decoded.startsWith("/") && !decoded.startsWith("//")) {
+        return decoded;
+      }
+    } catch {
+      /* noop */
+    }
+    return "/dashboard";
+  }, [searchQs]);
   
   const [showFirstConfirm, setShowFirstConfirm] = useState(false);
   const [showSecondConfirm, setShowSecondConfirm] = useState(false);
@@ -284,7 +304,7 @@ export default function Settings() {
     <div className="container max-w-lg mx-auto py-8 px-4">
       <div className="flex items-center gap-4 mb-6">
         <Button variant="ghost" size="icon" asChild>
-          <Link href="/dashboard">
+          <Link href={settingsBackHref}>
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
@@ -293,6 +313,8 @@ export default function Settings() {
           <p className="text-sm text-muted-foreground">Gestiona tu perfil y datos de cuenta bancaria</p>
         </div>
       </div>
+
+      <ThemeAppearanceCard className="mb-6" />
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -447,12 +469,13 @@ export default function Settings() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Building2 className="h-5 w-5" />
-                Datos bancarios
+              <CardTitle className="flex items-center gap-2 leading-snug">
+                <Building2 className="h-5 w-5 shrink-0" />
+                Datos de cuenta bancaria para pagos de servicio
               </CardTitle>
               <CardDescription>
-                Banco y número de cuenta para retiros o pagos. Solo se permiten dígitos, espacios y guiones en el número de cuenta.
+                Indica el banco y el número de cuenta donde recibir pagos por tus servicios. Solo se permiten dígitos,
+                espacios y guiones en el número de cuenta.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

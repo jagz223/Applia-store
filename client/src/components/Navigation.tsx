@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED, FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { 
@@ -54,6 +55,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useEffect, useMemo } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { ThemeToggleHeaderButton } from "@/components/ThemeToggle";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { useTheme } from "@/contexts/ThemeContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { Check } from "lucide-react";
 
@@ -61,6 +66,26 @@ import { Check } from "lucide-react";
 const SHOW_CREATE_SERVICE = false;
 /** Oculta el área de "Payments" (en un futuro se podrá configurar). */
 const SHOW_PAYMENTS = false;
+
+function MobileDarkModePreference() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
+      <div className="min-w-0">
+        <Label htmlFor="nav-mobile-dark" className="text-base font-medium text-foreground cursor-pointer">
+          Modo oscuro
+        </Label>
+        <p className="text-xs text-muted-foreground mt-0.5">Igual que en escritorio — se guarda en el navegador</p>
+      </div>
+      <Switch
+        id="nav-mobile-dark"
+        checked={theme === "dark"}
+        onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
+        aria-label={theme === "dark" ? "Desactivar modo oscuro" : "Activar modo oscuro"}
+      />
+    </div>
+  );
+}
 
 export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth();
@@ -75,16 +100,19 @@ export function Navigation() {
   const { data: myServices = [], isLoading: myServicesLoading } = useMyServices({
     enabled: shouldFetchMyServices,
   });
-  const { data: walletData } = useWallet({ enabled: isAuthenticated });
+  const { data: walletData } = useWallet({ enabled: isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED });
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
   const providerWalletFloorUsd =
     typeof (walletData as { providerWalletFloorUsd?: number })?.providerWalletFloorUsd === "number"
       ? (walletData as { providerWalletFloorUsd: number }).providerWalletFloorUsd
       : PROVIDER_WALLET_FLOOR_USD;
   const isProviderDebtCapped = !!(walletData as { isProviderDebtCapped?: boolean })?.isProviderDebtCapped;
-  const userRating =
-    typeof (walletData as { rating?: number } | undefined)?.rating === "number"
+  const userRating = FEATURE_WALLET_RECHARGE_UI_ENABLED
+    ? typeof (walletData as { rating?: number } | undefined)?.rating === "number"
       ? (walletData as { rating: number }).rating
+      : 5
+    : typeof (user as { rating?: number } | null)?.rating === "number"
+      ? (user as { rating: number }).rating
       : 5;
   const formatWallet = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
@@ -258,27 +286,29 @@ export function Navigation() {
           <Link href="/vault" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/vault') ? 'text-primary' : 'text-muted-foreground'}`}>
             Documentos
           </Link>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive('/recharge') || isActive('/movimientos') ? 'text-primary' : 'text-muted-foreground'}`}>
-                Movimientos <ChevronDown className="h-4 w-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="bg-card border-border">
-              <DropdownMenuItem asChild>
-                <Link href="/recharge" className="flex items-center gap-2 w-full">
-                  <Banknote className="h-4 w-4" />
-                  <span>Añadir saldo</span>
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/movimientos" className="flex items-center gap-2 w-full">
-                  <CreditCard className="h-4 w-4" />
-                  <span>Historial de movimientos</span>
-                </Link>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive('/recharge') || isActive('/movimientos') ? 'text-primary' : 'text-muted-foreground'}`}>
+                  Movimientos <ChevronDown className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="bg-card border-border">
+                <DropdownMenuItem asChild>
+                  <Link href="/recharge" className="flex items-center gap-2 w-full">
+                    <Banknote className="h-4 w-4" />
+                    <span>Añadir saldo</span>
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/movimientos" className="flex items-center gap-2 w-full">
+                    <CreditCard className="h-4 w-4" />
+                    <span>Historial de movimientos</span>
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </>
       )}
     </>
@@ -292,15 +322,19 @@ export function Navigation() {
         {/* Logo & Desktop Nav */}
         <div className="flex items-center gap-8">
           <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-1.5 min-[400px]:gap-2 shrink-0">
-            <img
-              src="/logo-Genfeb.jpg"
-              alt=""
-              className="h-7 w-7 min-[400px]:h-8 min-[400px]:w-8 shrink-0 bg-white object-contain"
-              width={32}
-              height={32}
-              decoding="async"
+            <span
+              className="flex h-7 w-7 min-[400px]:h-8 min-[400px]:w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background p-0.5 ring-1 ring-border"
               aria-hidden
-            />
+            >
+              <img
+                src="/genfeb-logo-new.png"
+                alt=""
+                className="h-full w-full object-contain"
+                width={32}
+                height={32}
+                decoding="async"
+              />
+            </span>
             <span className="sr-only">GenFeb, inicio</span>
             <span className="hidden text-xl font-bold font-display text-primary sm:inline-block tracking-wider">
               {exploreCategoryDisplayName ?? <>GENFEB</>}
@@ -320,8 +354,10 @@ export function Navigation() {
                 <span>ES</span>
               </Button>
 
-          {/* Saldo Genfeb en cabecera (importe + valoración) */}
-          {isAuthenticated && (
+          <ThemeToggleHeaderButton className="hidden lg:flex" />
+
+          {/* Saldo Genfeb en cabecera (importe + valoración) — oculto si no hay UI de wallet */}
+          {isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED && (
             <div
               className="flex items-center gap-1.5 min-w-0 px-2 py-1.5 min-[400px]:gap-2 min-[400px]:px-2.5 min-[400px]:py-1.5 rounded-md min-[400px]:rounded-lg bg-primary/10 border border-primary/20 text-primary max-w-[100%]"
               title="Saldo GenFeb y valoración"
@@ -335,6 +371,15 @@ export function Navigation() {
                 <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-500 fill-amber-500" aria-hidden />
                 <span className="text-foreground">{Number(userRating).toFixed(1)}</span>
               </span>
+            </div>
+          )}
+          {isAuthenticated && !FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+            <div
+              className="hidden min-[400px]:flex items-center gap-1 rounded-md px-2 py-1.5 bg-primary/10 border border-primary/20 text-primary"
+              title="Valoración"
+            >
+              <Star className="h-4 w-4 text-amber-500 fill-amber-500 shrink-0" aria-hidden />
+              <span className="text-sm font-semibold tabular-nums text-foreground">{Number(userRating).toFixed(1)}</span>
             </div>
           )}
           
@@ -445,12 +490,14 @@ export function Navigation() {
                       Mis documentos
                     </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/recharge" className="flex items-center">
-                      <Banknote className="mr-2 h-4 w-4" />
-                      Añadir saldo
-                    </Link>
-                  </DropdownMenuItem>
+                  {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/recharge" className="flex items-center">
+                        <Banknote className="mr-2 h-4 w-4" />
+                        Añadir saldo
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   {SHOW_PAYMENTS && (
                     <DropdownMenuItem asChild>
                       <Link href="/payments" className="flex items-center">
@@ -519,7 +566,7 @@ export function Navigation() {
             </SheetTrigger>
             <SheetContent side="right" className="w-[300px] bg-card border-l border-border">
               {/* Saldo en menú móvil */}
-              {isAuthenticated && (
+              {isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED && (
                 <div className="flex items-center gap-2 mt-6 mb-2 px-1 py-3 rounded-xl bg-primary/10 border border-primary/20">
                   <Banknote className="h-5 w-5 text-primary shrink-0" />
                   <span className="text-base font-semibold text-primary tabular-nums">
@@ -532,6 +579,15 @@ export function Navigation() {
                   </span>
                 </div>
               )}
+              {isAuthenticated && !FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+                <div className="flex items-center gap-2 mt-6 mb-2 px-1 py-3 rounded-xl bg-primary/10 border border-primary/20">
+                  <Star className="h-5 w-5 text-amber-500 fill-amber-500 shrink-0" aria-hidden />
+                  <span className="text-base font-semibold tabular-nums text-foreground">{Number(userRating).toFixed(1)}</span>
+                </div>
+              )}
+              <div className="mt-4 lg:hidden">
+                <MobileDarkModePreference />
+              </div>
               <div className="flex flex-col gap-4 mt-4">
                 <Link href="/" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Inicio
@@ -588,12 +644,16 @@ export function Navigation() {
                     <Link href="/vault" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Mis documentos
                     </Link>
-                    <Link href="/recharge" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                      Añadir saldo
-                    </Link>
-                    <Link href="/movimientos" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                      Historial de movimientos
-                    </Link>
+                    {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
+                      <>
+                        <Link href="/recharge" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                          Añadir saldo
+                        </Link>
+                        <Link href="/movimientos" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                          Historial de movimientos
+                        </Link>
+                      </>
+                    )}
                   </>
                 )}
                 <Link href="/dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
@@ -683,7 +743,7 @@ export function Navigation() {
       <SheetContent
         side="left"
         // En móviles (ej. 344x) evita que el panel se vea “demasiado largo” (se queda fijo arriba).
-        className="w-[360px] max-w-[92vw] bg-white border-r border-border overflow-y-auto rounded-r-xl shadow-lg top-0 bottom-auto h-auto max-h-[calc(100vh-1rem)] p-0"
+        className="w-[360px] max-w-[92vw] bg-card border-r border-border overflow-y-auto rounded-r-xl shadow-lg top-0 bottom-auto h-auto max-h-[calc(100vh-1rem)] p-0"
       >
         <div className="p-6">
           <div className="pb-4 border-b border-border/80">
@@ -691,7 +751,7 @@ export function Navigation() {
             <p className="text-sm text-muted-foreground mt-1">Tu publicación destacada</p>
           </div>
 
-          {providerProfile ? (
+          {providerProfile && FEATURE_WALLET_RECHARGE_UI_ENABLED ? (
             <div className="mt-5 rounded-xl border border-border/70 bg-muted/30 p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Cartera GenFeb</p>
               <div className="grid grid-cols-2 gap-3">
@@ -716,22 +776,24 @@ export function Navigation() {
                   </p>
                 </div>
               </div>
-              {isProviderDebtCapped ? (
-                <p className="mt-3 text-[11px] leading-snug text-amber-950 dark:text-amber-100 border-t border-amber-500/25 pt-3">
-                  Llegaste al límite de deuda: no podrás aceptar más servicios pagados en efectivo o transferencia hasta
-                  recargar (donde aplique). Podrás seguir con pago en Saldo GenFeb.
-                </p>
-              ) : (
-                <p className="mt-3 text-[10px] text-muted-foreground leading-snug">
-                  Con efectivo o transferencia, GenFeb retiene comisión; el saldo no puede bajar de este piso.
-                </p>
-              )}
+              {FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? (
+                isProviderDebtCapped ? (
+                  <p className="mt-3 text-[11px] leading-snug text-amber-950 dark:text-amber-100 border-t border-amber-500/25 pt-3">
+                    Llegaste al límite de deuda: no podrás aceptar más servicios pagados en efectivo o transferencia hasta
+                    recargar (donde aplique). Podrás seguir con pago en Saldo GenFeb.
+                  </p>
+                ) : (
+                  <p className="mt-3 text-[10px] text-muted-foreground leading-snug">
+                    Con efectivo o transferencia, GenFeb retiene comisión; el saldo no puede bajar de este piso.
+                  </p>
+                )
+              ) : null}
             </div>
           ) : null}
 
           <div className="mt-5 space-y-4">
             {myServicesLoading ? (
-              <Card className="rounded-xl border border-border/60 bg-white shadow-sm overflow-hidden">
+              <Card className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
@@ -763,7 +825,7 @@ export function Navigation() {
               </div>
             ) : (
               <TooltipProvider delayDuration={300}>
-                <Card className="rounded-xl border border-border/60 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+                <Card className="rounded-xl border border-border/60 bg-card shadow-sm hover:shadow-md transition-shadow overflow-hidden">
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">

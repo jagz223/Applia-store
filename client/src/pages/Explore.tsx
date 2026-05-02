@@ -188,7 +188,7 @@ export default function Explore() {
     <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
       {/* Vista cuando hay categoría seleccionada: encabezado centrado en la categoría */}
       {hasCategorySelected ? (
-        <div className="bg-white dark:bg-card border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-white/80 dark:bg-card/80 shadow-sm transition-shadow duration-300">
+        <div className="border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-background/90 dark:bg-background/92 shadow-sm transition-shadow duration-300">
           <div className={`container mx-auto px-4 max-w-7xl ${filtersPanelExpanded ? "py-6" : "py-3"}`}>
             <Button
               variant="ghost"
@@ -307,7 +307,7 @@ export default function Explore() {
         </div>
       ) : (
         /* Vista sin categoría: Explorar Servicios con filtros */
-        <div className="bg-white dark:bg-card border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-white/80 dark:bg-card/80 shadow-sm transition-shadow duration-300">
+        <div className="border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-background/90 dark:bg-background/92 shadow-sm transition-shadow duration-300">
           <div className={`container mx-auto px-4 max-w-7xl ${filtersPanelExpanded ? "py-6" : "py-3"}`}>
             <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
               <div className="min-w-0">
@@ -484,7 +484,7 @@ export default function Explore() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="text-center py-20 bg-white dark:bg-card rounded-3xl border border-dashed border-border shadow-lg"
+            className="text-center py-20 bg-muted/30 dark:bg-card rounded-3xl border border-dashed border-border shadow-lg"
           >
             <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-muted flex items-center justify-center">
               <Search className="h-10 w-10 text-muted-foreground" />

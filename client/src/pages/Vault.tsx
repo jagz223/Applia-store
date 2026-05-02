@@ -848,7 +848,7 @@ export default function Vault() {
                       <iframe
                         title={credentialVaultLabel}
                         src={viewCredentialUrl}
-                        className="h-[min(65vh,560px)] w-full min-h-[240px] rounded border-0 bg-white"
+                        className="h-[min(65vh,560px)] w-full min-h-[240px] rounded border-0 bg-card dark:bg-muted/30"
                       />
                     ) : (
                       <div className="space-y-3 py-4 text-center text-sm text-muted-foreground">

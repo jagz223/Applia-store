@@ -56,7 +56,7 @@ export const bookings = pgTable("bookings", {
   notes: text("notes"),
   /** Costo numérico de la reserva/servicio. */
   cost: decimal("cost", { precision: 10, scale: 2 }),
-  /** Handshake: el cliente confirma el pago (escrow); completed es inalcanzable si es false. */
+  /** El cliente confirma el pago seguro; completed es inalcanzable si es false. */
   confirmedByClient: boolean("confirmed_by_client").default(false),
   paymentMethod: text("payment_method").notNull().default("wallet"), // 'wallet', 'cash'
   createdAt: timestamp("created_at").defaultNow(),

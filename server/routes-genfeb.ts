@@ -11,6 +11,7 @@ import { calcCommission, calcProviderNet, commissionDisplayPercents } from "@sha
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { isFullAdmin } from "@shared/roles";
 import { isWalletAtOrBelowDebtCap, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
+import { isOffPlatformServiceBookingPayment, serviceBookingPaymentLabel } from "@shared/booking-payment";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
@@ -25,7 +26,7 @@ const createBookingBodySchema = z.object({
   serviceId: z.number({ required_error: "serviceId es requerido" }),
   date: z.string().min(1, "date es requerido"),
   notes: z.string().optional(),
-  paymentMethod: z.enum(["wallet", "cash"]).optional().default("wallet"),
+  paymentMethod: z.enum(["wallet", "cash", "bank_transfer"]).optional().default("wallet"),
 });
 
 const updateBookingStatusSchema = z.object({
@@ -190,7 +191,7 @@ export async function registerGenFebRoutes(
         void notificationService
           .sendPushToUser(providerUserId, {
             title: "Nueva solicitud de reserva",
-            body: `Tienes una nueva solicitud de reserva (Pago: ${(data as any).paymentMethod === "cash" ? "Efectivo" : "Saldo Genfeb"}). Revisa el detalle en tu Panel Asociado.`,
+            body: `Tienes una nueva solicitud de reserva (Pago: ${serviceBookingPaymentLabel((data as any).paymentMethod)}). Revisa el detalle en tu Panel Asociado.`,
             data: {
               url: `/professional-dashboard?tab=bookings&highlight=${(booking as { id: number }).id}`,
               type: "booking",
@@ -248,7 +249,7 @@ export async function registerGenFebRoutes(
       const provider = await storage.getProviderByUserId(userId);
       const isProvider = provider != null && (provider as { id?: number }).id === bid.providerId;
 
-      const isCash = bid.paymentMethod === "cash";
+      const isOffPlatform = isOffPlatformServiceBookingPayment(bid.paymentMethod);
 
       // Solo el cliente o el profesional de la reserva pueden cambiar el estado
       if (!isClient && !isProvider) {
@@ -263,7 +264,7 @@ export async function registerGenFebRoutes(
       } else {
         // Es el profesional
         // FSM Guard: 'in_progress' inalcanzable si confirmedByClient es false (solo para Wallet)
-        if (data.status === "in_progress" && !isCash) {
+        if (data.status === "in_progress" && !isOffPlatform) {
           if (bid.confirmedByClient !== true) {
             return res.status(403).json({
               message: "Debes esperar a que el cliente confirme el pago antes de marcar como En proceso.",
@@ -271,7 +272,7 @@ export async function registerGenFebRoutes(
           }
         }
         // FSM Guard: completed es inalcanzable si confirmedByClient es false (solo para Wallet)
-        if (data.status === "completed" && !isCash) {
+        if (data.status === "completed" && !isOffPlatform) {
           if (bid.confirmedByClient !== true) {
             return res.status(403).json({
               message: "El servicio requiere confirmación previa del cliente para procesar los fondos retenidos",
@@ -480,6 +481,9 @@ export async function registerGenFebRoutes(
       const bid = existing as { userId?: string; providerId?: number };
       if (bid.userId !== userId) return res.status(403).json({ message: "Solo el cliente de la reserva puede confirmar el pago" });
 
+      const paymentMethod = (existing as { paymentMethod?: string }).paymentMethod;
+      const offPlatformBooking = isOffPlatformServiceBookingPayment(paymentMethod);
+
       const updated = await storage.confirmBookingByClient(bookingId);
       const cost = typeof (updated as any).cost === "number" ? (updated as any).cost : Number((updated as any).cost) || 0;
       const amountFormatted = cost > 0 ? cost.toFixed(2) : "";
@@ -490,24 +494,39 @@ export async function registerGenFebRoutes(
       const commissionFormatted = commission > 0 ? commission.toFixed(2) : "";
       const providerNetFormatted = providerNet > 0 ? providerNet.toFixed(2) : "";
 
-      // Notificación al profesional: fondos agregados (retenidos a su favor) + cliente confirmó el pago
+      // Notificación al profesional: escrow (wallet) vs pago acordado fuera de wallet (efectivo / transferencia)
       const provider = bid.providerId != null ? await storage.getProvider(bid.providerId) : undefined;
       const providerUserId = provider != null ? String((provider as { userId?: string }).userId ?? "") : "";
       if (providerUserId) {
-        const notifData = {
-          bookingId,
-          amount: cost,
-          amountFormatted,
-          commission,
-          commissionFormatted,
-          providerNet,
-          providerNetFormatted,
-          platformPercent,
-          providerPercent,
-          message: amountFormatted
-            ? `Se te han retenido $${amountFormatted} USD (retenidos). El cliente confirmó el pago. Recibirás $${providerNetFormatted} USD (${providerPercent}%) y la plataforma tomará $${commissionFormatted} USD (${platformPercent}%). Ya puedes completar el servicio.`
-            : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
-        };
+        const notifData = offPlatformBooking
+          ? {
+              bookingId,
+              amount: cost,
+              amountFormatted,
+              commission,
+              commissionFormatted,
+              providerNet,
+              providerNetFormatted,
+              platformPercent,
+              providerPercent,
+              message: amountFormatted
+                ? `El cliente confirmó el acuerdo (${serviceBookingPaymentLabel(paymentMethod)}). Monto: $${amountFormatted} USD. Al marcar completado se descontará la comisión (${platformPercent}%) de tu Saldo Genfeb.`
+                : `El cliente confirmó el acuerdo (${serviceBookingPaymentLabel(paymentMethod)}).`,
+            }
+          : {
+              bookingId,
+              amount: cost,
+              amountFormatted,
+              commission,
+              commissionFormatted,
+              providerNet,
+              providerNetFormatted,
+              platformPercent,
+              providerPercent,
+              message: amountFormatted
+                ? `Se te han retenido $${amountFormatted} USD (retenidos). El cliente confirmó el pago. Recibirás $${providerNetFormatted} USD (${providerPercent}%) y la plataforma tomará $${commissionFormatted} USD (${platformPercent}%). Ya puedes completar el servicio.`
+                : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+            };
         try {
           await storage.createNotification({
             userId: providerUserId,
@@ -525,12 +544,16 @@ export async function registerGenFebRoutes(
           });
         }
         void notificationService.sendPushToUser(providerUserId, {
-          title: "Fondos agregados",
-          body: amountFormatted && providerNetFormatted && commissionFormatted
-            ? `Se te han retenido $${amountFormatted} USD. Recibirás $${providerNetFormatted} USD (${providerPercent}%) y la plataforma tomará $${commissionFormatted} USD (${platformPercent}%). Completa el servicio para liberar los fondos.`
-            : amountFormatted
-              ? `Se te han retenido $${amountFormatted} USD. Completa el servicio para liberar los fondos.`
-              : "El cliente confirmó el pago.",
+          title: offPlatformBooking ? "Cliente confirmó el acuerdo" : "Fondos agregados",
+          body: offPlatformBooking
+            ? amountFormatted
+              ? `Monto acordado $${amountFormatted} USD (${serviceBookingPaymentLabel(paymentMethod)}). Completa el servicio; la comisión se aplicará a tu Saldo Genfeb.`
+              : `El cliente confirmó (${serviceBookingPaymentLabel(paymentMethod)}).`
+            : amountFormatted && providerNetFormatted && commissionFormatted
+              ? `Se te han retenido $${amountFormatted} USD. Recibirás $${providerNetFormatted} USD (${providerPercent}%) y la plataforma tomará $${commissionFormatted} USD (${platformPercent}%). Completa el servicio para liberar los fondos.`
+              : amountFormatted
+                ? `Se te han retenido $${amountFormatted} USD. Completa el servicio para liberar los fondos.`
+                : "El cliente confirmó el pago.",
           data: { url: "/professional-dashboard?tab=bookings", type: "booking_confirmed_by_client", bookingId: String(bookingId) },
         });
       }
@@ -1069,7 +1092,8 @@ export async function registerGenFebRoutes(
     transferTime: z.string().optional(),
     transferCode: z.string().optional(),
   });
-  app.post("/api/wallet/recharge-request", authenticateJWT, async (req: any, res) => {
+  // Recarga auto-servicio deshabilitada para usuarios finales: solo administrador puede usar este endpoint (pantalla /recharge).
+  app.post("/api/wallet/recharge-request", authenticateJWT, requireFullAdmin, async (req: any, res) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -1400,7 +1424,12 @@ export async function registerGenFebRoutes(
                 storage.getLastMessageByConversation(convId),
                 storage.getUnreadCountByConversation(convId, userId),
               ]);
-              lastMessageText = lastMsg?.content ?? null;
+              if (lastMsg) {
+                const lmType = String((lastMsg as { type?: string }).type ?? "text");
+                if (lmType === "image") lastMessageText = "📷 Comprobante de pago";
+                else if (lmType === "location") lastMessageText = "📍 Ubicación compartida";
+                else lastMessageText = (lastMsg as { content?: string }).content ?? null;
+              }
               unreadCount = unread;
             } catch (err) {
               console.error("Error enriching conversation", c.id, err);
@@ -1549,12 +1578,20 @@ export async function registerGenFebRoutes(
         conv.participant1Id === userId ? conv.participant2Id : conv.participant1Id;
       const recipientIdStr = String(recipientId);
 
+      const msgType = String((message as { type?: string }).type ?? data.type ?? "text");
+      const messagePreview =
+        msgType === "image"
+          ? "📷 Comprobante de pago"
+          : msgType === "location"
+            ? "📍 Ubicación compartida"
+            : String(message.content ?? "").slice(0, 120);
+
       await storage.createNotification({
         userId: recipientIdStr,
         type: "message",
         data: {
           conversationId: message.conversationId,
-          preview: message.content.slice(0, 120),
+          preview: messagePreview,
           messageId: message.id,
         },
       });
@@ -1563,7 +1600,7 @@ export async function registerGenFebRoutes(
       if (io) {
         io.to(`user:${recipientIdStr}`).emit("notification:message", {
           conversationId: message.conversationId,
-          preview: message.content.slice(0, 120),
+          preview: messagePreview,
           messageId: message.id,
         });
       }
@@ -1571,7 +1608,7 @@ export async function registerGenFebRoutes(
       void notificationService.sendNewMessageNotification({
         recipientId,
         conversationId: message.conversationId,
-        preview: message.content.slice(0, 120),
+        preview: messagePreview,
         senderId: userId,
       });
       res.status(201).json(message);

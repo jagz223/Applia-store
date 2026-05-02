@@ -1,4 +1,6 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, useLocation, Redirect } from "wouter";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
+import { AdminRechargeRoute } from "@/components/AdminRechargeRoute";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -86,9 +88,25 @@ function MainRouter() {
       {/* wouter: `component` recibe props de ruta; render inline evita mismatch de props */}
       <Route path="/payment-voucher">{() => <PaymentVoucher />}</Route>
       <Route path="/bookings" component={Bookings} />
-      <Route path="/recharge" component={Recharge} />
-      <Route path="/recharge/confirm" component={RechargeConfirm} />
-      <Route path="/movimientos" component={Movimientos} />
+      <Route path="/recharge">
+        {() => (
+          <AdminRechargeRoute>
+            <Recharge />
+          </AdminRechargeRoute>
+        )}
+      </Route>
+      <Route path="/recharge/confirm">
+        {() => (
+          <AdminRechargeRoute>
+            <RechargeConfirm />
+          </AdminRechargeRoute>
+        )}
+      </Route>
+      {FEATURE_WALLET_RECHARGE_UI_ENABLED ? (
+        <Route path="/movimientos" component={Movimientos} />
+      ) : (
+        <Route path="/movimientos">{() => <Redirect to="/" />}</Route>
+      )}
       <Route path="/settings" component={Settings} />
       <Route path="/notifications" component={Notifications} />
       <Route path="/professional/verify" component={VerifyProfessional} />

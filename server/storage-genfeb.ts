@@ -25,6 +25,8 @@ import type { ProfessionalVerification, VerifyingStatus, ProfessionalVerificatio
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
 import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
 import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
+import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
+import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 const getDb = async () => (await import("./db")).db;
 
 /**
@@ -499,8 +501,8 @@ export class InMemoryStorage implements IStorage {
     const booking = this.bookings.find(b => b.id === bookingId) as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean } | undefined;
     if (!booking) return undefined;
     if (booking.status === "completed") return booking;
-    const isCash = (booking as any).paymentMethod === "cash";
-    if (booking.confirmedByClient !== true && !isCash) {
+    const isOffPlatform = isOffPlatformServiceBookingPayment((booking as any).paymentMethod);
+    if (booking.confirmedByClient !== true && !isOffPlatform) {
       throw new Error("El servicio requiere confirmación previa del cliente para procesar los fondos retenidos");
     }
     const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
@@ -511,7 +513,7 @@ export class InMemoryStorage implements IStorage {
     const client = this.users.find((u: { id?: string }) => u.id === booking.userId);
     if (!client) throw new Error("Usuario cliente no encontrado");
     const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
-    if (!isCash && clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
+    if (!isOffPlatform && clientPending < cost) throw new Error("Fondos en espera del cliente insuficientes para este servicio");
 
     const provider = this.providers.find((p: { id?: number }) => p.id === booking.providerId);
     if (!provider) throw new Error("Profesional no encontrado");
@@ -528,24 +530,26 @@ export class InMemoryStorage implements IStorage {
     const adminUserTotalEarnings =
       typeof (adminUser as { totalEarnings?: number }).totalEarnings === "number" ? (adminUser as { totalEarnings: number }).totalEarnings : 0;
 
-    if (!isCash) {
+    if (!isOffPlatform) {
       (client as { pendingBalance: number }).pendingBalance = clientPending - cost;
       (providerUser as { wallet: number }).wallet = providerWallet + providerNet;
       (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + providerNet;
       (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
       (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
     } else {
-      if (!canAffordOffPlatformCommission(providerWallet, commission)) {
-        throw new Error(
-          `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo GenFeb.`
-        );
+      if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
+        if (!canAffordOffPlatformCommission(providerWallet, commission)) {
+          throw new Error(
+            `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo GenFeb.`
+          );
+        }
+        (providerUser as { wallet: number }).wallet = providerWallet - commission;
+        (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + cost;
+        (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
+        (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
+      } else {
+        (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + cost;
       }
-      // Para efectivo, el profesional ya cobró físicamente. 
-      // Descontamos la comisión (10%) de su wallet (puede quedar en negativo).
-      (providerUser as { wallet: number }).wallet = providerWallet - commission;
-      (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + cost;
-      (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
-      (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
     }
     (booking as { status: string }).status = "completed";
     (booking as { completedAt?: Date }).completedAt = new Date();
@@ -553,7 +557,7 @@ export class InMemoryStorage implements IStorage {
     const now = new Date();
     const refId = String(bookingId);
 
-    if (!isCash) {
+    if (!isOffPlatform) {
       const clientTransferRecord = {
         id: this.walletTransferIdCounter++,
         userId: booking.userId,
@@ -569,33 +573,61 @@ export class InMemoryStorage implements IStorage {
       this.walletTransfers.push(clientTransferRecord);
     }
 
-    const providerTransferRecord = {
-      id: this.walletTransferIdCounter++,
-      userId: providerUserId,
-      fromUserId: null,
-      amount: isCash ? commission : providerNet,
-      transferType: "service_payment",
-      status: "completed",
-      description: isCash ? "Comisión de plataforma por servicio en efectivo" : "Pago por servicio completado (neto)",
-      referenceId: refId,
-      currency: "USD",
-      createdAt: now,
-    };
-    const commissionTransferRecord = {
-      id: this.walletTransferIdCounter++,
-      userId: adminUser.id,
-      fromUserId: null,
-      amount: commission,
-      transferType: "service_payment",
-      status: "completed",
-      description: `Comisión de plataforma por servicio (${isCash ? 'Efectivo' : 'Wallet'})`,
-      referenceId: refId,
-      currency: "USD",
-      createdAt: now,
-    };
-    
-    this.walletTransfers.push(providerTransferRecord);
-    this.walletTransfers.push(commissionTransferRecord);
+    if (!isOffPlatform) {
+      const providerTransferRecord = {
+        id: this.walletTransferIdCounter++,
+        userId: providerUserId,
+        fromUserId: null,
+        amount: providerNet,
+        transferType: "service_payment",
+        status: "completed",
+        description: "Pago por servicio completado (neto)",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      };
+      const commissionTransferRecord = {
+        id: this.walletTransferIdCounter++,
+        userId: adminUser.id,
+        fromUserId: null,
+        amount: commission,
+        transferType: "service_payment",
+        status: "completed",
+        description: "Comisión de plataforma por servicio (Wallet)",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      };
+      this.walletTransfers.push(providerTransferRecord);
+      this.walletTransfers.push(commissionTransferRecord);
+    } else if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
+      const providerTransferRecord = {
+        id: this.walletTransferIdCounter++,
+        userId: providerUserId,
+        fromUserId: null,
+        amount: commission,
+        transferType: "service_payment",
+        status: "completed",
+        description: "Comisión de plataforma por servicio en efectivo o transferencia",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      };
+      const commissionTransferRecord = {
+        id: this.walletTransferIdCounter++,
+        userId: adminUser.id,
+        fromUserId: null,
+        amount: commission,
+        transferType: "service_payment",
+        status: "completed",
+        description: "Comisión de plataforma por servicio (fuera de wallet)",
+        referenceId: refId,
+        currency: "USD",
+        createdAt: now,
+      };
+      this.walletTransfers.push(providerTransferRecord);
+      this.walletTransfers.push(commissionTransferRecord);
+    }
 
     return { ...booking, status: "completed" };
   }
@@ -680,40 +712,45 @@ export class InMemoryStorage implements IStorage {
         createdAt: now,
       });
     } else {
-      if (!canAffordOffPlatformCommission(driverWallet, commission)) {
-        throw new Error(
-          `No se puede completar: la comisión te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Acepta viajes con Saldo GenFeb o recarga.`
-        );
+      if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
+        if (!canAffordOffPlatformCommission(driverWallet, commission)) {
+          throw new Error(
+            `No se puede completar: la comisión te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Acepta viajes con Saldo GenFeb o recarga.`
+          );
+        }
+        (driverUser as { wallet: number }).wallet = driverWallet - commission;
+        (driverUser as { totalEarnings: number }).totalEarnings = driverEarnings + cost;
+        (driverUser as { completedTrips: number }).completedTrips = driverTrips + 1;
+        (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
+        (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
+        this.walletTransfers.push({
+          id: this.walletTransferIdCounter++,
+          userId: input.driverUserId,
+          fromUserId: null,
+          amount: commission,
+          transferType: "service_payment",
+          status: "completed",
+          description: `Comisión de plataforma (Car Go, ${input.paymentMethod})`,
+          referenceId: refId,
+          currency: "USD",
+          createdAt: now,
+        });
+        this.walletTransfers.push({
+          id: this.walletTransferIdCounter++,
+          userId: adminId,
+          fromUserId: null,
+          amount: commission,
+          transferType: "service_payment",
+          status: "completed",
+          description: `Comisión de plataforma (Car Go, ${input.paymentMethod}) — plataforma`,
+          referenceId: refId,
+          currency: "USD",
+          createdAt: now,
+        });
+      } else {
+        (driverUser as { totalEarnings: number }).totalEarnings = driverEarnings + cost;
+        (driverUser as { completedTrips: number }).completedTrips = driverTrips + 1;
       }
-      (driverUser as { wallet: number }).wallet = driverWallet - commission;
-      (driverUser as { totalEarnings: number }).totalEarnings = driverEarnings + cost;
-      (driverUser as { completedTrips: number }).completedTrips = driverTrips + 1;
-      (adminUser as { wallet: number }).wallet = adminUserWallet + commission;
-      (adminUser as { totalEarnings: number }).totalEarnings = adminUserTotalEarnings + commission;
-      this.walletTransfers.push({
-        id: this.walletTransferIdCounter++,
-        userId: input.driverUserId,
-        fromUserId: null,
-        amount: commission,
-        transferType: "service_payment",
-        status: "completed",
-        description: `Comisión de plataforma (Car Go, ${input.paymentMethod})`,
-        referenceId: refId,
-        currency: "USD",
-        createdAt: now,
-      });
-      this.walletTransfers.push({
-        id: this.walletTransferIdCounter++,
-        userId: adminId,
-        fromUserId: null,
-        amount: commission,
-        transferType: "service_payment",
-        status: "completed",
-        description: `Comisión de plataforma (Car Go, ${input.paymentMethod}) — plataforma`,
-        referenceId: refId,
-        currency: "USD",
-        createdAt: now,
-      });
     }
   }
 
@@ -722,7 +759,7 @@ export class InMemoryStorage implements IStorage {
     if (!booking) return undefined;
 
     // Si el cliente no confirmó el pago o es pago en efectivo, solo marcar cancelado.
-    if (booking.confirmedByClient !== true || booking.paymentMethod === "cash") {
+    if (booking.confirmedByClient !== true || isOffPlatformServiceBookingPayment(booking.paymentMethod)) {
       (booking as { status: string }).status = "cancelled";
       (booking as { cancelledAt?: Date }).cancelledAt = new Date();
       return { ...booking, status: "cancelled" };
@@ -787,6 +824,11 @@ export class InMemoryStorage implements IStorage {
     const providerId = booking.providerId;
     if (!clientUserId) throw new Error("Reserva sin cliente asociado");
     if (providerId == null) throw new Error("Reserva sin profesional asociado");
+
+    if (isOffPlatformServiceBookingPayment((booking as { paymentMethod?: string }).paymentMethod)) {
+      (booking as { confirmedByClient: boolean }).confirmedByClient = true;
+      return { ...booking, confirmedByClient: true };
+    }
 
     const client = this.users.find((u: { id?: string }) => u.id === clientUserId);
     if (!client) throw new Error("Usuario cliente no encontrado");

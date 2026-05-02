@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -27,7 +27,8 @@ import {
   XCircle,
   Building2,
   Receipt,
-  Banknote
+  Banknote,
+  Settings,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
@@ -36,6 +37,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { QuickSettingsPanel } from "@/components/settings/QuickSettingsPanel";
 
 const monthlyData = [
   { month: "Ene", income: 12400, expenses: 8200 },
@@ -57,6 +60,8 @@ export default function Dashboard() {
   const [timeRange, setTimeRange] = useState("6m");
   const [transactionsPage, setTransactionsPage] = useState(1);
   const [overviewPage, setOverviewPage] = useState(1);
+  const [dashboardSettingsOpen, setDashboardSettingsOpen] = useState(false);
+  const [locationPath] = useLocation();
 
   const { user } = useAuth();
 
@@ -412,7 +417,18 @@ export default function Dashboard() {
                 Movimientos, comprobantes y saldo GenFeb en un solo lugar
               </p>
             </div>
-            <div className="flex gap-3 justify-center md:justify-end flex-wrap">
+            <div className="flex gap-3 justify-center md:justify-end flex-wrap items-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="shrink-0 border-border"
+                onClick={() => setDashboardSettingsOpen(true)}
+                aria-label="Abrir configuración"
+                title="Configuración"
+              >
+                <Settings className="w-5 h-5" aria-hidden />
+              </Button>
               {SHOW_DASHBOARD_HEADER_ACTIONS && (
                 <>
                   <Button variant="outline" className="border-primary/50 text-primary">
@@ -478,6 +494,21 @@ export default function Dashboard() {
         </div>
       </section>
       )}
+
+      <Sheet open={dashboardSettingsOpen} onOpenChange={setDashboardSettingsOpen}>
+        <SheetContent side="right" className="w-full max-w-md overflow-y-auto sm:max-w-lg">
+          <SheetHeader className="text-left pr-8 space-y-1.5">
+            <SheetTitle>Configuración</SheetTitle>
+            <SheetDescription>Preferencias y accesos; sin salir del panel.</SheetDescription>
+          </SheetHeader>
+          <div className="mt-6">
+            <QuickSettingsPanel
+              returnPath={locationPath.startsWith("/") ? locationPath : "/dashboard"}
+              onNavigate={() => setDashboardSettingsOpen(false)}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Main Content */}
       <section className="py-4 sm:py-6 pb-16">

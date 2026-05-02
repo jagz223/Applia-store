@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocket } from "@/hooks/use-socket";
 import { useConversations } from "@/hooks/use-chat";
+import { serviceBookingPaymentLabel } from "@shared/booking-payment";
 
 const PAGE_SIZE = 10;
 
@@ -175,7 +176,11 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
     return "Reserva actualizada";
   }
   if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el asociado";
-  if (type === "booking_confirmed_by_client") return "Fondos agregados";
+  if (type === "booking_confirmed_by_client") {
+    const msg = d.message ?? d.data?.message;
+    if (typeof msg === "string" && msg.includes("acuerdo")) return "Cliente confirmó el acuerdo";
+    return "Fondos agregados";
+  }
   if (type === "booking_cost_commission_reminder") return "Recordatorio de comisión";
   if (type === "booking_cancelled") return "Reserva cancelada";
   if (type === "booking_cancelled_by_provider") return "Servicio cancelado";
@@ -233,11 +238,13 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     return "La reserva fue actualizada.";
   }
   if (type === "booking" && d.type === "new_booking") {
-    const method = d.booking?.paymentMethod === "cash" ? "Efectivo" : "Saldo Genfeb";
+    const method = serviceBookingPaymentLabel(d.booking?.paymentMethod);
     return `Tienes una nueva solicitud de reserva (Pago: ${method}). Revisa el detalle en tu Panel Asociado.`;
   }
   // 1) Mensajes de reserva (comunes)
   if (type === "booking_confirmed_by_client") {
+    const customMsg = d.message ?? d.data?.message;
+    if (typeof customMsg === "string" && customMsg.trim()) return customMsg;
     const amount = d.amountFormatted ?? d.data?.amountFormatted;
     const providerNet = d.providerNetFormatted ?? d.data?.providerNetFormatted;
     const commission = d.commissionFormatted ?? d.data?.commissionFormatted;

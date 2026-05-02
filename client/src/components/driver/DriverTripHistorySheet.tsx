@@ -20,6 +20,12 @@ function formatMoney(n: number): string {
   return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(n);
 }
 
+function paymentLabel(p: CargoDriverTripLog["payment"]): string {
+  if (p === "genfeb") return "Saldo GenFeb";
+  if (p === "bank_transfer") return "Transferencia bancaria";
+  return "Efectivo";
+}
+
 type Props = {
   trips: CargoDriverTripLog[];
   triggerClassName?: string;
@@ -29,6 +35,8 @@ type Props = {
   /** Controlado desde la barra inferior (sin botón flotante). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Mensaje alternativo cuando la lista filtrada viene vacía pero hubo actividad oculta (p. ej. cartera desactivada). */
+  emptyHint?: string;
 };
 
 export function DriverTripHistorySheet({
@@ -38,6 +46,7 @@ export function DriverTripHistorySheet({
   compactTrigger = false,
   open: controlledOpen,
   onOpenChange,
+  emptyHint,
 }: Props) {
   const isControlled = onOpenChange !== undefined;
   const moduleLabel = (t: CargoDriverTripLog): string => (t.goSlug === "pack" ? "Pack Go" : "Car Go");
@@ -69,8 +78,8 @@ export function DriverTripHistorySheet({
         <div className="mt-4 space-y-3 pb-6">
           {trips.length === 0 ? (
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Aún no hay servicios registrados. Cuando completes servicios con Car Go o Pack Go, aquí verás la
-              duración, el monto y si el pago fue en efectivo o con saldo GenFeb.
+              {emptyHint ??
+                "Aún no hay servicios registrados. Cuando completes servicios con Car Go o Pack Go, aquí verás la duración, el monto y la forma de pago."}
             </p>
           ) : (
             <ul className="space-y-3">
@@ -91,7 +100,7 @@ export function DriverTripHistorySheet({
                     <span>
                       Pago:{" "}
                       <span className="font-medium text-foreground">
-                        {t.payment === "genfeb" ? "Saldo GenFeb" : "Efectivo"}
+                        {paymentLabel(t.payment)}
                       </span>
                     </span>
                   </div>

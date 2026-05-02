@@ -32,6 +32,8 @@ import { isFullAdmin } from "@shared/roles";
 import type { ProfessionalVerification, ProfessionalVerificationState } from "@shared/professional-verification";
 import type { VerifyingStatus } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
+import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
+import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
 
 /** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed); payment = client paid for a service (outflow from pending to provider). */
@@ -1150,10 +1152,23 @@ class FirestoreStorageImpl implements IStorage {
       const bookingRef = bookingsColl.doc(bookingId.toString());
       const bookingSnap = await t.get(bookingRef);
       if (!bookingSnap.exists) return undefined;
-      const data = bookingSnap.data() as { status?: string; userId?: string; cost?: number; confirmedByClient?: boolean };
+      const data = bookingSnap.data() as {
+        status?: string;
+        userId?: string;
+        cost?: number;
+        confirmedByClient?: boolean;
+        paymentMethod?: string;
+      };
 
       if (data.confirmedByClient !== true) {
         // Si el cliente no confirmó el pago, solo marcamos cancelado sin mover dinero.
+        const now = new Date();
+        t.update(bookingRef, { status: "cancelled", cancelledAt: now });
+        return { id: bookingId, ...data, status: "cancelled" } as Booking;
+      }
+
+      const pm = data.paymentMethod || "wallet";
+      if (isOffPlatformServiceBookingPayment(pm)) {
         const now = new Date();
         t.update(bookingRef, { status: "cancelled", cancelledAt: now });
         return { id: bookingId, ...data, status: "cancelled" } as Booking;
@@ -1241,7 +1256,7 @@ class FirestoreStorageImpl implements IStorage {
         paymentMethod?: string;
       };
       
-      if (data.status === "completed") return { id: bookingId, ...data } as Booking;
+      if (data.status === "completed") return { id: bookingId, ...data } as unknown as Booking;
       
       const paymentMethod = data.paymentMethod || "wallet";
       const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
@@ -1317,34 +1332,40 @@ class FirestoreStorageImpl implements IStorage {
           transferType: "service_payment", status: "completed", description: "Pago por servicio completado (neto)",
           referenceId: String(bookingId), currency: "USD", createdAt: now,
         });
-      } else {
+        t.update(adminUserRef, { wallet: adminWallet + commission, totalEarnings: adminTotalEarnings + commission, updatedAt: now });
+        t.set(transfersColl.doc(String(transferId3)), {
+          id: transferId3, userId: adminUserId, fromUserId: null, amount: commission,
+          transferType: "service_payment", status: "completed", description: `Comisión de plataforma por servicio (${paymentMethod})`,
+          referenceId: String(bookingId), currency: "USD", createdAt: now,
+        });
+      } else if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
         if (!canAffordOffPlatformCommission(providerWallet, commission)) {
           throw new Error(
             `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo GenFeb.`
           );
         }
-        // Lógica cash / fuera de wallet: descontar comisión; acumular ingresos bruto (lo cobrado al cliente)
         t.update(providerUserRef, { 
           wallet: providerWallet - commission, 
           totalEarnings: providerTotalEarnings + cost, 
           updatedAt: now 
         });
-        
-        // Registro de transferencia (comisión)
         t.set(transfersColl.doc(String(transferId2)), {
           id: transferId2, userId: providerUserId, fromUserId: null, amount: commission,
-          transferType: "service_payment", status: "completed", description: "Comisión de plataforma por servicio en efectivo",
+          transferType: "service_payment", status: "completed", description: "Comisión de plataforma por servicio (efectivo o transferencia)",
           referenceId: String(bookingId), currency: "USD", createdAt: now,
         });
+        t.update(adminUserRef, { wallet: adminWallet + commission, totalEarnings: adminTotalEarnings + commission, updatedAt: now });
+        t.set(transfersColl.doc(String(transferId3)), {
+          id: transferId3, userId: adminUserId, fromUserId: null, amount: commission,
+          transferType: "service_payment", status: "completed", description: `Comisión de plataforma por servicio (${paymentMethod})`,
+          referenceId: String(bookingId), currency: "USD", createdAt: now,
+        });
+      } else {
+        t.update(providerUserRef, {
+          totalEarnings: providerTotalEarnings + cost,
+          updatedAt: now,
+        });
       }
-
-      // Admin recibe la comisión en ambos casos
-      t.update(adminUserRef, { wallet: adminWallet + commission, totalEarnings: adminTotalEarnings + commission, updatedAt: now });
-      t.set(transfersColl.doc(String(transferId3)), {
-        id: transferId3, userId: adminUserId, fromUserId: null, amount: commission,
-        transferType: "service_payment", status: "completed", description: `Comisión de plataforma por servicio (${paymentMethod})`,
-        referenceId: String(bookingId), currency: "USD", createdAt: now,
-      });
 
       return { id: bookingId, ...data, status: "completed" } as unknown as Booking;
     });
@@ -1428,6 +1449,22 @@ class FirestoreStorageImpl implements IStorage {
       });
     }
 
+    if (!FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
+      return this.db.runTransaction(async (t) => {
+        const driverRef = usersColl.doc(input.driverUserId);
+        const driverSnap = await t.get(driverRef);
+        if (!driverSnap.exists) throw new Error("Conductor no encontrado");
+        const dData = driverSnap.data() as { totalEarnings?: number; completedTrips?: number };
+        const dEarnings = typeof dData.totalEarnings === "number" ? dData.totalEarnings : 0;
+        const dTrips = typeof dData.completedTrips === "number" ? dData.completedTrips : 0;
+        t.update(driverRef, {
+          totalEarnings: dEarnings + cost,
+          completedTrips: dTrips + 1,
+          updatedAt: now,
+        });
+      });
+    }
+
     const transferIdA = await this.getNextId("wallet_transfers");
     const transferIdB = await this.getNextId("wallet_transfers");
     return this.db.runTransaction(async (t) => {
@@ -1507,7 +1544,14 @@ class FirestoreStorageImpl implements IStorage {
       const bookingRef = bookingsColl.doc(bookingId.toString());
       const bookingSnap = await t.get(bookingRef);
       if (!bookingSnap.exists) throw new Error("Reserva no encontrada");
-      const bookingData = bookingSnap.data() as { status?: string; userId?: string; providerId?: number; cost?: number; confirmedByClient?: boolean };
+      const bookingData = bookingSnap.data() as {
+        status?: string;
+        userId?: string;
+        providerId?: number;
+        cost?: number;
+        confirmedByClient?: boolean;
+        paymentMethod?: string;
+      };
       if ((bookingData.status || "pending") !== "confirmed") {
         throw new Error("Solo puedes confirmar el pago cuando el profesional haya confirmado la reserva");
       }
@@ -1519,6 +1563,17 @@ class FirestoreStorageImpl implements IStorage {
       const clientUserId = bookingData.userId;
       if (!clientUserId) throw new Error("Reserva sin cliente asociado");
 
+      const pm = bookingData.paymentMethod || "wallet";
+      const now = new Date();
+      if (isOffPlatformServiceBookingPayment(pm)) {
+        t.update(bookingRef, { confirmedByClient: true, updatedAt: now });
+        return {
+          id: bookingId,
+          ...bookingData,
+          confirmedByClient: true,
+        } as unknown as Booking;
+      }
+
       const clientRef = usersColl.doc(clientUserId);
       const clientSnap = await t.get(clientRef);
       if (!clientSnap.exists) throw new Error("Usuario cliente no encontrado");
@@ -1529,7 +1584,6 @@ class FirestoreStorageImpl implements IStorage {
         throw new Error("Saldo insuficiente. Añade saldo a tu Saldo Genfeb para confirmar el pago.");
       }
 
-      const now = new Date();
       t.update(clientRef, {
         wallet: clientWallet - cost,
         pendingBalance: clientPending + cost,
@@ -1541,7 +1595,7 @@ class FirestoreStorageImpl implements IStorage {
         id: bookingId,
         ...bookingData,
         confirmedByClient: true,
-      } as Booking;
+      } as unknown as Booking;
     });
   }
 

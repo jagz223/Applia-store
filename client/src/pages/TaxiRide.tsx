@@ -30,6 +30,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
 
@@ -261,7 +262,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const rideSocketPrefix = goSlug === "pack" ? "pack:ride:" : "cargo:ride:";
 
   const isGoClient = location === goBasePath;
-  const { data: goWallet } = useWallet({ enabled: isGoClient && isAuthenticated });
+  const { data: goWallet } = useWallet({ enabled: isGoClient && isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED });
   const riderWalletBalance = typeof goWallet?.wallet === "number" ? goWallet.wallet : 0;
   const matchedDriverFullName = useMemo(() => {
     if (!matchedDriverInfo) return "";
@@ -356,6 +357,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
   const goToRecharge = useCallback(
     () => {
+      if (!FEATURE_WALLET_RECHARGE_UI_ENABLED) return;
       saveRiderDraft();
       const ret = `${goBasePath}${typeof window !== "undefined" ? window.location.search : ""}`;
       setLocation(`/recharge?return=${encodeURIComponent(ret)}`);
@@ -383,7 +385,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       if (p.routeMeta) setRouteMeta(p.routeMeta);
       if (typeof p.mapTarget === "string") setMapTarget(p.mapTarget);
       if (p.selectedVehicle) setSelectedVehicle(p.selectedVehicle);
-      if (p.taxiPaymentMethod) setTaxiPaymentMethod(p.taxiPaymentMethod);
+      if (p.taxiPaymentMethod) {
+        const m = p.taxiPaymentMethod as string;
+        if (m === "genfeb" && !FEATURE_WALLET_RECHARGE_UI_ENABLED) setTaxiPaymentMethod("cash");
+        else if (m === "genfeb" || m === "cash" || m === "bank_transfer") setTaxiPaymentMethod(m);
+      }
       if (p.vehicleModalStep) setVehicleModalStep(p.vehicleModalStep);
       if (typeof p.vehiclePickerOpen === "boolean") setVehiclePickerOpen(p.vehiclePickerOpen);
     } catch {
@@ -563,6 +569,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
   const handlePaymentContinue = useCallback(() => {
     if (!taxiPaymentMethod) return;
+    if (!FEATURE_WALLET_RECHARGE_UI_ENABLED && taxiPaymentMethod === "genfeb") {
+      setTaxiPaymentMethod("cash");
+      setVehicleModalStep("ready");
+      return;
+    }
     if (taxiPaymentMethod === "genfeb") {
       const need = typeof estimatedUsdRef.current === "number" && Number.isFinite(estimatedUsdRef.current) ? estimatedUsdRef.current : 0;
       if (need > riderWalletBalance) {
@@ -1350,7 +1361,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 onClick={goBack}
                 aria-label={fromCategories ? "Volver a categorías" : "Volver a Explorar"}
               >
-                <img src="/logo-Genfeb.jpg" alt="" className="h-full w-full scale-110 object-contain" />
+                <span className="flex h-full w-full items-center justify-center rounded-full bg-background p-1 ring-1 ring-border">
+                  <img src="/genfeb-logo-new.png" alt="" className="h-full w-full object-contain" />
+                </span>
               </Button>
             ) : null}
             <div className="pointer-events-auto absolute inset-0 z-0 overflow-hidden bg-muted/30">
@@ -1409,12 +1422,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                       <div className="space-y-2">
                 {!matchedDriverInfo ? (
                   <>
-                    <div className="rounded-xl border border-border/60 bg-background/88 p-2 shadow-md backdrop-blur-md">
+                    <div className="rounded-xl border border-border bg-card p-2 shadow-lg">
                       <div className="space-y-2">
                         {/* Origen arriba */}
                         <div className="space-y-1">
-                          <Label htmlFor="taxi-start-mobile" className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
-                            <MapPin className="h-3.5 w-3.5 shrink-0 text-green-600" />
+                          <Label
+                            htmlFor="taxi-start-mobile"
+                            className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground"
+                          >
+                            <MapPin className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-500" />
                             {goSlug === "pack" ? "Retiro" : "Origen"}
                           </Label>
                           <div className="relative">
@@ -1426,8 +1442,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                               onChange={(e) => onStartInput(e.target.value)}
                               autoComplete="off"
                               className={cn(
-                                "h-8 rounded-lg border-border/70 bg-background/95 py-1.5 text-sm",
-                                mapTarget === "start" && "ring-1 ring-green-600/30"
+                                "h-8 rounded-lg border-border bg-muted/90 py-1.5 text-sm text-foreground placeholder:text-muted-foreground dark:bg-muted/70",
+                                mapTarget === "start" && "ring-2 ring-green-600/35 dark:ring-green-500/40"
                               )}
                             />
                             {suggestStart.length > 0 && (
@@ -1450,8 +1466,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
                         {/* Destino abajo */}
                         <div className="space-y-1">
-                          <Label htmlFor="taxi-end-mobile" className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
-                            <MapPin className="h-3.5 w-3.5 shrink-0 text-red-600" />
+                          <Label
+                            htmlFor="taxi-end-mobile"
+                            className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground"
+                          >
+                            <MapPin className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-500" />
                             {goSlug === "pack" ? "Entrega" : "Destino"}
                           </Label>
                           <div className="relative">
@@ -1463,8 +1482,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                               onChange={(e) => onEndInput(e.target.value)}
                               autoComplete="off"
                               className={cn(
-                                "h-8 rounded-lg border-border/70 bg-background/95 py-1.5 text-sm",
-                                mapTarget === "end" && "ring-1 ring-red-600/30"
+                                "h-8 rounded-lg border-border bg-muted/90 py-1.5 text-sm text-foreground placeholder:text-muted-foreground dark:bg-muted/70",
+                                mapTarget === "end" && "ring-2 ring-red-600/35 dark:ring-red-500/40"
                               )}
                             />
                             {suggestEnd.length > 0 && (
@@ -1490,14 +1509,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 ) : null}
 
                 {geoLoading && (
-                  <p className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/90 px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-sm backdrop-blur-sm">
+                  <p className="flex items-center gap-2 rounded-xl border border-border bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-sm">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     Buscando direcciones…
                   </p>
                 )}
 
                 {routeMeta && !routeError && (
-                  <div className="mt-2 rounded-xl border border-border/60 bg-background/88 px-3 py-2 text-[11px] shadow-md backdrop-blur-md">
+                  <div className="mt-2 rounded-xl border border-border bg-card px-3 py-2 text-[11px] shadow-md">
                     <p className="font-semibold text-foreground">Ruta estimada</p>
                     <p className="mt-0.5 text-muted-foreground">
                       <span className="font-medium text-foreground">{formatKm(routeMeta.distanceM)}</span>
@@ -1509,7 +1528,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 {routeError && <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{routeError}</p>}
 
                 {matchedDriverInfo && !ridePanelCollapsed && (
-                  <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/[0.08] px-3 py-3 text-[11px] shadow-md backdrop-blur-md">
+                  <div className="rounded-2xl border border-emerald-500/40 bg-card px-3 py-3 text-[11px] shadow-md dark:border-emerald-500/35 dark:bg-emerald-950/40">
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-semibold text-foreground">{isPackGoClient ? "Aceptó tu envío" : "Te aceptó el viaje"}</p>
                       <Button
@@ -1562,7 +1581,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                       <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                           {typeof matchedDriverInfo.driver.rating === "number" ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-0.5">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/80 px-2 py-0.5">
                               <Star className="h-3 w-3 text-amber-500" aria-hidden />
                               <span className="font-medium text-foreground tabular-nums">
                                 {matchedDriverInfo.driver.rating.toFixed(1)}
@@ -1570,7 +1589,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                             </span>
                           ) : null}
                           {typeof matchedDriverInfo.driver.completedTrips === "number" ? (
-                            <span className="rounded-full border border-border/70 bg-background/70 px-2 py-0.5">
+                            <span className="rounded-full border border-border/70 bg-muted/80 px-2 py-0.5">
                               <span className="font-medium text-foreground tabular-nums">
                                 {matchedDriverInfo.driver.completedTrips}
                               </span>{" "}
@@ -1685,7 +1704,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                                   {" "}
                                   · Pago:{" "}
                                   <span className="font-medium text-foreground">
-                                    {taxiPaymentMethod === "genfeb" ? "Saldo GenFeb" : "Efectivo"}
+                                    {taxiPaymentMethod === "genfeb"
+                                      ? "Saldo GenFeb"
+                                      : taxiPaymentMethod === "bank_transfer"
+                                        ? "Transferencia bancaria"
+                                        : "Efectivo"}
                                   </span>
                                 </span>
                               )}
@@ -2090,7 +2113,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                           <span className="text-muted-foreground text-xs block sm:inline sm:ml-1">
                             · Pago:{" "}
                             <span className="font-medium text-foreground">
-                              {taxiPaymentMethod === "genfeb" ? "Saldo GenFeb" : "Efectivo"}
+                              {taxiPaymentMethod === "genfeb"
+                                ? "Saldo GenFeb"
+                                : taxiPaymentMethod === "bank_transfer"
+                                  ? "Transferencia bancaria"
+                                  : "Efectivo"}
                             </span>
                           </span>
                         )}
