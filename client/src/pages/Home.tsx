@@ -21,7 +21,6 @@ import {
   CheckCircle,
   MapPin,
   Calendar,
-  CreditCard,
   MessageSquare,
   Vault,
   Briefcase,
@@ -96,13 +95,6 @@ export default function HomePage() {
       description: "Calendario dinámico sincronizado con geolocalización. Reserva en máximo 3 clics.",
       color: "text-primary",
       bgColor: "bg-primary/10"
-    },
-    {
-      icon: CreditCard,
-      title: "Pagos seguros",
-      description: "El dinero queda protegido hasta confirmar el servicio. Pagos seguros con Stripe/PayPal.",
-      color: "text-accent",
-      bgColor: "bg-accent/10"
     },
     {
       icon: Vault,
@@ -315,10 +307,6 @@ export default function HomePage() {
                 <div className="flex items-center gap-2">
                   <CheckCircle className="h-5 w-5 shrink-0 text-secondary" aria-hidden />
                   <span>Profesionales verificados</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Shield className="h-5 w-5 shrink-0 text-secondary" aria-hidden />
-                  <span>Pagos seguros</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Users className="h-5 w-5 shrink-0 text-secondary" aria-hidden />
