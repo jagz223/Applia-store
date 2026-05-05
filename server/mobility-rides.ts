@@ -330,53 +330,50 @@ function safeNumber(v: unknown, fallback = 0): number {
 
 async function buildRiderPublic(riderUserId: string) {
   const u = await genFebStorage.getUserById(riderUserId);
-  const fn = String((u as any)?.firstName ?? "").trim();
-  const ln = String((u as any)?.lastName ?? "").trim();
-  const nn = String((u as any)?.name ?? "").trim();
-  const email = String((u as any)?.email ?? "").trim();
+  const rec = (u ?? undefined) as Record<string, unknown> | undefined;
+  const fn = String(rec?.firstName ?? "").trim();
+  const ln = String(rec?.lastName ?? "").trim();
+  const nn = String(rec?.name ?? "").trim();
+  const email = String(rec?.email ?? "").trim();
   // Mantener compatibilidad: el cliente arma el nombre completo como en el chat.
   const name = nn || fn || "Pasajero";
   const profileImageUrl =
-    (u?.profileImageUrl as string) ||
-    (u?.profile_image_url as string) ||
-    (u?.imageUrl as string) ||
-    ((u as any)?.avatar as string) ||
+    (rec?.profileImageUrl as string) ||
+    (rec?.profile_image_url as string) ||
+    (rec?.imageUrl as string) ||
+    (rec?.avatar as string) ||
     null;
-  const phone = String((u as any)?.phone ?? "").trim() || null;
-  const rating = safeNumber((u as any)?.rating, 0);
-  const ratingCount = safeNumber((u as any)?.ratingCount, 0);
-  const completedTrips = safeNumber((u as any)?.completedTrips, 0);
+  const phone = String(rec?.phone ?? "").trim() || null;
+  const rating = safeNumber(rec?.rating, 0);
+  const ratingCount = safeNumber(rec?.ratingCount, 0);
+  const completedTrips = safeNumber(rec?.completedTrips, 0);
   return { name, lastName: ln, profileImageUrl, phone, rating, ratingCount, completedTrips, email };
 }
 
 async function buildDriverPublic(driverUserId: string) {
   const u = await genFebStorage.getUserById(driverUserId);
+  const rec = (u ?? undefined) as Record<string, unknown> | undefined;
   const provider = await catalogService.getProviderByUserId(driverUserId);
   const vehicle = provider
     ? await genFebStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id)
     : null;
-  const fn = String((u as any)?.firstName ?? "").trim();
-  const ln = String((u as any)?.lastName ?? "").trim();
-  const nn = String((u as any)?.name ?? "").trim();
+  const fn = String(rec?.firstName ?? "").trim();
+  const ln = String(rec?.lastName ?? "").trim();
+  const nn = String(rec?.name ?? "").trim();
   // Mantener compatibilidad: el cliente arma el nombre completo como en el chat.
   const name = nn || fn || "Conductor";
   const profileImageUrl =
-    (u?.profileImageUrl as string) ||
-    (u?.profile_image_url as string) ||
-    (u?.imageUrl as string) ||
-    ((u as any)?.avatar as string) ||
+    (rec?.profileImageUrl as string) ||
+    (rec?.profile_image_url as string) ||
+    (rec?.imageUrl as string) ||
+    (rec?.avatar as string) ||
     null;
   const phone =
-    String(
-      (u as any)?.phone ??
-        (u as any)?.phoneNumber ??
-        (u as any)?.phone_number ??
-        (u as any)?.phone_number_e164 ??
-        ""
-    ).trim() || null;
-  const rating = safeNumber((u as any)?.rating, 0);
-  const ratingCount = safeNumber((u as any)?.ratingCount, 0);
-  const completedTrips = safeNumber((u as any)?.completedTrips, 0);
+    String(rec?.phone ?? rec?.phoneNumber ?? rec?.phone_number ?? rec?.phone_number_e164 ?? "").trim() ||
+    null;
+  const rating = safeNumber(rec?.rating, 0);
+  const ratingCount = safeNumber(rec?.ratingCount, 0);
+  const completedTrips = safeNumber(rec?.completedTrips, 0);
   return {
     userId: driverUserId,
     name,
@@ -392,7 +389,7 @@ async function buildDriverPublic(driverUserId: string) {
           brand: vehicle.brand as string,
           model: vehicle.model as string,
           licensePlate: vehicle.license_plate as string,
-          color: (vehicle.exterior_color as string) || null,
+          color: (vehicle as { exterior_color?: string }).exterior_color ?? null,
         }
       : null,
   };

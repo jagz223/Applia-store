@@ -32,9 +32,16 @@ import { isFullAdmin } from "@shared/roles";
 import type { ProfessionalVerification, ProfessionalVerificationState } from "@shared/professional-verification";
 import type { VerifyingStatus } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
+import {
+  computeListingPublished,
+  listingSubscriptionDaysRemaining,
+  parseVisibilitySubscriptionEndMs,
+} from "@shared/professional-listing-subscription";
 import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
+import { applyPublicServicePrice, applyPublicServicePriceList } from "@shared/public-service-price";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
+import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 
 /** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed); payment = client paid for a service (outflow from pending to provider). */
 export type WalletTransferType = "service_payment" | "recharge" | "withdrawal" | "payment";
@@ -59,7 +66,7 @@ export interface WalletTransfer {
   transferType: WalletTransferType;
   status: WalletTransferStatus;
   description?: string;
-  referenceId?: string;
+  referenceId?: string | null;
   currency?: string;
   createdAt: Date;
 }
@@ -522,7 +529,45 @@ class FirestoreStorageImpl implements IStorage {
     if (!doc.exists) return undefined;
 
     const provider = { id: parseInt(doc.id, 10), ...doc.data() } as Provider;
-    return this.enrichProviderWithSubcategory(provider);
+    const enriched = await this.enrichProviderWithSubcategory(provider as Provider & { subcategoryId?: number | null });
+    return enriched as Provider | undefined;
+  }
+
+  /** Normaliza fin de suscripción mensual USD 15 a ISO (Firestore Timestamp / string / Date). */
+  private normalizeVisibilitySubscriptionEndsAtIso(raw: unknown): string | null {
+    const ms = parseVisibilitySubscriptionEndMs(raw);
+    return ms == null ? null : new Date(ms).toISOString();
+  }
+
+  /** Estado de publicación en catálogo marketplace (cuota mensual). */
+  private attachProfessionalListingFields(
+    provider: Provider,
+    ownerRole: string | undefined,
+  ): Provider & {
+    visibilitySubscriptionEndsAt: string | null;
+    isVerified: boolean;
+    isListingPublished: boolean;
+    subscriptionDaysRemaining: number | null;
+  } {
+    const visibilitySubscriptionEndsAt = this.normalizeVisibilitySubscriptionEndsAtIso(
+      (provider as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
+    );
+    const isFullAdminUser = isFullAdmin(ownerRole);
+    const isVerifiedIdentity = provider.isVerified === true || isFullAdminUser;
+    const isListingPublished = computeListingPublished({
+      isVerifiedIdentity,
+      visibilitySubscriptionEndsAt,
+      isFullAdmin: isFullAdminUser,
+    });
+    const subscriptionDaysRemaining =
+      visibilitySubscriptionEndsAt != null ? listingSubscriptionDaysRemaining(visibilitySubscriptionEndsAt) : null;
+    return {
+      ...provider,
+      visibilitySubscriptionEndsAt,
+      isVerified: isVerifiedIdentity,
+      isListingPublished,
+      subscriptionDaysRemaining,
+    };
   }
 
   /** Enriquece un proveedor con los datos del usuario (para ServiceWithProvider). */
@@ -543,10 +588,9 @@ class FirestoreStorageImpl implements IStorage {
           createdAt: new Date(),
           updatedAt: new Date(),
         };
-    // Administrador como asociado: visible y "verificado" en catálogo sin pasar por verificación de plataforma.
     const ownerRole = raw ? (raw as { role?: string }).role : undefined;
-    const isVerified = provider.isVerified === true || isFullAdmin(ownerRole);
-    return { ...provider, isVerified, user } as ProviderWithUser;
+    const withListing = this.attachProfessionalListingFields(provider, ownerRole);
+    return { ...withListing, user } as unknown as ProviderWithUser;
   }
 
   async getProviderByUserId(userId: string): Promise<Provider | undefined> {
@@ -558,12 +602,10 @@ class FirestoreStorageImpl implements IStorage {
     if (snapshot.empty) return undefined;
     const doc = snapshot.docs[0];
     const provider = { id: parseInt(doc.id), ...doc.data() } as Provider;
-    const enriched = await this.enrichProviderWithSubcategory(provider);
+    const enriched = await this.enrichProviderWithSubcategory(provider as Provider & { subcategoryId?: number | null });
     const rawUser = await this.getUserById(userId);
-    const isVerified =
-      (enriched as { isVerified?: boolean }).isVerified === true ||
-      isFullAdmin((rawUser as { role?: string } | null)?.role);
-    return { ...enriched, isVerified } as Provider;
+    const ownerRole = (rawUser as { role?: string } | null)?.role;
+    return this.attachProfessionalListingFields(enriched as Provider, ownerRole) as Provider;
   }
 
   /** Añade subcategory { id, name } al proveedor cuando tiene subcategoryId. */
@@ -585,9 +627,11 @@ class FirestoreStorageImpl implements IStorage {
       category: provider.category ?? null,
       subcategoryId: (provider as { subcategoryId?: number | null }).subcategoryId ?? null,
       goBrands: (provider as any).goBrands ?? null,
-      isVerified: provider.isVerified ?? false,
-      rating: provider.rating ?? "0",
-      reviewCount: provider.reviewCount ?? 0,
+      coursesCompleted: (provider as { coursesCompleted?: string | null }).coursesCompleted ?? null,
+      certifications: (provider as { certifications?: string | null }).certifications ?? null,
+      isVerified: Boolean((provider as { isVerified?: boolean }).isVerified),
+      rating: String((provider as { rating?: unknown }).rating ?? "0"),
+      reviewCount: Number((provider as { reviewCount?: unknown }).reviewCount ?? 0),
       skills: (provider as { skills?: string[] | null }).skills ?? [],
     };
     await docRef.set(newProvider);
@@ -713,8 +757,9 @@ class FirestoreStorageImpl implements IStorage {
       const pid = parseServiceProviderId(service.providerId);
       const provider = pid != null ? await this.getProvider(pid) : undefined;
       const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
-      // Catálogo público: solo proveedores verificados. Panel admin: incluir todos para gestionar marcas y cuentas (p. ej. admin con servicio).
-      if (!includeUnverifiedForAdmin && !providerWithUser?.isVerified) continue;
+      // Catálogo público: verificado + cuota mensual vigente. Panel admin: incluir todos.
+      const listingOk = (providerWithUser as { isListingPublished?: boolean } | undefined)?.isListingPublished === true;
+      if (!includeUnverifiedForAdmin && !listingOk) continue;
       if (includeUnverifiedForAdmin && !providerWithUser) continue;
       const category = allCategories.find((c) => c.id === service.categoryId);
       const subId = (service as { subcategoryId?: number | null }).subcategoryId;
@@ -752,13 +797,15 @@ class FirestoreStorageImpl implements IStorage {
     }
     if (search) {
       const searchLower = search.toLowerCase();
-      return servicesWithProviders.filter(
-        (s) =>
-          s.title?.toLowerCase().includes(searchLower) ||
-          s.description?.toLowerCase().includes(searchLower)
+      return applyPublicServicePriceList(
+        servicesWithProviders.filter(
+          (s) =>
+            s.title?.toLowerCase().includes(searchLower) ||
+            s.description?.toLowerCase().includes(searchLower)
+        )
       );
     }
-    return servicesWithProviders;
+    return applyPublicServicePriceList(servicesWithProviders);
   }
 
   async getService(id: number): Promise<ServiceWithProvider | undefined> {
@@ -777,8 +824,8 @@ class FirestoreStorageImpl implements IStorage {
     const pid = parseServiceProviderId(service.providerId);
     const provider = pid != null ? await this.getProvider(pid) : undefined;
     const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
-    // Si el proveedor no está verificado, no exponemos el servicio.
-    if (!providerWithUser?.isVerified) return undefined;
+    const listingOk = (providerWithUser as { isListingPublished?: boolean } | undefined)?.isListingPublished === true;
+    if (!listingOk) return undefined;
     const allCategories = await this.getCategories();
     const category = allCategories.find((c) => c.id === service.categoryId) ?? (allCategories[0] as Category | undefined);
     const subId = (service as { subcategoryId?: number | null }).subcategoryId;
@@ -787,12 +834,12 @@ class FirestoreStorageImpl implements IStorage {
       const sub = await this.getSubcategoryById(Number(subId));
       if (sub) subcategory = { id: sub.id, name: sub.name };
     }
-    return {
+    return applyPublicServicePrice({
       ...service,
       provider: providerWithUser ?? undefined,
       category: category ?? ({} as Category),
       subcategory,
-    } as ServiceWithProvider;
+    } as ServiceWithProvider) as ServiceWithProvider;
   }
 
   async createService(service: InsertService): Promise<Service> {
@@ -881,7 +928,9 @@ class FirestoreStorageImpl implements IStorage {
         } catch (_) {
           service = undefined;
         }
-        const serviceFallback = service ?? ({ id: 0, title: "Servicio", provider: undefined, category: {} } as ServiceWithProvider);
+        const serviceFallback =
+          service ??
+          ({ id: 0, title: "Servicio", provider: undefined, category: {} } as unknown as ServiceWithProvider);
         bookings.push({
           ...booking,
           service: serviceFallback,
@@ -925,7 +974,15 @@ class FirestoreStorageImpl implements IStorage {
             firstName: (rawUser as { firstName?: string }).firstName ?? (rawUser as { name?: string }).name ?? "Cliente",
             lastName: (rawUser as { lastName?: string }).lastName ?? "",
           }
-        : { id: booking.userId, firstName: "Cliente", lastName: "", email: null, profileImageUrl: null, createdAt: new Date(), updatedAt: new Date() } as User;
+        : ({
+            id: booking.userId,
+            firstName: "Cliente",
+            lastName: "",
+            email: null,
+            profileImageUrl: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          } as unknown as User);
       
       bookings.push({
         ...booking,
@@ -955,7 +1012,7 @@ class FirestoreStorageImpl implements IStorage {
     const providerId = service?.provider?.id ?? (service as any)?.providerId;
     const id = await this.getNextId("bookings");
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(id.toString());
-    const costNum = (booking as { cost?: number }).cost ?? (service?.price != null ? Number(service.price) : 0);
+    const costNum = 0;
     const newBooking = {
       id,
       ...booking,
@@ -1164,18 +1221,22 @@ class FirestoreStorageImpl implements IStorage {
         // Si el cliente no confirmó el pago, solo marcamos cancelado sin mover dinero.
         const now = new Date();
         t.update(bookingRef, { status: "cancelled", cancelledAt: now });
-        return { id: bookingId, ...data, status: "cancelled" } as Booking;
+        return { id: bookingId, ...data, status: "cancelled" } as unknown as Booking;
       }
 
       const pm = data.paymentMethod || "wallet";
       if (isOffPlatformServiceBookingPayment(pm)) {
         const now = new Date();
         t.update(bookingRef, { status: "cancelled", cancelledAt: now });
-        return { id: bookingId, ...data, status: "cancelled" } as Booking;
+        return { id: bookingId, ...data, status: "cancelled" } as unknown as Booking;
       }
 
       const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
-      if (cost <= 0) throw new Error("Costo de reserva no definido");
+      if (cost <= 0) {
+        const nowZero = new Date();
+        t.update(bookingRef, { status: "cancelled", cancelledAt: nowZero });
+        return { id: bookingId, ...data, status: "cancelled", cancelledAt: nowZero } as unknown as Booking;
+      }
       const clientUserId = data.userId;
       if (!clientUserId) throw new Error("Reserva sin cliente asociado");
 
@@ -1212,7 +1273,7 @@ class FirestoreStorageImpl implements IStorage {
       };
       t.set(transfersColl.doc(String(transferId1)), clientRefundTransferRecord);
 
-      return { id: bookingId, ...data, status: "cancelled" } as Booking;
+      return { id: bookingId, ...data, status: "cancelled" } as unknown as Booking;
     });
   }
 
@@ -1260,8 +1321,12 @@ class FirestoreStorageImpl implements IStorage {
       
       const paymentMethod = data.paymentMethod || "wallet";
       const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
-      if (cost <= 0) throw new Error("Costo de reserva no definido");
-      
+      if (cost <= 0) {
+        const nowDone = new Date();
+        t.update(bookingRef, { status: "completed", completedAt: nowDone });
+        return { id: bookingId, ...data, status: "completed", completedAt: nowDone } as unknown as Booking;
+      }
+
       // Validaciones específicas por método de pago
       if (paymentMethod === "wallet") {
         if (data.confirmedByClient !== true) {
@@ -1510,7 +1575,11 @@ class FirestoreStorageImpl implements IStorage {
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(id.toString());
     const doc = await docRef.get();
     if (!doc.exists) return undefined;
-    await docRef.update({ cost: Number(cost) });
+    await docRef.update({
+      cost: Number(cost),
+      pendingClientAcknowledgment: true,
+      pendingClientAcknowledgmentAt: new Date(),
+    });
     const updated = await docRef.get();
     return { id: parseInt(updated.id), ...updated.data() } as Booking;
   }
@@ -1520,7 +1589,23 @@ class FirestoreStorageImpl implements IStorage {
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(id.toString());
     const doc = await docRef.get();
     if (!doc.exists) return undefined;
-    await docRef.update({ date });
+    await docRef.update({
+      date,
+      pendingClientAcknowledgment: true,
+      pendingClientAcknowledgmentAt: new Date(),
+    });
+    const updated = await docRef.get();
+    return { id: parseInt(updated.id), ...updated.data() } as Booking;
+  }
+
+  async acknowledgeBookingProChanges(bookingId: number, clientUserId: string): Promise<Booking | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(bookingId.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+    const data = doc.data() as { userId?: string };
+    if (data.userId !== clientUserId) return undefined;
+    await docRef.update({ pendingClientAcknowledgment: false });
     const updated = await docRef.get();
     return { id: parseInt(updated.id), ...updated.data() } as Booking;
   }
@@ -1559,12 +1644,19 @@ class FirestoreStorageImpl implements IStorage {
         throw new Error("Esta reserva ya fue confirmada por el cliente");
       }
       const cost = typeof bookingData.cost === "number" ? bookingData.cost : Number(bookingData.cost) || 0;
-      if (cost <= 0) throw new Error("El costo de la reserva no está definido");
       const clientUserId = bookingData.userId;
       if (!clientUserId) throw new Error("Reserva sin cliente asociado");
 
       const pm = bookingData.paymentMethod || "wallet";
       const now = new Date();
+      if (cost <= 0) {
+        t.update(bookingRef, { confirmedByClient: true, updatedAt: now });
+        return {
+          id: bookingId,
+          ...bookingData,
+          confirmedByClient: true,
+        } as unknown as Booking;
+      }
       if (isOffPlatformServiceBookingPayment(pm)) {
         t.update(bookingRef, { confirmedByClient: true, updatedAt: now });
         return {
@@ -2175,7 +2267,10 @@ class FirestoreStorageImpl implements IStorage {
     let q = this.db.collection(FIRESTORE_COLLECTIONS.DOCUMENTS).where("userId", "==", userId) as any;
     if (type) q = q.where("type", "==", type);
     const snap = await q.get();
-    return snap.docs.map(d => ({ id: parseInt(d.id) || d.id, ...d.data() }));
+    return snap.docs.map((d: { id: string; data: () => Record<string, unknown> }) => ({
+      id: parseInt(d.id, 10) || d.id,
+      ...d.data(),
+    }));
   }
   async createDocument(doc: any): Promise<any> {
     if (!this.db) throw new Error("Firestore no configurado");
@@ -2193,6 +2288,20 @@ class FirestoreStorageImpl implements IStorage {
   }
 
   // ============ CONVERSACIONES Y MENSAJES ============
+  private conversationHideFromUsersAtMs(c: any): number | null {
+    const t = c?.serviceChatHideFromUsersAt;
+    if (t == null) return null;
+    if (t instanceof Date) return t.getTime();
+    if (typeof (t as any)?.toMillis === "function") return (t as any).toMillis();
+    if (typeof (t as any)?.toDate === "function") return (t as any).toDate().getTime();
+    if (typeof t === "number") return t;
+    if (typeof t === "string") {
+      const d = new Date(t);
+      return Number.isNaN(d.getTime()) ? null : d.getTime();
+    }
+    return null;
+  }
+
   async getConversationsByUser(userId: string): Promise<any[]> {
     if (!this.db) return [];
     const snap1 = await this.db.collection(FIRESTORE_COLLECTIONS.CONVERSATIONS).where("participant1Id", "==", userId).get();
@@ -2200,10 +2309,14 @@ class FirestoreStorageImpl implements IStorage {
     const map = new Map<string, any>();
     [...snap1.docs, ...snap2.docs].forEach(d => map.set(d.id, { id: parseInt(d.id) || d.id, ...d.data() }));
     const uid = String(userId ?? "");
+    const now = Date.now();
     const list = Array.from(map.values());
     return list.filter((c: any) => {
       const hiddenFor = Array.isArray(c?.hiddenForUserIds) ? c.hiddenForUserIds.map((x: any) => String(x)) : [];
-      return !hiddenFor.includes(uid);
+      if (hiddenFor.includes(uid)) return false;
+      const hideMs = this.conversationHideFromUsersAtMs(c);
+      if (hideMs != null && now > hideMs) return false;
+      return true;
     });
   }
   async createConversation(conv: any): Promise<any> {
@@ -2267,7 +2380,8 @@ class FirestoreStorageImpl implements IStorage {
       .where("conversationId", "==", conversationId)
       .get();
     return snap.docs.filter(doc => {
-      const d = doc.data() as { senderId?: string; status?: string };
+      const d = doc.data() as { senderId?: string; status?: string; type?: string };
+      if (d.type === "system" || d.senderId === CHAT_SYSTEM_SENDER_ID) return false;
       return d.senderId !== userId && d.status !== "read";
     }).length;
   }
@@ -2319,6 +2433,49 @@ class FirestoreStorageImpl implements IStorage {
       if (s) next.add(s);
     }
     await ref.update({ hiddenForUserIds: Array.from(next), hiddenAt: new Date() });
+  }
+
+  async patchConversation(conversationId: number, patch: Record<string, unknown>): Promise<void> {
+    if (!this.db) return;
+    const id = Number(conversationId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.CONVERSATIONS).doc(String(id));
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    await ref.update(patch as any);
+  }
+
+  async findConversationForServiceBooking(booking: {
+    id: number;
+    userId?: string;
+    providerId?: number;
+    serviceId?: number;
+  }): Promise<any | null> {
+    if (!this.db) return null;
+    const bid = Number(booking.id);
+    if (!Number.isFinite(bid)) return null;
+    const byBid = await this.db
+      .collection(FIRESTORE_COLLECTIONS.CONVERSATIONS)
+      .where("bookingId", "==", bid)
+      .limit(1)
+      .get();
+    if (!byBid.empty) {
+      const d = byBid.docs[0];
+      return { id: parseInt(d.id) || d.id, ...d.data() };
+    }
+    // No reutilizar hilos viejos (mismo cliente + mismo servicio): cada reserva nueva debe tener su propia conversación.
+    return null;
+  }
+
+  async listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]> {
+    if (!this.db) return [];
+    const lim = Math.min(Math.max(Number(opts?.limit) || 200, 1), 500);
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.CONVERSATIONS)
+      .orderBy("lastMessageAt", "desc")
+      .limit(lim)
+      .get();
+    return snap.docs.map((d) => ({ id: parseInt(d.id) || d.id, ...d.data() }));
   }
 
   // ============ REPORTES FINANCIEROS ============
@@ -3145,5 +3302,3 @@ export async function initializeFirestoreStorage(): Promise<FirestoreStorage> {
   
   return getFirestoreStorage();
 }
-
-export type { FirestoreStorage };

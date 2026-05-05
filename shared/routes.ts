@@ -169,7 +169,7 @@ export const api = {
       method: 'GET' as const,
       path: '/api/services/:id',
       responses: {
-        200: z.custom<typeof services.$inferSelect>(),
+        200: z.custom<ServiceWithProvider>(),
         404: errorSchemas.notFound,
       },
     },

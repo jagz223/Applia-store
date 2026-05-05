@@ -308,8 +308,8 @@ export default function VerifyProfessional() {
                 <CardTitle className="text-lg">{isCarGo ? "Cuota de asociado Car Go" : "Cuota por ser profesional"}</CardTitle>
                 <CardDescription>
                   {isCarGo
-                    ? "Es un pago de una sola vez (USD 15). Una vez verificado, podrás operar como asociado y los clientes podrán usar tus servicios de transporte en la plataforma."
-                    : "Es un pago de una sola vez (USD 15). Una vez verificado, ya estarás asociado a nosotros y podrás ofrecer tu servicio de forma pública."}
+                    ? "Es una cuota de USD 15 por mes de visibilidad en la plataforma. Con la primera validación podrás operar como asociado; cada mes debés renovar para seguir publicado. Si pagás antes de vencer el período, al validar el comprobante se suma un mes desde tu fecha de vencimiento actual."
+                    : "Es una cuota de USD 15 por mes para mantener tu servicio visible en el catálogo. Con la primera validación quedás publicado; cada mes debés renovar. Si pagás antes de vencer, al validar el comprobante se suma un mes desde tu vencimiento actual (no perdés lo ya pagado)."}
                 </CardDescription>
               </div>
               {step2Locked ? <Lock className="h-5 w-5 text-muted-foreground shrink-0" /> : null}

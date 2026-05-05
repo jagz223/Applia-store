@@ -23,7 +23,7 @@ export type DateLike =
  * Convierte fecha devuelta por la API (string ISO, Date o Firestore Timestamp) a Date válido.
  * Firestore puede enviar Timestamp con toDate(), toMillis() o { _seconds, _nanoseconds }.
  */
-export function toDate(value: DateLike): Date {
+export function toDate(value: DateLike | unknown): Date {
   if (value == null) return new Date(NaN);
   if (value instanceof Date) return value;
   if (typeof value === "number" && Number.isFinite(value)) return new Date(value);
@@ -37,7 +37,7 @@ export function toDate(value: DateLike): Date {
 }
 
 /** Indica si la fecha resultante de toDate es válida. */
-export function isValidDate(value: DateLike): boolean {
+export function isValidDate(value: DateLike | unknown): boolean {
   const d = toDate(value);
   return !Number.isNaN(d.getTime());
 }

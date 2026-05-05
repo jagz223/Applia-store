@@ -132,49 +132,45 @@ function clearRideTimers(rideId: string) {
 
 async function buildRiderPublic(riderUserId: string) {
   const u = await genFebStorage.getUserById(riderUserId);
-  const ln = String((u as any)?.lastName ?? "").trim();
-  const nn = String((u as any)?.name ?? "").trim();
-  const fn = String((u as any)?.firstName ?? "").trim();
-  const email = String((u as any)?.email ?? "").trim();
+  const rec = (u ?? undefined) as Record<string, unknown> | undefined;
+  const ln = String(rec?.lastName ?? "").trim();
+  const nn = String(rec?.name ?? "").trim();
+  const fn = String(rec?.firstName ?? "").trim();
+  const email = String(rec?.email ?? "").trim();
   const name = nn || fn || "Cliente";
   const profileImageUrl =
-    (u?.profileImageUrl as string) ||
-    (u?.profile_image_url as string) ||
-    (u?.imageUrl as string) ||
-    ((u as any)?.avatar as string) ||
+    (rec?.profileImageUrl as string) ||
+    (rec?.profile_image_url as string) ||
+    (rec?.imageUrl as string) ||
+    (rec?.avatar as string) ||
     null;
-  const phone = String((u as any)?.phone ?? "").trim() || null;
-  const rating = Number((u as any)?.rating) || 0;
-  const ratingCount = Number((u as any)?.ratingCount) || 0;
-  const completedTrips = Number((u as any)?.completedTrips) || 0;
+  const phone = String(rec?.phone ?? "").trim() || null;
+  const rating = Number(rec?.rating) || 0;
+  const ratingCount = Number(rec?.ratingCount) || 0;
+  const completedTrips = Number(rec?.completedTrips) || 0;
   return { name, lastName: ln, profileImageUrl, phone, rating, ratingCount, completedTrips, email };
 }
 
 async function buildDriverPublic(driverUserId: string) {
   const u = await genFebStorage.getUserById(driverUserId);
+  const rec = (u ?? undefined) as Record<string, unknown> | undefined;
   const provider = await catalogService.getProviderByUserId(driverUserId);
   const vehicle = provider ? await genFebStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id) : null;
-  const ln = String((u as any)?.lastName ?? "").trim();
-  const nn = String((u as any)?.name ?? "").trim();
-  const fn = String((u as any)?.firstName ?? "").trim();
+  const ln = String(rec?.lastName ?? "").trim();
+  const nn = String(rec?.name ?? "").trim();
+  const fn = String(rec?.firstName ?? "").trim();
   const name = nn || fn || "Driver";
   const profileImageUrl =
-    (u?.profileImageUrl as string) ||
-    (u?.profile_image_url as string) ||
-    (u?.imageUrl as string) ||
-    ((u as any)?.avatar as string) ||
+    (rec?.profileImageUrl as string) ||
+    (rec?.profile_image_url as string) ||
+    (rec?.imageUrl as string) ||
+    (rec?.avatar as string) ||
     null;
   const phone =
-    String(
-      (u as any)?.phone ??
-        (u as any)?.phoneNumber ??
-        (u as any)?.phone_number ??
-        (u as any)?.phone_number_e164 ??
-        ""
-    ).trim() || null;
-  const rating = Number((u as any)?.rating) || 0;
-  const ratingCount = Number((u as any)?.ratingCount) || 0;
-  const completedTrips = Number((u as any)?.completedTrips) || 0;
+    String(rec?.phone ?? rec?.phoneNumber ?? rec?.phone_number ?? rec?.phone_number_e164 ?? "").trim() || null;
+  const rating = Number(rec?.rating) || 0;
+  const ratingCount = Number(rec?.ratingCount) || 0;
+  const completedTrips = Number(rec?.completedTrips) || 0;
   return {
     userId: driverUserId,
     name,
@@ -296,7 +292,7 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
           for (const ride of rides.values()) {
             if (ride.status !== "searching") continue;
             if (ride.driverUserId != null) continue;
-            const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType];
+            const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind];
             if (wantVehicle !== pres.vehicleType) continue;
 
             // No interrumpir una oferta en curso; cuando no haya oferta activa, re-evaluar candidatos (incluye al nuevo driver).
@@ -799,7 +795,7 @@ export function registerPackRideRoutes(app: Express) {
         for (const ride of rides.values()) {
           if (ride.status !== "searching") continue;
           if (ride.driverUserId != null) continue;
-          const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType];
+          const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind];
           if (wantVehicle !== pres.vehicleType) continue;
           if (!ride.currentOfferDriverId) {
             const rider = await buildRiderPublic(ride.riderUserId);

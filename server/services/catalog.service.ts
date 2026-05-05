@@ -5,6 +5,7 @@
 
 import type { ICatalogStorage, ProviderUpdate, ServiceUpdate } from "../storage-contracts";
 import type { InsertProvider, InsertService } from "@shared/schema";
+import { computeListingPublished } from "@shared/professional-listing-subscription";
 
 export class CatalogService {
   constructor(private readonly storage: ICatalogStorage) {}
@@ -101,10 +102,17 @@ export class CatalogService {
       this.storage.getAllProviders(),
       professional ? this.storage.getSubcategories(Number(professional.id)) : Promise.resolve([]),
     ]);
-    const verifiedProviders = allProviders.filter((p) => !!(p as { isVerified?: boolean | null }).isVerified);
+    const verifiedProviders = allProviders.filter((p) =>
+      computeListingPublished({
+        isVerifiedIdentity: (p as { isVerified?: boolean | null }).isVerified === true,
+        visibilitySubscriptionEndsAt: (p as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
+        isFullAdmin: false,
+      }),
+    );
 
     const legalSub = subcategories.find((s) => s.slug === "legal");
     const financialSub = subcategories.find((s) => s.slug === "financial");
+    const tutoringSub = subcategories.find((s) => s.slug === "tutoring");
 
     const countByCategoryId = (catId: number | undefined) => {
       if (catId == null || Number.isNaN(Number(catId))) return 0;
@@ -119,13 +127,17 @@ export class CatalogService {
 
     const legalId = legalSub?.id;
     const financialId = financialSub?.id;
+    const tutoringId = tutoringSub?.id;
+    const proGoIds = [legalId, financialId, tutoringId].filter(
+      (id): id is number => id != null && !Number.isNaN(Number(id)),
+    );
     const proGo =
-      legalId == null && financialId == null
+      proGoIds.length === 0
         ? 0
         : verifiedProviders.filter((p) => {
             const sid = (p as { subcategoryId?: number | null }).subcategoryId;
             if (sid == null || Number.isNaN(Number(sid))) return false;
-            return sid === legalId || sid === financialId;
+            return proGoIds.includes(Number(sid));
           }).length;
 
     return { fixGo, proGo, manGo, carGo, shopGo, packGo };

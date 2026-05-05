@@ -5,6 +5,8 @@ interface MessageBubbleProps {
   type?: string;
   time: string;
   isOwn: boolean;
+  /** Mensaje del sistema: centrado, sin avatar, estilo distinto. */
+  isSystem?: boolean;
   status?: string;
   avatarUrl?: string | null;
 }
@@ -25,13 +27,25 @@ function parseLocationContent(content: string): { lat: number; lng: number; labe
   return null;
 }
 
-export function MessageBubble({ text, type, time, isOwn, status = "sent", avatarUrl }: MessageBubbleProps) {
-  const isImage = type === "image";
+export function MessageBubble({ text, type, time, isOwn, isSystem = false, status = "sent", avatarUrl }: MessageBubbleProps) {
+  const isImage = type === "image" && !isSystem;
   const isHttpUrl =
     /^https?:\/\//i.test(text.trim()) && !text.includes(" ") && text.length <= 4096;
 
-  const isLocation = type === "location";
+  const isLocation = type === "location" && !isSystem;
   const location = isLocation ? parseLocationContent(text) : null;
+
+  if (isSystem) {
+    return (
+      <div className="flex justify-center px-2 py-1" role="status" aria-label="Mensaje del sistema">
+        <div className="max-w-[92%] rounded-lg border border-border/80 bg-muted/60 px-3 py-2 shadow-sm">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Sistema</p>
+          <p className="mt-1 text-center text-sm leading-snug text-foreground">{text}</p>
+          <p className="mt-1 text-center text-[10px] text-muted-foreground">{time}</p>
+        </div>
+      </div>
+    );
+  }
   const mapsUrl = location
     ? `https://www.openstreetmap.org/?mlat=${location.lat}&mlon=${location.lng}#map=16/${location.lat}/${location.lng}`
     : null;

@@ -1,5 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
+import {
+  LISTING_SUBSCRIPTION_WARNING_DAYS,
+  listingSubscriptionDaysRemaining,
+} from "@shared/professional-listing-subscription";
 import { type InsertProvider, type InsertService, type InsertBooking, type ServiceWithProvider } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { debouncedRefetch } from "@/lib/refetch-utils";
@@ -181,9 +185,33 @@ export function useCurrentProvider() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     refetchInterval: (query) => {
-      const d = query.state.data as { isVerified?: boolean } | null | undefined;
+      const d = query.state.data as {
+        isVerified?: boolean;
+        isListingPublished?: boolean;
+        visibilitySubscriptionEndsAt?: string | null;
+        subscriptionDaysRemaining?: number | null;
+      } | null | undefined;
       if (d == null) return false;
-      return d.isVerified === true ? false : 20_000;
+
+      let daysRemaining: number | null = d.subscriptionDaysRemaining ?? null;
+      if (
+        (daysRemaining == null || Number.isNaN(daysRemaining)) &&
+        d.visibilitySubscriptionEndsAt
+      ) {
+        daysRemaining = listingSubscriptionDaysRemaining(d.visibilitySubscriptionEndsAt);
+      }
+
+      const nearRenewalWindow =
+        d.isVerified === true &&
+        typeof daysRemaining === "number" &&
+        daysRemaining <= LISTING_SUBSCRIPTION_WARNING_DAYS + 1 &&
+        daysRemaining >= 0;
+
+      if (nearRenewalWindow) return 60_000;
+
+      if (d.isVerified !== true) return 20_000;
+
+      return false;
     },
   });
 }
@@ -198,6 +226,8 @@ export function useCreateProvider() {
         serviceTitle?: string;
         serviceDescription?: string;
         vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle;
+        coursesCompleted?: string;
+        certifications?: string;
       }
     ) => {
       const token = getToken();
@@ -557,10 +587,15 @@ export function useUpdateBookingStatus() {
         },
         body: JSON.stringify({ status }),
       });
-      if (!res.ok) throw new Error("No se pudo actualizar el estado");
-      return api.bookings.updateStatus.responses[200].parse(await res.json());
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((json as { message?: string }).message ?? "No se pudo actualizar el estado");
+      }
+      const parsed = api.bookings.updateStatus.responses[200].safeParse(json);
+      return parsed.success ? parsed.data : json;
     },
-    onSuccess: (_data, { status }) => {
+    onSuccess: (_data, { id, status }) => {
+      queryClient.invalidateQueries({ queryKey: ["booking", id] });
       // Refrescar inmediatamente la lista de reservas para que la UI se actualice al instante.
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
@@ -573,6 +608,14 @@ export function useUpdateBookingStatus() {
         debouncedRefetch(queryClient, ["/api/professional/stats"]);
       }
       toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: "No se pudo cambiar el estado",
+        description: message,
+        variant: "destructive",
+      });
     },
   });
 }
@@ -599,7 +642,8 @@ export function useUpdateBookingCost() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["booking", id] });
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       debouncedRefetch(queryClient, [api.bookings.list.path]);
@@ -634,12 +678,44 @@ export function useUpdateBookingSchedule() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["booking", id] });
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       debouncedRefetch(queryClient, [api.bookings.list.path]);
       debouncedRefetch(queryClient, ["/api/bookings/provider"]);
       toast({ title: "Fecha actualizada", description: "La fecha del servicio se ha guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+/** Cliente confirma que acepta el último monto/fecha definidos por el profesional (reserva pendiente). */
+export function useAcknowledgeBookingProChanges() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (bookingId: number) => {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${bookingId}/acknowledge-pro-changes`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { message?: string }).message || "No se pudo registrar tu aceptación");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      toast({
+        title: "Cambios aceptados",
+        description: "El asociado ya puede confirmar la reserva con el monto y la fecha acordados.",
+      });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });

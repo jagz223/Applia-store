@@ -266,10 +266,8 @@ export async function registerRoutes(
       if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
 
       const st = await genFebStorage.getVerifyingStatusByUserId(userId);
-      // Solo bloqueamos si el admin ya aprobó el pago. En "pending" o "rejected"
-      // puede reenviar comprobante/fecha y se actualizan los campos (merge en Firestore).
-      if (st?.transacction_verified === "verified") {
-        return res.status(409).json({ message: "El pago ya fue verificado" });
+      if (st?.transacction_verified === "pending") {
+        return res.status(409).json({ message: "Ya hay un comprobante de pago en revisión. Espera la validación del equipo." });
       }
 
       const body = patchProfessionalVerificationPaymentBody.parse(req.body);
@@ -579,6 +577,8 @@ export async function registerRoutes(
         (v) => (v === "" || v === null || v === undefined ? undefined : v),
         z.union([z.string(), z.number()]).optional().nullable()
       ),
+      coursesCompleted: z.string().trim().max(8000).optional(),
+      certifications: z.string().trim().max(8000).optional(),
     });
 
   const createProviderBodySchemaStrict = insertProviderSchema
@@ -590,12 +590,16 @@ export async function registerRoutes(
     .extend({
       bio: professionalBioFieldSchema,
       skills: providerSkillsSchema,
+      goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).optional(),
       /** Título público del único servicio (listado / edición). Si no se envía, se deriva de profesión o nombre. */
       serviceTitle: z.string().trim().max(500).optional(),
       /** Qué incluye la oferta; si no se envía o va vacío, se usa la biografía como texto inicial del servicio. */
       serviceDescription: z.string().trim().max(5000).optional(),
       /** Solo categoría Car Go (`transport`): datos del vehículo; validación adicional en el handler. */
       vehicle: z.any().optional(),
+      /** Fix Go / Man Go: texto libre guardado en el perfil (Firestore). */
+      coursesCompleted: z.string().trim().max(8000).optional(),
+      certifications: z.string().trim().max(8000).optional(),
     });
   const updateProviderBodySchema = z.object({
     category: providerCategorySchema.optional(),
@@ -623,6 +627,8 @@ export async function registerRoutes(
         serviceDescription: serviceDescriptionFromClient,
         vehicle: vehicleFromBody,
         goBrands,
+        coursesCompleted: coursesCompletedRaw,
+        certifications: certificationsRaw,
         ...providerInsert
       } = data;
 
@@ -657,17 +663,32 @@ export async function registerRoutes(
         }
         return res.status(409).json({ message: "Ya tienes un perfil de proveedor" });
       }
+      const coursesCompleted =
+        typeof coursesCompletedRaw === "string" && coursesCompletedRaw.trim() !== "" ? coursesCompletedRaw.trim() : undefined;
+      const certifications =
+        typeof certificationsRaw === "string" && certificationsRaw.trim() !== "" ? certificationsRaw.trim() : undefined;
+
       const provider = await catalogService.createProvider({
         userId,
         categoryId: providerInsert.categoryId ?? undefined,
         category: providerInsert.category ?? null,
         subcategoryId: providerInsert.subcategoryId ?? undefined,
-        goBrands: Array.isArray(goBrands) ? Array.from(new Set(["transport", ...goBrands])) : ["transport"],
+        ...(isGoDriverCategory
+          ? {
+              goBrands: Array.isArray(goBrands)
+                ? Array.from(new Set(goBrands))
+                : catForSignup?.slug === "delivery"
+                  ? ["delivery"]
+                  : ["transport"],
+            }
+          : {}),
         profession: providerInsert.profession,
         bio: providerInsert.bio ?? "",
         yearsExperience: providerInsert.yearsExperience ?? 0,
         hourlyRate: providerInsert.hourlyRate ?? null,
         skills: providerInsert.skills ?? [],
+        ...(coursesCompleted != null ? { coursesCompleted } : {}),
+        ...(certifications != null ? { certifications } : {}),
       } as any);
       if (keepStaffRole) {
         // Solo administrador pleno: verificado en catálogo sin flujo de verificación de plataforma.

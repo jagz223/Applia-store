@@ -24,7 +24,7 @@ import {
   MapPerspectiveControls,
 } from "@/components/taxi/MapPerspectiveControls";
 
-export type MapPoint = { lat: number; lon: number };
+export type MapPoint = { lat: number; lon: number; label?: string };
 
 const NO_NEARBY_VEHICLES: readonly { id: string; lat: number; lon: number }[] = [];
 

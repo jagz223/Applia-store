@@ -5,6 +5,11 @@ import { useAuth } from "./use-auth";
 import { hasFullAdminRole } from "@/lib/auth-utils";
 import { useToast } from "@/hooks/use-toast";
 import { fetchNotificationsFromServer, type ClientNotification } from "@/lib/notifications-api";
+import {
+  filterOutWalletRelatedNotifications,
+  isHiddenAdminWalletSocketPayload,
+  isHiddenWalletRelatedNotification,
+} from "@/lib/notification-filters";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 
 const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
@@ -114,7 +119,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
                   byId.set(n.id, existing.read && !n.read ? existing : n);
                 }
               });
-              const merged = Array.from(byId.values());
+              const merged = filterOutWalletRelatedNotifications(Array.from(byId.values()));
               merged.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
               return merged;
             });
@@ -134,19 +139,25 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     newSocket.on("notification", (notification: any) => {
       console.log("🔔 New notification:", notification);
-      const id = notification?.id != null ? String(notification.id) : `${notification?.type ?? "unknown"}-${notification?.data?.id ?? Date.now().toString()}`;
-      setNotifications((prev) => {
-        const base: Notification = {
-          id,
-          type: notification.type,
-          data: notification.data ?? notification,
-          timestamp: new Date(),
-          read: false,
-        };
-        const withoutDup = prev.filter((n) => n.id !== base.id);
-        return [base, ...withoutDup];
+      const hideWalletUi = isHiddenWalletRelatedNotification({
+        type: notification?.type,
+        data: notification?.data,
       });
-      // Recarga aprobada o rechazada: actualizar wallet/movimientos y avisar al usuario
+      const id = notification?.id != null ? String(notification.id) : `${notification?.type ?? "unknown"}-${notification?.data?.id ?? Date.now().toString()}`;
+      if (!hideWalletUi) {
+        setNotifications((prev) => {
+          const base: Notification = {
+            id,
+            type: notification.type,
+            data: notification.data ?? notification,
+            timestamp: new Date(),
+            read: false,
+          };
+          const withoutDup = prev.filter((n) => n.id !== base.id);
+          return [base, ...withoutDup];
+        });
+      }
+      // Recarga aprobada o rechazada: actualizar wallet/movimientos (sin toast si flujo saldo oculto)
       const type = notification?.type;
       if (type === "recharge_completed" || type === "recharge_rejected") {
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
@@ -156,21 +167,23 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
         debouncedRefetch(queryClient, ["/api/invoices", "list"]);
         const amount = notification?.data?.amountFormatted ?? notification?.data?.amount ?? "";
-        if (type === "recharge_completed") {
-          toast({
-            title: "Abono confirmado",
-            description: amount
-              ? `Se acreditaron $${amount} USD a tu saldo GenFeb. La factura queda en Mi actividad → Facturas.`
-              : "Tu saldo GenFeb fue actualizado. Revisa Facturas en Mi actividad si necesitas el comprobante.",
-          });
-        } else {
-          toast({
-            title: "No pudimos confirmar el abono",
-            description: amount
-              ? `Tu solicitud por $${amount} USD no pudo completarse. Revisa el comprobante o contacta a soporte.`
-              : "Revisa el detalle en la pestaña Transacciones.",
-            variant: "destructive",
-          });
+        if (!hideWalletUi) {
+          if (type === "recharge_completed") {
+            toast({
+              title: "Abono confirmado",
+              description: amount
+                ? `Se acreditaron $${amount} USD a tu saldo GenFeb. La factura queda en Mi actividad → Facturas.`
+                : "Tu saldo GenFeb fue actualizado. Revisa Facturas en Mi actividad si necesitas el comprobante.",
+            });
+          } else {
+            toast({
+              title: "No pudimos confirmar el abono",
+              description: amount
+                ? `Tu solicitud por $${amount} USD no pudo completarse. Revisa el comprobante o contacta a soporte.`
+                : "Revisa el detalle en la pestaña Transacciones.",
+              variant: "destructive",
+            });
+          }
         }
       }
       if (type === "balance_credited") {
@@ -180,12 +193,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         debouncedRefetch(queryClient, ["/api/wallet/me"]);
         debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
         debouncedRefetch(queryClient, ["/api/invoices", "list"]);
-        const message = notification?.data?.message;
-        const amount = notification?.data?.amountFormatted;
-        toast({
-          title: "Saldo acreditado",
-          description: message ?? (amount != null ? `Recibiste $${amount} USD` : "Se ha acreditado saldo a tu cuenta."),
-        });
+        if (!hideWalletUi) {
+          const message = notification?.data?.message;
+          const amount = notification?.data?.amountFormatted;
+          toast({
+            title: "Saldo acreditado",
+            description: message ?? (amount != null ? `Recibiste $${amount} USD` : "Se ha acreditado saldo a tu cuenta."),
+          });
+        }
       }
       if (type === "booking_confirmed_by_provider") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
@@ -264,21 +279,25 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
         debouncedRefetch(queryClient, ["/api/wallet/me"]);
         debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
-        toast({
-          title: "Retiro aprobado",
-          description: notification?.body ?? "Tu retiro fue aprobado. Tus fondos fueron enviados a la cuenta bancaria registrada.",
-        });
+        if (!hideWalletUi) {
+          toast({
+            title: "Retiro aprobado",
+            description: notification?.body ?? "Tu retiro fue aprobado. Tus fondos fueron enviados a la cuenta bancaria registrada.",
+          });
+        }
       }
       if (type === "withdrawal_rejected") {
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
         queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
         debouncedRefetch(queryClient, ["/api/wallet/me"]);
         debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
-        toast({
-          title: "Retiro rechazado",
-          description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.",
-          variant: "destructive",
-        });
+        if (!hideWalletUi) {
+          toast({
+            title: "Retiro rechazado",
+            description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.",
+            variant: "destructive",
+          });
+        }
       }
       if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
         queryClient.invalidateQueries({ queryKey: ["user"] });
@@ -378,6 +397,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     newSocket.on("notification:admin", (notification: any) => {
       console.log("[recharge] Cliente recibió notification:admin:", notification);
+      if (isHiddenAdminWalletSocketPayload(notification)) {
+        return;
+      }
       setNotifications((prev) => {
         const id = notification?.id != null ? String(notification.id) : `admin-${notification?.type ?? Date.now().toString()}`;
         const base: Notification = {

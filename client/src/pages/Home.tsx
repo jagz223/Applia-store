@@ -6,12 +6,22 @@ import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { api } from "@shared/routes";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useCategories, useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
+import { providerHasGoBrand } from "@shared/provider-go";
 import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { cn } from "@/lib/utils";
+import { hasAdminRole } from "@/lib/auth-utils";
 import { 
   ArrowRight, 
   Search, 
@@ -60,7 +70,7 @@ export default function HomePage() {
   const { user, isAuthenticated } = useAuth();
   const [location, setLocation] = useLocation();
   const showBecomePro = useShowBecomePro();
-  const { data: providerProfile } = useCurrentProvider();
+  const { data: providerProfile, isLoading: providerProfileLoading } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
   const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
@@ -72,6 +82,28 @@ export default function HomePage() {
   const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace || mobilityAllowed.delivery;
   const isCarGoDriver = useMemo(() => !!(providerProfile && isCarGoProvider(providerProfile, categories)), [providerProfile, categories]);
   const [goQuickOpen, setGoQuickOpen] = useState(false);
+  const [associateIntroOpen, setAssociateIntroOpen] = useState(false);
+  const [goDriverPickOpen, setGoDriverPickOpen] = useState(false);
+
+  const heroAssociateKind = useMemo(() => {
+    if (isAuthenticated && providerProfileLoading) return "loading" as const;
+
+    if (isAuthenticated && hasAdminRole(user)) return "admin_panel" as const;
+
+    const hasProvider = !!providerProfile;
+    const isCargoBrand = hasProvider && isCarGoProvider(providerProfile, categories);
+    const isPackBrand = hasProvider && providerHasGoBrand(providerProfile, "delivery", categories);
+
+    if (!hasProvider) return "intro_become" as const;
+
+    if (isCargoBrand && isPackBrand) return "go_both" as const;
+    if (isCargoBrand) return "go_cargo" as const;
+    if (isPackBrand) return "go_pack" as const;
+
+    return "professional_panel" as const;
+  }, [isAuthenticated, providerProfileLoading, providerProfile, categories]);
+
+  const becomeHref = showBecomePro ? "/become-pro" : "/register";
   const { data: homeCounts, isLoading: homeCountsLoading, isError: homeCountsError } = useQuery({
     queryKey: [api.categories.homeAssociateCounts.path],
     queryFn: async () => {
@@ -291,18 +323,76 @@ export default function HomePage() {
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                 </Link>
-                <Link
-                  href={showBecomePro ? "/become-pro" : "/register"}
-                  className="w-full sm:w-auto"
-                >
+                {heroAssociateKind === "loading" ? (
                   <Button
                     size="lg"
                     variant="outline"
-                    className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                    disabled
+                    className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary sm:w-auto"
                   >
-                    Ofrecer Servicios
+                    Cargando…
                   </Button>
-                </Link>
+                ) : heroAssociateKind === "intro_become" ? (
+                  <Button
+                    type="button"
+                    size="lg"
+                    variant="outline"
+                    className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                    onClick={() => setAssociateIntroOpen(true)}
+                  >
+                    Ofrecer servicios
+                  </Button>
+                ) : heroAssociateKind === "admin_panel" ? (
+                  <Link href="/admin" className="w-full sm:w-auto">
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                    >
+                      Ir al panel de administración
+                    </Button>
+                  </Link>
+                ) : heroAssociateKind === "professional_panel" ? (
+                  <Link href="/professional-dashboard" className="w-full sm:w-auto">
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                    >
+                      Ir a panel de asociados
+                    </Button>
+                  </Link>
+                ) : heroAssociateKind === "go_cargo" ? (
+                  <Link href="/go/cargo/driver" className="w-full sm:w-auto">
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                    >
+                      Ir a vista Car Go
+                    </Button>
+                  </Link>
+                ) : heroAssociateKind === "go_pack" ? (
+                  <Link href="/go/pack/driver" className="w-full sm:w-auto">
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                    >
+                      Ir a vista Pack Go
+                    </Button>
+                  </Link>
+                ) : (
+                  <Button
+                    type="button"
+                    size="lg"
+                    variant="outline"
+                    className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                    onClick={() => setGoDriverPickOpen(true)}
+                  >
+                    Ir a Car Go / Pack Go
+                  </Button>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-6 pt-4 font-marketing text-sm text-muted-foreground">
@@ -594,12 +684,16 @@ export default function HomePage() {
                 </Button>
               </Link>
               {showBecomePro && (
-                <Link href="/become-pro">
-                  <Button size="lg" variant="outline" className="h-14 px-8 rounded-full text-lg border-accent text-accent hover:bg-accent hover:text-white">
-                    <Briefcase className="mr-2 h-5 w-5" />
-                    Convertirse en Asociado
-                  </Button>
-                </Link>
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="outline"
+                  className="h-14 px-8 rounded-full text-lg border-accent text-accent hover:bg-accent hover:text-white"
+                  onClick={() => setAssociateIntroOpen(true)}
+                >
+                  <Briefcase className="mr-2 h-5 w-5" />
+                  Convertirse en Asociado
+                </Button>
               )}
             </div>
           </motion.div>
@@ -633,6 +727,85 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <Dialog open={associateIntroOpen} onOpenChange={setAssociateIntroOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Únete como asociado GenFeb</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 pt-1 text-left text-base text-muted-foreground">
+                <p>
+                  Aquí podrás registrarte como asociado, crear tu perfil y publicar los servicios que ofreces. Los
+                  clientes podrán reservarte, chatear contigo y dejarte valoraciones.
+                </p>
+                <p>
+                  El proceso te pedirá datos de tu actividad y, cuando corresponda, pasos de verificación para generar
+                  confianza en la plataforma.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => setAssociateIntroOpen(false)}>
+              Cerrar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setAssociateIntroOpen(false);
+                setLocation(becomeHref);
+              }}
+            >
+              Continuar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={goDriverPickOpen} onOpenChange={setGoDriverPickOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Vista conductores Go</DialogTitle>
+            <DialogDescription>
+              Tienes Car Go y Pack Go en tu perfil. Elige el panel de conductor al que quieres entrar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 pt-1">
+            {mobilityAllowed.transport ? (
+              <Button
+                type="button"
+                className="w-full justify-start gap-2"
+                onClick={() => {
+                  setGoDriverPickOpen(false);
+                  setLocation("/go/cargo/driver");
+                }}
+              >
+                <Car className="h-4 w-4 shrink-0" aria-hidden />
+                Car Go (conducir)
+              </Button>
+            ) : null}
+            {mobilityAllowed.delivery ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full justify-start gap-2"
+                onClick={() => {
+                  setGoDriverPickOpen(false);
+                  setLocation("/go/pack/driver");
+                }}
+              >
+                <Package className="h-4 w-4 shrink-0" aria-hidden />
+                Pack Go (conductor)
+              </Button>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setGoDriverPickOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Botón flotante hacia módulos Go: solo conductores con categoría Car Go. */}
       {isCarGoDriver && anyMobilityAllowed && typeof document !== "undefined"

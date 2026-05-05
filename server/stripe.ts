@@ -3,9 +3,9 @@ import Stripe from "stripe";
 // Initialize Stripe with API key
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
-export const stripe = stripeSecretKey 
+export const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, {
-      apiVersion: "2024-12-18.acacia" as const,
+      apiVersion: "2026-01-28.clover",
     })
   : null;
 

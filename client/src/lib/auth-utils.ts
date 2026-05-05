@@ -1,4 +1,4 @@
-import { hasAdminPrivileges, isFullAdmin } from "@shared/roles";
+import { hasAdminPrivileges, isFullAdmin, normalizeRoleCode } from "@shared/roles";
 import { api } from "@shared/routes";
 
 /** Roles que no deben ver el CTA "Convertirse en Profesional" (salvo reglas especiales por rol). */
@@ -27,6 +27,19 @@ export function hasAdminRole(user: { role?: string } | null): boolean {
 /** Solo administrador (no Soporte TI): pestañas financieras y verificación de asociados. */
 export function hasFullAdminRole(user: { role?: string } | null): boolean {
   return isFullAdmin(user?.role);
+}
+
+/**
+ * Ruta `/dashboard` (actividad / abono asociado): solo administrador pleno, profesionales y conductores
+ * (perfil de proveedor en API o rol `professional`). Excluye clientes y Soporte TI.
+ */
+export function canAccessAssociateActivityDashboard(
+  user: { role?: string; provider?: unknown } | null | undefined,
+  hasProviderProfile: boolean,
+): boolean {
+  if (hasFullAdminRole(user ?? null)) return true;
+  if (hasProviderProfile) return true;
+  return normalizeRoleCode(user?.role) === "professional";
 }
 
 /**

@@ -13,6 +13,7 @@ import { userService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
+import { applyServiceBookingChatLifecycle } from "./service-booking-chat";
 import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
 import { getMobilityFares, setMobilityFares } from "./mobility-fares";
@@ -20,6 +21,7 @@ import { getPackFares, setPackFares } from "./pack-fares";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
+import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
 import {
   getHiddenCategorySlugs,
   getHiddenCategorySlugsByRole,
@@ -29,6 +31,7 @@ import {
 } from "./category-visibility";
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
 import { isFullAdmin } from "@shared/roles";
+import { extendVisibilitySubscriptionEndsAt } from "@shared/professional-listing-subscription";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
@@ -613,6 +616,20 @@ export function registerAdminRoutes(app: Express): void {
         let verificationReportId: number | null = null;
         if (status === "verified") {
           await maybeVerifyProfessional(userId);
+          try {
+            const providerAfter = await genFebStorage.getProviderByUserId(userId);
+            if (providerAfter) {
+              const nextIso = extendVisibilitySubscriptionEndsAt(
+                (providerAfter as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
+                new Date(),
+              );
+              await genFebStorage.updateProvider(Number((providerAfter as { id: number }).id), {
+                visibilitySubscriptionEndsAt: nextIso,
+              } as any);
+            }
+          } catch (err) {
+            console.error("[admin] visibilitySubscriptionEndsAt extend:", err);
+          }
           
           // Reporte financiero (factura USD 15): completar pendiente o crear si faltaba al subir comprobante
           try {
@@ -1283,6 +1300,7 @@ export function registerAdminRoutes(app: Express): void {
       }
 
       const updated = await genFebStorage.getBooking(bookingId);
+      await applyServiceBookingChatLifecycle(getIO(), genFebStorage, updated ?? current);
       return res.status(200).json(updated ?? current);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1290,6 +1308,42 @@ export function registerAdminRoutes(app: Express): void {
       }
       console.error("Error updating admin booking:", error);
       return res.status(500).json({ message: "Error al actualizar la reserva" });
+    }
+  });
+
+  /**
+   * GET /api/admin/conversations
+   * Lista conversaciones para auditoría (sin filtro de gracia de 24h ni ocultamiento por usuario).
+   */
+  app.get("/api/admin/conversations", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+      const conversations = await genFebStorage.listConversationsForAdmin({ limit });
+      return res.status(200).json({ conversations, total: conversations.length });
+    } catch (error) {
+      console.error("Error listing admin conversations:", error);
+      return res.status(500).json({ message: "Error al listar conversaciones" });
+    }
+  });
+
+  /**
+   * GET /api/admin/conversations/:id/messages
+   * Historial de mensajes para revisión interna (staff).
+   */
+  app.get("/api/admin/conversations/:id/messages", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
+    try {
+      const conversationId = Number(req.params.id);
+      if (!Number.isFinite(conversationId)) return res.status(400).json({ message: "ID inválido" });
+      const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+      const before = req.query.before != null ? Number(req.query.before) : undefined;
+      const { messages, hasMore } = await genFebStorage.getMessagesByConversation(conversationId, {
+        limit,
+        before: before && !Number.isNaN(before) ? before : undefined,
+      });
+      return res.status(200).json({ messages, hasMore });
+    } catch (error) {
+      console.error("Error fetching admin conversation messages:", error);
+      return res.status(500).json({ message: "Error al cargar mensajes" });
     }
   });
 
@@ -1336,73 +1390,75 @@ export function registerAdminRoutes(app: Express): void {
         };
         if (adminNote) notificationData.adminNote = adminNote;
 
-        await genFebStorage.createNotification({
-          userId,
-          type: "withdrawal_approved",
-          data: notificationData,
-        });
-        const io = getIO();
-        const bodyWithNote = adminNote ? `${approvedMessage} Nota: ${adminNote}` : approvedMessage;
-        if (io) {
-          io.to(`user:${userId}`).emit("notification", {
+        if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+          await genFebStorage.createNotification({
+            userId,
             type: "withdrawal_approved",
+            data: notificationData,
+          });
+          const io = getIO();
+          const bodyWithNote = adminNote ? `${approvedMessage} Nota: ${adminNote}` : approvedMessage;
+          if (io) {
+            io.to(`user:${userId}`).emit("notification", {
+              type: "withdrawal_approved",
+              title: "Retiro aprobado",
+              body: bodyWithNote,
+              data: { message: approvedMessage, amount: transfer.amount, transferId: transfer.id, adminNote: adminNote ?? undefined },
+            });
+          }
+          void notificationService.sendPushToUser(userId, {
             title: "Retiro aprobado",
             body: bodyWithNote,
-            data: { message: approvedMessage, amount: transfer.amount, transferId: transfer.id, adminNote: adminNote ?? undefined },
-          });
-        }
-        void notificationService.sendPushToUser(userId, {
-          title: "Retiro aprobado",
-          body: bodyWithNote,
-        }).catch(() => {});
+          }).catch(() => {});
 
-        // Notificar a los demás admins: el retiro ya fue procesado por otro admin (queda en historial para evitar duplicados)
-        const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
-        const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
-          ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
-        const allAdmins = await getFullAdminUsers(genFebStorage);
-        for (const admin of allAdmins ?? []) {
-          const aid = (admin as { id?: string }).id;
-          if (aid && aid !== adminUserId) {
-            await genFebStorage.createNotification({
-              userId: aid,
-              type: "admin",
-              data: {
-                type: "withdrawal_processed_by_other",
-                action: "approved",
-                message: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}. Ya no aparece en Solicitudes de Retiro.`,
-                professionalUserId: userId,
-                professionalName,
-                amount: transfer.amount,
-                amountFormatted,
-                processedByAdminId: adminUserId,
-                processedByAdminName: adminName,
-              },
-            });
-            // Push FCM a otros admins: mismo evento, pero fuera de tiempo real
-            void notificationService
-              .sendPushToUser(aid, {
-                title: "Retiro aprobado por otro admin",
-                body: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}.`,
+          // Notificar a los demás admins: el retiro ya fue procesado por otro admin (queda en historial para evitar duplicados)
+          const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
+          const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
+            ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
+          const allAdmins = await getFullAdminUsers(genFebStorage);
+          for (const admin of allAdmins ?? []) {
+            const aid = (admin as { id?: string }).id;
+            if (aid && aid !== adminUserId) {
+              await genFebStorage.createNotification({
+                userId: aid,
+                type: "admin",
                 data: {
-                  url: "/admin?tab=payouts",
-                  type: "admin",
-                  withdrawalType: "withdrawal_processed_by_other",
+                  type: "withdrawal_processed_by_other",
                   action: "approved",
+                  message: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}. Ya no aparece en Solicitudes de Retiro.`,
                   professionalUserId: userId,
                   professionalName,
+                  amount: transfer.amount,
                   amountFormatted,
+                  processedByAdminId: adminUserId,
+                  processedByAdminName: adminName,
                 },
-              })
-              .catch((err) => console.error("[push] Error notificando retiro aprobado por otro admin:", err));
+              });
+              void notificationService
+                .sendPushToUser(aid, {
+                  title: "Retiro aprobado por otro admin",
+                  body: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}.`,
+                  data: {
+                    url: "/admin?tab=payouts",
+                    type: "admin",
+                    withdrawalType: "withdrawal_processed_by_other",
+                    action: "approved",
+                    professionalUserId: userId,
+                    professionalName,
+                    amountFormatted,
+                  },
+                })
+                .catch((err) => console.error("[push] Error notificando retiro aprobado por otro admin:", err));
+            }
           }
-        }
-        if (io) {
-          sendNotificationToAdmins(io, {
-            type: "withdrawal_processed_by_other",
-            action: "approved",
-            data: { professionalUserId: userId, professionalName, amountFormatted, processedByAdminName: adminName },
-          });
+          const ioBroadcast = getIO();
+          if (ioBroadcast) {
+            sendNotificationToAdmins(ioBroadcast, {
+              type: "withdrawal_processed_by_other",
+              action: "approved",
+              data: { professionalUserId: userId, professionalName, amountFormatted, processedByAdminName: adminName },
+            });
+          }
         }
 
         return res.status(200).json({ message: "Pago aprobado y registrado.", transfer, user: toPlainUser(user) });
@@ -1423,70 +1479,71 @@ export function registerAdminRoutes(app: Express): void {
         const rejectionData: Record<string, unknown> = { message: rejectedMessage };
         if (adminNote) rejectionData.adminNote = adminNote;
 
-        await genFebStorage.createNotification({
-          userId,
-          type: "withdrawal_rejected",
-          data: rejectionData,
-        });
-        const io = getIO();
-        const bodyReject = adminNote ? `${rejectedMessage} Nota: ${adminNote}` : rejectedMessage;
-        if (io) {
-          io.to(`user:${userId}`).emit("notification", {
+        if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+          await genFebStorage.createNotification({
+            userId,
             type: "withdrawal_rejected",
+            data: rejectionData,
+          });
+          const io = getIO();
+          const bodyReject = adminNote ? `${rejectedMessage} Nota: ${adminNote}` : rejectedMessage;
+          if (io) {
+            io.to(`user:${userId}`).emit("notification", {
+              type: "withdrawal_rejected",
+              title: "Retiro rechazado",
+              body: bodyReject,
+              data: { message: rejectedMessage, adminNote: adminNote ?? undefined },
+            });
+          }
+          void notificationService.sendPushToUser(userId, {
             title: "Retiro rechazado",
             body: bodyReject,
-            data: { message: rejectedMessage, adminNote: adminNote ?? undefined },
-          });
-        }
-        void notificationService.sendPushToUser(userId, {
-          title: "Retiro rechazado",
-          body: bodyReject,
-        }).catch(() => {});
+          }).catch(() => {});
 
-        // Notificar a los demás admins: el retiro fue rechazado por otro admin (queda en historial)
-        const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
-        const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
-          ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
-        const allAdmins = await getFullAdminUsers(genFebStorage);
-        for (const admin of allAdmins ?? []) {
-          const aid = (admin as { id?: string }).id;
-          if (aid && aid !== adminUserId) {
-            await genFebStorage.createNotification({
-              userId: aid,
-              type: "admin",
-              data: {
-                type: "withdrawal_processed_by_other",
-                action: "rejected",
-                message: `El retiro de ${professionalName} fue rechazado por ${adminName}. Los fondos fueron devueltos a su Saldo Genfeb.`,
-                professionalUserId: userId,
-                professionalName,
-                processedByAdminId: adminUserId,
-                processedByAdminName: adminName,
-              },
-            });
-            // Push FCM a otros admins: mismo evento, pero fuera de tiempo real
-            void notificationService
-              .sendPushToUser(aid, {
-                title: "Retiro rechazado por otro admin",
-                body: `El retiro de ${professionalName} fue rechazado por ${adminName}.`,
+          const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
+          const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
+            ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
+          const allAdmins = await getFullAdminUsers(genFebStorage);
+          for (const admin of allAdmins ?? []) {
+            const aid = (admin as { id?: string }).id;
+            if (aid && aid !== adminUserId) {
+              await genFebStorage.createNotification({
+                userId: aid,
+                type: "admin",
                 data: {
-                  url: "/admin?tab=payouts",
-                  type: "admin",
-                  withdrawalType: "withdrawal_processed_by_other",
+                  type: "withdrawal_processed_by_other",
                   action: "rejected",
+                  message: `El retiro de ${professionalName} fue rechazado por ${adminName}. Los fondos fueron devueltos a su Saldo Genfeb.`,
                   professionalUserId: userId,
                   professionalName,
+                  processedByAdminId: adminUserId,
+                  processedByAdminName: adminName,
                 },
-              })
-              .catch((err) => console.error("[push] Error notificando retiro rechazado por otro admin:", err));
+              });
+              void notificationService
+                .sendPushToUser(aid, {
+                  title: "Retiro rechazado por otro admin",
+                  body: `El retiro de ${professionalName} fue rechazado por ${adminName}.`,
+                  data: {
+                    url: "/admin?tab=payouts",
+                    type: "admin",
+                    withdrawalType: "withdrawal_processed_by_other",
+                    action: "rejected",
+                    professionalUserId: userId,
+                    professionalName,
+                  },
+                })
+                .catch((err) => console.error("[push] Error notificando retiro rechazado por otro admin:", err));
+            }
           }
-        }
-        if (io) {
-          sendNotificationToAdmins(io, {
-            type: "withdrawal_processed_by_other",
-            action: "rejected",
-            data: { professionalUserId: userId, professionalName, processedByAdminName: adminName },
-          });
+          const ioBroadcast = getIO();
+          if (ioBroadcast) {
+            sendNotificationToAdmins(ioBroadcast, {
+              type: "withdrawal_processed_by_other",
+              action: "rejected",
+              data: { professionalUserId: userId, professionalName, processedByAdminName: adminName },
+            });
+          }
         }
 
         return res.status(200).json({ message: "Retiro rechazado; fondos devueltos al Saldo Genfeb del usuario.", user: toPlainUser(user) });

@@ -82,7 +82,7 @@ export class DatabaseStorage implements IStorage {
 
   async createProvider(insertProvider: InsertProvider): Promise<Provider> {
     const db = await getDb();
-    const [provider] = await db.insert(providers).values(insertProvider).returning();
+    const [provider] = await db.insert(providers).values(insertProvider as typeof providers.$inferInsert).returning();
     return provider;
   }
 
@@ -248,13 +248,18 @@ class MemoryStorage implements IStorage {
   }
 
   async createProvider(insertProvider: InsertProvider): Promise<Provider> {
+    const skillsRaw = insertProvider.skills;
+    const skillsNorm: string[] | null = Array.isArray(skillsRaw) ? skillsRaw : skillsRaw == null ? null : null;
     const provider: Provider = {
       id: this._providerId++,
       isVerified: false,
       rating: "0",
       reviewCount: 0,
       ...insertProvider,
+      categoryId: insertProvider.categoryId ?? null,
+      category: insertProvider.category ?? null,
       hourlyRate: insertProvider.hourlyRate ?? null,
+      skills: skillsNorm,
     };
     this._providers.push(provider);
     return provider;
@@ -291,7 +296,13 @@ class MemoryStorage implements IStorage {
   }
 
   async createService(insertService: InsertService): Promise<Service> {
-    const service: Service = { id: this._serviceId++, isActive: true, ...insertService };
+    const { lastEditedAt, ...rest } = insertService;
+    const service: Service = {
+      id: this._serviceId++,
+      isActive: true,
+      ...rest,
+      lastEditedAt: lastEditedAt ?? null,
+    };
     this._services.push(service);
     return service;
   }
@@ -327,6 +338,9 @@ class MemoryStorage implements IStorage {
       createdAt: new Date(),
       ...insertBooking,
       notes: insertBooking.notes ?? null,
+      cost: insertBooking.cost ?? null,
+      confirmedByClient: insertBooking.confirmedByClient ?? null,
+      paymentMethod: insertBooking.paymentMethod ?? "wallet",
     };
     this._bookings.push(booking);
     return booking;

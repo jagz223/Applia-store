@@ -51,14 +51,16 @@ const sheetVariants = cva(
 
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> {
+  /** Si true, no se muestra el botón de cerrar (X). Consumido aquí y no pasado al primitivo. */
+  hideClose?: boolean;
+}
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => {
-  const hideClose = Boolean((props as any).hideClose);
-  if ("hideClose" in (props as any)) delete (props as any).hideClose;
+>(({ side = "right", className, children, hideClose: hideCloseProp, ...props }, ref) => {
+  const hideClose = Boolean(hideCloseProp);
   return (
   <SheetPortal>
     <SheetOverlay />

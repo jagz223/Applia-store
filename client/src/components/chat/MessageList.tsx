@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import { MessageBubble } from "./MessageBubble";
 import { toDate } from "@/lib/date-utils";
+import { cn } from "@/lib/utils";
 
 const SCROLL_LOAD_MORE_THRESHOLD = 80;
 
@@ -10,6 +11,8 @@ interface DisplayMessage {
   type?: string;
   time: string;
   isOwn: boolean;
+  /** Mensaje automático (no es de un usuario). */
+  isSystem?: boolean;
   status?: string;
 }
 
@@ -21,6 +24,8 @@ interface MessageListProps {
   hasMore?: boolean;
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
+  /** Clases extra en el contenedor scroll (p. ej. padding inferior si la barra de envío está fija). */
+  className?: string;
 }
 
 export function MessageList({
@@ -30,6 +35,7 @@ export function MessageList({
   hasMore,
   onLoadMore,
   isLoadingMore,
+  className,
 }: MessageListProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
@@ -94,7 +100,7 @@ export function MessageList({
   return (
     <div
       ref={scrollContainerRef}
-      className="flex-1 min-h-0 overflow-y-auto p-4"
+      className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4", className)}
       onScroll={handleScroll}
     >
       <div className="space-y-4">
@@ -124,6 +130,7 @@ export function MessageList({
               type={msg.type}
               time={msg.time}
               isOwn={msg.isOwn}
+              isSystem={msg.isSystem}
               status={msg.status}
             />
           ))

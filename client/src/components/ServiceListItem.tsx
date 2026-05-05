@@ -31,8 +31,6 @@ export function ServiceListItem({ service }: ServiceListItemProps) {
   const rating = Number(providerUser?.rating ?? 5);
   const reviewCount = Number(providerUser?.ratingCount ?? 0);
 
-  const priceNum = Number(service.price ?? 0);
-
   const providerId = Number((service.provider as any)?.id);
   const {
     data: completedCount,
@@ -89,11 +87,7 @@ export function ServiceListItem({ service }: ServiceListItemProps) {
               </div>
             </div>
 
-            <div className="flex flex-col items-end gap-3 shrink-0">
-              <div className="text-right">
-                <p className="text-xs text-muted-foreground">desde</p>
-                <p className="text-lg font-bold text-primary">${Number.isFinite(priceNum) ? priceNum.toFixed(0) : "0"}</p>
-              </div>
+            <div className="flex flex-col items-end justify-center gap-3 shrink-0 self-stretch">
               <ArrowRight className="h-5 w-5 text-muted-foreground" />
             </div>
           </div>

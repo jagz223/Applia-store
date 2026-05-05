@@ -11,7 +11,7 @@ const FIRESTORE_METHODS = new Set([
   "getUserRole", "updateUserRole",
   "getCategories", "getSubcategories", "getSubcategoryById", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId",
   "getAllServices", "getService", "createService",
-  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
+  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "acknowledgeBookingProChanges", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getPendingBookingRatings", "submitBookingRating",
   "getProfessionalVerificationByUserId", "upsertProfessionalVerificationImage", "upsertProfessionalVerificationCredential", "upsertProfessionalVerificationPayment",
   "getVerifyingStatusByUserId",
@@ -25,9 +25,11 @@ const FIRESTORE_METHODS = new Set([
   // Chat: debe persistir en Firestore para auditoría/admin.
   "getConversationsByUser", "createConversation", "getMessagesByConversation", "getLastMessageByConversation", "getUnreadCountByConversation",
   "createMessage", "markMessageAsRead", "markConversationAsRead", "hideConversationForUsers",
+  "patchConversation", "findConversationForServiceBooking", "listConversationsForAdmin",
 ]);
 
-export class HybridStorage implements IStorage {
+/** Delegador Firestore/memoria alineado con {@link IStorage} en tiempo de ejecución. */
+export class HybridStorage {
   constructor(
     private firestore: FirestoreStorage,
     private memory: IStorage,
@@ -108,6 +110,9 @@ export class HybridStorage implements IStorage {
   updateBookingStatus(id: number, status: string) { return this.delegate("updateBookingStatus", [id, status]); }
   updateBookingCost(id: number, cost: number) { return this.delegate("updateBookingCost", [id, cost]); }
   updateBookingSchedule(id: number, date: Date) { return this.delegate("updateBookingSchedule", [id, date]); }
+  acknowledgeBookingProChanges(bookingId: number, clientUserId: string) {
+    return this.delegate("acknowledgeBookingProChanges", [bookingId, clientUserId]);
+  }
   confirmBookingByClient(bookingId: number) { return this.delegate("confirmBookingByClient", [bookingId]); }
   completeBookingAndReleaseEscrow(bookingId: number) { return this.delegate("completeBookingAndReleaseEscrow", [bookingId]); }
   cancelBookingAndRefundClientEscrow(bookingId: number) { return this.delegate("cancelBookingAndRefundClientEscrow", [bookingId]); }
@@ -133,6 +138,20 @@ export class HybridStorage implements IStorage {
   markMessageAsRead(messageId: number) { return this.delegate("markMessageAsRead", [messageId]); }
   markConversationAsRead(conversationId: number, userId: string) { return this.delegate("markConversationAsRead", [conversationId, userId]); }
   hideConversationForUsers(conversationId: number, userIds: string[]) { return this.delegate("hideConversationForUsers", [conversationId, userIds]); }
+  patchConversation(conversationId: number, patch: Record<string, unknown>) {
+    return this.delegate("patchConversation", [conversationId, patch]);
+  }
+  findConversationForServiceBooking(booking: {
+    id: number;
+    userId?: string;
+    providerId?: number;
+    serviceId?: number;
+  }) {
+    return this.delegate("findConversationForServiceBooking", [booking]);
+  }
+  listConversationsForAdmin(opts?: { limit?: number }) {
+    return this.delegate("listConversationsForAdmin", [opts]);
+  }
   getFinancialReports(userId: string, period?: string) { return this.memory.getFinancialReports(userId, period); }
   getKPIs(userId: string) { return this.memory.getKPIs(userId); }
   getNotifications(userId: string, unreadOnly?: boolean) { return this.delegate("getNotifications", [userId, unreadOnly]); }

@@ -96,7 +96,7 @@ export function useSendMessage(conversationId: number | null, _recipientId?: str
 
   const mutation = useMutation({
     mutationFn: (
-      payload: string | { content: string; type?: "text" | "image" | "file" | "location" },
+      payload: string | { content: string; type?: "text" | "image" | "file" | "location" | "system" },
     ) => {
       const content = typeof payload === "string" ? payload : payload.content;
       const type = typeof payload === "string" ? "text" : (payload.type ?? "text");
@@ -141,11 +141,23 @@ export function useGetOrCreateConversation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ participantId, serviceId }: { participantId: string; serviceId?: number }) => {
+    mutationFn: async ({
+      participantId,
+      serviceId,
+      bookingId,
+    }: {
+      participantId: string;
+      serviceId?: number;
+      /** Si se indica, solo coincide conversaciones de esa reserva (marketplace). */
+      bookingId?: number;
+    }) => {
       const list = await chatApi.getConversations();
-      const existing = list.find(
-        (c) => c.otherParticipant?.id === participantId || c.participant1Id === participantId || c.participant2Id === participantId
-      );
+      const matchesPeer = (c: (typeof list)[number]) =>
+        c.otherParticipant?.id === participantId || c.participant1Id === participantId || c.participant2Id === participantId;
+      const existing =
+        bookingId != null && Number.isFinite(bookingId)
+          ? list.find((c) => matchesPeer(c) && Number(c.bookingId) === bookingId)
+          : list.find(matchesPeer);
       if (existing) return existing.id;
       const created = await chatApi.createConversation({ participantId, serviceId });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });

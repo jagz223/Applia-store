@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
-import { hasAdminRole } from "@/lib/auth-utils";
+import { hasAdminRole, canAccessAssociateActivityDashboard } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
@@ -50,7 +50,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useEffect, useMemo } from "react";
@@ -111,8 +110,8 @@ export function Navigation() {
     ? typeof (walletData as { rating?: number } | undefined)?.rating === "number"
       ? (walletData as { rating: number }).rating
       : 5
-    : typeof (user as { rating?: number } | null)?.rating === "number"
-      ? (user as { rating: number }).rating
+    : user != null && typeof (user as { rating?: unknown }).rating === "number"
+      ? (user as unknown as { rating: number }).rating
       : 5;
   const formatWallet = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
@@ -157,6 +156,9 @@ export function Navigation() {
 
   /** Mostrar opciones de profesional si tiene perfil de proveedor o rol professional (por si el perfil no carga). */
   const isProfessional = !!providerProfile || (user as { role?: string } | null)?.role === "professional";
+  const hasProviderForDashboard =
+    !!providerProfile || !!(user as { provider?: unknown } | null)?.provider;
+  const canAccessActivityDashboard = canAccessAssociateActivityDashboard(user, hasProviderForDashboard);
   /** Panel "Mis servicios" visible solo si tiene al menos un servicio activo (condición distinta a Crear servicio). */
   const activeServices = myServices.filter((s) => s.isActive !== false);
   /** Cualquier servicio propio (aunque esté inactivo) para poder abrir el panel y editar. */
@@ -439,14 +441,14 @@ export function Navigation() {
                 <Button variant="outline" className="hidden sm:flex border-primary text-primary hover:bg-primary/10" asChild>
                   <Link href="/become-pro">Convertirse en Asociado</Link>
                 </Button>
-              ) : (
+              ) : canAccessActivityDashboard ? (
                  <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
                    <Link href="/dashboard">
                      <LayoutDashboard className="h-4 w-4" />
                      <span>Dashboard</span>
                    </Link>
                  </Button>
-              )}
+              ) : null}
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -472,12 +474,14 @@ export function Navigation() {
                       </Link>
                     </DropdownMenuItem>
                   )}
+                  {canAccessActivityDashboard && (
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard" className="flex items-center">
                       <LayoutDashboard className="mr-2 h-4 w-4" />
                       Panel de Control
                     </Link>
                   </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem asChild>
                     <Link href="/bookings" className="flex items-center">
                       <Calendar className="mr-2 h-4 w-4" />
@@ -656,9 +660,11 @@ export function Navigation() {
                     )}
                   </>
                 )}
+                {canAccessActivityDashboard && (
                 <Link href="/dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mi Panel
                 </Link>
+                )}
                 {SHOW_PAYMENTS && (
                   <Link href="/payments" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                     Pagos
@@ -836,12 +842,6 @@ export function Navigation() {
                         <h3 className="font-bold text-base text-foreground truncate">{panelService.title ?? "—"}</h3>
 
                         <div className="flex flex-wrap items-center gap-2 mt-2">
-                          <Badge
-                            variant="outline"
-                            className="bg-amber-500/15 text-amber-700 dark:text-amber-400 dark:bg-amber-500/20 border-amber-500/30 font-semibold"
-                          >
-                            {panelService.price ?? "—"} USD/h
-                          </Badge>
                           <span className="text-xs text-muted-foreground">{getServiceBrand(panelService)}</span>
                         </div>
 

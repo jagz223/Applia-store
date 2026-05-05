@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import {
   useConversations,
@@ -26,13 +26,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ChatProviderBookingModal } from "@/components/chat/ChatProviderBookingModal";
 import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
+import { formatDistanceToNow } from "date-fns";
+import { es } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
-import { uploadChatPaymentProof } from "@/lib/firebase-client";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSocket } from "@/hooks/use-socket";
+import type { ConversationEnriched } from "@/types/chat";
 
 type Props = {
   mode: "page" | "embedded";
@@ -43,6 +46,30 @@ type Props = {
 /** Altura del área de chat (viewport menos header aproximado). */
 const CHAT_AREA_HEIGHT = "calc(100vh - 280px)";
 const CHAT_AREA_MIN_HEIGHT = 500;
+
+/** Deja `/chat?conversation=id` para que F5 y nuevas visitas mantengan el hilo y el recordatorio de reserva/servicio. */
+function setConversationInUrl(
+  setLocation: (path: string, opts?: { replace?: boolean }) => void,
+  conversationId: number,
+  opts?: { clearDeepLink?: boolean },
+) {
+  const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  if (opts?.clearDeepLink) {
+    params.delete("with");
+    params.delete("bookingId");
+    params.delete("serviceId");
+  }
+  params.set("conversation", String(conversationId));
+  const qs = params.toString();
+  setLocation(`/chat?${qs}`, { replace: true });
+}
+
+function stripConversationFromUrl(setLocation: (path: string, opts?: { replace?: boolean }) => void) {
+  const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  params.delete("conversation");
+  const qs = params.toString();
+  setLocation(qs ? `/chat?${qs}` : "/chat", { replace: true });
+}
 
 export function ChatPanel({ mode, selectedConversationId: externalId, onSelectedConversationIdChange }: Props) {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -64,15 +91,16 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
 
   const [messageInput, setMessageInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [mobileShowList, setMobileShowList] = useState(true);
   const isMobile = useIsMobile();
-  const resolvedWithRef = useRef<string | null>(null);
+  /** Evita bucles; incluye bookingId/serviceId para que un mismo `with` abra otro hilo al cambiar de reserva. */
+  const resolvedChatDeepLinkRef = useRef<string | null>(null);
   const resolvedSupportRef = useRef<boolean>(false);
   /** Contexto de la conversación al abrir desde reserva/servicio (para mostrar recordatorio). */
   const [chatContext, setChatContext] = useState<{ bookingId: number | null; serviceId: number | null }>({ bookingId: null, serviceId: null });
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [pendingShareLocation, setPendingShareLocation] = useState<PickedLocation | null>(null);
 
+  const queryClient = useQueryClient();
   const conversationsQuery = useConversations(!!isAuthenticated);
   const conversations = conversationsQuery.data ?? [];
   const messagesQuery = useMessages(selectedConversationId, !!isAuthenticated && selectedConversationId != null);
@@ -91,14 +119,51 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
 
   useChatRealtime(selectedConversationId);
 
-  const bookingIdForContext = chatContext.bookingId && selectedConversationId ? chatContext.bookingId : null;
-  const serviceIdForContext = chatContext.serviceId && selectedConversationId && !chatContext.bookingId ? chatContext.serviceId : null;
+  /** Prioridad: datos de la conversación en API (persisten sin query ?bookingId=). Fallback: deep link en chatContext. */
+  const { bookingIdForContext, serviceIdForContext } = useMemo(() => {
+    if (selectedConversationId == null) {
+      return { bookingIdForContext: null as number | null, serviceIdForContext: null as number | null };
+    }
+    if (!selectedConversation) {
+      const bid = chatContext.bookingId ? chatContext.bookingId : null;
+      const sid =
+        chatContext.serviceId != null && bid == null ? chatContext.serviceId : null;
+      return { bookingIdForContext: bid, serviceIdForContext: sid };
+    }
+    let bookingIdForContext: number | null = null;
+    const bidRaw = selectedConversation.bookingId as unknown;
+    if (bidRaw != null && String(bidRaw).trim() !== "") {
+      const n = Number(bidRaw);
+      if (Number.isFinite(n)) bookingIdForContext = n;
+    }
+    if (bookingIdForContext == null && chatContext.bookingId != null) {
+      bookingIdForContext = chatContext.bookingId;
+    }
+
+    let serviceIdForContext: number | null = null;
+    if (bookingIdForContext == null) {
+      const sidRaw = selectedConversation.serviceId as unknown;
+      if (sidRaw != null && String(sidRaw).trim() !== "") {
+        const n = Number(sidRaw);
+        if (Number.isFinite(n)) serviceIdForContext = n;
+      }
+      if (serviceIdForContext == null && chatContext.serviceId != null) {
+        serviceIdForContext = chatContext.serviceId;
+      }
+    }
+    return { bookingIdForContext, serviceIdForContext };
+  }, [
+    selectedConversationId,
+    selectedConversation,
+    chatContext.bookingId,
+    chatContext.serviceId,
+  ]);
   const { data: bookingContext } = useQuery({
     queryKey: ["booking", bookingIdForContext],
     queryFn: async () => {
       const res = await fetch(`/api/bookings/${bookingIdForContext}`);
       if (!res.ok) throw new Error("Reserva no encontrada");
-      return res.json() as Promise<{ id: number; serviceTitle?: string; status?: string }>;
+      return res.json() as Promise<{ id: number; serviceTitle?: string; status?: string; providerId?: number }>;
     },
     enabled: !!bookingIdForContext,
   });
@@ -107,23 +172,84 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     queryFn: async () => {
       const res = await fetch(`/api/services/${serviceIdForContext}`);
       if (!res.ok) throw new Error("Servicio no encontrado");
-      return res.json() as Promise<{ id: number; title?: string }>;
+      return res.json() as Promise<{ id: number; title?: string; providerId?: number }>;
     },
     enabled: !!serviceIdForContext,
   });
 
-  const chatReminderText =
+  const graceBannerText =
+    selectedConversation?.serviceChatHideFromUsersAt &&
+    new Date(selectedConversation.serviceChatHideFromUsersAt).getTime() > Date.now()
+      ? (() => {
+          const until = new Date(selectedConversation.serviceChatHideFromUsersAt as string);
+          if (Number.isNaN(until.getTime())) return null;
+          const rel = formatDistanceToNow(until, { locale: es, addSuffix: true });
+          return `El servicio ya no está activo. Esta conversación se archivará de tu vista ${rel}; guardá lo que necesites antes. El historial permanece disponible para el equipo de soporte.`;
+        })()
+      : null;
+
+  const priceAgreementHint =
+    " Coordinen entre ambos el precio del servicio de forma mutua (por este chat u otro canal); la app no publica ni exige un importe fijo por servicio.";
+
+  const bookingOrServiceReminder =
     selectedConversationId != null
-      ? (bookingContext?.status === "pending" ||
+      ? bookingContext?.status === "pending" ||
           bookingContext?.status === "confirmed" ||
           bookingContext?.status === "in_progress"
-          ? bookingContext?.serviceTitle != null
-            ? `Este chat es sobre la reserva #${bookingContext.id} — ${bookingContext.serviceTitle}. Ambos pueden ver este recordatorio.`
-            : `Este chat es sobre la reserva #${bookingContext.id}. Ambos pueden ver este recordatorio.`
-          : serviceContext?.title
-            ? `Este chat es sobre el servicio: ${serviceContext.title}. Ambos pueden ver este recordatorio.`
-            : null)
+        ? bookingContext?.serviceTitle != null
+          ? `Este chat es sobre la reserva #${bookingContext.id} — ${bookingContext.serviceTitle}. Ambos pueden ver este recordatorio.${priceAgreementHint}`
+          : `Este chat es sobre la reserva #${bookingContext.id}. Ambos pueden ver este recordatorio.${priceAgreementHint}`
+        : serviceContext?.title
+          ? `Este chat es sobre el servicio: ${serviceContext.title}. Ambos pueden ver este recordatorio.${priceAgreementHint}`
+          : null
       : null;
+
+  const chatReminderText = graceBannerText ?? bookingOrServiceReminder;
+
+  const [providerBookingModalOpen, setProviderBookingModalOpen] = useState(false);
+
+  const bookingPayload = bookingContext as { providerId?: number } | undefined;
+  const servicePayload = serviceContext as { providerId?: number } | undefined;
+  const myProviderId = user?.provider?.id;
+
+  const showProviderBookingTools =
+    myProviderId != null &&
+    bookingIdForContext != null &&
+    bookingPayload?.providerId === myProviderId;
+
+  const showProviderServiceTools =
+    myProviderId != null &&
+    serviceIdForContext != null &&
+    bookingIdForContext == null &&
+    servicePayload?.providerId === myProviderId;
+
+  const reminderActions =
+    showProviderBookingTools || showProviderServiceTools ? (
+      <>
+        {showProviderBookingTools ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="border-primary/40 bg-background font-semibold shadow-sm hover:bg-primary/15"
+            onClick={() => setProviderBookingModalOpen(true)}
+          >
+            Gestionar reserva
+          </Button>
+        ) : null}
+        {showProviderServiceTools ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="border-primary/40 bg-background font-semibold shadow-sm"
+            asChild
+          >
+            <Link href={`/edit-service/${serviceIdForContext}`}>Editar mi servicio</Link>
+          </Button>
+        ) : null}
+      </>
+    ) : undefined;
 
   // Indicar conversación abierta para no mostrar notificación en la campana ni badge en la lista
   useEffect(() => {
@@ -138,6 +264,21 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     }
   }, [selectedConversationId]);
 
+  const handleBackFromChat = useCallback(() => {
+    setSelectedConversationId(null);
+    if (allowNavigate) stripConversationFromUrl(setLocation);
+  }, [allowNavigate, setLocation, setSelectedConversationId]);
+
+  // Si el usuario elige un chat desde la lista pero la URL no lleva ?conversation=, sincronizar (F5 conserva hilo y banner).
+  useEffect(() => {
+    if (!allowNavigate) return;
+    if (typeof window === "undefined") return;
+    if (selectedConversationId == null) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("conversation") === String(selectedConversationId)) return;
+    setConversationInUrl(setLocation, selectedConversationId);
+  }, [allowNavigate, selectedConversationId, setLocation]);
+
   // Resolver links por querystring solo en modo página.
   useEffect(() => {
     if (!allowNavigate) return;
@@ -150,7 +291,8 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     const exists = conversations.some((c) => c.id === id);
     if (exists && selectedConversationId !== id) {
       setSelectedConversationId(id);
-      setLocation("/chat", { replace: true });
+      params.set("conversation", String(id));
+      setLocation(params.toString() ? `/chat?${params.toString()}` : "/chat", { replace: true });
     }
   }, [allowNavigate, conversationsQuery.isSuccess, conversations, selectedConversationId, setLocation, setSelectedConversationId]);
 
@@ -166,32 +308,96 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     if (bookingId != null && !Number.isNaN(bookingId)) setChatContext((prev) => ({ ...prev, bookingId }));
     if (serviceId != null && !Number.isNaN(serviceId)) setChatContext((prev) => ({ ...prev, serviceId }));
     if (!withUserId) {
-      resolvedWithRef.current = null;
+      resolvedChatDeepLinkRef.current = null;
       return;
     }
-    if (resolvedWithRef.current === withUserId) return;
-    resolvedWithRef.current = withUserId;
 
-    const existing = conversations.find(
-      (c) =>
-        c.otherParticipant?.id === withUserId ||
-        c.participant1Id === withUserId ||
-        c.participant2Id === withUserId
-    );
+    const resolveKey = `with:${withUserId}|b:${bookingId ?? ""}|s:${serviceId ?? ""}`;
+    if (resolvedChatDeepLinkRef.current === resolveKey) return;
+
+    const matchesPeer = (c: ConversationEnriched) =>
+      c.otherParticipant?.id === withUserId ||
+      c.participant1Id === withUserId ||
+      c.participant2Id === withUserId;
+
+    const pickFromList = (list: ConversationEnriched[]) => {
+      if (bookingId != null && !Number.isNaN(bookingId)) {
+        return list.find((c) => matchesPeer(c) && Number(c.bookingId) === bookingId);
+      }
+      return list.find(matchesPeer);
+    };
+
+    const existing = pickFromList(conversations);
     if (existing) {
+      resolvedChatDeepLinkRef.current = resolveKey;
       setSelectedConversationId(existing.id);
-      setLocation("/chat", { replace: true });
+      setConversationInUrl(setLocation, existing.id, { clearDeepLink: true });
       return;
     }
+
+    // Reserva marketplace: cada bookingId tiene su propio hilo; no reutilizar el chat genérico con el mismo usuario.
+    if (bookingId != null && !Number.isNaN(bookingId)) {
+      const pendingMarker = `pending:${resolveKey}`;
+      if (resolvedChatDeepLinkRef.current === pendingMarker || resolvedChatDeepLinkRef.current === resolveKey) {
+        return;
+      }
+      resolvedChatDeepLinkRef.current = pendingMarker;
+
+      let cancelled = false;
+      const run = async () => {
+        const token = localStorage.getItem("token");
+        for (let attempt = 0; attempt < 14 && !cancelled; attempt++) {
+          const list =
+            queryClient.getQueryData<ConversationEnriched[]>(["chat", "conversations"]) ?? conversations;
+          const fromList = pickFromList(list);
+          if (fromList) {
+            resolvedChatDeepLinkRef.current = resolveKey;
+            setSelectedConversationId(fromList.id);
+            setConversationInUrl(setLocation, fromList.id, { clearDeepLink: true });
+            return;
+          }
+          const res = await fetch(`/api/bookings/${bookingId}/chat-conversation`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { conversationId: number };
+            resolvedChatDeepLinkRef.current = resolveKey;
+            void queryClient.invalidateQueries({ queryKey: ["chat", "conversations"] });
+            setSelectedConversationId(data.conversationId);
+            setConversationInUrl(setLocation, data.conversationId, { clearDeepLink: true });
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 380));
+          await queryClient.refetchQueries({ queryKey: ["chat", "conversations"] });
+        }
+        if (!cancelled) {
+          if (resolvedChatDeepLinkRef.current === pendingMarker) {
+            resolvedChatDeepLinkRef.current = null;
+          }
+          toast({
+            variant: "destructive",
+            title: "Chat de la reserva",
+            description:
+              "No se pudo abrir el chat de esta reserva todavía. Cierra y vuelve a entrar desde Mis reservas o espera unos segundos.",
+          });
+        }
+      };
+      void run();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     getOrCreateConversation.mutate(
       { participantId: withUserId, serviceId: serviceId ?? undefined },
       {
         onSuccess: (conversationId) => {
+          resolvedChatDeepLinkRef.current = resolveKey;
           setSelectedConversationId(conversationId);
-          setLocation("/chat", { replace: true });
+          setConversationInUrl(setLocation, conversationId, { clearDeepLink: true });
         },
         onError: (err) => {
-          resolvedWithRef.current = null;
+          resolvedChatDeepLinkRef.current = null;
           toast({
             variant: "destructive",
             title: "Error",
@@ -200,7 +406,17 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
         },
       }
     );
-  }, [allowNavigate, isAuthenticated, conversationsQuery.isSuccess, conversations, getOrCreateConversation, setLocation, toast, setSelectedConversationId]);
+  }, [
+    allowNavigate,
+    isAuthenticated,
+    conversationsQuery.isSuccess,
+    conversations,
+    getOrCreateConversation,
+    setLocation,
+    toast,
+    setSelectedConversationId,
+    queryClient,
+  ]);
 
   useEffect(() => {
     if (!allowNavigate) return;
@@ -217,7 +433,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
       );
       if (existing) {
         setSelectedConversationId(existing.id);
-        setLocation("/chat", { replace: true });
+        setConversationInUrl(setLocation, existing.id);
         return;
       }
       getOrCreateConversation.mutate(
@@ -225,7 +441,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
         {
           onSuccess: (conversationId) => {
             setSelectedConversationId(conversationId);
-            setLocation("/chat", { replace: true });
+            setConversationInUrl(setLocation, conversationId);
           },
         },
       );
@@ -256,15 +472,6 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     void run();
   }, [allowNavigate, isAuthenticated, conversationsQuery.isSuccess, conversations, getOrCreateConversation, setLocation, toast, setSelectedConversationId]);
 
-  const handleSelectConversationMobile = (id: number | null) => {
-    setSelectedConversationId(id);
-    setMobileShowList(false);
-  };
-
-  const handleBackToMobileList = () => {
-    setMobileShowList(true);
-  };
-
   const handleSendMessage = () => {
     const text = messageInput.trim();
     if (!text || sendMessage.isPending) return;
@@ -285,24 +492,6 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     setPendingShareLocation(null);
     setLocationDialogOpen(true);
   };
-
-  const handlePaymentProofFile = useCallback(
-    async (file: File) => {
-      if (!user?.id || selectedConversationId == null || sendMessage.isPending) return;
-      try {
-        const url = await uploadChatPaymentProof(user.id, selectedConversationId, file);
-        await sendMessage.mutateAsync({ content: url, type: "image" });
-        toast({ title: "Comprobante enviado", description: "La imagen se compartió en el chat." });
-      } catch (e) {
-        toast({
-          variant: "destructive",
-          title: "No se pudo enviar el comprobante",
-          description: e instanceof Error ? e.message : "Intenta con otra imagen o más tarde.",
-        });
-      }
-    },
-    [user?.id, selectedConversationId, sendMessage, toast],
-  );
 
   const confirmShareLocation = () => {
     if (!pendingShareLocation) {
@@ -348,7 +537,8 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     return <ChatUnauthenticated />;
   }
 
-  const rootClassName = mode === "page" ? "min-h-screen bg-background" : "h-full bg-background";
+  const rootClassName =
+    mode === "page" ? "flex min-h-0 flex-1 flex-col bg-background" : "h-full bg-background";
 
   return (
     <div className={rootClassName}>
@@ -401,14 +591,14 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                         onMessageInputChange={setMessageInput}
                         onSendMessage={handleSendMessage}
                         onShareLocation={handleShareLocation}
-                        onPaymentProofFile={handlePaymentProofFile}
                         isSending={sendMessage.isPending}
                         isLoadingMessages={messagesQuery.isLoading}
                         hasMoreMessages={messagesQuery.hasNextPage ?? false}
                         onLoadMoreMessages={messagesQuery.fetchNextPage}
                         isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
-                        onBack={() => setSelectedConversationId(null)}
+                        onBack={handleBackFromChat}
                         reminderText={chatReminderText ?? undefined}
+                        reminderActions={reminderActions}
                       />
                     </div>
                   ) : (
@@ -455,14 +645,14 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                         onMessageInputChange={setMessageInput}
                         onSendMessage={handleSendMessage}
                         onShareLocation={handleShareLocation}
-                        onPaymentProofFile={handlePaymentProofFile}
                         isSending={sendMessage.isPending}
                         isLoadingMessages={messagesQuery.isLoading}
                         hasMoreMessages={messagesQuery.hasNextPage ?? false}
                         onLoadMoreMessages={messagesQuery.fetchNextPage}
                         isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
-                        onBack={() => setSelectedConversationId(null)}
+                        onBack={handleBackFromChat}
                         reminderText={chatReminderText ?? undefined}
+                        reminderActions={reminderActions}
                       />
                     ) : (
                       <ChatEmptyState />
@@ -475,7 +665,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
         </div>
       ) : (
         <>
-          {(isMobile ? true : true) && (
+          {!isMobile && (
             <section className="bg-gradient-to-r from-primary/20 via-background to-accent/20 border-b border-border">
               <div className="container px-4 py-6 mx-auto max-w-7xl">
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
@@ -506,60 +696,59 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
           )}
 
           {isMobile ? (
-            <section className="py-4 pb-16 px-4">
-              <div className="container mx-auto max-w-7xl">
-                <Card className="card-industrial overflow-hidden">
-                  <div
-                    className="relative overflow-hidden"
-                    style={{ height: CHAT_AREA_HEIGHT, minHeight: CHAT_AREA_MIN_HEIGHT }}
-                  >
-                    <motion.div
-                      className="absolute inset-0 flex"
-                      initial={false}
-                      animate={{ x: mobileShowList ? "0%" : "-100%" }}
-                      transition={{ type: "tween", duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
-                    >
-                      <div className="w-full min-w-full min-h-0 flex flex-col shrink-0">
-                        <ConversationList
-                          conversations={conversations}
-                          searchQuery={searchQuery}
-                          onSearchChange={setSearchQuery}
-                          selectedId={selectedConversationId}
-                          onSelectConversation={handleSelectConversationMobile}
-                          isLoading={conversationsQuery.isLoading}
-                          isError={conversationsQuery.isError}
-                          error={conversationsQuery.error as Error | undefined}
-                          onRetry={() => conversationsQuery.refetch()}
-                        />
-                      </div>
-                      <div className="w-full min-w-full min-h-0 flex flex-col shrink-0">
-                        {selectedConversation && user ? (
-                          <ChatWindow
-                            conversation={selectedConversation}
-                            messages={messages}
-                            currentUserId={user.id}
-                            messageInput={messageInput}
-                            onMessageInputChange={setMessageInput}
-                            onSendMessage={handleSendMessage}
-                            onShareLocation={handleShareLocation}
-                            onPaymentProofFile={handlePaymentProofFile}
-                            isSending={sendMessage.isPending}
-                            isLoadingMessages={messagesQuery.isLoading}
-                            hasMoreMessages={messagesQuery.hasNextPage ?? false}
-                            onLoadMoreMessages={messagesQuery.fetchNextPage}
-                            isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
-                            onBack={handleBackToMobileList}
-                            reminderText={chatReminderText ?? undefined}
-                          />
-                        ) : (
-                          <ChatEmptyState />
-                        )}
-                      </div>
-                    </motion.div>
+            <div className="flex min-h-0 flex-1 flex-col md:hidden">
+              <header className="shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg bg-primary/15 p-2">
+                    <MessageSquare className="h-5 w-5 text-primary" aria-hidden />
                   </div>
-                </Card>
-              </div>
-            </section>
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold leading-tight">Chat</p>
+                    <p className="truncate text-xs text-muted-foreground">Mensajes en vivo</p>
+                  </div>
+                </div>
+              </header>
+              <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-0 border-x-0 shadow-none">
+                <div className="flex h-full min-h-0 w-full flex-col">
+                  {selectedConversation && user ? (
+                    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                      <ChatWindow
+                        conversation={selectedConversation}
+                        messages={messages}
+                        currentUserId={user.id}
+                        messageInput={messageInput}
+                        onMessageInputChange={setMessageInput}
+                        onSendMessage={handleSendMessage}
+                        onShareLocation={handleShareLocation}
+                        isSending={sendMessage.isPending}
+                        isLoadingMessages={messagesQuery.isLoading}
+                        hasMoreMessages={messagesQuery.hasNextPage ?? false}
+                        onLoadMoreMessages={messagesQuery.fetchNextPage}
+                        isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
+                        onBack={handleBackFromChat}
+                        reminderText={chatReminderText ?? undefined}
+                        reminderActions={reminderActions}
+                        pinInputToBottom
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                      <ConversationList
+                        conversations={conversations}
+                        searchQuery={searchQuery}
+                        onSearchChange={setSearchQuery}
+                        selectedId={selectedConversationId}
+                        onSelectConversation={setSelectedConversationId}
+                        isLoading={conversationsQuery.isLoading}
+                        isError={conversationsQuery.isError}
+                        error={conversationsQuery.error as Error | undefined}
+                        onRetry={() => conversationsQuery.refetch()}
+                      />
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
           ) : (
             <section className="py-6 pb-16 min-w-0">
               <div className="container px-4 mx-auto max-w-7xl w-full min-w-0">
@@ -596,14 +785,14 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                           onMessageInputChange={setMessageInput}
                           onSendMessage={handleSendMessage}
                           onShareLocation={handleShareLocation}
-                          onPaymentProofFile={handlePaymentProofFile}
                           isSending={sendMessage.isPending}
                           isLoadingMessages={messagesQuery.isLoading}
                           hasMoreMessages={messagesQuery.hasNextPage ?? false}
                           onLoadMoreMessages={messagesQuery.fetchNextPage}
                           isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
-                          onBack={() => setSelectedConversationId(null)}
+                          onBack={handleBackFromChat}
                           reminderText={chatReminderText ?? undefined}
+                          reminderActions={reminderActions}
                         />
                       ) : (
                         <ChatEmptyState />
@@ -616,6 +805,12 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
           )}
         </>
       )}
+      <ChatProviderBookingModal
+        open={providerBookingModalOpen}
+        onOpenChange={setProviderBookingModalOpen}
+        bookingId={bookingIdForContext}
+        conversationId={selectedConversationId}
+      />
     </div>
   );
 }

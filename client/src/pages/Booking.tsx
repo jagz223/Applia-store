@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,7 +36,7 @@ import {
 import { FEATURE_WALLET_RECHARGE_UI_ENABLED, FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 
 /** Marcas con flujo propio (p. ej. taxi / mapa); no se reservan desde esta página. */
-const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set(MOBILITY_GO_PROVIDER_SLUGS);
+const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set<string>(MOBILITY_GO_PROVIDER_SLUGS);
 import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { isBeforeToday } from "@/lib/date-utils";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
@@ -107,10 +108,6 @@ function ProviderOptionCard({
           </div>
         </div>
       </div>
-      <div className="w-full text-left sm:w-auto sm:text-right">
-        <p className="font-bold text-base sm:text-lg">${Number(provider.price).toFixed(0)}</p>
-        <p className="text-xs text-muted-foreground">desde</p>
-      </div>
     </button>
   );
 }
@@ -129,6 +126,7 @@ export default function Booking() {
   const [insufficientFundsOpen, setInsufficientFundsOpen] = useState(false);
   const [paymentSelectionOpen, setPaymentSelectionOpen] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAuthenticated = !!user?.id;
   const [, navigate] = useLocation();
@@ -359,7 +357,21 @@ export default function Booking() {
           if (providerId != null && notifyNewBooking) {
             notifyNewBooking(String(providerId), data);
           }
-          setStep(4);
+          void queryClient.invalidateQueries({ queryKey: ["chat", "conversations"] });
+          const svc = verifiedServices.find((s) => s.id === selectedBookingServiceId) as
+            | { provider?: { userId?: string; user?: { id?: string } } }
+            | undefined;
+          const providerUserId = String(svc?.provider?.userId ?? (svc?.provider?.user as { id?: string } | undefined)?.id ?? "");
+          const bookingId = Number((data as { id?: number }).id);
+          const sid = selectedBookingServiceId;
+          if (providerUserId && Number.isFinite(bookingId) && sid != null) {
+            navigate(
+              `/chat?with=${encodeURIComponent(providerUserId)}&bookingId=${bookingId}&serviceId=${sid}`,
+              { replace: true },
+            );
+          } else {
+            setStep(4);
+          }
         },
       }
     );
