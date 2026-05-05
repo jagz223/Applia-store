@@ -458,6 +458,24 @@ class FirestoreStorageImpl implements IStorage {
     } as Category));
   }
 
+  async updateCategory(id: number, data: Partial<Category>): Promise<Category | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.CATEGORIES).doc(String(id));
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+    
+    const updates: Record<string, unknown> = {};
+    if (data.name !== undefined) updates.name = data.name;
+    if (data.slug !== undefined) updates.slug = data.slug;
+    if (data.icon !== undefined) updates.icon = data.icon;
+    
+    if (Object.keys(updates).length > 0) {
+      await docRef.update(updates);
+    }
+    const updated = await docRef.get();
+    return { id: parseInt(updated.id), ...updated.data() } as Category;
+  }
+
   async getSubcategories(categoryId: number): Promise<import("./storage-contracts").Subcategory[]> {
     if (!this.db) return [];
     const snapshot = await this.db
@@ -485,6 +503,51 @@ class FirestoreStorageImpl implements IStorage {
     const d = doc.data()!;
     return {
       id: typeof d?.id === "number" ? d.id : parseInt(doc.id, 10),
+      name: (d?.name as string) ?? "",
+      slug: (d?.slug as string) ?? "",
+      categoryId: (d?.categoryId ?? d?.categoria) as number,
+      categorySlug: d?.categorySlug as string | undefined,
+      icon: d?.icon ?? null,
+    } as import("./storage-contracts").Subcategory;
+  }
+
+  async createSubcategory(data: Omit<import("./storage-contracts").Subcategory, "id">): Promise<import("./storage-contracts").Subcategory> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("subcategories");
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.SUB_CATEGORIES).doc(id.toString());
+    const newSub: any = {
+      id,
+      name: data.name,
+      slug: data.slug,
+      categoryId: data.categoryId,
+    };
+    if (data.categorySlug) newSub.categorySlug = data.categorySlug;
+    if (data.icon) newSub.icon = data.icon;
+    
+    await docRef.set(newSub);
+    return newSub as import("./storage-contracts").Subcategory;
+  }
+
+  async updateSubcategory(id: number, data: Partial<import("./storage-contracts").Subcategory>): Promise<import("./storage-contracts").Subcategory | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.SUB_CATEGORIES).doc(String(id));
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+    
+    const updates: Record<string, unknown> = {};
+    if (data.name !== undefined) updates.name = data.name;
+    if (data.slug !== undefined) updates.slug = data.slug;
+    if (data.categoryId !== undefined) updates.categoryId = data.categoryId;
+    if (data.categorySlug !== undefined) updates.categorySlug = data.categorySlug;
+    if (data.icon !== undefined) updates.icon = data.icon;
+    
+    if (Object.keys(updates).length > 0) {
+      await docRef.update(updates);
+    }
+    const updated = await docRef.get();
+    const d = updated.data()!;
+    return {
+      id: typeof d?.id === "number" ? d.id : parseInt(updated.id, 10),
       name: (d?.name as string) ?? "",
       slug: (d?.slug as string) ?? "",
       categoryId: (d?.categoryId ?? d?.categoria) as number,

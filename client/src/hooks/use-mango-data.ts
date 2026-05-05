@@ -55,6 +55,93 @@ export function useSubcategories(categoryId: number | null | undefined) {
   });
 }
 
+export function useUpdateCategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (data: { id: number; name?: string; slug?: string; icon?: string }) => {
+      const { id, ...payload } = data;
+      const token = getToken();
+      const res = await fetch(`/api/admin/categories/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.message || "Error al actualizar categoría");
+      return resData;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.categories.list.path] });
+      debouncedRefetch(queryClient, [api.categories.list.path]);
+      toast({ title: "Categoría actualizada", description: "Los cambios se han guardado exitosamente." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Error al actualizar", variant: "destructive" });
+    },
+  });
+}
+
+export function useCreateSubcategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (data: Omit<Subcategory, "id">) => {
+      const token = getToken();
+      const res = await fetch(`/api/admin/subcategories`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.message || "Error al crear subcategoría");
+      return resData;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/subcategories", variables.categoryId] });
+      toast({ title: "Subcategoría creada", description: "La subcategoría ha sido creada." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Error al crear", variant: "destructive" });
+    },
+  });
+}
+
+export function useUpdateSubcategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (data: { id: number; categoryId: number } & Partial<Omit<Subcategory, "id">>) => {
+      const { id, categoryId, ...payload } = data;
+      const token = getToken();
+      const res = await fetch(`/api/admin/subcategories/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.message || "Error al actualizar subcategoría");
+      return { data: resData, categoryId };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/subcategories", result.categoryId] });
+      toast({ title: "Subcategoría actualizada", description: "Los cambios se han guardado." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Error al actualizar", variant: "destructive" });
+    },
+  });
+}
+
 // ==========================================
 // PROVIDERS
 // ==========================================

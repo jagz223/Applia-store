@@ -14,12 +14,24 @@ export class CatalogService {
     return this.storage.getCategories();
   }
 
+  async updateCategory(id: number, data: import("@shared/schema").Category) {
+    return this.storage.updateCategory(id, data);
+  }
+
   async getSubcategories(categoryId: number) {
     return this.storage.getSubcategories(categoryId);
   }
 
   async getSubcategoryById(id: number) {
     return this.storage.getSubcategoryById(id);
+  }
+
+  async createSubcategory(data: Omit<import("../storage-contracts").Subcategory, "id">) {
+    return this.storage.createSubcategory(data);
+  }
+
+  async updateSubcategory(id: number, data: Partial<import("../storage-contracts").Subcategory>) {
+    return this.storage.updateSubcategory(id, data);
   }
 
   async getAllProviders(profession?: string, category?: string, categoryId?: number) {

@@ -78,8 +78,11 @@ export type ServiceUpdate = Partial<
 /** Contrato para catálogo: categorías, subcategorías, proveedores, servicios. */
 export interface ICatalogStorage {
   getCategories(): Promise<Category[]>;
+  updateCategory(id: number, data: Partial<Category>): Promise<Category | undefined>;
   getSubcategories(categoryId: number): Promise<Subcategory[]>;
   getSubcategoryById(id: number): Promise<Subcategory | undefined>;
+  createSubcategory(data: Omit<Subcategory, "id">): Promise<Subcategory>;
+  updateSubcategory(id: number, data: Partial<Subcategory>): Promise<Subcategory | undefined>;
   getAllProviders(profession?: string, category?: string, categoryId?: number): Promise<Provider[]>;
   getProvider(id: number | null | undefined): Promise<Provider | undefined>;
   getProviderByUserId(userId: string): Promise<Provider | undefined>;

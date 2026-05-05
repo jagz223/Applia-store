@@ -54,6 +54,12 @@ import {
   usePatchPlatformPackFares,
   type WithdrawalHistoryStatus,
   type WithdrawalHistoryItem,
+  useCategories,
+  useSubcategories,
+  useUpdateCategory,
+  useCreateSubcategory,
+  useUpdateSubcategory,
+  type Subcategory,
 } from "@/hooks/use-mango-data";
 import { calcCommission, calcProviderNet, PLATFORM_COMMISSION_RATE, commissionDisplayPercents } from "@shared/platform-commission";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
@@ -64,7 +70,8 @@ import { toDate, isValidDate } from "@/lib/date-utils";
 import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
 import { AnimatePresence, motion } from "framer-motion";
-import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
+import { DEFAULT_CATEGORIES, getCategoryDisplayName, CATEGORY_DISPLAY_NAMES } from "@shared/default-categories";
+import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
 
 const USERS_PAGE_SIZE = 10;
@@ -571,6 +578,269 @@ function useSaldoUserSearch(debouncedName: string, queryEnabled = true) {
     enabled: queryEnabled && debouncedName.trim().length >= 2,
     staleTime: 30_000,
   });
+}
+
+
+
+function AdminCategoriesTab() {
+  const { data: categories = [], isLoading: isLoadingCategories } = useCategories();
+  const updateCategory = useUpdateCategory();
+  const createSubcategory = useCreateSubcategory();
+  const updateSubcategory = useUpdateSubcategory();
+  const { toast } = useToast();
+
+  const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
+  const [editCategoryOpen, setEditCategoryOpen] = useState(false);
+  const [categoryNameDraft, setCategoryNameDraft] = useState("");
+  
+  // Subcategories
+  const { data: subcategories = [], isLoading: isLoadingSubcategories } = useSubcategories(selectedCategory?.id);
+  
+  const [newSubcatName, setNewSubcatName] = useState("");
+  const [newSubcatSlug, setNewSubcatSlug] = useState("");
+  const [editingSubcatId, setEditingSubcatId] = useState<number | null>(null);
+  const [editingSubcatName, setEditingSubcatName] = useState("");
+
+  const handleEditCategory = (category: any) => {
+    setSelectedCategory(category);
+    setCategoryNameDraft(category.name || "");
+    setEditCategoryOpen(true);
+  };
+
+  const handleSaveCategory = () => {
+    if (!selectedCategory || !categoryNameDraft.trim()) return;
+    updateCategory.mutate({
+      id: selectedCategory.id,
+      name: categoryNameDraft.trim()
+    }, {
+      onSuccess: () => {
+        setEditCategoryOpen(false);
+      }
+    });
+  };
+
+  const handleCreateSubcategory = () => {
+    if (!selectedCategory || !newSubcatName.trim() || !newSubcatSlug.trim()) return;
+    createSubcategory.mutate({
+      name: newSubcatName.trim(),
+      slug: newSubcatSlug.trim(),
+      categoryId: selectedCategory.id,
+      categorySlug: selectedCategory.slug
+    }, {
+      onSuccess: () => {
+        setNewSubcatName("");
+        setNewSubcatSlug("");
+      }
+    });
+  };
+
+  const handleSaveSubcategory = (id: number) => {
+    if (!selectedCategory || !editingSubcatName.trim()) return;
+    updateSubcategory.mutate({
+      id,
+      categoryId: selectedCategory.id,
+      name: editingSubcatName.trim()
+    }, {
+      onSuccess: () => {
+        setEditingSubcatId(null);
+      }
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Categorías y Subcategorías</CardTitle>
+          <CardDescription>
+            Administra las categorías de servicios y crea nuevas subcategorías.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingCategories ? (
+            <div className="py-12 flex items-center justify-center text-muted-foreground gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Cargando categorías…</span>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="text-left p-3 font-medium">ID</th>
+                    <th className="text-left p-3 font-medium">Nombre</th>
+                    <th className="text-left p-3 font-medium">Slug</th>
+                    <th className="text-left p-3 font-medium">Marca</th>
+                    <th className="text-right p-3 font-medium">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    // Build slug → parent brand label from DEFAULT_SUBCATEGORIES
+                    const subSlugToBrand: Record<string, string> = {};
+                    for (const sub of DEFAULT_SUBCATEGORIES) {
+                      const parentBrand = (CATEGORY_DISPLAY_NAMES as Record<string, string>)[sub.categorySlug];
+                      if (parentBrand) subSlugToBrand[sub.slug] = parentBrand;
+                    }
+                    const brandColors: Record<string, string> = {
+                      "Fix Go": "bg-blue-500/15 text-blue-400 border-blue-500/30",
+                      "Man Go": "bg-orange-500/15 text-orange-400 border-orange-500/30",
+                      "Pro Go": "bg-purple-500/15 text-purple-400 border-purple-500/30",
+                      "Pack Go": "bg-green-500/15 text-green-400 border-green-500/30",
+                      "Shop Go": "bg-pink-500/15 text-pink-400 border-pink-500/30",
+                      "Car Go": "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+                    };
+                    return categories.map((cat: any) => {
+                      // Direct brand: category slug maps directly (technical→Fix Go, etc.)
+                      const directBrand: string | null = cat.slug && cat.slug in CATEGORY_DISPLAY_NAMES
+                        ? (CATEGORY_DISPLAY_NAMES as Record<string, string>)[cat.slug]
+                        : null;
+                      // Sub brand: slug belongs to a subcategory of a known parent
+                      const subBrand: string | null = !directBrand && cat.slug ? (subSlugToBrand[cat.slug] ?? null) : null;
+                      const brandLabel = directBrand ?? subBrand;
+                      const isSub = !directBrand && !!subBrand;
+                      const badgeClass = brandLabel ? (brandColors[brandLabel] ?? "bg-muted text-muted-foreground") : "";
+                      return (
+                        <tr key={cat.id} className="border-b border-border hover:bg-muted/30">
+                          <td className="p-3 font-medium">{cat.id}</td>
+                          <td className="p-3">{cat.name}</td>
+                          <td className="p-3 text-muted-foreground">{cat.slug}</td>
+                          <td className="p-3">
+                            {brandLabel ? (
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${badgeClass}`}>
+                                {brandLabel}
+                                {isSub && (
+                                  <span className="opacity-60 font-normal">(sub)</span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right">
+                            <Button variant="outline" size="sm" onClick={() => handleEditCategory(cat)}>
+                              Editar / Subcategorías
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={editCategoryOpen} onOpenChange={setEditCategoryOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Categoría</DialogTitle>
+            <DialogDescription>
+              Modifica la categoría o administra sus subcategorías.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            <div className="space-y-3">
+              <Label>Nombre de la Categoría</Label>
+              <div className="flex gap-2">
+                <Input 
+                  value={categoryNameDraft}
+                  onChange={(e) => setCategoryNameDraft(e.target.value)}
+                />
+                <Button 
+                  onClick={handleSaveCategory}
+                  disabled={updateCategory.isPending || categoryNameDraft.trim() === selectedCategory?.name}
+                >
+                  {updateCategory.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Guardar
+                </Button>
+              </div>
+            </div>
+
+            <div className="border-t pt-4 space-y-4">
+              <h3 className="font-semibold text-lg">Subcategorías</h3>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <Input 
+                  placeholder="Nombre de subcategoría" 
+                  value={newSubcatName}
+                  onChange={(e) => setNewSubcatName(e.target.value)}
+                />
+                <Input 
+                  placeholder="Slug (ej: limpieza_hogar)" 
+                  value={newSubcatSlug}
+                  onChange={(e) => setNewSubcatSlug(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
+                />
+                <Button 
+                  onClick={handleCreateSubcategory}
+                  disabled={createSubcategory.isPending || !newSubcatName.trim() || !newSubcatSlug.trim()}
+                >
+                  {createSubcategory.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Crear Subcategoría
+                </Button>
+              </div>
+
+              {isLoadingSubcategories ? (
+                <div className="py-4 text-center text-sm text-muted-foreground">Cargando subcategorías…</div>
+              ) : subcategories.length === 0 ? (
+                <div className="py-4 text-center text-sm text-muted-foreground">No hay subcategorías en esta categoría.</div>
+              ) : (
+                <div className="rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="text-left p-2">Nombre</th>
+                        <th className="text-left p-2">Slug</th>
+                        <th className="text-right p-2">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {subcategories.map((sub: Subcategory) => (
+                        <tr key={sub.id} className="border-b">
+                          <td className="p-2">
+                            {editingSubcatId === sub.id ? (
+                              <Input 
+                                value={editingSubcatName}
+                                onChange={(e) => setEditingSubcatName(e.target.value)}
+                                className="h-8"
+                              />
+                            ) : (
+                              sub.name
+                            )}
+                          </td>
+                          <td className="p-2 text-muted-foreground">{sub.slug}</td>
+                          <td className="p-2 text-right">
+                            {editingSubcatId === sub.id ? (
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" variant="outline" onClick={() => setEditingSubcatId(null)}>Cancelar</Button>
+                                <Button size="sm" onClick={() => handleSaveSubcategory(sub.id)} disabled={updateSubcategory.isPending}>
+                                  Guardar
+                                </Button>
+                              </div>
+                            ) : (
+                              <Button size="sm" variant="ghost" onClick={() => {
+                                setEditingSubcatId(sub.id);
+                                setEditingSubcatName(sub.name);
+                              }}>
+                                Editar
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 }
 
 /** Pestañas solo para administrador (no Soporte TI). */
@@ -1181,6 +1451,9 @@ export default function AdminPanel() {
                 <TabsTrigger value="users" className="shrink-0">Usuarios</TabsTrigger>
                 <TabsTrigger value="providers" className="shrink-0">Proveedores</TabsTrigger>
                 <TabsTrigger value="bookings" className="shrink-0">Reservas</TabsTrigger>
+                {fullAdmin && (
+                  <TabsTrigger value="categories" className="shrink-0">Categorías</TabsTrigger>
+                )}
                 {fullAdmin && (
                   <TabsTrigger value="services" className="gap-1.5 shrink-0">
                     <Layers className="h-4 w-4 shrink-0" />
@@ -2996,6 +3269,10 @@ export default function AdminPanel() {
 
           <TabsContent value="payouts">
             <AdminWithdrawalsTab toast={toast} enabled={fullAdmin} />
+          </TabsContent>
+
+          <TabsContent value="categories">
+            <AdminCategoriesTab />
           </TabsContent>
 
           <TabsContent value="roles">

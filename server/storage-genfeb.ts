@@ -1366,11 +1366,23 @@ export class InMemoryStorage implements IStorage {
     ];
   }
 
+  async updateCategory(_id: number, _data: Partial<Category>): Promise<Category | undefined> {
+    return undefined; // Dummy implementation
+  }
+
   async getSubcategories(_categoryId: number): Promise<import("./storage-contracts").Subcategory[]> {
     return [];
   }
 
   async getSubcategoryById(_id: number): Promise<import("./storage-contracts").Subcategory | undefined> {
+    return undefined;
+  }
+
+  async createSubcategory(data: Omit<import("./storage-contracts").Subcategory, "id">): Promise<import("./storage-contracts").Subcategory> {
+    return { id: 999, ...data } as import("./storage-contracts").Subcategory;
+  }
+
+  async updateSubcategory(_id: number, _data: Partial<import("./storage-contracts").Subcategory>): Promise<import("./storage-contracts").Subcategory | undefined> {
     return undefined;
   }
 

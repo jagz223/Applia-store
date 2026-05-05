@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { CategoryIcon } from "@/components/CategoryIcon";
-import { getCategoryDisplayName } from "@shared/default-categories";
+
 import { motion } from "framer-motion";
 
 export interface SubcategoryItem {
@@ -50,7 +50,7 @@ export function ExploreCategoryCards({
                   <div className="p-4 rounded-xl text-primary bg-primary/10 w-fit mx-auto mb-4 group-hover:scale-110 transition-transform">
                     <CategoryIcon name={iconName} className="w-8 h-8" />
                   </div>
-                  <h3 className="text-lg font-bold mb-1">{getCategoryDisplayName(cat)}</h3>
+                  <h3 className="text-lg font-bold mb-1">{cat.name}</h3>
                 </CardContent>
               </Card>
             </motion.div>

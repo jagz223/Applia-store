@@ -1594,5 +1594,72 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  // ==================== CATEGORÍAS Y SUBCATEGORÍAS ====================
+  const updateCategorySchema = z.object({
+    name: z.string().min(1).max(200).optional(),
+    slug: z.string().max(200).optional(),
+    icon: z.string().max(100).optional(),
+  });
+
+  app.patch("/api/admin/categories/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id) || id <= 0) return res.status(400).json({ message: "ID inválido" });
+      const parsed = updateCategorySchema.parse(req.body);
+      
+      const updated = await catalogService.updateCategory(id, parsed as any);
+      if (!updated) return res.status(404).json({ message: "Categoría no encontrada" });
+      return res.status(200).json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      console.error("Error updating category:", error);
+      return res.status(500).json({ message: "Error al actualizar categoría" });
+    }
+  });
+
+  const createSubcategorySchema = z.object({
+    name: z.string().min(1).max(200),
+    slug: z.string().min(1).max(200),
+    categoryId: z.number().int().positive(),
+    categorySlug: z.string().optional(),
+    icon: z.string().optional(),
+  });
+
+  app.post("/api/admin/subcategories", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const parsed = createSubcategorySchema.parse(req.body);
+      const created = await catalogService.createSubcategory(parsed);
+      return res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      console.error("Error creating subcategory:", error);
+      return res.status(500).json({ message: "Error al crear subcategoría" });
+    }
+  });
+
+  const updateSubcategorySchema = z.object({
+    name: z.string().min(1).max(200).optional(),
+    slug: z.string().max(200).optional(),
+    categoryId: z.number().int().positive().optional(),
+    categorySlug: z.string().optional(),
+    icon: z.string().optional(),
+  });
+
+  app.patch("/api/admin/subcategories/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id) || id <= 0) return res.status(400).json({ message: "ID inválido" });
+      const parsed = updateSubcategorySchema.parse(req.body);
+      
+      const updated = await catalogService.updateSubcategory(id, parsed);
+      if (!updated) return res.status(404).json({ message: "Subcategoría no encontrada" });
+      return res.status(200).json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      console.error("Error updating subcategory:", error);
+      return res.status(500).json({ message: "Error al actualizar subcategoría" });
+    }
+  });
+
   console.log("✅ Admin routes registered (incl. GET /api/admin/dashboard-stats)");
 }

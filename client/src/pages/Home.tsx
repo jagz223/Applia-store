@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { useCategories, useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
+import { useCategories, useCategoryVisibility, useCurrentProvider, useSubcategories } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { providerHasGoBrand } from "@shared/provider-go";
 import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
@@ -46,6 +46,8 @@ import {
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { HomeVideoCarousel } from "@/components/home/HomeVideoCarousel";
+import { CategoryIcon } from "@/components/CategoryIcon";
+import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 
 type HomeServiceCategory = {
   name: string;
@@ -74,11 +76,59 @@ export default function HomePage() {
   const { data: categories = [] } = useCategories();
   const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
+
+  // Subcategories for the 3 service categories
+  const technicalCat = useMemo(() => categories.find((c: any) => c.slug === "technical"), [categories]);
+  const professionalCat = useMemo(() => categories.find((c: any) => c.slug === "professional"), [categories]);
+  const maintenanceCat = useMemo(() => categories.find((c: any) => c.slug === "maintenance"), [categories]);
+  const { data: technicalSubs = [] } = useSubcategories((technicalCat as any)?.id ?? null);
+  const { data: professionalSubs = [] } = useSubcategories((professionalCat as any)?.id ?? null);
+  const { data: maintenanceSubs = [] } = useSubcategories((maintenanceCat as any)?.id ?? null);
+  const subsByCategorySlug = useMemo(() => ({
+    technical: technicalSubs,
+    professional: professionalSubs,
+    maintenance: maintenanceSubs,
+  }), [technicalSubs, professionalSubs, maintenanceSubs]);
+
   const mobilityAllowed = {
     transport: !hiddenSlugs.has("transport"),
     marketplace: !hiddenSlugs.has("marketplace"),
     delivery: !hiddenSlugs.has("delivery"),
   };
+
+  // Flat list: all subcategories + mobility cards (same size)
+  const allHomeServiceItems = useMemo(() => {
+    const items: { key: string; name: string; icon: string; parentName: string; href: string }[] = [];
+    for (const { slug, subs } of [
+      { slug: "technical", subs: technicalSubs },
+      { slug: "professional", subs: professionalSubs },
+      { slug: "maintenance", subs: maintenanceSubs },
+    ]) {
+      const cat = categories.find((c: any) => c.slug === slug);
+      if (!cat) continue;
+      for (const sub of subs) {
+        const def = DEFAULT_SUBCATEGORIES.find((s) => s.slug === (sub as any).slug);
+        items.push({
+          key: `sub-${(sub as any).id}`,
+          name: (sub as any).name,
+          icon: def?.icon ?? "HelpCircle",
+          parentName: (cat as any).name,
+          href: `/explore?providerCategoryId=${(cat as any).id}&subcategoryId=${(sub as any).id}`,
+        });
+      }
+    }
+    if (mobilityAllowed.transport) {
+      const cat = categories.find((c: any) => c.slug === "transport");
+      items.push({ key: "transport", name: (cat as any)?.name ?? "Servicios de transporte", icon: "Car", parentName: "Conductores disponibles", href: "/go/cargo" });
+    }
+    if (mobilityAllowed.delivery) {
+      const cat = categories.find((c: any) => c.slug === "delivery");
+      items.push({ key: "delivery", name: (cat as any)?.name ?? "Delivery", icon: "Package", parentName: "Conductores disponibles", href: "/go/pack" });
+    }
+    return items;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [technicalSubs, professionalSubs, maintenanceSubs, categories, mobilityAllowed.transport, mobilityAllowed.delivery]);
+
   const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace || mobilityAllowed.delivery;
   const isCarGoDriver = useMemo(() => !!(providerProfile && isCarGoProvider(providerProfile, categories)), [providerProfile, categories]);
   const [goQuickOpen, setGoQuickOpen] = useState(false);
@@ -534,65 +584,32 @@ export default function HomePage() {
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6 max-w-5xl mx-auto">
-            {serviceCategories.map((category, index) => {
-              const n = homeCounts?.[category.countKey];
-              const c = n ?? 0;
-              /** Car Go / Pack Go / Shop Go: sin número de conductores; texto fijo de disponibilidad. */
-              const isMobilityBrandSubtitle =
-                category.slug === "transport" || category.slug === "delivery" || category.slug === "marketplace";
-              const countLabel = isMobilityBrandSubtitle
-                ? "Conductores siempre disponibles para ti"
-                : homeCountsLoading
-                  ? "…"
-                  : homeCountsError
-                    ? "—"
-                    : `${c} asociados`;
-              const isBrandInactive = hiddenSlugs.has(category.slug);
-              const card = (
-                <Card
-                  className={cn(
-                    "card-industrial transition-all duration-300",
-                    isBrandInactive
-                      ? "cursor-not-allowed opacity-70 grayscale border-border/60"
-                      : "cursor-pointer group hover:border-primary/50",
-                  )}
-                >
-                  <CardContent className="p-3 sm:p-6 text-center">
-                    {isBrandInactive && (
-                      <Badge variant="secondary" className="mb-2 text-[10px] sm:text-xs">
-                        No disponible
-                      </Badge>
-                    )}
-                    <div
-                      className={cn(
-                        "p-3 sm:p-4 rounded-xl bg-primary/10 w-fit mx-auto mb-2 sm:mb-4 transition-transform",
-                        category.color,
-                        !isBrandInactive && "group-hover:scale-110",
-                      )}
-                    >
-                      <category.icon className="w-6 h-6 sm:w-8 sm:h-8" />
-                    </div>
-                    <h3 className="text-sm sm:text-lg font-bold mb-0.5 sm:mb-1">{category.name}</h3>
-                    <p className="text-xs sm:text-sm text-muted-foreground">
-                      {isBrandInactive ? "Servicio desactivado en la plataforma" : countLabel}
-                    </p>
-                  </CardContent>
-                </Card>
-              );
-              return (
-                <motion.div
-                  key={category.countKey}
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  viewport={{ once: true }}
-                >
-                  {isBrandInactive ? card : <Link href={category.href}>{card}</Link>}
-                </motion.div>
-              );
-            })}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 max-w-5xl mx-auto">
+            {allHomeServiceItems.map((item, index) => (
+              <motion.div
+                key={item.key}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.05 }}
+                viewport={{ once: true }}
+              >
+                <Link href={item.href}>
+                  <Card className="cursor-pointer group hover:border-primary/50 transition-all duration-300 h-full card-industrial">
+                    <CardContent className="p-3 sm:p-5 text-center flex flex-col items-center gap-2 h-full justify-center min-h-[110px]">
+                      <div className="p-2.5 rounded-xl bg-primary/10 text-primary group-hover:scale-110 transition-transform">
+                        <CategoryIcon name={item.icon} className="w-5 h-5 sm:w-6 sm:h-6" />
+                      </div>
+                      <div>
+                        <p className="text-xs sm:text-sm font-semibold leading-tight">{item.name}</p>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">{item.parentName}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              </motion.div>
+            ))}
           </div>
+
 
           <div className="text-center mt-8 sm:mt-10">
             <Link href="/explore">

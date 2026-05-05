@@ -9,7 +9,7 @@ import type { FirestoreStorage } from "./storage-firestore";
 const FIRESTORE_METHODS = new Set([
   "getUserById", "getUserByEmail", "getUserByPhone", "createUser", "updateUser", "updateUserPassword",
   "getUserRole", "updateUserRole",
-  "getCategories", "getSubcategories", "getSubcategoryById", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId",
+  "getCategories", "updateCategory", "getSubcategories", "getSubcategoryById", "createSubcategory", "updateSubcategory", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId",
   "getAllServices", "getService", "createService",
   "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "acknowledgeBookingProChanges", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getPendingBookingRatings", "submitBookingRating",
@@ -51,8 +51,11 @@ export class HybridStorage {
   getUserRole(userId: string) { return this.delegate("getUserRole", [userId]); }
   updateUserRole(userId: string, data: any) { return this.delegate("updateUserRole", [userId, data]); }
   getCategories() { return this.delegate("getCategories", []); }
+  updateCategory(id: number, data: any) { return this.delegate("updateCategory", [id, data]); }
   getSubcategories(categoryId: number) { return this.delegate("getSubcategories", [categoryId]); }
   getSubcategoryById(id: number) { return this.delegate("getSubcategoryById", [id]); }
+  createSubcategory(data: any) { return this.delegate("createSubcategory", [data]); }
+  updateSubcategory(id: number, data: any) { return this.delegate("updateSubcategory", [id, data]); }
   getAllProviders(profession?: string) { return this.delegate("getAllProviders", [profession]); }
   getProvider(id: number) { return this.delegate("getProvider", [id]); }
   getProviderByUserId(userId: string) { return this.delegate("getProviderByUserId", [userId]); }
