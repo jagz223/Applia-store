@@ -119,15 +119,71 @@ export default function HomePage() {
     }
     if (mobilityAllowed.transport) {
       const cat = categories.find((c: any) => c.slug === "transport");
-      items.push({ key: "transport", name: (cat as any)?.name ?? "Servicios de transporte", icon: "Car", parentName: "Conductores disponibles", href: "/go/cargo" });
+      items.push({ key: "transport", name: (cat as any)?.name ?? "Servicios de transporte", icon: "Car", parentName: "Conductores disponibles", href: "/go/taxi" });
     }
     if (mobilityAllowed.delivery) {
       const cat = categories.find((c: any) => c.slug === "delivery");
-      items.push({ key: "delivery", name: (cat as any)?.name ?? "Delivery", icon: "Package", parentName: "Conductores disponibles", href: "/go/pack" });
+      items.push({ key: "delivery", name: (cat as any)?.name ?? "Delivery", icon: "Package", parentName: "Conductores disponibles", href: "/go/delivery" });
     }
     return items;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [technicalSubs, professionalSubs, maintenanceSubs, categories, mobilityAllowed.transport, mobilityAllowed.delivery]);
+
+  const homePopularSubcategoriesLimit = 12;
+  const { data: monthlyPopularSubcategories } = useQuery({
+    queryKey: [api.categories.monthlyPopularSubcategories.path, homePopularSubcategoriesLimit],
+    queryFn: async () => {
+      const res = await fetch(api.categories.monthlyPopularSubcategories.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: homePopularSubcategoriesLimit }),
+      });
+      if (!res.ok) throw new Error("No se pudieron cargar las subcategorías populares");
+      return api.categories.monthlyPopularSubcategories.responses[200].parse(await res.json());
+    },
+    staleTime: 60_000,
+  });
+
+  const popularityBySubcategoryId = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const row of monthlyPopularSubcategories?.items ?? []) {
+      m.set(row.subcategoryId, row.count);
+    }
+    return m;
+  }, [monthlyPopularSubcategories]);
+
+  /** Tarjetas de subcategoría primero por reservas del mes; luego taxi/delivery y el resto. */
+  const displayHomeServiceItems = useMemo(() => {
+    const subs = allHomeServiceItems.filter((i) => i.key.startsWith("sub-"));
+    const other = allHomeServiceItems.filter((i) => !i.key.startsWith("sub-"));
+    const items = monthlyPopularSubcategories?.items;
+    if (!items?.length) return allHomeServiceItems;
+    const rank = new Map<number, number>();
+    items.forEach((it, idx) => rank.set(it.subcategoryId, idx));
+    subs.sort((a, b) => {
+      const idA = Number(String(a.key).replace(/^sub-/, ""));
+      const idB = Number(String(b.key).replace(/^sub-/, ""));
+      const ra = rank.has(idA) ? rank.get(idA)! : 900 + idA;
+      const rb = rank.has(idB) ? rank.get(idB)! : 900 + idB;
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name, "es");
+    });
+    return [...subs, ...other];
+  }, [allHomeServiceItems, monthlyPopularSubcategories]);
+
+  const popularMonthLabel = useMemo(() => {
+    const key = monthlyPopularSubcategories?.monthKey;
+    if (!key || !/^\d{4}-\d{2}$/.test(key)) return null;
+    const [y, m] = key.split("-").map((x) => Number(x));
+    if (!y || !m) return null;
+    try {
+      return new Intl.DateTimeFormat("es-EC", { month: "long", year: "numeric", timeZone: "UTC" }).format(
+        new Date(Date.UTC(y, m - 1, 4))
+      );
+    } catch {
+      return key;
+    }
+  }, [monthlyPopularSubcategories?.monthKey]);
 
   const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace || mobilityAllowed.delivery;
   const isCarGoDriver = useMemo(() => !!(providerProfile && isCarGoProvider(providerProfile, categories)), [providerProfile, categories]);
@@ -253,7 +309,7 @@ export default function HomePage() {
         icon: Car,
         countKey: "carGo",
         color: "text-primary",
-        href: "/go/cargo",
+        href: "/go/taxi",
       });
     }
     if (mobilityAllowed.marketplace) {
@@ -273,7 +329,7 @@ export default function HomePage() {
         icon: Package,
         countKey: "packGo",
         color: "text-primary",
-        href: "/go/pack",
+        href: "/go/delivery",
       });
     }
 
@@ -413,23 +469,23 @@ export default function HomePage() {
                     </Button>
                   </Link>
                 ) : heroAssociateKind === "go_cargo" ? (
-                  <Link href="/go/cargo/driver" className="w-full sm:w-auto">
+                  <Link href="/go/taxi/driver" className="w-full sm:w-auto">
                     <Button
                       size="lg"
                       variant="outline"
                       className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
                     >
-                      Ir a vista Car Go
+                      Ir a vista Taxi
                     </Button>
                   </Link>
                 ) : heroAssociateKind === "go_pack" ? (
-                  <Link href="/go/pack/driver" className="w-full sm:w-auto">
+                  <Link href="/go/delivery/driver" className="w-full sm:w-auto">
                     <Button
                       size="lg"
                       variant="outline"
                       className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
                     >
-                      Ir a vista Pack Go
+                      Ir a vista Delivery
                     </Button>
                   </Link>
                 ) : (
@@ -440,7 +496,7 @@ export default function HomePage() {
                     className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
                     onClick={() => setGoDriverPickOpen(true)}
                   >
-                    Ir a Car Go / Pack Go
+                    Ir a Taxi / Delivery
                   </Button>
                 )}
               </div>
@@ -582,10 +638,23 @@ export default function HomePage() {
             <p className="text-sm sm:text-lg text-muted-foreground max-w-2xl mx-auto">
               Encuentra el asociado perfecto para cualquier necesidad
             </p>
+            {popularMonthLabel && (monthlyPopularSubcategories?.items?.length ?? 0) > 0 ? (
+              <p className="text-xs sm:text-sm text-secondary font-medium max-w-2xl mx-auto mt-2">
+                Ordenadas por demanda real: primero las subcategorías con más reservas confirmadas o completadas en{" "}
+                {popularMonthLabel}.
+              </p>
+            ) : null}
           </motion.div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 max-w-5xl mx-auto">
-            {allHomeServiceItems.map((item, index) => (
+            {displayHomeServiceItems.map((item, index) => {
+              const subcategoryIdForStats = item.key.startsWith("sub-")
+                ? Number(String(item.key).replace(/^sub-/, ""))
+                : NaN;
+              const monthlyBookingCount = Number.isFinite(subcategoryIdForStats)
+                ? popularityBySubcategoryId.get(subcategoryIdForStats)
+                : undefined;
+              return (
               <motion.div
                 key={item.key}
                 initial={{ opacity: 0, y: 20 }}
@@ -601,13 +670,22 @@ export default function HomePage() {
                       </div>
                       <div>
                         <p className="text-xs sm:text-sm font-semibold leading-tight">{item.name}</p>
-                        <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">{item.parentName}</p>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
+                          {item.parentName}
+                          {monthlyBookingCount != null && monthlyBookingCount > 0 ? (
+                            <span className="block text-secondary tabular-nums font-medium">
+                              {monthlyBookingCount} reserva{monthlyBookingCount === 1 ? "" : "s"} confirmada
+                              {monthlyBookingCount === 1 ? "" : "s"} o completada{monthlyBookingCount === 1 ? "" : "s"} este mes
+                            </span>
+                          ) : null}
+                        </p>
                       </div>
                     </CardContent>
                   </Card>
                 </Link>
               </motion.div>
-            ))}
+            );
+            })}
           </div>
 
 
@@ -784,7 +862,7 @@ export default function HomePage() {
           <DialogHeader>
             <DialogTitle>Vista conductores Go</DialogTitle>
             <DialogDescription>
-              Tienes Car Go y Pack Go en tu perfil. Elige el panel de conductor al que quieres entrar.
+              Tienes Taxi y Delivery en tu perfil. Elige el panel de conductor al que quieres entrar.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2 pt-1">
@@ -794,11 +872,11 @@ export default function HomePage() {
                 className="w-full justify-start gap-2"
                 onClick={() => {
                   setGoDriverPickOpen(false);
-                  setLocation("/go/cargo/driver");
+                  setLocation("/go/taxi/driver");
                 }}
               >
                 <Car className="h-4 w-4 shrink-0" aria-hidden />
-                Car Go (conducir)
+                Taxi (conducir)
               </Button>
             ) : null}
             {mobilityAllowed.delivery ? (
@@ -808,11 +886,11 @@ export default function HomePage() {
                 className="w-full justify-start gap-2"
                 onClick={() => {
                   setGoDriverPickOpen(false);
-                  setLocation("/go/pack/driver");
+                  setLocation("/go/delivery/driver");
                 }}
               >
                 <Package className="h-4 w-4 shrink-0" aria-hidden />
-                Pack Go (conductor)
+                Delivery (conductor)
               </Button>
             ) : null}
           </div>
@@ -843,7 +921,7 @@ export default function HomePage() {
                         </Button>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Car Go (conducir), Shop Go y Pack Go.
+                        Taxi (conducir), Pedidos y Delivery.
                       </p>
                       <div className="mt-3 grid gap-2">
                         {mobilityAllowed.transport ? (
@@ -852,10 +930,10 @@ export default function HomePage() {
                           variant="default"
                           onClick={() => {
                             setGoQuickOpen(false);
-                            setLocation("/go/cargo/driver");
+                            setLocation("/go/taxi/driver");
                           }}
                         >
-                          <Car className="h-4 w-4" /> Car Go (conducir)
+                          <Car className="h-4 w-4" /> Taxi (conducir)
                         </Button>
                         ) : null}
                         {mobilityAllowed.marketplace ? (
@@ -867,7 +945,7 @@ export default function HomePage() {
                             setLocation("/go/shop");
                           }}
                         >
-                          <Store className="h-4 w-4" /> Shop Go
+                          <Store className="h-4 w-4" /> Pedidos
                         </Button>
                         ) : null}
                         {mobilityAllowed.delivery ? (
@@ -876,10 +954,10 @@ export default function HomePage() {
                           variant="secondary"
                           onClick={() => {
                             setGoQuickOpen(false);
-                            setLocation("/go/pack/driver");
+                            setLocation("/go/delivery/driver");
                           }}
                         >
-                          <Package className="h-4 w-4" /> Pack Go
+                          <Package className="h-4 w-4" /> Delivery
                         </Button>
                         ) : null}
                       </div>

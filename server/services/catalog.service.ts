@@ -4,14 +4,23 @@
  */
 
 import type { ICatalogStorage, ProviderUpdate, ServiceUpdate } from "../storage-contracts";
+import type { IStorage } from "../storage-genfeb";
+import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
 import type { InsertProvider, InsertService } from "@shared/schema";
+import { excludeLegacySubcategoryCategoryDocuments } from "@shared/catalog-category-utils";
 import { computeListingPublished } from "@shared/professional-listing-subscription";
 
 export class CatalogService {
-  constructor(private readonly storage: ICatalogStorage) {}
+  constructor(private readonly storage: IStorage) {}
 
   async getCategories() {
     return this.storage.getCategories();
+  }
+
+  /** Lista para UI pública: sin documentos legacy que duplican slugs de subcategorías (legal, financial, etc.). */
+  async getCategoriesForPublicCatalog() {
+    const all = await this.storage.getCategories();
+    return excludeLegacySubcategoryCategoryDocuments(all);
   }
 
   async updateCategory(id: number, data: import("@shared/schema").Category) {
@@ -91,7 +100,7 @@ export class CatalogService {
   /**
    * Conteos reales de asociados por marca (Fix Go / Pro Go / Man Go) para la home.
    * Pro Go = suma de proveedores en subcategorías legal y financial (bajo categoría professional).
-   * Car Go / Shop Go / Pack Go = proveedores cuya categoría base coincide con el slug.
+   * Taxi / Pedidos / Delivery = proveedores cuya categoría base coincide con el slug.
    */
   async getHomeCategoryAssociateCounts(): Promise<{
     fixGo: number;
@@ -155,13 +164,24 @@ export class CatalogService {
     return { fixGo, proGo, manGo, carGo, shopGo, packGo };
   }
 
+  /** Top subcategorías por reservas en el mes calendario (Ecuador), para la home. */
+  async getMonthlyPopularSubcategoryBookingCountsForHome(limit: number): Promise<{
+    monthKey: string;
+    items: { subcategoryId: number; count: number }[];
+  }> {
+    const monthKey = getGenfebStatsMonthKey();
+    const lim = Math.min(50, Math.max(1, Math.floor(limit)));
+    const items = await this.storage.getMonthlyPopularSubcategoryBookingCounts(monthKey, lim);
+    return { monthKey, items };
+  }
+
   /**
    * Indica qué categorías (por id) tienen al menos un servicio ofertado (proveedor con al menos un servicio).
    * Una categoría solo se considera "disponible" si existe al menos un servicio cuyo proveedor pertenece a esa categoría.
    */
   async getProviderCategoryAvailability(): Promise<Record<string, boolean>> {
     const [categories, services] = await Promise.all([
-      this.storage.getCategories(),
+      this.getCategoriesForPublicCatalog(),
       this.storage.getAllServices(),
     ]);
     const availability: Record<string, boolean> = {};

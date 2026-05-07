@@ -115,6 +115,28 @@ export const api = {
         }),
       },
     },
+    /**
+     * Subcategorías con más reservas confirmadas o completadas en el mes (America/Guayaquil).
+     * Body: `{ "limit": number }` — cuántas posiciones devolver (1–50).
+     */
+    monthlyPopularSubcategories: {
+      method: 'POST' as const,
+      path: '/api/categories/monthly-popular-subcategories',
+      input: z.object({
+        limit: z.coerce.number().int().min(1).max(50).default(12),
+      }),
+      responses: {
+        200: z.object({
+          monthKey: z.string(),
+          items: z.array(
+            z.object({
+              subcategoryId: z.number(),
+              count: z.number(),
+            })
+          ),
+        }),
+      },
+    },
   },
   providers: {
     list: {

@@ -67,6 +67,13 @@ export type ProviderUpdate = Partial<
     subcategoryId?: number | null;
     /** ISO fin de período mensual USD 15 (visibilidad en catálogo). */
     visibilitySubscriptionEndsAt?: string | Date | null;
+    /**
+     * Idempotencia suscripción: "huella" del último comprobante aprobado (p.ej. `${code}|${yyyy-MM-dd}`).
+     * Se guarda en el doc del proveedor (Firestore) para evitar extender 2 veces el mismo pago.
+     */
+    visibilitySubscriptionLastPaymentKey?: string | null;
+    visibilitySubscriptionLastPaymentApprovedAt?: string | Date | null;
+    visibilitySubscriptionLastPaymentApprovedBy?: string | null;
   }
 >;
 
@@ -154,4 +161,18 @@ export interface IBookingStorage {
    * La reserva pasa a estado 'cancelled'. Transacción ACID.
    */
   cancelBookingAndRefundClientEscrow(bookingId: number): Promise<Booking | undefined>;
+
+  /**
+   * Suma una reserva al contador mensual de la subcategoría (mes calendario America/Guayaquil).
+   * No-op si `subcategoryId` es null/undefined/NaN.
+   */
+  incrementSubcategoryMonthlyBookingCount(subcategoryId: number | null | undefined): Promise<void>;
+
+  /**
+   * Top subcategorías por reservas en el mes `monthKey` (`YYYY-MM`), orden descendente por conteo.
+   */
+  getMonthlyPopularSubcategoryBookingCounts(
+    monthKey: string,
+    limit: number
+  ): Promise<{ subcategoryId: number; count: number }[]>;
 }

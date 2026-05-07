@@ -56,7 +56,7 @@ type RideRecord = {
 const rides = new Map<string, RideRecord>();
 const rideTimers = new Map<string, { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }>();
 
-/** Oferta pendiente por driver (recovery al abrir /go/pack/driver tras push). */
+/** Oferta pendiente por driver (recovery al abrir /go/delivery/driver tras push). */
 const pendingOfferByDriverId = new Map<
   string,
   { rideId: string; expiresAt: number; module: "pack" }
@@ -235,11 +235,11 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
     // Push al driver si no está viendo la vista de driver.
     try {
       const pth = getUserActivePath(String(driverId));
-      if (!pth || !pth.startsWith("/go/pack/driver")) {
+      if (!pth || (!pth.startsWith("/go/delivery/driver") && !pth.startsWith("/go/pack/driver"))) {
         void notificationService.sendPushToUser(driverId, {
-          title: "Pack Go",
+          title: "Delivery",
           body: "Tienes un envío disponible. Abre para aceptar o rechazar.",
-          data: { url: "/go/pack/driver", type: "pack_ride_offer", rideId: ride.id },
+          data: { url: "/go/delivery/driver", type: "pack_ride_offer", rideId: ride.id },
         });
       }
     } catch {}
@@ -508,11 +508,11 @@ export function registerPackRideRoutes(app: Express) {
 
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/pack")) {
+        if (!pth || (!pth.startsWith("/go/delivery") && !pth.startsWith("/go/pack"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Pack Go",
+            title: "Delivery",
             body: "Tu envío fue aceptado. Abre para ver a tu driver.",
-            data: { url: "/go/pack", type: "pack_ride_matched", rideId },
+            data: { url: "/go/delivery", type: "pack_ride_matched", rideId },
           });
         }
       } catch {}

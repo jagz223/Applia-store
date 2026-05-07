@@ -6,6 +6,7 @@ import { useGoChat } from "@/contexts/GoChatContext";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useCategoryVisibility, useWallet, useWalletTransfers } from "@/hooks/use-mango-data";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { mobilityHistorySheetTitle, mobilityServiceLabel } from "@shared/mobility-ui-labels";
 import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -35,7 +36,7 @@ function tabIsActive(location: string, href: string, hasAction?: boolean): boole
 
 export function GoBottomNav() {
   const [location, setLocation] = useLocation();
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { openChat, chatBadge } = useGoChat();
   const { openNotifications } = useGoNotifications();
   const goDriverUi = useGoDriverUi();
@@ -46,6 +47,12 @@ export function GoBottomNav() {
   const [driverEarningsOpen, setDriverEarningsOpen] = useState(false);
   const [goQuickSettingsOpen, setGoQuickSettingsOpen] = useState(false);
   const unreadNotif = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+
+  const riderTripAccountId = user?.id ?? null;
+  const riderTripEntries = useMemo(
+    () => loadRiderTripLog(riderTripAccountId),
+    [riderTripAccountId, riderHistoryOpen, location]
+  );
 
   /** En escritorio: barra compacta centrada tipo “dock”, sin estirar 6 ítems a todo el ancho. */
   const [desktopNav, setDesktopNav] = useState(() =>
@@ -62,15 +69,32 @@ export function GoBottomNav() {
   const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
   const showShop = !hiddenSlugs.has("marketplace");
   const showPack = !hiddenSlugs.has("delivery");
-  const isCargoDriverView = location === "/go/cargo/driver" || location.startsWith("/go/cargo/driver/");
-  const isPackDriverView = location === "/go/pack/driver" || location.startsWith("/go/pack/driver/");
+  const isCargoDriverView =
+    location === "/go/taxi/driver" ||
+    location.startsWith("/go/taxi/driver/") ||
+    location === "/go/cargo/driver" ||
+    location.startsWith("/go/cargo/driver/");
+  const isPackDriverView =
+    location === "/go/delivery/driver" ||
+    location.startsWith("/go/delivery/driver/") ||
+    location === "/go/pack/driver" ||
+    location.startsWith("/go/pack/driver/");
   const isDriverView = isCargoDriverView || isPackDriverView;
-  const isRiderCargoView = location === "/go/cargo" || location.startsWith("/go/cargo/");
-  const isRiderPackView = location === "/go/pack" || location.startsWith("/go/pack/");
+  /** Rutas de pasajero: no incluyen `/go/taxi/driver` ni `/go/delivery/driver` (antes quedaban mal clasificadas). */
+  const isRiderCargoView =
+    location === "/go/taxi" ||
+    (location.startsWith("/go/taxi/") && !location.startsWith("/go/taxi/driver")) ||
+    location === "/go/cargo" ||
+    (location.startsWith("/go/cargo/") && !location.startsWith("/go/cargo/driver"));
+  const isRiderPackView =
+    location === "/go/delivery" ||
+    (location.startsWith("/go/delivery/") && !location.startsWith("/go/delivery/driver")) ||
+    location === "/go/pack" ||
+    (location.startsWith("/go/pack/") && !location.startsWith("/go/pack/driver"));
   const isRiderGoView = isRiderCargoView || isRiderPackView;
-  const cargoHref = isDriverView ? "/go/cargo/driver" : "/go/cargo";
-  const packHref = isDriverView ? "/go/pack/driver" : "/go/pack";
-  const configHref = isCargoDriverView ? "/go/cargo/driver/settings" : isPackDriverView ? "/go/pack/driver/settings" : "/go/cargo";
+  const cargoHref = isDriverView ? "/go/taxi/driver" : "/go/taxi";
+  const packHref = isDriverView ? "/go/delivery/driver" : "/go/delivery";
+  const configHref = isCargoDriverView ? "/go/taxi/driver/settings" : isPackDriverView ? "/go/delivery/driver/settings" : "/go/taxi";
 
   const [activeDriverService, setActiveDriverService] = useState<null | { module: "cargo" | "pack"; rideId: string }>(null);
   useEffect(() => {
@@ -119,9 +143,9 @@ export function GoBottomNav() {
   const tabs: Tab[] = useMemo(
     () =>
       [
-        { href: cargoHref, label: "Car Go", icon: <Car className="h-5 w-5" aria-hidden /> },
-        showPack ? { href: packHref, label: "Pack Go", icon: <Package className="h-5 w-5" aria-hidden /> } : null,
-        showShop ? { href: "/go/shop", label: "Shop Go", icon: <Store className="h-5 w-5" aria-hidden /> } : null,
+        { href: cargoHref, label: "Taxi", icon: <Car className="h-5 w-5" aria-hidden /> },
+        showPack ? { href: packHref, label: "Delivery", icon: <Package className="h-5 w-5" aria-hidden /> } : null,
+        showShop ? { href: "/go/shop", label: "Pedidos", icon: <Store className="h-5 w-5" aria-hidden /> } : null,
         !isDriverView && isRiderGoView
           ? {
               href: "__go_rider_history__",
@@ -228,18 +252,18 @@ export function GoBottomNav() {
             const active = tabIsActive(location, t.href, !!t.onClick);
             const isChatTab = t.href === "__go_chat__";
             const isNotifTab = t.href.startsWith("/notifications") || t.href === "__go_notifications__";
-            const isGoDriverTab = isDriverView && (t.href === "/go/cargo/driver" || t.href === "/go/pack/driver");
-            const isGoRiderTab = !isDriverView && (t.href === "/go/cargo" || t.href === "/go/pack");
+            const isGoDriverTab = isDriverView && (t.href === "/go/taxi/driver" || t.href === "/go/delivery/driver");
+            const isGoRiderTab = !isDriverView && (t.href === "/go/taxi" || t.href === "/go/delivery");
             const blockedByService =
               isGoDriverTab &&
               !!activeDriverService &&
-              ((activeDriverService.module === "cargo" && t.href === "/go/pack/driver") ||
-                (activeDriverService.module === "pack" && t.href === "/go/cargo/driver"));
+              ((activeDriverService.module === "cargo" && t.href === "/go/delivery/driver") ||
+                (activeDriverService.module === "pack" && t.href === "/go/taxi/driver"));
             const blockedByRiderService =
               isGoRiderTab &&
               !!activeRiderService &&
-              ((activeRiderService.module === "cargo" && t.href === "/go/pack") ||
-                (activeRiderService.module === "pack" && t.href === "/go/cargo"));
+              ((activeRiderService.module === "cargo" && t.href === "/go/delivery") ||
+                (activeRiderService.module === "pack" && t.href === "/go/taxi"));
             return (
               <Button
                 key={t.label}
@@ -264,8 +288,8 @@ export function GoBottomNav() {
                       title: "Servicio en curso",
                       description:
                         activeDriverService?.module === "cargo"
-                          ? "Tienes un servicio activo en Car Go. Finalízalo o cancélalo para entrar a Pack Go."
-                          : "Tienes un servicio activo en Pack Go. Finalízalo o cancélalo para entrar a Car Go.",
+                          ? "Tienes un servicio activo de Taxi. Finalízalo o cancélalo para entrar a Delivery."
+                          : "Tienes un servicio activo de Delivery. Finalízalo o cancélalo para entrar a Taxi.",
                       variant: "destructive",
                     });
                     return;
@@ -275,8 +299,8 @@ export function GoBottomNav() {
                       title: "Servicio en curso",
                       description:
                         activeRiderService?.module === "cargo"
-                          ? "Tienes un servicio activo en Car Go. Finalízalo o cancélalo para entrar a Pack Go."
-                          : "Tienes un servicio activo en Pack Go. Finalízalo o cancélalo para entrar a Car Go.",
+                          ? "Tienes un servicio activo de Taxi. Finalízalo o cancélalo para entrar a Delivery."
+                          : "Tienes un servicio activo de Delivery. Finalízalo o cancélalo para entrar a Taxi.",
                       variant: "destructive",
                     });
                     return;
@@ -311,7 +335,7 @@ export function GoBottomNav() {
           className="max-h-[min(92dvh,720px)] overflow-y-auto overflow-x-hidden rounded-t-2xl p-4 sm:max-w-lg sm:mx-auto"
         >
           <SheetHeader className="text-left space-y-1.5 sm:pr-6">
-            <SheetTitle className="font-display text-lg">Ingresos — Car Go</SheetTitle>
+            <SheetTitle className="font-display text-lg">Ingresos — Conductor</SheetTitle>
             <SheetDescription>
               Resumen al estilo panel de asociado: cartera, límite y actividad por día.
             </SheetDescription>
@@ -325,16 +349,16 @@ export function GoBottomNav() {
       <Sheet open={riderHistoryOpen} onOpenChange={setRiderHistoryOpen}>
         <SheetContent side="bottom" className="max-h-[min(85dvh,560px)] overflow-y-auto rounded-t-2xl">
           <SheetHeader>
-            <SheetTitle>Historial (Car Go · Pack Go)</SheetTitle>
+            <SheetTitle>{mobilityHistorySheetTitle()}</SheetTitle>
           </SheetHeader>
           <div className="mt-4 space-y-3 pb-6">
-            {loadRiderTripLog().length === 0 ? (
+            {riderTripEntries.length === 0 ? (
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Aún no hay servicios registrados. Cuando completes servicios con Car Go o Pack Go, aquí verás el monto, duración y el conductor.
+                Aún no hay servicios registrados. Cuando completes un servicio de taxi o un envío de delivery, aquí verás el monto, duración y el conductor.
               </p>
             ) : (
               <ul className="space-y-3">
-                {loadRiderTripLog().map((t) => (
+                {riderTripEntries.map((t) => (
                   <li key={t.id} className="rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
                     <div className="flex items-start justify-between gap-2">
                       <span className="font-medium text-foreground">{new Date(t.endedAt).toLocaleString("es-EC")}</span>
@@ -345,7 +369,7 @@ export function GoBottomNav() {
                     <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground text-xs">
                       <span>
                         Servicio:{" "}
-                        <span className="font-medium text-foreground">{t.goSlug === "pack" ? "Pack Go" : "Car Go"}</span>
+                        <span className="font-medium text-foreground">{mobilityServiceLabel(t.goSlug)}</span>
                       </span>
                       <span>Conductor: <span className="font-medium text-foreground">{t.driverName}</span></span>
                       <span>Duración: {t.durationMin} min</span>
@@ -467,7 +491,7 @@ export function GoBottomNav() {
           </SheetHeader>
           <div className="mt-5">
             <QuickSettingsPanel
-              returnPath={location.split("?")[0] || "/go/cargo"}
+              returnPath={location.split("?")[0] || "/go/taxi"}
               onNavigate={() => setGoQuickSettingsOpen(false)}
             />
           </div>

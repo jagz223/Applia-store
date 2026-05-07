@@ -38,6 +38,7 @@ export function ListingSubscriptionRibbon() {
   const { data: provider } = useCurrentProvider();
   const { toast } = useToast();
   const [reminderOpen, setReminderOpen] = useState(false);
+  const [actionModalOpen, setActionModalOpen] = useState(false);
   const remindedKey = useMemo(() => {
     const p = provider as ProviderMe | null | undefined;
     if (!p?.visibilitySubscriptionEndsAt) return null;
@@ -54,13 +55,14 @@ export function ListingSubscriptionRibbon() {
     const days = p.subscriptionDaysRemaining ?? listingSubscriptionDaysRemaining(endsAt) ?? null;
     if (days == null) return null;
     const expired = p.isListingPublished === false;
-    const urgent = !expired && days > 0 && days <= LISTING_SUBSCRIPTION_WARNING_DAYS;
+    const critical = !expired && days > 0 && days <= 2;
+    const urgent = !expired && !critical && days > 0 && days <= LISTING_SUBSCRIPTION_WARNING_DAYS;
     const endDate = new Date(endsAt);
     const endLabel = Number.isNaN(endDate.getTime())
       ? endsAt
       : endDate.toLocaleString("es-EC", { dateStyle: "medium", timeStyle: "short" });
 
-    return { days, expired, urgent, endsAt, endLabel };
+    return { days, expired, critical, urgent, endsAt, endLabel };
   }, [isAuthenticated, provider]);
 
   useEffect(() => {
@@ -80,26 +82,91 @@ export function ListingSubscriptionRibbon() {
     }
   }, [state?.urgent, state?.days, remindedKey, toast]);
 
+  useEffect(() => {
+    if (!state || remindedKey == null) return;
+    if (!(state.critical || state.expired)) return;
+    if (typeof sessionStorage === "undefined") return;
+    const key = `listing_action_dlg_${state.endsAt}_${state.expired ? "expired" : "critical"}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+      setActionModalOpen(true);
+    } catch {
+      /* ignore */
+    }
+  }, [state, remindedKey]);
+
   const dismissReminder = useCallback(() => setReminderOpen(false), []);
+  const dismissActionModal = useCallback(() => setActionModalOpen(false), []);
 
   if (!state) return null;
 
-  if (state.expired) {
+  if (state.expired || state.critical) {
     return (
-      <div className="border-b border-destructive/35 bg-destructive/15 px-3 py-2.5 sm:px-4">
-        <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-3 sm:flex-row sm:justify-between">
-          <div className="flex items-start gap-2 text-center text-sm font-semibold text-destructive sm:text-left">
-            <AlertTriangle className="mx-auto mt-0.5 h-4 w-4 shrink-0 sm:mx-0" aria-hidden />
-            <span>
-              Tu servicio ya no aparece en el explorador público: venció la cuota mensual de visibilidad (USD 15).
-              Subí el comprobante para que un administrador la valide y recuperes la publicación.
-            </span>
+      <>
+        {state.expired ? (
+          <div className="border-b border-destructive/35 bg-destructive/15 px-3 py-2.5 sm:px-4">
+            <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-3 sm:flex-row sm:justify-between">
+              <div className="flex items-start gap-2 text-center text-sm font-semibold text-destructive sm:text-left">
+                <AlertTriangle className="mx-auto mt-0.5 h-4 w-4 shrink-0 sm:mx-0" aria-hidden />
+                <span>
+                  Tu servicio ya no aparece en el explorador público: venció la cuota mensual de visibilidad (USD 15).
+                  Subí el comprobante para que un administrador la valide y recuperes la publicación.
+                </span>
+              </div>
+              <Button size="sm" variant="destructive" asChild className="shrink-0">
+                <Link href={RENEW_PAYMENT_HREF}>Renovar pago</Link>
+              </Button>
+            </div>
           </div>
-          <Button size="sm" variant="destructive" asChild className="shrink-0">
-            <Link href={RENEW_PAYMENT_HREF}>Renovar pago</Link>
-          </Button>
-        </div>
-      </div>
+        ) : (
+          <div className="border-b border-amber-500/45 bg-amber-500/18 px-3 py-2.5 sm:px-4">
+            <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-3 sm:flex-row sm:justify-between">
+              <div className="flex items-start gap-2 text-center text-sm font-semibold text-foreground sm:text-left">
+                <CalendarClock className="mx-auto mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300 sm:mx-0" aria-hidden />
+                <span>
+                  Quedan <strong>{state.days}</strong> día(s) para que expire tu visibilidad (hasta {state.endLabel}).
+                  Renová ahora para evitar quedar fuera del catálogo.
+                </span>
+              </div>
+              <Button size="sm" variant="secondary" asChild className="shrink-0 border border-amber-600/35">
+                <Link href={RENEW_PAYMENT_HREF}>Renovar ahora</Link>
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <AlertDialog open={actionModalOpen} onOpenChange={setActionModalOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {state.expired ? "Visibilidad vencida" : "Renová hoy para no perder visibilidad"}
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-left leading-relaxed">
+                {state.expired ? (
+                  <>
+                    Tu publicación en el catálogo está <strong>inactiva</strong> porque venció la cuota mensual (USD 15).
+                    Subí el comprobante y, al validarlo, volverás a estar visible.
+                  </>
+                ) : (
+                  <>
+                    Quedan <strong>{state.days}</strong> día(s) para que expire tu visibilidad (hasta {state.endLabel}).
+                    Subí el comprobante de USD 15 para que el equipo lo valide.
+                  </>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={dismissActionModal}>Ahora no</AlertDialogCancel>
+              <AlertDialogAction asChild>
+                <Link href={RENEW_PAYMENT_HREF} onClick={() => dismissActionModal()}>
+                  Ir a renovar
+                </Link>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
     );
   }
 

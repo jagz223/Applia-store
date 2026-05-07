@@ -11,6 +11,7 @@ import { authenticateJWT } from "./routes-auth";
 import { requireAdminStaff, requireFullAdmin, requireStaffFromDb } from "./middleware-roles";
 import { userService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
+import { catalogService } from "./services";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { applyServiceBookingChatLifecycle } from "./service-booking-chat";
@@ -31,11 +32,41 @@ import {
 } from "./category-visibility";
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
 import { isFullAdmin } from "@shared/roles";
-import { extendVisibilitySubscriptionEndsAt } from "@shared/professional-listing-subscription";
+import {
+  extendVisibilitySubscriptionEndsAt,
+  parseVisibilitySubscriptionEndMs,
+} from "@shared/professional-listing-subscription";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
   return genFebStorage.getAllServices(undefined, undefined, undefined, undefined, true);
+}
+
+async function createAdminAuditEvent(args: {
+  action:
+    | "subscription_payment_approved"
+    | "subscription_payment_rejected"
+    | "associate_onboarding_approved"
+    | "associate_onboarding_rejected"
+    | "account_change_request_approved"
+    | "account_change_request_rejected";
+  adminUserId: string;
+  affectedUserId: string;
+  meta?: Record<string, unknown>;
+}) {
+  try {
+    const db = getFirestore();
+    if (!db) return;
+    await db.collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG).add({
+      action: args.action,
+      adminUserId: args.adminUserId,
+      affectedUserId: args.affectedUserId,
+      meta: args.meta ?? null,
+      createdAt: new Date(),
+    });
+  } catch (e) {
+    console.error("[admin-audit] Error:", e);
+  }
 }
 
 /**
@@ -347,6 +378,7 @@ export function registerAdminRoutes(app: Express): void {
         name: string;
         email?: string | null;
         avatar?: string | null;
+        requestType?: "onboarding" | "renewal";
         user_identification?: string | null;
         professionalCredentialUrl?: string | null;
         identification_verified: "pending" | "verified" | "rejected";
@@ -355,6 +387,8 @@ export function registerAdminRoutes(app: Express): void {
         transacction_code?: string | null;
         /** Slug de categoría del proveedor (p. ej. `transport` = Car Go). */
         providerCategorySlug?: string | null;
+        /** ISO fin de suscripción vigente (si existe). */
+        visibilitySubscriptionEndsAt?: string | null;
       }> = [];
 
       for (const st of pending ?? []) {
@@ -362,13 +396,18 @@ export function registerAdminRoutes(app: Express): void {
         if (!userId) continue;
 
         const provider = await genFebStorage.getProviderByUserId(userId);
+        const providerEndsAtRaw = (provider as any)?.visibilitySubscriptionEndsAt;
+        const providerEndsAtIso = (() => {
+          const ms = parseVisibilitySubscriptionEndMs(providerEndsAtRaw);
+          return ms == null ? null : new Date(ms).toISOString();
+        })();
         const catId = Number((provider as any)?.categoryId);
         const slugFromId =
           Number.isFinite(catId) && catId > 0 ? String((catById.get(catId) as any)?.slug ?? "") : "";
         const providerCategorySlug =
           (slugFromId || String((provider as any)?.category ?? "").trim()) || null;
 
-        // Filtrar por marca del proveedor (Pack Go / Shop Go / Car Go, etc.) si aplica al rol.
+        // Filtrar por marca del proveedor (Delivery / Pedidos / Taxi, etc.) si aplica al rol.
         if (hiddenSlugs.size > 0) {
           if (providerCategorySlug && hiddenSlugs.has(providerCategorySlug)) continue;
         }
@@ -384,12 +423,19 @@ export function registerAdminRoutes(app: Express): void {
 
         const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
         const transacction_code = profVer?.transferReceiptCode ?? null;
+        const storedType = (st as any)?.requestType as ("onboarding" | "renewal" | undefined);
+        const inferredType =
+          storedType ??
+          ((provider as any)?.isVerified === true && (st as any)?.transacction_verified === "pending" && (st as any)?.identification_verified !== "pending"
+            ? "renewal"
+            : "onboarding");
 
         items.push({
           userId,
           name,
           email,
           avatar,
+          requestType: inferredType,
           user_identification,
           professionalCredentialUrl: profVer?.professionalCredentialUrl ?? null,
           identification_verified: (st.identification_verified as any) ?? "rejected",
@@ -397,6 +443,7 @@ export function registerAdminRoutes(app: Express): void {
           transacction_verified: (st.transacction_verified as any) ?? "rejected",
           transacction_code,
           providerCategorySlug,
+          visibilitySubscriptionEndsAt: providerEndsAtIso,
         });
       }
 
@@ -404,6 +451,55 @@ export function registerAdminRoutes(app: Express): void {
     } catch (error) {
       console.error("Error listing verifying_status pending:", error);
       return res.status(500).json({ message: "Error al listar asociados" });
+    }
+  });
+
+  app.get("/api/admin/audit-log", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const limRaw = Number(req.query?.limit ?? 50);
+      const limit = Number.isFinite(limRaw) ? Math.max(1, Math.min(200, limRaw)) : 50;
+      const db = getFirestore();
+      if (!db) return res.json({ items: [], total: 0 });
+      const snap = await db
+        .collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG)
+        .orderBy("createdAt", "desc")
+        .limit(limit)
+        .get();
+      const rawItems = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+      const uniqueAdminIds = Array.from(
+        new Set(rawItems.map((it) => String(it.adminUserId ?? "").trim()).filter(Boolean)),
+      );
+      const adminById = new Map<string, { id: string; name: string; email: string | null }>();
+      await Promise.all(
+        uniqueAdminIds.map(async (id) => {
+          try {
+            const u = (await genFebStorage.getUserById(id)) as any;
+            const name =
+              (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) ||
+              u?.email ||
+              id;
+            const email = u?.email ?? null;
+            adminById.set(id, { id, name, email });
+          } catch {
+            adminById.set(id, { id, name: id, email: null });
+          }
+        }),
+      );
+
+      const items = rawItems.map((it) => {
+        const admin = adminById.get(String(it.adminUserId ?? "").trim()) ?? null;
+        return {
+          ...it,
+          adminName: admin?.name ?? null,
+          adminEmail: admin?.email ?? null,
+        };
+      });
+
+      return res.json({ items, total: items.length });
+    } catch (e) {
+      console.error("Error listing admin audit log:", e);
+      return res.status(500).json({ message: "Error al listar historial" });
     }
   });
 
@@ -449,6 +545,21 @@ export function registerAdminRoutes(app: Express): void {
         action: body.action,
         adminUserId: String(req.user.id),
       });
+
+      // --- Auditoría ---
+      try {
+        const userId = String((resolved as any)?.userId ?? "");
+        if (userId) {
+          await createAdminAuditEvent({
+            action: body.action === "approve" ? "account_change_request_approved" : "account_change_request_rejected",
+            adminUserId: String(req.user?.id ?? ""),
+            affectedUserId: userId,
+            meta: { requestId: id, field: String((resolved as any)?.field ?? "") },
+          });
+        }
+      } catch {
+        /* ignore */
+      }
 
       const userId = String((resolved as any)?.userId ?? "");
       const field = String((resolved as any)?.field ?? "");
@@ -557,6 +668,18 @@ export function registerAdminRoutes(app: Express): void {
           await maybeVerifyProfessional(userId);
         }
 
+        // --- Auditoría ---
+        try {
+          const isApprove = status === "verified";
+          await createAdminAuditEvent({
+            action: isApprove ? "associate_onboarding_approved" : "associate_onboarding_rejected",
+            adminUserId: String(req.user?.id ?? ""),
+            affectedUserId: userId,
+          });
+        } catch {
+          /* ignore */
+        }
+
         // --- Notificar al usuario ---
         try {
           const isApprove = status === "verified";
@@ -619,13 +742,34 @@ export function registerAdminRoutes(app: Express): void {
           try {
             const providerAfter = await genFebStorage.getProviderByUserId(userId);
             if (providerAfter) {
+              const approvalBase = (() => {
+                const raw = (updated as any)?.transacction_date;
+                const s = raw != null ? String(raw).trim() : "";
+                // `yyyy-MM-dd` → usar mediodía UTC para evitar bordes por TZ/DST.
+                if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00Z`);
+                return new Date();
+              })();
+              const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
+              const receipt = (profVer?.transferReceiptCode ?? "").trim();
+              const txDate = String((updated as any)?.transacction_date ?? "").trim();
+              const paymentKey = receipt && txDate ? `${receipt}|${txDate}` : "";
+
+              const alreadyApplied =
+                paymentKey &&
+                String((providerAfter as any)?.visibilitySubscriptionLastPaymentKey ?? "").trim() === paymentKey;
+
+              if (!alreadyApplied) {
               const nextIso = extendVisibilitySubscriptionEndsAt(
                 (providerAfter as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
-                new Date(),
+                approvalBase,
               );
-              await genFebStorage.updateProvider(Number((providerAfter as { id: number }).id), {
-                visibilitySubscriptionEndsAt: nextIso,
-              } as any);
+                await genFebStorage.updateProvider(Number((providerAfter as { id: number }).id), {
+                  visibilitySubscriptionEndsAt: nextIso,
+                  visibilitySubscriptionLastPaymentKey: paymentKey || null,
+                  visibilitySubscriptionLastPaymentApprovedAt: new Date(),
+                  visibilitySubscriptionLastPaymentApprovedBy: String(req.user?.id ?? ""),
+                } as any);
+              }
             }
           } catch (err) {
             console.error("[admin] visibilitySubscriptionEndsAt extend:", err);
@@ -742,6 +886,23 @@ export function registerAdminRoutes(app: Express): void {
           console.error("Error notificando resultado tx:", err);
         }
         // ----------------------------
+
+        // --- Auditoría ---
+        try {
+          const isApprove = status === "verified";
+          const provider = await genFebStorage.getProviderByUserId(userId);
+          const isRenewal = (provider as any)?.isVerified === true;
+          await createAdminAuditEvent({
+            action: isApprove
+              ? "subscription_payment_approved"
+              : "subscription_payment_rejected",
+            adminUserId: String(req.user?.id ?? ""),
+            affectedUserId: userId,
+            meta: { requestType: isRenewal ? "renewal" : "onboarding" },
+          });
+        } catch {
+          /* ignore */
+        }
 
         return res.status(200).json(updated);
       } catch (error: any) {
@@ -1599,6 +1760,17 @@ export function registerAdminRoutes(app: Express): void {
     name: z.string().min(1).max(200).optional(),
     slug: z.string().max(200).optional(),
     icon: z.string().max(100).optional(),
+  });
+
+  /** Lista completa de categorías (incluye legacy tipo legal/financial en `categories`) para gestión en admin. */
+  app.get("/api/admin/categories", authenticateJWT, requireFullAdmin, async (_req, res) => {
+    try {
+      const categories = await catalogService.getCategories();
+      return res.status(200).json(categories ?? []);
+    } catch (error) {
+      console.error("Error listing admin categories:", error);
+      return res.status(500).json({ message: "Error al listar categorías" });
+    }
   });
 
   app.patch("/api/admin/categories/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {

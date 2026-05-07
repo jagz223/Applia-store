@@ -5,7 +5,7 @@ export default function GoShop() {
     <div className="p-4">
       <Card>
         <CardHeader>
-          <CardTitle>Shop Go</CardTitle>
+          <CardTitle>Pedidos</CardTitle>
           <CardDescription>Pedidos en tienda.</CardDescription>
         </CardHeader>
         <CardContent>

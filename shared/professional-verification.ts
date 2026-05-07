@@ -50,11 +50,20 @@ export const professionalVerificationStateSchema = z.enum(["rejected", "pending"
 export type ProfessionalVerificationState = z.infer<typeof professionalVerificationStateSchema>;
 
 /**
+ * Tipo de solicitud: onboarding (alta inicial) vs renewal (renovación simple de cuota USD 15).
+ * Se guarda en `verifying_status` para que el admin pueda distinguir flujos sin inferencias frágiles.
+ */
+export const verificationRequestTypeSchema = z.enum(["onboarding", "renewal"]);
+export type VerificationRequestType = z.infer<typeof verificationRequestTypeSchema>;
+
+/**
  * Colección Firestore `verifying_status` (1 doc por userId).
  * Nota: respetamos el nombre solicitado: `transacction_date` y `transacction_verified`.
  */
 export const verifyingStatusSchema = z.object({
   user: z.string(),
+  /** Puede faltar en docs antiguos; default = onboarding. */
+  requestType: verificationRequestTypeSchema.optional(),
   identification_verified: professionalVerificationStateSchema,
   /** null = aún no enviado / sin valor en Firestore */
   transacction_date: z.string().nullable(),

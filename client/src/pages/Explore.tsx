@@ -106,9 +106,9 @@ export default function Explore() {
     const slug = (cat as { slug?: string }).slug;
     if (slug && hiddenSlugs.has(slug)) return;
     const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
-    if (slug === "transport") return setLocation(`/go/cargo${fromQs}`);
+    if (slug === "transport") return setLocation(`/go/taxi${fromQs}`);
     if (slug === "marketplace") return setLocation(`/go/shop${fromQs}`);
-    if (slug === "delivery") return setLocation(`/go/pack${fromQs}`);
+    if (slug === "delivery") return setLocation(`/go/delivery${fromQs}`);
   }, [categories, providerCategoryFromUrl, exploreFrom, setLocation, hiddenSlugs]);
 
   const verifiedServices = useMemo(
@@ -133,7 +133,7 @@ export default function Explore() {
     const slug = (cat as { slug?: string } | undefined)?.slug;
     if (slug === "transport") {
       const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
-      setLocation(`/go/cargo${fromQs}`);
+      setLocation(`/go/taxi${fromQs}`);
       return;
     }
     if (slug === "marketplace") {
@@ -143,7 +143,7 @@ export default function Explore() {
     }
     if (slug === "delivery") {
       const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
-      setLocation(`/go/pack${fromQs}`);
+      setLocation(`/go/delivery${fromQs}`);
       return;
     }
     setSelectedProviderCategoryId(id);

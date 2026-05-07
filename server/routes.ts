@@ -114,6 +114,7 @@ export async function registerRoutes(
       if (!st) {
         return res.json({
           user: userId,
+          requestType: null,
           identification_verified: "rejected",
           transacction_date: null,
           transacction_verified: null,
@@ -122,6 +123,7 @@ export async function registerRoutes(
 
       return res.json({
         user: st.user ?? userId,
+        requestType: (st as any)?.requestType ?? null,
         identification_verified: st.identification_verified,
         transacction_date: st.transacction_date ?? null,
         transacction_verified: st.transacction_verified,
@@ -156,7 +158,7 @@ export async function registerRoutes(
       await genFebStorage.upsertProfessionalVerificationImage(userId, body.imageUrl);
 
       // Cambiar estado en verifying_status → identification_verified = pending
-      await genFebStorage.upsertVerifyingStatusIdentificationPending(userId);
+      await genFebStorage.upsertVerifyingStatusIdentificationPending(userId, "onboarding" as any);
 
       // --- Notificar a administradores ---
       try {
@@ -277,7 +279,9 @@ export async function registerRoutes(
       });
 
       // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
-      await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate);
+      const requestType =
+        (provider as any)?.isVerified === true ? ("renewal" as const) : ("onboarding" as const);
+      await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate, requestType as any);
 
       // Un solo cargo pendiente por usuario: evita duplicados si reenvía comprobante.
       try {
@@ -348,7 +352,7 @@ export async function registerRoutes(
 
   // Catálogo público: registrar ANTES de GenFeb para que /api/provider-categories/availability y /api/services coincidan
   app.get(api.categories.list.path, async (_req, res) => {
-    const categories = await catalogService.getCategories();
+    const categories = await catalogService.getCategoriesForPublicCatalog();
     res.json(categories);
   });
   app.get("/api/subcategories", async (req, res) => {
@@ -370,6 +374,13 @@ export async function registerRoutes(
   });
   app.get(api.categories.homeAssociateCounts.path, async (_req, res) => {
     res.json(await catalogService.getHomeCategoryAssociateCounts());
+  });
+  app.post(api.categories.monthlyPopularSubcategories.path, async (req, res) => {
+    const parsed = api.categories.monthlyPopularSubcategories.input.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+    }
+    res.json(await catalogService.getMonthlyPopularSubcategoryBookingCountsForHome(parsed.data.limit));
   });
   app.get(api.providers.list.path, async (req, res) => {
     const profession = (req.query.profession as string)?.trim() || undefined;
@@ -399,7 +410,7 @@ export async function registerRoutes(
     const isGeneralCatalogExplore = categoryId == null && providerCategoryId == null;
     if (isGeneralCatalogExplore && list?.length) {
       const mobilitySlugs = new Set(MOBILITY_GO_PROVIDER_SLUGS.map((s) => String(s).toLowerCase()));
-      const cats = await catalogService.getCategories();
+      const cats = await catalogService.getCategoriesForPublicCatalog();
       list = list.filter((s: any) => {
         const p = s?.provider as { category?: string; categoryId?: number } | undefined;
         if (!p) return true;

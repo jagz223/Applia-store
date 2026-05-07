@@ -1,7 +1,11 @@
-/** Estado local del conductor Car Go hasta que exista API dedicada. */
+/**
+ * Estado local del conductor (viajes completados en este dispositivo).
+ * El historial va por cuenta (`user.id`): no se mezcla con el del pasajero ni entre conductores.
+ */
 
 export const CARGO_DRIVER_RECEIVING_KEY = "cargo-driver-receiving";
 export const PACK_DRIVER_RECEIVING_KEY = "pack-driver-receiving";
+/** Prefijo base; las entradas efectivas son `cargo-driver-trip-log:user:<id>` o `:guest`. */
 export const CARGO_DRIVER_TRIP_LOG_KEY = "cargo-driver-trip-log";
 /** Viaje Car Go activo (matched / in_progress) para reanudar al reabrir la app. */
 export const CARGO_DRIVER_ACTIVE_RIDE_KEY = "cargo-driver-active-ride-id";
@@ -104,10 +108,21 @@ export function clearGoDriverActiveRideId(goSlug: "cargo" | "pack"): void {
   }
 }
 
-export function loadTripLog(): CargoDriverTripLog[] {
+function normalizeAccountId(accountId: string | null | undefined): string | null {
+  if (typeof accountId !== "string") return null;
+  const t = accountId.trim();
+  return t.length > 0 ? t : null;
+}
+
+/** Clave de localStorage para el historial del conductor (una por usuario autenticado). */
+export function driverTripLogStorageKey(accountId: string | null | undefined): string {
+  const id = normalizeAccountId(accountId);
+  return id ? `${CARGO_DRIVER_TRIP_LOG_KEY}:user:${id}` : `${CARGO_DRIVER_TRIP_LOG_KEY}:guest`;
+}
+
+function parseTripLogRaw(raw: string | null): CargoDriverTripLog[] {
+  if (!raw) return [];
   try {
-    const raw = localStorage.getItem(CARGO_DRIVER_TRIP_LOG_KEY);
-    if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
@@ -117,7 +132,9 @@ export function loadTripLog(): CargoDriverTripLog[] {
         typeof (t as CargoDriverTripLog).id === "string" &&
         typeof (t as CargoDriverTripLog).durationMin === "number" &&
         typeof (t as CargoDriverTripLog).amountUsd === "number" &&
-        ((t as CargoDriverTripLog).payment === "genfeb" || (t as CargoDriverTripLog).payment === "cash") &&
+        ((t as CargoDriverTripLog).payment === "genfeb" ||
+          (t as CargoDriverTripLog).payment === "cash" ||
+          (t as CargoDriverTripLog).payment === "bank_transfer") &&
         ((t as CargoDriverTripLog).goSlug === undefined ||
           (t as CargoDriverTripLog).goSlug === "cargo" ||
           (t as CargoDriverTripLog).goSlug === "pack")
@@ -127,11 +144,42 @@ export function loadTripLog(): CargoDriverTripLog[] {
   }
 }
 
-export function appendDriverTripLog(entry: CargoDriverTripLog): void {
+/**
+ * Historial de viajes completados como conductor para la cuenta indicada.
+ * No usa el mismo almacén que el pasajero (`cargo-rider-trip-log`).
+ */
+export function loadTripLog(accountId?: string | null): CargoDriverTripLog[] {
   try {
-    const cur = loadTripLog();
+    const key = driverTripLogStorageKey(accountId ?? null);
+    let rows = parseTripLogRaw(localStorage.getItem(key));
+    /**
+     * Compat: clave única antigua `cargo-driver-trip-log`. La primera carga la mueve al bucket activo
+     * (usuario o invitado). En un mismo navegador suele haber un conductor habitual.
+     */
+    if (rows.length === 0) {
+      const legacy = parseTripLogRaw(localStorage.getItem(CARGO_DRIVER_TRIP_LOG_KEY));
+      if (legacy.length > 0) {
+        try {
+          localStorage.setItem(key, JSON.stringify(legacy));
+          localStorage.removeItem(CARGO_DRIVER_TRIP_LOG_KEY);
+        } catch {
+          /* ignore */
+        }
+        rows = legacy;
+      }
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+export function appendDriverTripLog(entry: CargoDriverTripLog, accountId?: string | null): void {
+  try {
+    const key = driverTripLogStorageKey(accountId ?? null);
+    const cur = parseTripLogRaw(localStorage.getItem(key));
     const next = [entry, ...cur.filter((t) => t.id !== entry.id)].slice(0, 30);
-    localStorage.setItem(CARGO_DRIVER_TRIP_LOG_KEY, JSON.stringify(next));
+    localStorage.setItem(key, JSON.stringify(next));
   } catch {
     /* ignore */
   }

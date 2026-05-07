@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Ban, CheckCircle2, Loader2, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TaxiRouteMap } from "@/components/taxi/TaxiRouteMap";
+import { mobilityServiceLabel } from "@shared/mobility-ui-labels";
 export type CargoRideOfferPayload = {
   rideId: string;
   rider: {
@@ -64,7 +65,7 @@ export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, 
   if (typeof document === "undefined") return null;
   const riderStars = typeof offer.rider.rating === "number" ? offer.rider.rating : null;
   const riderTrips = typeof offer.rider.completedTrips === "number" ? offer.rider.completedTrips : null;
-  const title = module === "pack" ? "Pack Go" : "Car Go";
+  const title = mobilityServiceLabel(module === "pack" ? "pack" : "cargo");
 
   const ttlMsRef = useRef<number>(18_000);
   const [remainingMs, setRemainingMs] = useState<number>(() => {

@@ -38,6 +38,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton";
 import { useAuth } from "@/hooks/use-auth";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { useCategories } from "@/hooks/use-mango-data";
@@ -790,17 +791,14 @@ function InvoicesTabContent() {
     },
   });
 
-  const { data, isLoading: transfersLoading } = useWalletTransfers({ page, limit: 10 });
-  const transfers = data?.transfers ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / 10));
+  // Nota: este tab muestra únicamente el pago mensual USD 15 (suscripción).
 
   const verificationRows = useMemo(
     () => (invoiceList ?? []).filter((inv) => inv.type === "verification"),
     [invoiceList],
   );
 
-  const isLoading = invoicesLoading || transfersLoading;
+  const isLoading = invoicesLoading;
 
   useEffect(() => {
     const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
@@ -903,7 +901,7 @@ function InvoicesTabContent() {
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Comprobantes de verificación, abonos de saldo y descarga en PDF</CardDescription>
+          <CardDescription>Historial y descarga en PDF del pago mensual (USD 15) para ser asociado</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
@@ -913,16 +911,16 @@ function InvoicesTabContent() {
     );
   }
 
-  if (verificationRows.length === 0 && transfers.length === 0) {
+  if (verificationRows.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Comprobantes de verificación, abonos de saldo y descarga en PDF</CardDescription>
+          <CardDescription>Historial y descarga en PDF del pago mensual (USD 15) para ser asociado</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <FileText className="h-8 w-8 opacity-60" />
-          <p className="text-sm">Aún no tienes facturas disponibles.</p>
+          <p className="text-sm">Aún no tienes pagos de suscripción registrados.</p>
         </CardContent>
       </Card>
     );
@@ -933,13 +931,13 @@ function InvoicesTabContent() {
       <CardHeader>
         <CardTitle>Facturas</CardTitle>
         <CardDescription>
-          Incluye el cargo de verificación (USD 15), abonos a tu saldo GenFeb y el resto de movimientos con comprobante
+          Historial y descarga en PDF del pago mensual (USD 15) para ser asociado
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {verificationRows.length > 0 && (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-foreground">Verificación profesional</p>
+            <p className="text-sm font-medium text-foreground">Suscripción mensual (USD 15)</p>
             {verificationRows.map((inv) => {
               const reportKey = inv.reportId ?? inv.id;
               if (reportKey == null) return null;
@@ -1008,84 +1006,6 @@ function InvoicesTabContent() {
           </div>
         )}
 
-        {transfers.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-foreground">Abonos y otros movimientos</p>
-            {transfers.map((t: TransferForInvoice & { id: number; status?: string }) => {
-              const label = getTransferTypeLabel(t.transferType);
-              const dateStr = parseTransferDate(t.createdAt)
-                ? format(parseTransferDate(t.createdAt)!, "dd MMM yyyy HH:mm", { locale: es })
-                : "—";
-              return (
-                <div
-                  key={t.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
-                >
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <Receipt className="w-4 h-4 text-primary" />
-                    </div>
-                    <div className="min-w-0 space-y-1">
-                      <p className="font-medium text-sm">{label}</p>
-                      <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
-                      <p className="text-xs text-muted-foreground">{dateStr}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <p className="font-semibold text-sm">{formatWalletAmount(t.amount)}</p>
-                    <Badge
-                      variant={
-                        t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"
-                      }
-                    >
-                      {t.status === "pending_approval" ? "Pendiente" : t.status === "completed" ? "Completado" : "Rechazado"}
-                    </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        userForInvoice &&
-                        downloadInvoicePdf(
-                          {
-                            id: t.id,
-                            amount: t.amount,
-                            transferType: t.transferType,
-                            description: t.description,
-                            createdAt: t.createdAt,
-                            status: t.status,
-                          },
-                          userForInvoice,
-                        )
-                      }
-                      disabled={!userForInvoice || t.status !== "completed"}
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Generar factura
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-            <div className="flex items-center justify-between pt-2">
-              <p className="text-xs text-muted-foreground">
-                Página {page} de {totalPages}
-              </p>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                >
-                  Siguiente
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
@@ -1422,6 +1342,7 @@ function ProfessionalDashboardInner() {
                   <CardTitle>Acciones Rápidas</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
+                  <SubscriptionStatusButton variant="outline" className="w-full justify-start" />
                   <Button variant="outline" className="w-full justify-start">
                     <CreditCard className="h-4 w-4 mr-2" />
                     Solicitar pago a mi cuenta

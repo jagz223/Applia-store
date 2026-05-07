@@ -5,9 +5,9 @@ import { loadGoDriverActiveRideId } from "@/lib/cargo-driver-storage";
 import { loadGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 
 /**
- * Reanuda Go (Car Go / Pack Go) al reabrir la app:
- * - Si hay servicio activo del conductor, lo lleva a `/go/cargo/driver` o `/go/pack/driver`
- * - Si hay servicio activo del cliente, lo lleva a `/go/cargo` o `/go/pack`
+ * Reanuda Go (Taxi / Delivery) al reabrir la app:
+ * - Si hay servicio activo del conductor, lo lleva a `/go/taxi/driver` o `/go/delivery/driver`
+ * - Si hay servicio activo del cliente, lo lleva a `/go/taxi` o `/go/delivery`
  */
 export function GoActiveRideResume() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -20,23 +20,23 @@ export function GoActiveRideResume() {
 
     const cargoDriver = loadGoDriverActiveRideId("cargo");
     const packDriver = loadGoDriverActiveRideId("pack");
-    if (packDriver && !path.startsWith("/go/pack/driver")) {
-      setLocation("/go/pack/driver");
+    if (packDriver && !path.startsWith("/go/delivery/driver")) {
+      setLocation("/go/delivery/driver");
       return;
     }
-    if (cargoDriver && !path.startsWith("/go/cargo/driver")) {
-      setLocation("/go/cargo/driver");
+    if (cargoDriver && !path.startsWith("/go/taxi/driver")) {
+      setLocation("/go/taxi/driver");
       return;
     }
 
     const cargoRider = loadGoRiderActiveRideId("cargo");
     const packRider = loadGoRiderActiveRideId("pack");
-    if (packRider && !path.startsWith("/go/pack")) {
-      setLocation("/go/pack");
+    if (packRider && !path.startsWith("/go/delivery")) {
+      setLocation("/go/delivery");
       return;
     }
-    if (cargoRider && !path.startsWith("/go/cargo")) {
-      setLocation("/go/cargo");
+    if (cargoRider && !path.startsWith("/go/taxi")) {
+      setLocation("/go/taxi");
     }
   }, [isAuthenticated, isLoading, location, setLocation]);
 

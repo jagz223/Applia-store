@@ -148,7 +148,7 @@ export default function Booking() {
     [hiddenSlugs]
   );
   const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace || mobilityAllowed.delivery;
-  const mobilityHref = mobilityAllowed.transport ? "/go/cargo" : mobilityAllowed.marketplace ? "/go/shop" : "/go/pack";
+  const mobilityHref = mobilityAllowed.transport ? "/go/taxi" : mobilityAllowed.marketplace ? "/go/shop" : "/go/delivery";
   const visibleCategories = useMemo(() => {
     const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
     const hidden = new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs));
@@ -506,7 +506,7 @@ export default function Booking() {
                 <div className="min-w-0">
                   <p className="font-semibold text-foreground">¿Necesitas movilidad y envíos?</p>
                   <p className="text-sm text-muted-foreground">
-                    Taxi (Car Go), pedidos (Shop Go) y delivery (Pack Go) están en esta sección.
+                    Taxi, pedidos y delivery están en esta sección.
                   </p>
                 </div>
                 <Button asChild className="h-11 rounded-xl shrink-0">

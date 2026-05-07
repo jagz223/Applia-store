@@ -3,7 +3,7 @@
  *
  * Modelo:
  * - Históricamente, `providers.category/categoryId` era UNA sola categoría (ej. transport = Car Go).
- * - Para permitir que un conductor Car Go también use Pack Go / Shop Go, guardamos un arreglo opcional
+ * - Para permitir que un conductor Taxi también use Delivery / Pedidos, guardamos un arreglo opcional
  *   `goBrands: string[]` en el perfil del proveedor (Firestore/memoria; no requiere migración SQL).
  *
  * La UI arma la navegación y permisos usando esta función.

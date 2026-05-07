@@ -1,4 +1,4 @@
-import { addMonths } from "date-fns";
+import { addMonths, differenceInCalendarDays, startOfDay } from "date-fns";
 
 /** Días antes del vencimiento en los que se muestra aviso fuerte de renovación. */
 export const LISTING_SUBSCRIPTION_WARNING_DAYS = 10;
@@ -41,7 +41,10 @@ export function parseVisibilitySubscriptionEndMs(raw: unknown): number | null {
 export function isVisibilitySubscriptionWindowActive(endsAtRaw: unknown, nowMs: number = Date.now()): boolean {
   const endMs = parseVisibilitySubscriptionEndMs(endsAtRaw);
   if (endMs == null) return true;
-  return nowMs < endMs;
+  // Semántica por calendario: un "fin" en una fecha X se considera vigente durante todo ese día.
+  const nowDay = startOfDay(new Date(nowMs));
+  const endDay = startOfDay(new Date(endMs));
+  return differenceInCalendarDays(endDay, nowDay) >= 0;
 }
 
 export function computeListingPublished(args: {
@@ -69,5 +72,9 @@ export function extendVisibilitySubscriptionEndsAt(prevEndsAtRaw: unknown, appro
 export function listingSubscriptionDaysRemaining(endsAtRaw: unknown, nowMs: number = Date.now()): number | null {
   const endMs = parseVisibilitySubscriptionEndMs(endsAtRaw);
   if (endMs == null) return null;
-  return Math.ceil((endMs - nowMs) / (24 * 60 * 60 * 1000));
+  // Conteo por días de calendario (incluye "hoy" si aún es vigente).
+  const nowDay = startOfDay(new Date(nowMs));
+  const endDay = startOfDay(new Date(endMs));
+  const diff = differenceInCalendarDays(endDay, nowDay);
+  return diff >= 0 ? diff + 1 : 0;
 }

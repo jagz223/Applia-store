@@ -90,11 +90,15 @@ export class HybridStorage {
   getVerifyingStatusByUserId(userId: string) {
     return this.delegate("getVerifyingStatusByUserId", [userId]);
   }
-  upsertVerifyingStatusIdentificationPending(userId: string) {
-    return this.delegate("upsertVerifyingStatusIdentificationPending", [userId]);
+  upsertVerifyingStatusIdentificationPending(userId: string, requestType?: "onboarding" | "renewal") {
+    return this.delegate("upsertVerifyingStatusIdentificationPending", [userId, requestType]);
   }
-  upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string) {
-    return this.delegate("upsertVerifyingStatusTransactionPending", [userId, transactionDate]);
+  upsertVerifyingStatusTransactionPending(
+    userId: string,
+    transactionDate: string,
+    requestType?: "onboarding" | "renewal"
+  ) {
+    return this.delegate("upsertVerifyingStatusTransactionPending", [userId, transactionDate, requestType]);
   }
   getPendingVerifyingStatuses() {
     return this.delegate("getPendingVerifyingStatuses", []);

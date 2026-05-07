@@ -1,4 +1,7 @@
-/** Historial local del pasajero Car Go (hasta que exista API dedicada). */
+/**
+ * Historial local del pasajero (quien solicita taxi/delivery).
+ * Va por cuenta (`user.id`), separado del historial del conductor (`cargo-driver-trip-log`).
+ */
 
 export const CARGO_RIDER_TRIP_LOG_KEY = "cargo-rider-trip-log";
 
@@ -9,14 +12,25 @@ export type CargoRiderTripLog = {
   amountUsd: number;
   payment: "genfeb" | "cash" | "bank_transfer";
   driverName: string;
-  /** Módulo Go: transport (Car Go) o delivery (Pack Go). */
+  /** Módulo: taxi (`cargo`) o delivery (`pack`). */
   goSlug?: "cargo" | "pack";
 };
 
-export function loadRiderTripLog(): CargoRiderTripLog[] {
+function normalizeAccountId(accountId: string | null | undefined): string | null {
+  if (typeof accountId !== "string") return null;
+  const t = accountId.trim();
+  return t.length > 0 ? t : null;
+}
+
+/** Clave en localStorage: una lista por usuario (o invitado). */
+export function riderTripLogStorageKey(accountId: string | null | undefined): string {
+  const id = normalizeAccountId(accountId);
+  return id ? `${CARGO_RIDER_TRIP_LOG_KEY}:user:${id}` : `${CARGO_RIDER_TRIP_LOG_KEY}:guest`;
+}
+
+function parseRiderTripLogRaw(raw: string | null): CargoRiderTripLog[] {
+  if (!raw) return [];
   try {
-    const raw = localStorage.getItem(CARGO_RIDER_TRIP_LOG_KEY);
-    if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((t): t is CargoRiderTripLog => {
@@ -37,13 +51,35 @@ export function loadRiderTripLog(): CargoRiderTripLog[] {
   }
 }
 
-export function appendRiderTripLog(entry: CargoRiderTripLog): void {
+export function loadRiderTripLog(accountId?: string | null): CargoRiderTripLog[] {
   try {
-    const cur = loadRiderTripLog();
+    const key = riderTripLogStorageKey(accountId ?? null);
+    let rows = parseRiderTripLogRaw(localStorage.getItem(key));
+    if (rows.length === 0) {
+      const legacy = parseRiderTripLogRaw(localStorage.getItem(CARGO_RIDER_TRIP_LOG_KEY));
+      if (legacy.length > 0) {
+        try {
+          localStorage.setItem(key, JSON.stringify(legacy));
+          localStorage.removeItem(CARGO_RIDER_TRIP_LOG_KEY);
+        } catch {
+          /* ignore */
+        }
+        rows = legacy;
+      }
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+export function appendRiderTripLog(entry: CargoRiderTripLog, accountId?: string | null): void {
+  try {
+    const key = riderTripLogStorageKey(accountId ?? null);
+    const cur = parseRiderTripLogRaw(localStorage.getItem(key));
     const next = [entry, ...cur.filter((t) => t.id !== entry.id)].slice(0, 30);
-    localStorage.setItem(CARGO_RIDER_TRIP_LOG_KEY, JSON.stringify(next));
+    localStorage.setItem(key, JSON.stringify(next));
   } catch {
     /* ignore */
   }
 }
-

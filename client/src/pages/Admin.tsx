@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { 
@@ -54,7 +54,7 @@ import {
   usePatchPlatformPackFares,
   type WithdrawalHistoryStatus,
   type WithdrawalHistoryItem,
-  useCategories,
+  useAdminCategories,
   useSubcategories,
   useUpdateCategory,
   useCreateSubcategory,
@@ -72,6 +72,9 @@ import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerific
 import { AnimatePresence, motion } from "framer-motion";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName, CATEGORY_DISPLAY_NAMES } from "@shared/default-categories";
 import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
+import { firstAvailableSubcategoryIcon } from "@shared/subcategory-lucide-picklist";
+import { SubcategoryIconPicker } from "@/components/admin/SubcategoryIconPicker";
+import { CategoryIcon } from "@/components/CategoryIcon";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
 
 const USERS_PAGE_SIZE = 10;
@@ -582,8 +585,20 @@ function useSaldoUserSearch(debouncedName: string, queryEnabled = true) {
 
 
 
+function isRenderableAdminCategory(cat: unknown): cat is { id: number; name: string; slug: string } {
+  if (!cat || typeof cat !== "object") return false;
+  const o = cat as { id?: unknown; name?: unknown; slug?: unknown };
+  const id = typeof o.id === "number" ? o.id : Number(o.id);
+  if (!Number.isFinite(id) || id < 1) return false;
+  if (!String(o.name ?? "").trim()) return false;
+  if (!String(o.slug ?? "").trim()) return false;
+  return true;
+}
+
 function AdminCategoriesTab() {
-  const { data: categories = [], isLoading: isLoadingCategories } = useCategories();
+  const { data: categoriesRaw = [], isLoading: isLoadingCategories } = useAdminCategories();
+  const categories = categoriesRaw.filter(isRenderableAdminCategory);
+  const queryClient = useQueryClient();
   const updateCategory = useUpdateCategory();
   const createSubcategory = useCreateSubcategory();
   const updateSubcategory = useUpdateSubcategory();
@@ -598,12 +613,50 @@ function AdminCategoriesTab() {
   
   const [newSubcatName, setNewSubcatName] = useState("");
   const [newSubcatSlug, setNewSubcatSlug] = useState("");
+  const [newSubcatIcon, setNewSubcatIcon] = useState("");
   const [editingSubcatId, setEditingSubcatId] = useState<number | null>(null);
   const [editingSubcatName, setEditingSubcatName] = useState("");
+  const [editingSubcatIcon, setEditingSubcatIcon] = useState("");
+  const newSubcatDefaultsInitialized = useRef(false);
+
+  const iconsTakenByOtherSubs = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of subcategories) {
+      if (editingSubcatId != null && s.id === editingSubcatId) continue;
+      const ic = (s.icon ?? "").trim();
+      if (ic) set.add(ic);
+    }
+    return set;
+  }, [subcategories, editingSubcatId]);
+
+  const takenForNewSubcategory = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of subcategories) {
+      const ic = (s.icon ?? "").trim();
+      if (ic) set.add(ic);
+    }
+    return set;
+  }, [subcategories]);
+
+  useEffect(() => {
+    if (!editCategoryOpen) {
+      newSubcatDefaultsInitialized.current = false;
+      return;
+    }
+    if (!selectedCategory || isLoadingSubcategories) return;
+    if (newSubcatDefaultsInitialized.current) return;
+    setNewSubcatIcon(firstAvailableSubcategoryIcon(takenForNewSubcategory));
+    newSubcatDefaultsInitialized.current = true;
+  }, [editCategoryOpen, selectedCategory?.id, isLoadingSubcategories, takenForNewSubcategory]);
 
   const handleEditCategory = (category: any) => {
     setSelectedCategory(category);
     setCategoryNameDraft(category.name || "");
+    setNewSubcatName("");
+    setNewSubcatSlug("");
+    setEditingSubcatId(null);
+    setEditingSubcatName("");
+    setEditingSubcatIcon("");
     setEditCategoryOpen(true);
   };
 
@@ -621,30 +674,65 @@ function AdminCategoriesTab() {
 
   const handleCreateSubcategory = () => {
     if (!selectedCategory || !newSubcatName.trim() || !newSubcatSlug.trim()) return;
-    createSubcategory.mutate({
-      name: newSubcatName.trim(),
-      slug: newSubcatSlug.trim(),
-      categoryId: selectedCategory.id,
-      categorySlug: selectedCategory.slug
-    }, {
-      onSuccess: () => {
-        setNewSubcatName("");
-        setNewSubcatSlug("");
+    const icon = newSubcatIcon.trim();
+    if (icon && takenForNewSubcategory.has(icon)) {
+      toast({
+        title: "Icono ya en uso",
+        description: "Ese icono lo tiene otra subcategoría de esta categoría. Elige otro en la cuadrícula.",
+        variant: "destructive",
+      });
+      return;
+    }
+    createSubcategory.mutate(
+      {
+        name: newSubcatName.trim(),
+        slug: newSubcatSlug.trim(),
+        categoryId: selectedCategory.id,
+        categorySlug: selectedCategory.slug,
+        ...(icon ? { icon } : {}),
+      },
+      {
+        onSuccess: async (_, variables) => {
+          setNewSubcatName("");
+          setNewSubcatSlug("");
+          await queryClient.refetchQueries({ queryKey: ["/api/subcategories", variables.categoryId] });
+          const fresh =
+            queryClient.getQueryData<Subcategory[]>(["/api/subcategories", variables.categoryId]) ?? [];
+          const used = new Set(fresh.map((s) => (s.icon ?? "").trim()).filter(Boolean));
+          setNewSubcatIcon(firstAvailableSubcategoryIcon(used));
+        },
       }
-    });
+    );
   };
 
   const handleSaveSubcategory = (id: number) => {
     if (!selectedCategory || !editingSubcatName.trim()) return;
-    updateSubcategory.mutate({
-      id,
-      categoryId: selectedCategory.id,
-      name: editingSubcatName.trim()
-    }, {
-      onSuccess: () => {
-        setEditingSubcatId(null);
+    const icon = editingSubcatIcon.trim();
+    if (
+      icon &&
+      subcategories.some((s) => s.id !== id && (s.icon ?? "").trim() === icon)
+    ) {
+      toast({
+        title: "Icono ya en uso",
+        description: "Ese icono lo tiene otra subcategoría de esta categoría. Elige otro en la cuadrícula.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateSubcategory.mutate(
+      {
+        id,
+        categoryId: selectedCategory.id,
+        name: editingSubcatName.trim(),
+        ...(icon ? { icon } : {}),
+      },
+      {
+        onSuccess: () => {
+          setEditingSubcatId(null);
+          setEditingSubcatIcon("");
+        },
       }
-    });
+    );
   };
 
   return (
@@ -763,7 +851,7 @@ function AdminCategoriesTab() {
             <div className="border-t pt-4 space-y-4">
               <h3 className="font-semibold text-lg">Subcategorías</h3>
               
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Input 
                   placeholder="Nombre de subcategoría" 
                   value={newSubcatName}
@@ -775,64 +863,136 @@ function AdminCategoriesTab() {
                   onChange={(e) => setNewSubcatSlug(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
                 />
                 <Button 
+                  className="sm:col-span-3 lg:col-span-1 lg:justify-self-end"
                   onClick={handleCreateSubcategory}
-                  disabled={createSubcategory.isPending || !newSubcatName.trim() || !newSubcatSlug.trim()}
+                  disabled={
+                    createSubcategory.isPending ||
+                    !newSubcatName.trim() ||
+                    !newSubcatSlug.trim() ||
+                    !newSubcatIcon.trim()
+                  }
                 >
                   {createSubcategory.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Crear Subcategoría
                 </Button>
               </div>
+              <SubcategoryIconPicker
+                value={newSubcatIcon}
+                onChange={setNewSubcatIcon}
+                takenIconNames={takenForNewSubcategory}
+                disabled={createSubcategory.isPending}
+              />
 
               {isLoadingSubcategories ? (
                 <div className="py-4 text-center text-sm text-muted-foreground">Cargando subcategorías…</div>
               ) : subcategories.length === 0 ? (
                 <div className="py-4 text-center text-sm text-muted-foreground">No hay subcategorías en esta categoría.</div>
               ) : (
-                <div className="rounded-md border">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/50">
-                        <th className="text-left p-2">Nombre</th>
-                        <th className="text-left p-2">Slug</th>
-                        <th className="text-right p-2">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {subcategories.map((sub: Subcategory) => (
-                        <tr key={sub.id} className="border-b">
-                          <td className="p-2">
-                            {editingSubcatId === sub.id ? (
-                              <Input 
-                                value={editingSubcatName}
-                                onChange={(e) => setEditingSubcatName(e.target.value)}
-                                className="h-8"
-                              />
-                            ) : (
-                              sub.name
-                            )}
-                          </td>
-                          <td className="p-2 text-muted-foreground">{sub.slug}</td>
-                          <td className="p-2 text-right">
-                            {editingSubcatId === sub.id ? (
-                              <div className="flex justify-end gap-2">
-                                <Button size="sm" variant="outline" onClick={() => setEditingSubcatId(null)}>Cancelar</Button>
-                                <Button size="sm" onClick={() => handleSaveSubcategory(sub.id)} disabled={updateSubcategory.isPending}>
-                                  Guardar
-                                </Button>
-                              </div>
-                            ) : (
-                              <Button size="sm" variant="ghost" onClick={() => {
-                                setEditingSubcatId(sub.id);
-                                setEditingSubcatName(sub.name);
-                              }}>
+                <div className="space-y-3">
+                  {editingSubcatId != null ? (
+                    <div className="rounded-lg border border-primary/30 bg-muted/20 p-4 space-y-3">
+                      <p className="text-sm font-semibold text-foreground">Editar subcategoría</p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Nombre</Label>
+                          <Input
+                            value={editingSubcatName}
+                            onChange={(e) => setEditingSubcatName(e.target.value)}
+                            className="h-9"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Slug (solo lectura)</Label>
+                          <Input
+                            value={subcategories.find((s) => s.id === editingSubcatId)?.slug ?? ""}
+                            readOnly
+                            className="h-9 bg-muted/50"
+                          />
+                        </div>
+                      </div>
+                      <SubcategoryIconPicker
+                        value={editingSubcatIcon}
+                        onChange={setEditingSubcatIcon}
+                        takenIconNames={iconsTakenByOtherSubs}
+                        disabled={updateSubcategory.isPending}
+                      />
+                      <div className="flex flex-wrap gap-2 justify-end">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          onClick={() => {
+                            setEditingSubcatId(null);
+                            setEditingSubcatIcon("");
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
+                          type="button"
+                          onClick={() => editingSubcatId != null && handleSaveSubcategory(editingSubcatId)}
+                          disabled={updateSubcategory.isPending || !editingSubcatName.trim()}
+                        >
+                          {updateSubcategory.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Guardar cambios
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="text-left p-2 w-14">Icono</th>
+                          <th className="text-left p-2">Nombre</th>
+                          <th className="text-left p-2">Slug</th>
+                          <th className="text-right p-2">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {subcategories.map((sub: Subcategory) => (
+                          <tr
+                            key={sub.id}
+                            className={`border-b ${editingSubcatId === sub.id ? "bg-primary/5" : ""}`}
+                          >
+                            <td className="p-2 align-middle">
+                              {sub.icon ? (
+                                <span className="inline-flex rounded-md border border-border bg-background p-1.5">
+                                  <CategoryIcon name={sub.icon} className="h-4 w-4 text-foreground" />
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">—</span>
+                              )}
+                            </td>
+                            <td className="p-2 align-middle font-medium">{sub.name}</td>
+                            <td className="p-2 text-muted-foreground align-middle">{sub.slug}</td>
+                            <td className="p-2 text-right align-middle">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                type="button"
+                                onClick={() => {
+                                  setEditingSubcatId(sub.id);
+                                  setEditingSubcatName(sub.name);
+                                  const used = new Set(
+                                    subcategories
+                                      .filter((x) => x.id !== sub.id)
+                                      .map((x) => (x.icon ?? "").trim())
+                                      .filter(Boolean)
+                                  );
+                                  const cur = (sub.icon ?? "").trim();
+                                  setEditingSubcatIcon(cur || firstAvailableSubcategoryIcon(used));
+                                }}
+                              >
                                 Editar
                               </Button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>
@@ -1247,6 +1407,7 @@ export default function AdminPanel() {
     name: string;
     email?: string | null;
     avatar?: string | null;
+    requestType?: "onboarding" | "renewal";
     user_identification?: string | null;
     professionalCredentialUrl?: string | null;
     identification_verified: "pending" | "verified" | "rejected";
@@ -1254,6 +1415,7 @@ export default function AdminPanel() {
     transacction_verified: "pending" | "verified" | "rejected";
     transacction_code?: string | null;
     providerCategorySlug?: string | null;
+    visibilitySubscriptionEndsAt?: string | null;
   };
 
   const credentialSlideTitle = (assoc: AdminVerifyingStatusItem) =>
@@ -1289,6 +1451,22 @@ export default function AdminPanel() {
     enabled: fullAdmin && activeTab === "overview",
   });
   const pendingAccountChangeRequests: AdminAccountChangeRequest[] = adminAccountChangeReqData?.requests ?? [];
+
+  const { data: adminAuditLogData, isLoading: adminAuditLogLoading } = useQuery({
+    queryKey: ["admin-audit-log"],
+    queryFn: () => fetchWithAuth("/api/admin/audit-log?limit=80"),
+    enabled: fullAdmin && activeTab === "overview",
+  });
+  const auditItems: Array<{
+    id: string;
+    action: string;
+    adminUserId: string;
+    adminName?: string | null;
+    adminEmail?: string | null;
+    affectedUserId: string;
+    createdAt: any;
+    meta?: any;
+  }> = adminAuditLogData?.items ?? [];
 
   const resolveAccountChangeRequestMutation = useMutation({
     mutationFn: async (args: { id: number; action: "approve" | "reject" }) =>
@@ -1568,6 +1746,8 @@ export default function AdminPanel() {
                             {paged.map((assoc) => {
                               const identEnabled = assoc.identification_verified === "pending";
                               const txEnabled = assoc.transacction_verified === "pending";
+                              const reqLabel = assoc.requestType === "renewal" ? "Renovación" : "Nuevo asociado";
+                              const reqBadgeVariant = assoc.requestType === "renewal" ? "secondary" : "default";
                               return (
                                 <div key={assoc.userId} className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4">
                                   <div className="flex items-center justify-between gap-3">
@@ -1577,16 +1757,27 @@ export default function AdminPanel() {
                                       </Avatar>
                                       <div className="min-w-0">
                                         <p className="font-medium truncate">{assoc.name}</p>
-                                        {assoc.email ? <p className="text-sm text-gray-500 truncate">{assoc.email}</p> : null}
+                                        {assoc.email ? <p className="text-sm text-muted-foreground truncate">{assoc.email}</p> : null}
                                       </div>
                                     </div>
+                                    <Badge
+                                      className={
+                                        assoc.requestType === "renewal"
+                                          ? "shrink-0 border-transparent bg-indigo-600/15 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200"
+                                          : "shrink-0 border-transparent bg-emerald-600/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+                                      }
+                                      variant={reqBadgeVariant}
+                                    >
+                                      {reqLabel}
+                                    </Badge>
                                   </div>
 
+                                  {assoc.requestType === "renewal" ? null : (
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
                                         <p className="font-medium">Verificación de identificación</p>
-                                        <p className="text-xs text-gray-500 mt-1">
+                                        <p className="text-xs text-muted-foreground mt-1">
                                           Estado: {stateLabel(assoc.identification_verified)}
                                         </p>
                                       </div>
@@ -1604,113 +1795,124 @@ export default function AdminPanel() {
                                       </Badge>
                                     </div>
 
-                                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="shrink-0"
-                                          disabled={!assoc.avatar}
-                                          onClick={() =>
-                                            setAssocImageDialog({
-                                              open: true,
-                                              userId: assoc.userId,
-                                              revieweeName: assoc.name?.trim() || "—",
-                                              initialIndex: 0,
-                                              slides: [...associateVerificationSlides(assoc)],
-                                            })
-                                          }
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="shrink-0"
-                                          disabled={!assoc.user_identification}
-                                          onClick={() =>
-                                            setAssocImageDialog({
-                                              open: true,
-                                              userId: assoc.userId,
-                                              revieweeName: assoc.name?.trim() || "—",
-                                              initialIndex: 1,
-                                              slides: [...associateVerificationSlides(assoc)],
-                                            })
-                                          }
-                                        >
-                                          <FileText className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="shrink-0"
-                                          disabled={!assoc.professionalCredentialUrl}
-                                          onClick={() =>
-                                            setAssocImageDialog({
-                                              open: true,
-                                              userId: assoc.userId,
-                                              revieweeName: assoc.name?.trim() || "—",
-                                              initialIndex: 2,
-                                              slides: [...associateVerificationSlides(assoc)],
-                                            })
-                                          }
-                                          title={
-                                            assoc.providerCategorySlug === "transport"
-                                              ? "Ver licencia de conducir"
-                                              : "Ver documento profesional"
-                                          }
-                                        >
-                                          <Shield className="h-4 w-4" />
-                                        </Button>
-                                      </div>
+                                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="shrink-0"
+                                            disabled={!assoc.avatar}
+                                            onClick={() =>
+                                              setAssocImageDialog({
+                                                open: true,
+                                                userId: assoc.userId,
+                                                revieweeName: assoc.name?.trim() || "—",
+                                                initialIndex: 0,
+                                                slides: [...associateVerificationSlides(assoc)],
+                                              })
+                                            }
+                                          >
+                                            <Eye className="h-4 w-4" />
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="shrink-0"
+                                            disabled={!assoc.user_identification}
+                                            onClick={() =>
+                                              setAssocImageDialog({
+                                                open: true,
+                                                userId: assoc.userId,
+                                                revieweeName: assoc.name?.trim() || "—",
+                                                initialIndex: 1,
+                                                slides: [...associateVerificationSlides(assoc)],
+                                              })
+                                            }
+                                          >
+                                            <FileText className="h-4 w-4" />
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="shrink-0"
+                                            disabled={!assoc.professionalCredentialUrl}
+                                            onClick={() =>
+                                              setAssocImageDialog({
+                                                open: true,
+                                                userId: assoc.userId,
+                                                revieweeName: assoc.name?.trim() || "—",
+                                                initialIndex: 2,
+                                                slides: [...associateVerificationSlides(assoc)],
+                                              })
+                                            }
+                                            title={
+                                              assoc.providerCategorySlug === "transport"
+                                                ? "Ver licencia de conducir"
+                                                : "Ver documento profesional"
+                                            }
+                                          >
+                                            <Shield className="h-4 w-4" />
+                                          </Button>
+                                        </div>
 
-                                      <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0 sm:gap-2">
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="min-w-0 justify-center text-green-600"
-                                          disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
-                                          onClick={() =>
-                                            updateVerifyingStatusMutation.mutate({
-                                              userId: assoc.userId,
-                                              step: "identification",
-                                              action: "approve",
-                                            })
-                                          }
-                                        >
-                                          <CheckCircle className="h-4 w-4 shrink-0 sm:mr-1" />
-                                          <span className="truncate">Aprobar</span>
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="min-w-0 justify-center text-red-600"
-                                          disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
-                                          onClick={() =>
-                                            updateVerifyingStatusMutation.mutate({
-                                              userId: assoc.userId,
-                                              step: "identification",
-                                              action: "reject",
-                                            })
-                                          }
-                                        >
-                                          <XCircle className="h-4 w-4 shrink-0 sm:mr-1" />
-                                          <span className="truncate">Rechazar</span>
-                                        </Button>
+                                        <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0 sm:gap-2">
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="min-w-0 justify-center text-green-600"
+                                            disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
+                                            onClick={() =>
+                                              updateVerifyingStatusMutation.mutate({
+                                                userId: assoc.userId,
+                                                step: "identification",
+                                                action: "approve",
+                                              })
+                                            }
+                                          >
+                                            <CheckCircle className="h-4 w-4 shrink-0 sm:mr-1" />
+                                            <span className="truncate">Aprobar</span>
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="min-w-0 justify-center text-red-600"
+                                            disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
+                                            onClick={() =>
+                                              updateVerifyingStatusMutation.mutate({
+                                                userId: assoc.userId,
+                                                step: "identification",
+                                                action: "reject",
+                                              })
+                                            }
+                                          >
+                                            <XCircle className="h-4 w-4 shrink-0 sm:mr-1" />
+                                            <span className="truncate">Rechazar</span>
+                                          </Button>
+                                        </div>
                                       </div>
-                                    </div>
                                   </div>
+                                  )}
 
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
                                         <p className="font-medium">Recarga de 15$</p>
-                                        <p className="break-words text-xs text-gray-500 mt-1">
+                                        <p className="break-words text-xs text-muted-foreground mt-1">
                                           Fecha:{" "}
                                           {assoc.transacction_date
                                             ? new Date(assoc.transacction_date).toLocaleDateString("es-EC")
                                             : "—"}{" "}
                                           · Código: {assoc.transacction_code ?? "—"}
+                                          {assoc.visibilitySubscriptionEndsAt ? (
+                                            <>
+                                              {" "}
+                                              · Vence:{" "}
+                                              {new Date(assoc.visibilitySubscriptionEndsAt).toLocaleString("es-EC", {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                              })}
+                                            </>
+                                          ) : null}
                                         </p>
                                       </div>
                                       <Badge
@@ -1797,6 +1999,55 @@ export default function AdminPanel() {
                         );
                       })()
                     )}
+
+                    <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-medium">Historial de auditoría</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Registro de acciones sensibles: fecha, admin, acción y usuario afectado.
+                          </p>
+                        </div>
+                      </div>
+
+                      {adminAuditLogLoading ? (
+                        <div className="py-6 text-center text-sm text-muted-foreground">Cargando historial…</div>
+                      ) : auditItems.length === 0 ? (
+                        <div className="py-6 text-center text-sm text-muted-foreground">Sin eventos recientes.</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {auditItems.slice(0, 40).map((it) => {
+                            const d = new Date(it.createdAt?.toDate ? it.createdAt.toDate() : it.createdAt);
+                            const dateLabel = Number.isNaN(d.getTime())
+                              ? "—"
+                              : d.toLocaleString("es-EC", { dateStyle: "medium", timeStyle: "short" });
+                            const actionLabel =
+                              it.action === "subscription_payment_approved"
+                                ? "Pago mensual aprobado"
+                                : it.action === "subscription_payment_rejected"
+                                  ? "Pago mensual rechazado"
+                                  : it.action === "associate_onboarding_approved"
+                                    ? "Nuevo asociado aprobado"
+                                    : it.action === "associate_onboarding_rejected"
+                                      ? "Nuevo asociado rechazado"
+                                      : it.action === "account_change_request_approved"
+                                        ? "Cambio de datos aprobado"
+                                        : it.action === "account_change_request_rejected"
+                                          ? "Cambio de datos rechazado"
+                                          : it.action;
+                            return (
+                              <div key={it.id} className="rounded-lg border bg-background p-3 text-sm">
+                                <p className="font-medium">{actionLabel}</p>
+                                <p className="text-xs text-muted-foreground mt-1 break-words">
+                                  {dateLabel} · Admin: {(it.adminName ?? it.adminUserId) || "—"}
+                                    {it.adminEmail ? ` (${it.adminEmail})` : ""} · Usuario: {it.affectedUserId || "—"}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>

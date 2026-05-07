@@ -33,6 +33,23 @@ export function useCategories() {
   });
 }
 
+/** Lista completa de categorías para el panel admin (incluye documentos legacy legal/financial en `categories`). */
+export const ADMIN_CATEGORIES_QUERY_KEY = ["/api/admin/categories"] as const;
+
+export function useAdminCategories() {
+  return useQuery({
+    queryKey: ADMIN_CATEGORIES_QUERY_KEY,
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/admin/categories", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("No se pudieron cargar las categorías (admin)");
+      return api.categories.list.responses[200].parse(await res.json());
+    },
+  });
+}
+
 export interface Subcategory {
   id: number;
   name: string;
@@ -77,6 +94,7 @@ export function useUpdateCategory() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.categories.list.path] });
       debouncedRefetch(queryClient, [api.categories.list.path]);
+      queryClient.invalidateQueries({ queryKey: ADMIN_CATEGORIES_QUERY_KEY });
       toast({ title: "Categoría actualizada", description: "Los cambios se han guardado exitosamente." });
     },
     onError: (error: any) => {
@@ -1379,6 +1397,8 @@ export type ProfessionalVerificationDto = {
 
 export type VerifyingStatusMeDto = {
   user: string;
+  /** null para compat con docs viejos / sin requestType aún */
+  requestType?: "onboarding" | "renewal" | null;
   identification_verified: "rejected" | "pending" | "verified";
   transacction_date: string | null;
   /** null = aún no hay intento de pago registrado */

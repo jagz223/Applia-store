@@ -12,10 +12,19 @@ type QuickSettingsPanelProps = {
 const linkCls =
   "flex items-center justify-between w-full rounded-lg border border-border bg-muted/25 px-4 py-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted/45 active:scale-[0.99]";
 
+/** En flujos Go taxi / delivery no mostramos “datos de pago” (no aplica en esa UI). */
+function isGoTaxiOrDeliverySettingsContext(returnPath: string): boolean {
+  const p = returnPath.split("?")[0] || "";
+  return p.startsWith("/go/taxi") || p.startsWith("/go/delivery");
+}
+
 export function QuickSettingsPanel({ returnPath, onNavigate }: QuickSettingsPanelProps) {
   const safeReturn =
     typeof returnPath === "string" && returnPath.startsWith("/") ? returnPath : "/dashboard";
   const settingsHref = `/settings?return=${encodeURIComponent(safeReturn)}`;
+  const profileLinkLabel = isGoTaxiOrDeliverySettingsContext(safeReturn)
+    ? "Editar perfil"
+    : "Editar perfil y datos de pago";
 
   return (
     <div className="space-y-4">
@@ -30,7 +39,7 @@ export function QuickSettingsPanel({ returnPath, onNavigate }: QuickSettingsPane
         </CardHeader>
         <CardContent className="space-y-2">
           <Link href={settingsHref} onClick={onNavigate} className={linkCls}>
-            <span>Editar perfil y datos de pago</span>
+            <span>{profileLinkLabel}</span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           </Link>
           <Link href="/notifications" onClick={onNavigate} className={linkCls}>

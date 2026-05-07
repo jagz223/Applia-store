@@ -225,14 +225,14 @@ function emitRideCancelled(
     io.to(`user:${uid}`).emit("cargo:ride:cancelled", payload);
   }
 
-  // Push al pasajero si no está viendo /go/cargo.
+  // Push al pasajero si no está viendo Go (Taxi).
   try {
     const pth = getUserActivePath(String(ride.riderUserId));
-    if (!pth || !pth.startsWith("/go/cargo")) {
+    if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
       void notificationService.sendPushToUser(ride.riderUserId, {
-        title: "Car Go",
+        title: "Servicio de taxi",
         body: cancelledBy === "driver" ? "El conductor canceló el viaje." : "El viaje fue cancelado.",
-        data: { url: "/go/cargo", type: "cargo_ride_cancelled", rideId: ride.id },
+        data: { url: "/go/taxi", type: "cargo_ride_cancelled", rideId: ride.id },
       });
     }
   } catch {}
@@ -293,17 +293,17 @@ async function offerNextDriver(
     expiresAt: ride.offerExpiresAt,
   });
 
-  // Guardar oferta pendiente para “recovery” si el driver no estaba en /go/cargo/driver.
+  // Guardar oferta pendiente para “recovery” si el driver no estaba en Go (Taxi driver).
   pendingOfferByDriverId.set(driverId, { rideId: ride.id, expiresAt: ride.offerExpiresAt!, module: "cargo" });
 
   // Push al driver si no está viendo la vista de driver (o no reportó ruta).
   try {
     const pth = getUserActivePath(String(driverId));
-    if (!pth || !pth.startsWith("/go/cargo/driver")) {
+    if (!pth || (!pth.startsWith("/go/taxi/driver") && !pth.startsWith("/go/cargo/driver"))) {
       void notificationService.sendPushToUser(driverId, {
-        title: "Car Go",
+        title: "Servicio de taxi",
         body: "Tienes un servicio disponible. Abre para aceptar o rechazar.",
-        data: { url: "/go/cargo/driver", type: "cargo_ride_offer", rideId: ride.id },
+        data: { url: "/go/taxi/driver", type: "cargo_ride_offer", rideId: ride.id },
       });
     }
   } catch {}
@@ -644,14 +644,14 @@ export function registerMobilityRideRoutes(app: Express) {
         conversationId,
       });
 
-      // Push al pasajero solo si no está viendo /go/cargo (o no reportó ruta).
+      // Push al pasajero solo si no está viendo Go (Taxi) (o no reportó ruta).
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/cargo")) {
+        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Car Go",
+            title: "Servicio de taxi",
             body: "Tu viaje fue aceptado. Abre para ver a tu conductor.",
-            data: { url: "/go/cargo", type: "cargo_ride_matched", rideId },
+            data: { url: "/go/taxi", type: "cargo_ride_matched", rideId },
           });
         }
       } catch {}
@@ -762,11 +762,11 @@ export function registerMobilityRideRoutes(app: Express) {
       io.to(`user:${driverUserId}`).emit("cargo:ride:started", { rideId });
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/cargo")) {
+        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Car Go",
+            title: "Servicio de taxi",
             body: "Tu viaje inició.",
-            data: { url: "/go/cargo", type: "cargo_ride_started", rideId },
+            data: { url: "/go/taxi", type: "cargo_ride_started", rideId },
           });
         }
       } catch {}
@@ -796,11 +796,11 @@ export function registerMobilityRideRoutes(app: Express) {
       io.to(`user:${driverUserId}`).emit("cargo:ride:driver_searching", { rideId });
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/cargo")) {
+        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Car Go",
+            title: "Servicio de taxi",
             body: "Tu conductor ya está coordinando la recogida.",
-            data: { url: "/go/cargo", type: "cargo_driver_searching", rideId },
+            data: { url: "/go/taxi", type: "cargo_driver_searching", rideId },
           });
         }
       } catch {}
@@ -882,11 +882,11 @@ export function registerMobilityRideRoutes(app: Express) {
       }
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/cargo")) {
+        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Car Go",
+            title: "Servicio de taxi",
             body: "Tu viaje terminó.",
-            data: { url: "/go/cargo", type: "cargo_ride_completed", rideId },
+            data: { url: "/go/taxi", type: "cargo_ride_completed", rideId },
           });
         }
       } catch {}
@@ -897,7 +897,7 @@ export function registerMobilityRideRoutes(app: Express) {
     }
   });
 
-  // POST /api/mobility/rides/:rideId/rate - Calificar al otro participante (Car Go)
+  // POST /api/mobility/rides/:rideId/rate - Calificar al otro participante (Taxi)
   app.post("/api/mobility/rides/:rideId/rate", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id as string;

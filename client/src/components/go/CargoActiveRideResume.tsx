@@ -18,14 +18,14 @@ export function CargoActiveRideResume() {
     if (path.startsWith("/login") || path.startsWith("/register")) return;
 
     const driverRide = loadDriverActiveRideId();
-    if (driverRide && !path.startsWith("/go/cargo/driver")) {
-      setLocation("/go/cargo/driver");
+    if (driverRide && !path.startsWith("/go/taxi/driver")) {
+      setLocation("/go/taxi/driver");
       return;
     }
 
     const riderRide = loadRiderActiveRideId();
-    if (riderRide && path !== "/go/cargo") {
-      setLocation("/go/cargo");
+    if (riderRide && path !== "/go/taxi") {
+      setLocation("/go/taxi");
     }
   }, [isAuthenticated, isLoading, location, setLocation]);
 

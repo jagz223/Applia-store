@@ -12,23 +12,39 @@ import { useEffect } from "react";
 import { useSocket } from "@/hooks/use-socket";
 import { GoChatAutoCloseOnRideEnd } from "@/components/go/GoChatAutoCloseOnRideEnd";
 import { GoChatBadgeOnMessage } from "@/components/go/GoChatBadgeOnMessage";
+import { ListingSubscriptionRibbon } from "@/components/ListingSubscriptionRibbon";
 
 export function GoShellLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { socket } = useSocket();
-  const headerTitle = location.startsWith("/go/cargo")
-    ? "Car Go"
-    : location.startsWith("/go/pack")
-      ? "Pack Go"
+  const headerTitle =
+    location.startsWith("/go/taxi") || location.startsWith("/go/cargo")
+    ? "Servicio de taxi"
+    : location.startsWith("/go/delivery") || location.startsWith("/go/pack")
+      ? "Delivery"
       : location.startsWith("/go/shop")
-        ? "Shop Go"
+        ? "Pedidos"
         : "Movilidad y envíos";
-  const wideDesktop = location.startsWith("/go/cargo") || location.startsWith("/go/pack");
+  const wideDesktop =
+    location.startsWith("/go/taxi") ||
+    location.startsWith("/go/cargo") ||
+    location.startsWith("/go/delivery") ||
+    location.startsWith("/go/pack");
   /** En mapa/viaje hacemos overflow hidden; en ajustes el contenido debe desplazarse en móvil. */
   const mainScrollOnMobile =
-    location === "/go/cargo/driver/settings" || location === "/go/pack/driver/settings";
+    location === "/go/taxi/driver/settings" ||
+    location === "/go/cargo/driver/settings" ||
+    location === "/go/delivery/driver/settings" ||
+    location === "/go/pack/driver/settings";
   const isGoMapView =
-    location === "/go/cargo" || location === "/go/cargo/driver" || location === "/go/pack" || location === "/go/pack/driver";
+    location === "/go/taxi" ||
+    location === "/go/taxi/driver" ||
+    location === "/go/cargo" ||
+    location === "/go/cargo/driver" ||
+    location === "/go/delivery" ||
+    location === "/go/delivery/driver" ||
+    location === "/go/pack" ||
+    location === "/go/pack/driver";
 
   useEffect(() => {
     if (!socket) return;
@@ -78,6 +94,7 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
               wideDesktop ? "md:overflow-y-auto md:overscroll-y-contain" : "md:overflow-y-auto",
             ].join(" ")}
           >
+            <ListingSubscriptionRibbon />
             {children}
           </main>
           <GoBottomNav />

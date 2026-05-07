@@ -28,6 +28,8 @@ import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shar
 import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
+import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
+import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
 const getDb = async () => (await import("./db")).db;
 
 /**
@@ -280,8 +282,15 @@ export interface IStorage
   // ==================== verifying_status (nueva colección) ====================
   getVerifyingStatusByUserId(userId: string): Promise<VerifyingStatus | null>;
   getPendingVerifyingStatuses(): Promise<VerifyingStatus[]>;
-  upsertVerifyingStatusIdentificationPending(userId: string): Promise<VerifyingStatus>;
-  upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus>;
+  upsertVerifyingStatusIdentificationPending(
+    userId: string,
+    requestType?: "onboarding" | "renewal",
+  ): Promise<VerifyingStatus>;
+  upsertVerifyingStatusTransactionPending(
+    userId: string,
+    transactionDate: string,
+    requestType?: "onboarding" | "renewal",
+  ): Promise<VerifyingStatus>;
   setVerifyingStatusIdentification(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
   setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
 
@@ -302,6 +311,8 @@ export interface IStorage
 
 export class InMemoryStorage implements IStorage {
   private bookings: any[] = [];
+  /** monthKey `YYYY-MM` → subcategoryId → conteo (misma semántica que Firestore). */
+  private subcategoryMonthlyBookingCounts = new Map<string, Map<number, number>>();
   private users: any[] = [];
   private userIdCounter = 1;
   
@@ -502,11 +513,49 @@ export class InMemoryStorage implements IStorage {
     this.bookings.push(newBooking);
     return newBooking;
   }
+
+  async incrementSubcategoryMonthlyBookingCount(subcategoryId: number | null | undefined): Promise<void> {
+    const id = subcategoryId != null ? Number(subcategoryId) : NaN;
+    if (!Number.isFinite(id) || id <= 0) return;
+    const monthKey = getGenfebStatsMonthKey();
+    let inner = this.subcategoryMonthlyBookingCounts.get(monthKey);
+    if (!inner) {
+      inner = new Map();
+      this.subcategoryMonthlyBookingCounts.set(monthKey, inner);
+    }
+    inner.set(id, (inner.get(id) ?? 0) + 1);
+  }
+
+  async getMonthlyPopularSubcategoryBookingCounts(
+    monthKey: string,
+    limit: number
+  ): Promise<{ subcategoryId: number; count: number }[]> {
+    const inner = this.subcategoryMonthlyBookingCounts.get(monthKey);
+    if (!inner || inner.size === 0) return [];
+    const lim = Math.min(50, Math.max(1, Math.floor(limit)));
+    const rows = [...inner.entries()].map(([subcategoryId, count]) => ({ subcategoryId, count }));
+    rows.sort((a, b) => b.count - a.count || a.subcategoryId - b.subcategoryId);
+    return rows.slice(0, lim);
+  }
   
   async updateBookingStatus(id: number, status: string): Promise<any | undefined> {
     const booking = this.bookings.find(b => b.id === id);
-    if (booking) {
-      booking.status = status;
+    if (!booking) return undefined;
+    const prev = String((booking as { status?: string }).status ?? "pending");
+    const countNow = bookingTransitionCountsForMonthlySubcategoryDemand(
+      prev,
+      status,
+      (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted === true
+    );
+    (booking as { status: string }).status = status;
+    if (status === "completed") (booking as { completedAt?: Date }).completedAt = new Date();
+    if (countNow) {
+      (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted = true;
+      const svc = await this.getService(Number((booking as { serviceId?: number }).serviceId));
+      const subId = (svc as { subcategoryId?: number | null } | undefined)?.subcategoryId;
+      await this.incrementSubcategoryMonthlyBookingCount(
+        subId != null && Number.isFinite(Number(subId)) ? Number(subId) : null
+      );
     }
     return booking;
   }
@@ -521,8 +570,22 @@ export class InMemoryStorage implements IStorage {
     }
     const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
     if (cost <= 0) {
+      const prev = String(booking.status ?? "pending");
+      const countNow = bookingTransitionCountsForMonthlySubcategoryDemand(
+        prev,
+        "completed",
+        (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted === true
+      );
       (booking as { status: string }).status = "completed";
       (booking as { completedAt?: Date }).completedAt = new Date();
+      if (countNow) {
+        (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted = true;
+        const svc = await this.getService(Number((booking as { serviceId?: number }).serviceId));
+        const subId = (svc as { subcategoryId?: number | null } | undefined)?.subcategoryId;
+        await this.incrementSubcategoryMonthlyBookingCount(
+          subId != null && Number.isFinite(Number(subId)) ? Number(subId) : null
+        );
+      }
       return booking;
     }
     const commissionRate = await getPlatformCommissionRate();
@@ -569,8 +632,22 @@ export class InMemoryStorage implements IStorage {
         (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + cost;
       }
     }
+    const prevStatusForDemand = String(booking.status ?? "pending");
     (booking as { status: string }).status = "completed";
     (booking as { completedAt?: Date }).completedAt = new Date();
+    const countDemandOnComplete = bookingTransitionCountsForMonthlySubcategoryDemand(
+      prevStatusForDemand,
+      "completed",
+      (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted === true
+    );
+    if (countDemandOnComplete) {
+      (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted = true;
+      const svc = await this.getService(Number((booking as { serviceId?: number }).serviceId));
+      const subId = (svc as { subcategoryId?: number | null } | undefined)?.subcategoryId;
+      await this.incrementSubcategoryMonthlyBookingCount(
+        subId != null && Number.isFinite(Number(subId)) ? Number(subId) : null
+      );
+    }
 
     const now = new Date();
     const refId = String(bookingId);
@@ -2334,10 +2411,14 @@ export class InMemoryStorage implements IStorage {
     return this.verifyingStatuses.get(userId) ?? null;
   }
 
-  async upsertVerifyingStatusIdentificationPending(userId: string): Promise<VerifyingStatus> {
+  async upsertVerifyingStatusIdentificationPending(
+    userId: string,
+    requestType: "onboarding" | "renewal" = "onboarding",
+  ): Promise<VerifyingStatus> {
     const cur = this.verifyingStatuses.get(userId);
     const next: VerifyingStatus = {
       user: userId,
+      requestType,
       identification_verified: "pending",
       transacction_date: cur?.transacction_date ?? null,
       // No tocar el estado del pago al subir identificación: null sigue null, pending sigue pending, etc.
@@ -2349,10 +2430,15 @@ export class InMemoryStorage implements IStorage {
     return next;
   }
 
-  async upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus> {
+  async upsertVerifyingStatusTransactionPending(
+    userId: string,
+    transactionDate: string,
+    requestType: "onboarding" | "renewal" = "onboarding",
+  ): Promise<VerifyingStatus> {
     const cur = this.verifyingStatuses.get(userId);
     const next: VerifyingStatus = {
       user: userId,
+      requestType: cur?.requestType ?? requestType,
       identification_verified: cur?.identification_verified ?? "rejected",
       transacction_date: transactionDate,
       transacction_verified: "pending",

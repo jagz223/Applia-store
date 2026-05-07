@@ -10,8 +10,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { loadTripLog } from "@/lib/cargo-driver-storage";
+import { loadTripLog, type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
+import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -34,7 +35,7 @@ export default function CargoDriverSettings() {
   const queryClient = useQueryClient();
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
-  const [localTrips, setLocalTrips] = useState(loadTripLog());
+  const [localTrips, setLocalTrips] = useState<CargoDriverTripLog[]>([]);
   const [bankName, setBankName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [bankSaving, setBankSaving] = useState(false);
@@ -62,8 +63,8 @@ export default function CargoDriverSettings() {
   });
 
   useEffect(() => {
-    setLocalTrips(loadTripLog());
-  }, []);
+    setLocalTrips(loadTripLog(user?.id ?? null));
+  }, [user?.id]);
 
   useEffect(() => {
     const u = user as any;
@@ -129,12 +130,12 @@ export default function CargoDriverSettings() {
       <div className="container mx-auto max-w-lg px-4 pt-6">
         <div className="mb-6 flex items-center gap-3">
           <Button variant="ghost" size="icon" className="shrink-0" asChild>
-            <Link href="/go/cargo/driver" aria-label="Volver a Go">
+            <Link href="/go/taxi/driver" aria-label="Volver a Go">
               <ArrowLeft className="h-5 w-5" />
             </Link>
           </Button>
           <div>
-            <h1 className="font-display text-2xl font-bold text-foreground">Car Go — Configuración</h1>
+            <h1 className="font-display text-2xl font-bold text-foreground">Taxi — Configuración</h1>
             <p className="text-sm text-muted-foreground">Tu panel como conductor (no el panel general de asociado).</p>
           </div>
         </div>
@@ -161,13 +162,15 @@ export default function CargoDriverSettings() {
 
         <ThemeAppearanceCard className="mb-4" />
 
+        <SubscriptionStatusButton className="mb-4 w-full" />
+
         <Card className="mb-4">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <Car className="h-5 w-5 text-primary" />
               Tu vehículo
             </CardTitle>
-            <CardDescription>Datos registrados en Car Go</CardDescription>
+            <CardDescription>Datos registrados en Taxi</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {vehicleLoading ? (
@@ -209,7 +212,7 @@ export default function CargoDriverSettings() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold tabular-nums text-foreground">{tripCount}</p>
-            <p className="text-xs text-muted-foreground mt-1">Viajes completados en Car Go.</p>
+            <p className="text-xs text-muted-foreground mt-1">Viajes completados en Taxi.</p>
           </CardContent>
         </Card>
 
@@ -274,7 +277,7 @@ export default function CargoDriverSettings() {
         </Card>
 
         <Button className="mt-8 w-full" variant="secondary" asChild>
-          <Link href="/go/cargo/driver">Volver a Go</Link>
+          <Link href="/go/taxi/driver">Volver a Go</Link>
         </Button>
       </div>
     </div>

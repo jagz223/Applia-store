@@ -11,6 +11,9 @@ import {
   FIRESTORE_COLLECTIONS,
   initializeFirebase,
 } from "./firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
+import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
+import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
 import type { 
   Category, 
   Provider, 
@@ -450,12 +453,24 @@ class FirestoreStorageImpl implements IStorage {
 
   async getCategories(): Promise<Category[]> {
     if (!this.db) return [];
-    
+
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.CATEGORIES).get();
-    return snapshot.docs.map(doc => ({
-      id: parseInt(doc.id),
-      ...doc.data(),
-    } as Category));
+    const rows = snapshot.docs.map((doc) => {
+      const data = doc.data() ?? {};
+      const idFromDoc = Number.parseInt(String(doc.id), 10);
+      return {
+        ...data,
+        id: Number.isFinite(idFromDoc) ? idFromDoc : (typeof data.id === "number" ? data.id : NaN),
+      } as Category;
+    });
+
+    return rows.filter((c) => {
+      const id = typeof c.id === "number" ? c.id : Number((c as { id?: unknown }).id);
+      if (!Number.isFinite(id) || id < 1) return false;
+      const slug = String((c as { slug?: unknown }).slug ?? "").trim();
+      const name = String((c as { name?: unknown }).name ?? "").trim();
+      return slug.length > 0 && name.length > 0;
+    });
   }
 
   async updateCategory(id: number, data: Partial<Category>): Promise<Category | undefined> {
@@ -1091,14 +1106,78 @@ class FirestoreStorageImpl implements IStorage {
     return newBooking as unknown as Booking;
   }
 
+  async incrementSubcategoryMonthlyBookingCount(subcategoryId: number | null | undefined): Promise<void> {
+    if (!this.db) return;
+    const id = subcategoryId != null ? Number(subcategoryId) : NaN;
+    if (!Number.isFinite(id) || id <= 0) return;
+    const monthKey = getGenfebStatsMonthKey();
+    const coll = this.db.collection(FIRESTORE_COLLECTIONS.STATS_SUBCATEGORY_BOOKINGS_MONTHLY);
+    const docRef = coll.doc(monthKey);
+    const field = `c_${id}`;
+    await docRef.set(
+      {
+        monthKey,
+        [field]: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+
+  async getMonthlyPopularSubcategoryBookingCounts(
+    monthKey: string,
+    limit: number
+  ): Promise<{ subcategoryId: number; count: number }[]> {
+    if (!this.db) return [];
+    const safeMonth = /^[0-9]{4}-[0-9]{2}$/.test(monthKey) ? monthKey : getGenfebStatsMonthKey();
+    const lim = Math.min(50, Math.max(1, Math.floor(limit)));
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.STATS_SUBCATEGORY_BOOKINGS_MONTHLY).doc(safeMonth).get();
+    if (!doc.exists) return [];
+    const data = doc.data() as Record<string, unknown> | undefined;
+    if (!data) return [];
+    const rows: { subcategoryId: number; count: number }[] = [];
+    for (const [key, raw] of Object.entries(data)) {
+      if (!key.startsWith("c_")) continue;
+      const sid = Number(key.slice(2));
+      if (!Number.isFinite(sid) || sid <= 0) continue;
+      const n = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      rows.push({ subcategoryId: sid, count: Math.floor(n) });
+    }
+    rows.sort((a, b) => b.count - a.count || a.subcategoryId - b.subcategoryId);
+    return rows.slice(0, lim);
+  }
+
   async updateBookingStatus(id: number, status: string): Promise<Booking | undefined> {
     if (!this.db) return undefined;
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).doc(id.toString());
     const doc = await docRef.get();
     if (!doc.exists) return undefined;
+    const data = doc.data() as Record<string, unknown>;
+    const prevStatus = String(data.status ?? "pending");
+    const countDemand = bookingTransitionCountsForMonthlySubcategoryDemand(
+      prevStatus,
+      status,
+      data.monthlyDemandStatsCounted === true
+    );
     const updates: Record<string, unknown> = { status };
     if (status === "completed") updates.completedAt = new Date();
+    if (countDemand) updates.monthlyDemandStatsCounted = true;
     await docRef.update(updates);
+    if (countDemand) {
+      try {
+        const serviceId = data.serviceId != null ? Number(data.serviceId) : NaN;
+        if (Number.isFinite(serviceId)) {
+          const svc = await this.getService(serviceId);
+          const subId = (svc as { subcategoryId?: number | null } | undefined)?.subcategoryId;
+          await this.incrementSubcategoryMonthlyBookingCount(
+            subId != null && Number.isFinite(Number(subId)) ? Number(subId) : null
+          );
+        }
+      } catch (e) {
+        console.error("[stats] updateBookingStatus monthly demand:", e);
+      }
+    }
     const updated = await docRef.get();
     return { id: parseInt(updated.id), ...updated.data() } as Booking;
   }
@@ -1367,26 +1446,43 @@ class FirestoreStorageImpl implements IStorage {
     const transferId2 = await this.getNextId("wallet_transfers");
     const transferId3 = await this.getNextId("wallet_transfers");
 
-    return this.db.runTransaction(async (t) => {
+    const postMonthlyDemand: { apply: boolean; serviceId?: number } = { apply: false };
+
+    const result = await this.db.runTransaction(async (t) => {
       const bookingRef = bookingsColl.doc(bookingId.toString());
       const bookingSnap = await t.get(bookingRef);
       if (!bookingSnap.exists) return undefined;
-      const data = bookingSnap.data() as { 
-        status?: string; 
-        userId?: string; 
-        providerId?: number; 
-        cost?: number; 
+      const data = bookingSnap.data() as {
+        status?: string;
+        userId?: string;
+        providerId?: number;
+        cost?: number;
         confirmedByClient?: boolean;
         paymentMethod?: string;
+        monthlyDemandStatsCounted?: boolean;
+        serviceId?: number;
       };
-      
+
       if (data.status === "completed") return { id: bookingId, ...data } as unknown as Booking;
-      
+
+      const countDemand = bookingTransitionCountsForMonthlySubcategoryDemand(
+        String(data.status ?? "pending"),
+        "completed",
+        data.monthlyDemandStatsCounted === true
+      );
+
       const paymentMethod = data.paymentMethod || "wallet";
       const cost = typeof data.cost === "number" ? data.cost : Number(data.cost) || 0;
       if (cost <= 0) {
         const nowDone = new Date();
-        t.update(bookingRef, { status: "completed", completedAt: nowDone });
+        const patch: Record<string, unknown> = { status: "completed", completedAt: nowDone };
+        if (countDemand) {
+          patch.monthlyDemandStatsCounted = true;
+          postMonthlyDemand.apply = true;
+          postMonthlyDemand.serviceId =
+            data.serviceId != null && Number.isFinite(Number(data.serviceId)) ? Number(data.serviceId) : undefined;
+        }
+        t.update(bookingRef, patch as never);
         return { id: bookingId, ...data, status: "completed", completedAt: nowDone } as unknown as Booking;
       }
 
@@ -1438,7 +1534,14 @@ class FirestoreStorageImpl implements IStorage {
       const adminTotalEarnings = typeof (adminSnap2.data() as { totalEarnings?: number }).totalEarnings === "number" ? (adminSnap2.data() as { totalEarnings: number }).totalEarnings : 0;
 
       const now = new Date();
-      t.update(bookingRef, { status: "completed", completedAt: now });
+      const completedPatch: Record<string, unknown> = { status: "completed", completedAt: now };
+      if (countDemand) {
+        completedPatch.monthlyDemandStatsCounted = true;
+        postMonthlyDemand.apply = true;
+        postMonthlyDemand.serviceId =
+          data.serviceId != null && Number.isFinite(Number(data.serviceId)) ? Number(data.serviceId) : undefined;
+      }
+      t.update(bookingRef, completedPatch as never);
 
       if (paymentMethod === "wallet") {
         // Lógica Wallet: Client Pending -> Provider Wallet
@@ -1497,6 +1600,20 @@ class FirestoreStorageImpl implements IStorage {
 
       return { id: bookingId, ...data, status: "completed" } as unknown as Booking;
     });
+
+    if (postMonthlyDemand.apply && postMonthlyDemand.serviceId != null && Number.isFinite(postMonthlyDemand.serviceId)) {
+      try {
+        const svc = await this.getService(postMonthlyDemand.serviceId);
+        const subId = (svc as { subcategoryId?: number | null } | undefined)?.subcategoryId;
+        await this.incrementSubcategoryMonthlyBookingCount(
+          subId != null && Number.isFinite(Number(subId)) ? Number(subId) : null
+        );
+      } catch (e) {
+        console.error("[stats] completeBookingAndReleaseEscrow monthly demand:", e);
+      }
+    }
+
+    return result;
   }
 
   async applyMobilityRideSettlement(input: {
@@ -3142,6 +3259,7 @@ class FirestoreStorageImpl implements IStorage {
     const data = doc.data() as Record<string, unknown>;
     return {
       user: String(data.user ?? userId),
+      requestType: (data.requestType as any) ?? undefined,
       identification_verified: (data.identification_verified as any) ?? "rejected",
       transacction_date: data.transacction_date != null ? String(data.transacction_date) : null,
       transacction_verified:
@@ -3157,19 +3275,24 @@ class FirestoreStorageImpl implements IStorage {
    * Solo marca identificación en pending. No modifica transacction_date ni transacction_verified
    * (si no existían en el doc, siguen ausentes / null).
    */
-  async upsertVerifyingStatusIdentificationPending(userId: string): Promise<VerifyingStatus> {
+  async upsertVerifyingStatusIdentificationPending(
+    userId: string,
+    requestType: "onboarding" | "renewal" = "onboarding",
+  ): Promise<VerifyingStatus> {
     if (!this.db) throw new Error("Firestore no configurado");
     const ref = this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId);
     const snap = await ref.get();
 
     if (snap.exists) {
       await ref.update({
+        requestType,
         identification_verified: "pending",
         updatedAt: new Date(),
       });
     } else {
       await ref.set({
         user: userId,
+        requestType,
         identification_verified: "pending",
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -3181,7 +3304,11 @@ class FirestoreStorageImpl implements IStorage {
     return out;
   }
 
-  async upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus> {
+  async upsertVerifyingStatusTransactionPending(
+    userId: string,
+    transactionDate: string,
+    requestType: "onboarding" | "renewal" = "onboarding",
+  ): Promise<VerifyingStatus> {
     if (!this.db) throw new Error("Firestore no configurado");
     const ref = this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId);
     const snap = await ref.get();
@@ -3191,6 +3318,7 @@ class FirestoreStorageImpl implements IStorage {
     await ref.set(
       {
         user: userId,
+        requestType: (existing as any)?.requestType ?? requestType,
         identification_verified: existing?.identification_verified ?? "rejected",
         transacction_date: transactionDate,
         transacction_verified: "pending",
@@ -3209,6 +3337,7 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) return [];
     const makeFromData = (data: Record<string, unknown>): VerifyingStatus => ({
       user: String(data.user ?? ""),
+      requestType: (data.requestType as any) ?? undefined,
       identification_verified: (data.identification_verified as any) ?? "rejected",
       transacction_date: data.transacction_date != null ? String(data.transacction_date) : null,
       transacction_verified:
