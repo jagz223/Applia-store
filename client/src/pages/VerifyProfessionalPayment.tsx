@@ -20,6 +20,7 @@ import { CalendarIcon, ArrowLeft, Copy, Check, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { api } from "@shared/routes";
 import { useAuth } from "@/hooks/use-auth";
 import {
   usePatchProfessionalVerificationPayment,
@@ -83,6 +84,7 @@ export default function VerifyProfessionalPayment() {
             description: "Tu solicitud está en revisión.",
           });
           await queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
+          await queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
           try {
             const status = await queryClient.fetchQuery<VerifyingStatusMeDto>({
               queryKey: [VERIFICATION_STATUS_ME],
@@ -144,14 +146,16 @@ export default function VerifyProfessionalPayment() {
 
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
-            Pago de verificación — {VERIFY_AMOUNT_USD} USD
+            Cuota de visibilidad — {VERIFY_AMOUNT_USD} USD / mes
           </h1>
           <p className="text-muted-foreground mt-1">
-            Realiza la transferencia por el monto indicado y registra la fecha (solo día) y el código de transferencia.
+            Transferí el monto indicado y registrá la fecha (solo día) y el código. La cuota se renueva cada mes para
+            seguir publicado en el catálogo; si pagás antes de vencer, al validar el comprobante se suma un mes desde tu
+            vencimiento actual.
             {isCarGo ? (
               <>
                 {" "}
-                Este paso forma parte de la verificación para que los clientes puedan usar tus servicios Car Go.
+                Este paso también forma parte de la verificación para que los clientes puedan usar tus servicios Car Go.
               </>
             ) : null}
           </p>
@@ -162,7 +166,8 @@ export default function VerifyProfessionalPayment() {
             <CardHeader>
               <CardTitle className="text-lg">Datos de la transferencia</CardTitle>
               <CardDescription>
-                Monto fijo: <strong>{VERIFY_AMOUNT_USD} USD</strong>. Completa la información para verificar tu pago.
+                Monto por período: <strong>{VERIFY_AMOUNT_USD} USD</strong>. Completá los datos para que el equipo valide
+                tu pago (activación o renovación mensual).
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -216,7 +221,7 @@ export default function VerifyProfessionalPayment() {
                 {paymentMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
-                Confirmo haber pagado los 15$
+                Registré el pago de {VERIFY_AMOUNT_USD} USD
               </Button>
             </CardContent>
           </Card>
@@ -267,7 +272,8 @@ export default function VerifyProfessionalPayment() {
           <DialogHeader>
             <DialogTitle>¿Confirmas el pago?</DialogTitle>
             <DialogDescription>
-              Solo pulsa sí si ya realizaste la transferencia de {VERIFY_AMOUNT_USD} USD con los datos indicados.
+              Solo confirmá si ya transferiste {VERIFY_AMOUNT_USD} USD con los datos indicados. El equipo validará el
+              comprobante y extenderá tu visibilidad un mes desde tu vencimiento actual si renovás anticipado.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

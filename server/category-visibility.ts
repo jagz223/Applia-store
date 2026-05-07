@@ -1,6 +1,6 @@
 /**
  * Visibilidad de marcas/categorías (Fix Go / Man Go / Pro Go / Pack Go / Shop Go / Car Go).
- * Default: Pack Go y Shop Go arrancan ocultos (si no hay configuración aún).
+ * Default: slugs delivery y marketplace arrancan ocultos (si no hay configuración aún).
  * Cuando el admin los activa, deben poder mostrarse aunque no tengan usuarios/servicios activos.
  * Persistencia: Firestore (platform_settings/global). Fallback: valores por defecto en memoria.
  */

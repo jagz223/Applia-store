@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
 import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
+import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
 
@@ -155,7 +156,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const [rateBusy, setRateBusy] = useState(false);
   const rateTargetRef = useRef<{ rideId: string; target: "driver"; targetName: string } | null>(null);
   const [location, setLocation] = useLocation();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { primeCarGoConversation, resetChat } = useGoChat();
   const { socket } = useSocket();
   const { toast } = useToast();
@@ -256,7 +257,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const [cancelServiceBusy, setCancelServiceBusy] = useState(false);
   const [cancelServiceMode, setCancelServiceMode] = useState<"search" | "matched" | "progress">("search");
 
-  const goBasePath = goSlug === "pack" ? "/go/pack" : "/go/cargo";
+  const goBasePath = goSlug === "pack" ? "/go/delivery" : "/go/taxi";
   const rideApiBase = goSlug === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
   const rideApiRequestPath = goSlug === "pack" ? "/api/pack/rides/request" : "/api/mobility/rides/request";
   const rideSocketPrefix = goSlug === "pack" ? "pack:ride:" : "cargo:ride:";
@@ -923,15 +924,18 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
       // Guardar historial del pasajero antes de limpiar estado.
       if (matchedDriverInfoRef.current) {
-        appendRiderTripLog({
-          id: p.rideId,
-          endedAt: new Date().toISOString(),
-          durationMin: Math.max(1, Math.round(durationSec / 60)),
-          amountUsd,
-          payment,
-          driverName: matchedDriverInfoRef.current.driver?.name ?? "Conductor",
-          goSlug: goSlug === "pack" ? "pack" : "cargo",
-        });
+        appendRiderTripLog(
+          {
+            id: p.rideId,
+            endedAt: new Date().toISOString(),
+            durationMin: Math.max(1, Math.round(durationSec / 60)),
+            amountUsd,
+            payment,
+            driverName: matchedDriverInfoRef.current.driver?.name ?? "Conductor",
+            goSlug: goSlug === "pack" ? "pack" : "cargo",
+          },
+          user?.id ?? null
+        );
         rateTargetRef.current = {
           rideId: p.rideId,
           target: "driver",
@@ -943,7 +947,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       applyCarGoRideEnded();
       toast({
         title: isPackGoClient ? "Envío finalizado" : "Viaje finalizado",
-        description: isPackGoClient ? "Gracias por usar Pack Go." : "Gracias por usar Car Go.",
+        description: isPackGoClient ? `Gracias por usar ${MOBILITY_UI.delivery}.` : `Gracias por usar ${MOBILITY_UI.taxiService.toLowerCase()}.`,
       });
     };
     const onCancelled = (p: { rideId: string; cancelledBy: "rider" | "driver" }) => {
@@ -993,7 +997,20 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       socket.off(`${rideSocketPrefix}cancelled`, onCancelled);
       socket.off(`${rideSocketPrefix}failed`, onFailed);
     };
-  }, [socket, clearVehicleSearchTimers, applyCarGoRideEnded, primeCarGoConversation, toast, start, end, loadDriverEtaRoute, rideSocketPrefix]);
+  }, [
+    socket,
+    clearVehicleSearchTimers,
+    applyCarGoRideEnded,
+    primeCarGoConversation,
+    toast,
+    start,
+    end,
+    loadDriverEtaRoute,
+    rideSocketPrefix,
+    goSlug,
+    user?.id,
+    isPackGoClient,
+  ]);
 
   const submitRideRating = useCallback(async () => {
     const tgt = rateTargetRef.current;
@@ -1332,7 +1349,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         <div className={cn("mb-6", isGoClient && "hidden md:block")}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <div className="min-w-0">
-              <h1 className="text-3xl font-display font-bold text-foreground">{isPackGoClient ? "Pack Go" : "Car Go"}</h1>
+              <h1 className="text-3xl font-display font-bold text-foreground">
+                {isPackGoClient ? MOBILITY_UI.delivery : MOBILITY_UI.taxiService}
+              </h1>
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
                 Primero fija el{" "}
                 <strong className="text-foreground">{goSlug === "pack" ? "punto de retiro" : "origen"}</strong> (puedes
@@ -2196,7 +2215,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           >
             <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-background/95 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur supports-[backdrop-filter]:bg-background/80">
               <div className="min-w-0 pr-2">
-                <p className="text-sm font-semibold text-foreground">Car Go</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {isPackGoClient ? MOBILITY_UI.delivery : MOBILITY_UI.taxiService}
+                </p>
                 <p className="text-xs text-muted-foreground">
                   {mapTarget === "start"
                     ? "Partida · toca el mapa para colocar o afinar el punto"

@@ -1,12 +1,13 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 
 export default function GoPack() {
   return (
     <div className="p-4">
       <Card>
         <CardHeader>
-          <CardTitle>Pack Go</CardTitle>
-          <CardDescription>Delivery.</CardDescription>
+          <CardTitle>{MOBILITY_UI.delivery}</CardTitle>
+          <CardDescription>{MOBILITY_UI.delivery}: envíos con tu saldo GenFeb.</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">

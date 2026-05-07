@@ -6,7 +6,7 @@
 
 /**
  * Slugs ocultos en la UI hasta que el admin los active vía Firestore (`hiddenCategorySlugs`).
- * Pack Go y Shop Go siguen ocultos por defecto; Car Go (`transport`) no: su visibilidad la controla solo el admin.
+ * Los slugs `delivery` y `marketplace` siguen ocultos por defecto en la UI; Car Go (`transport`) no: su visibilidad la controla solo el admin.
  */
 export const HIDDEN_CATEGORY_SLUGS_IN_UI: ReadonlyArray<string> = ["delivery", "marketplace"];
 
@@ -39,6 +39,20 @@ export function getCategoryDisplayName(category: { slug?: string; name?: string 
   const slug = (category as { slug?: string }).slug;
   if (slug && slug in CATEGORY_DISPLAY_NAMES) return (CATEGORY_DISPLAY_NAMES as Record<string, string>)[slug];
   return (category as { name?: string }).name ?? "";
+}
+
+/**
+ * Nombre “canónico” del catálogo (título en seed / DEFAULT_CATEGORIES), sin marcas tipo “Go”.
+ * Útil en formularios públicos (p. ej. registro de proveedor).
+ */
+export function getCategoryCanonicalName(category: { slug?: string; name?: string } | null | undefined): string {
+  if (!category) return "";
+  const slug = String((category as { slug?: string }).slug ?? "").trim();
+  if (slug) {
+    const row = DEFAULT_CATEGORIES.find((c) => c.slug === slug);
+    if (row) return row.name;
+  }
+  return String((category as { name?: string }).name ?? "").trim();
 }
 
 export const DEFAULT_CATEGORIES: ReadonlyArray<{

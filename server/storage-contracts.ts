@@ -60,8 +60,20 @@ export interface Subcategory {
 
 /** Datos parciales para actualizar un proveedor (solo campos editables). */
 export type ProviderUpdate = Partial<
-  Pick<Provider, "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate" | "skills"> & {
+  Pick<
+    Provider,
+    "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate" | "skills" | "isVerified"
+  > & {
     subcategoryId?: number | null;
+    /** ISO fin de período mensual USD 15 (visibilidad en catálogo). */
+    visibilitySubscriptionEndsAt?: string | Date | null;
+    /**
+     * Idempotencia suscripción: "huella" del último comprobante aprobado (p.ej. `${code}|${yyyy-MM-dd}`).
+     * Se guarda en el doc del proveedor (Firestore) para evitar extender 2 veces el mismo pago.
+     */
+    visibilitySubscriptionLastPaymentKey?: string | null;
+    visibilitySubscriptionLastPaymentApprovedAt?: string | Date | null;
+    visibilitySubscriptionLastPaymentApprovedBy?: string | null;
   }
 >;
 
@@ -73,8 +85,11 @@ export type ServiceUpdate = Partial<
 /** Contrato para catálogo: categorías, subcategorías, proveedores, servicios. */
 export interface ICatalogStorage {
   getCategories(): Promise<Category[]>;
+  updateCategory(id: number, data: Partial<Category>): Promise<Category | undefined>;
   getSubcategories(categoryId: number): Promise<Subcategory[]>;
   getSubcategoryById(id: number): Promise<Subcategory | undefined>;
+  createSubcategory(data: Omit<Subcategory, "id">): Promise<Subcategory>;
+  updateSubcategory(id: number, data: Partial<Subcategory>): Promise<Subcategory | undefined>;
   getAllProviders(profession?: string, category?: string, categoryId?: number): Promise<Provider[]>;
   getProvider(id: number | null | undefined): Promise<Provider | undefined>;
   getProviderByUserId(userId: string): Promise<Provider | undefined>;
@@ -126,6 +141,11 @@ export interface IBookingStorage {
   /** Actualizar fecha/hora de la reserva (solo permitido cuando status es 'pending'). */
   updateBookingSchedule(id: number, date: Date): Promise<Booking | undefined>;
   /**
+   * El cliente confirma que tomó conocimiento del último monto/fecha propuestos por el profesional.
+   * Limpia `pendingClientAcknowledgment` en la reserva.
+   */
+  acknowledgeBookingProChanges(bookingId: number, clientUserId: string): Promise<Booking | undefined>;
+  /**
    * Confirmación del cliente (handshake/escrow): debita wallet del cliente y acredita su propio pendingBalance
    * (monto exacto del servicio). Solo válido si booking.status === 'confirmed'. Transacción ACID.
    */
@@ -141,4 +161,18 @@ export interface IBookingStorage {
    * La reserva pasa a estado 'cancelled'. Transacción ACID.
    */
   cancelBookingAndRefundClientEscrow(bookingId: number): Promise<Booking | undefined>;
+
+  /**
+   * Suma una reserva al contador mensual de la subcategoría (mes calendario America/Guayaquil).
+   * No-op si `subcategoryId` es null/undefined/NaN.
+   */
+  incrementSubcategoryMonthlyBookingCount(subcategoryId: number | null | undefined): Promise<void>;
+
+  /**
+   * Top subcategorías por reservas en el mes `monthKey` (`YYYY-MM`), orden descendente por conteo.
+   */
+  getMonthlyPopularSubcategoryBookingCounts(
+    monthKey: string,
+    limit: number
+  ): Promise<{ subcategoryId: number; count: number }[]>;
 }

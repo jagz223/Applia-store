@@ -13,7 +13,7 @@ function getNotificationHref(notification: { type: string; data?: any }): string
   if (typeof url === "string" && url.trim()) return url.startsWith("/") ? url : `/${url}`;
 
   const subtype = data?.type ?? data?.data?.type;
-  if (typeof subtype === "string" && subtype.startsWith("cargo_")) return "/go/cargo";
+  if (typeof subtype === "string" && subtype.startsWith("cargo_")) return "/go/taxi";
 
   if (notification.type === "message") {
     const convId = data?.conversationId ?? data?.data?.conversationId;

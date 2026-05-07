@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { 
@@ -54,6 +54,12 @@ import {
   usePatchPlatformPackFares,
   type WithdrawalHistoryStatus,
   type WithdrawalHistoryItem,
+  useAdminCategories,
+  useSubcategories,
+  useUpdateCategory,
+  useCreateSubcategory,
+  useUpdateSubcategory,
+  type Subcategory,
 } from "@/hooks/use-mango-data";
 import { calcCommission, calcProviderNet, PLATFORM_COMMISSION_RATE, commissionDisplayPercents } from "@shared/platform-commission";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
@@ -64,7 +70,11 @@ import { toDate, isValidDate } from "@/lib/date-utils";
 import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
 import { AnimatePresence, motion } from "framer-motion";
-import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
+import { DEFAULT_CATEGORIES, getCategoryDisplayName, CATEGORY_DISPLAY_NAMES } from "@shared/default-categories";
+import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
+import { firstAvailableSubcategoryIcon } from "@shared/subcategory-lucide-picklist";
+import { SubcategoryIconPicker } from "@/components/admin/SubcategoryIconPicker";
+import { CategoryIcon } from "@/components/CategoryIcon";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
 
 const USERS_PAGE_SIZE = 10;
@@ -573,6 +583,426 @@ function useSaldoUserSearch(debouncedName: string, queryEnabled = true) {
   });
 }
 
+
+
+function isRenderableAdminCategory(cat: unknown): cat is { id: number; name: string; slug: string } {
+  if (!cat || typeof cat !== "object") return false;
+  const o = cat as { id?: unknown; name?: unknown; slug?: unknown };
+  const id = typeof o.id === "number" ? o.id : Number(o.id);
+  if (!Number.isFinite(id) || id < 1) return false;
+  if (!String(o.name ?? "").trim()) return false;
+  if (!String(o.slug ?? "").trim()) return false;
+  return true;
+}
+
+function AdminCategoriesTab() {
+  const { data: categoriesRaw = [], isLoading: isLoadingCategories } = useAdminCategories();
+  const categories = categoriesRaw.filter(isRenderableAdminCategory);
+  const queryClient = useQueryClient();
+  const updateCategory = useUpdateCategory();
+  const createSubcategory = useCreateSubcategory();
+  const updateSubcategory = useUpdateSubcategory();
+  const { toast } = useToast();
+
+  const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
+  const [editCategoryOpen, setEditCategoryOpen] = useState(false);
+  const [categoryNameDraft, setCategoryNameDraft] = useState("");
+  
+  // Subcategories
+  const { data: subcategories = [], isLoading: isLoadingSubcategories } = useSubcategories(selectedCategory?.id);
+  
+  const [newSubcatName, setNewSubcatName] = useState("");
+  const [newSubcatSlug, setNewSubcatSlug] = useState("");
+  const [newSubcatIcon, setNewSubcatIcon] = useState("");
+  const [editingSubcatId, setEditingSubcatId] = useState<number | null>(null);
+  const [editingSubcatName, setEditingSubcatName] = useState("");
+  const [editingSubcatIcon, setEditingSubcatIcon] = useState("");
+  const newSubcatDefaultsInitialized = useRef(false);
+
+  const iconsTakenByOtherSubs = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of subcategories) {
+      if (editingSubcatId != null && s.id === editingSubcatId) continue;
+      const ic = (s.icon ?? "").trim();
+      if (ic) set.add(ic);
+    }
+    return set;
+  }, [subcategories, editingSubcatId]);
+
+  const takenForNewSubcategory = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of subcategories) {
+      const ic = (s.icon ?? "").trim();
+      if (ic) set.add(ic);
+    }
+    return set;
+  }, [subcategories]);
+
+  useEffect(() => {
+    if (!editCategoryOpen) {
+      newSubcatDefaultsInitialized.current = false;
+      return;
+    }
+    if (!selectedCategory || isLoadingSubcategories) return;
+    if (newSubcatDefaultsInitialized.current) return;
+    setNewSubcatIcon(firstAvailableSubcategoryIcon(takenForNewSubcategory));
+    newSubcatDefaultsInitialized.current = true;
+  }, [editCategoryOpen, selectedCategory?.id, isLoadingSubcategories, takenForNewSubcategory]);
+
+  const handleEditCategory = (category: any) => {
+    setSelectedCategory(category);
+    setCategoryNameDraft(category.name || "");
+    setNewSubcatName("");
+    setNewSubcatSlug("");
+    setEditingSubcatId(null);
+    setEditingSubcatName("");
+    setEditingSubcatIcon("");
+    setEditCategoryOpen(true);
+  };
+
+  const handleSaveCategory = () => {
+    if (!selectedCategory || !categoryNameDraft.trim()) return;
+    updateCategory.mutate({
+      id: selectedCategory.id,
+      name: categoryNameDraft.trim()
+    }, {
+      onSuccess: () => {
+        setEditCategoryOpen(false);
+      }
+    });
+  };
+
+  const handleCreateSubcategory = () => {
+    if (!selectedCategory || !newSubcatName.trim() || !newSubcatSlug.trim()) return;
+    const icon = newSubcatIcon.trim();
+    if (icon && takenForNewSubcategory.has(icon)) {
+      toast({
+        title: "Icono ya en uso",
+        description: "Ese icono lo tiene otra subcategoría de esta categoría. Elige otro en la cuadrícula.",
+        variant: "destructive",
+      });
+      return;
+    }
+    createSubcategory.mutate(
+      {
+        name: newSubcatName.trim(),
+        slug: newSubcatSlug.trim(),
+        categoryId: selectedCategory.id,
+        categorySlug: selectedCategory.slug,
+        ...(icon ? { icon } : {}),
+      },
+      {
+        onSuccess: async (_, variables) => {
+          setNewSubcatName("");
+          setNewSubcatSlug("");
+          await queryClient.refetchQueries({ queryKey: ["/api/subcategories", variables.categoryId] });
+          const fresh =
+            queryClient.getQueryData<Subcategory[]>(["/api/subcategories", variables.categoryId]) ?? [];
+          const used = new Set(fresh.map((s) => (s.icon ?? "").trim()).filter(Boolean));
+          setNewSubcatIcon(firstAvailableSubcategoryIcon(used));
+        },
+      }
+    );
+  };
+
+  const handleSaveSubcategory = (id: number) => {
+    if (!selectedCategory || !editingSubcatName.trim()) return;
+    const icon = editingSubcatIcon.trim();
+    if (
+      icon &&
+      subcategories.some((s) => s.id !== id && (s.icon ?? "").trim() === icon)
+    ) {
+      toast({
+        title: "Icono ya en uso",
+        description: "Ese icono lo tiene otra subcategoría de esta categoría. Elige otro en la cuadrícula.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateSubcategory.mutate(
+      {
+        id,
+        categoryId: selectedCategory.id,
+        name: editingSubcatName.trim(),
+        ...(icon ? { icon } : {}),
+      },
+      {
+        onSuccess: () => {
+          setEditingSubcatId(null);
+          setEditingSubcatIcon("");
+        },
+      }
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Categorías y Subcategorías</CardTitle>
+          <CardDescription>
+            Administra las categorías de servicios y crea nuevas subcategorías.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingCategories ? (
+            <div className="py-12 flex items-center justify-center text-muted-foreground gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Cargando categorías…</span>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="text-left p-3 font-medium">ID</th>
+                    <th className="text-left p-3 font-medium">Nombre</th>
+                    <th className="text-left p-3 font-medium">Slug</th>
+                    <th className="text-left p-3 font-medium">Marca</th>
+                    <th className="text-right p-3 font-medium">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    // Build slug → parent brand label from DEFAULT_SUBCATEGORIES
+                    const subSlugToBrand: Record<string, string> = {};
+                    for (const sub of DEFAULT_SUBCATEGORIES) {
+                      const parentBrand = (CATEGORY_DISPLAY_NAMES as Record<string, string>)[sub.categorySlug];
+                      if (parentBrand) subSlugToBrand[sub.slug] = parentBrand;
+                    }
+                    const brandColors: Record<string, string> = {
+                      "Fix Go": "bg-blue-500/15 text-blue-400 border-blue-500/30",
+                      "Man Go": "bg-orange-500/15 text-orange-400 border-orange-500/30",
+                      "Pro Go": "bg-purple-500/15 text-purple-400 border-purple-500/30",
+                      "Pack Go": "bg-green-500/15 text-green-400 border-green-500/30",
+                      "Shop Go": "bg-pink-500/15 text-pink-400 border-pink-500/30",
+                      "Car Go": "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+                    };
+                    return categories.map((cat: any) => {
+                      // Direct brand: category slug maps directly (technical→Fix Go, etc.)
+                      const directBrand: string | null = cat.slug && cat.slug in CATEGORY_DISPLAY_NAMES
+                        ? (CATEGORY_DISPLAY_NAMES as Record<string, string>)[cat.slug]
+                        : null;
+                      // Sub brand: slug belongs to a subcategory of a known parent
+                      const subBrand: string | null = !directBrand && cat.slug ? (subSlugToBrand[cat.slug] ?? null) : null;
+                      const brandLabel = directBrand ?? subBrand;
+                      const isSub = !directBrand && !!subBrand;
+                      const badgeClass = brandLabel ? (brandColors[brandLabel] ?? "bg-muted text-muted-foreground") : "";
+                      return (
+                        <tr key={cat.id} className="border-b border-border hover:bg-muted/30">
+                          <td className="p-3 font-medium">{cat.id}</td>
+                          <td className="p-3">{cat.name}</td>
+                          <td className="p-3 text-muted-foreground">{cat.slug}</td>
+                          <td className="p-3">
+                            {brandLabel ? (
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${badgeClass}`}>
+                                {brandLabel}
+                                {isSub && (
+                                  <span className="opacity-60 font-normal">(sub)</span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right">
+                            <Button variant="outline" size="sm" onClick={() => handleEditCategory(cat)}>
+                              Editar / Subcategorías
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={editCategoryOpen} onOpenChange={setEditCategoryOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Categoría</DialogTitle>
+            <DialogDescription>
+              Modifica la categoría o administra sus subcategorías.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            <div className="space-y-3">
+              <Label>Nombre de la Categoría</Label>
+              <div className="flex gap-2">
+                <Input 
+                  value={categoryNameDraft}
+                  onChange={(e) => setCategoryNameDraft(e.target.value)}
+                />
+                <Button 
+                  onClick={handleSaveCategory}
+                  disabled={updateCategory.isPending || categoryNameDraft.trim() === selectedCategory?.name}
+                >
+                  {updateCategory.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Guardar
+                </Button>
+              </div>
+            </div>
+
+            <div className="border-t pt-4 space-y-4">
+              <h3 className="font-semibold text-lg">Subcategorías</h3>
+              
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Input 
+                  placeholder="Nombre de subcategoría" 
+                  value={newSubcatName}
+                  onChange={(e) => setNewSubcatName(e.target.value)}
+                />
+                <Input 
+                  placeholder="Slug (ej: limpieza_hogar)" 
+                  value={newSubcatSlug}
+                  onChange={(e) => setNewSubcatSlug(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
+                />
+                <Button 
+                  className="sm:col-span-3 lg:col-span-1 lg:justify-self-end"
+                  onClick={handleCreateSubcategory}
+                  disabled={
+                    createSubcategory.isPending ||
+                    !newSubcatName.trim() ||
+                    !newSubcatSlug.trim() ||
+                    !newSubcatIcon.trim()
+                  }
+                >
+                  {createSubcategory.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Crear Subcategoría
+                </Button>
+              </div>
+              <SubcategoryIconPicker
+                value={newSubcatIcon}
+                onChange={setNewSubcatIcon}
+                takenIconNames={takenForNewSubcategory}
+                disabled={createSubcategory.isPending}
+              />
+
+              {isLoadingSubcategories ? (
+                <div className="py-4 text-center text-sm text-muted-foreground">Cargando subcategorías…</div>
+              ) : subcategories.length === 0 ? (
+                <div className="py-4 text-center text-sm text-muted-foreground">No hay subcategorías en esta categoría.</div>
+              ) : (
+                <div className="space-y-3">
+                  {editingSubcatId != null ? (
+                    <div className="rounded-lg border border-primary/30 bg-muted/20 p-4 space-y-3">
+                      <p className="text-sm font-semibold text-foreground">Editar subcategoría</p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Nombre</Label>
+                          <Input
+                            value={editingSubcatName}
+                            onChange={(e) => setEditingSubcatName(e.target.value)}
+                            className="h-9"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Slug (solo lectura)</Label>
+                          <Input
+                            value={subcategories.find((s) => s.id === editingSubcatId)?.slug ?? ""}
+                            readOnly
+                            className="h-9 bg-muted/50"
+                          />
+                        </div>
+                      </div>
+                      <SubcategoryIconPicker
+                        value={editingSubcatIcon}
+                        onChange={setEditingSubcatIcon}
+                        takenIconNames={iconsTakenByOtherSubs}
+                        disabled={updateSubcategory.isPending}
+                      />
+                      <div className="flex flex-wrap gap-2 justify-end">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          onClick={() => {
+                            setEditingSubcatId(null);
+                            setEditingSubcatIcon("");
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
+                          type="button"
+                          onClick={() => editingSubcatId != null && handleSaveSubcategory(editingSubcatId)}
+                          disabled={updateSubcategory.isPending || !editingSubcatName.trim()}
+                        >
+                          {updateSubcategory.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Guardar cambios
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="text-left p-2 w-14">Icono</th>
+                          <th className="text-left p-2">Nombre</th>
+                          <th className="text-left p-2">Slug</th>
+                          <th className="text-right p-2">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {subcategories.map((sub: Subcategory) => (
+                          <tr
+                            key={sub.id}
+                            className={`border-b ${editingSubcatId === sub.id ? "bg-primary/5" : ""}`}
+                          >
+                            <td className="p-2 align-middle">
+                              {sub.icon ? (
+                                <span className="inline-flex rounded-md border border-border bg-background p-1.5">
+                                  <CategoryIcon name={sub.icon} className="h-4 w-4 text-foreground" />
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">—</span>
+                              )}
+                            </td>
+                            <td className="p-2 align-middle font-medium">{sub.name}</td>
+                            <td className="p-2 text-muted-foreground align-middle">{sub.slug}</td>
+                            <td className="p-2 text-right align-middle">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                type="button"
+                                onClick={() => {
+                                  setEditingSubcatId(sub.id);
+                                  setEditingSubcatName(sub.name);
+                                  const used = new Set(
+                                    subcategories
+                                      .filter((x) => x.id !== sub.id)
+                                      .map((x) => (x.icon ?? "").trim())
+                                      .filter(Boolean)
+                                  );
+                                  const cur = (sub.icon ?? "").trim();
+                                  setEditingSubcatIcon(cur || firstAvailableSubcategoryIcon(used));
+                                }}
+                              >
+                                Editar
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 /** Pestañas solo para administrador (no Soporte TI). */
 const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts", "services"] as const;
 
@@ -605,9 +1035,8 @@ export default function AdminPanel() {
       const p = new URLSearchParams(window.location.search);
       const tab = p.get("tab");
       if (tab === "estadisticas") return "estadisticas";
-      if (tab === "recargas") return "recargas";
-      if (tab === "saldo") return "saldo";
-      if (tab === "payouts") return "payouts";
+      /** Pestañas financieras ocultas: enviar a estadísticas */
+      if (tab === "recargas" || tab === "saldo" || tab === "payouts") return "estadisticas";
       if (tab === "services") return "services";
     }
     return "overview";
@@ -674,9 +1103,11 @@ export default function AdminPanel() {
     const q = new URLSearchParams(search);
     const tab = q.get("tab");
     if (tab === "estadisticas") setActiveTab("estadisticas");
-    if (tab === "recargas") setActiveTab("recargas");
-    if (tab === "saldo") setActiveTab("saldo");
-    if (tab === "payouts") setActiveTab("payouts");
+    if (tab === "recargas" || tab === "saldo" || tab === "payouts") {
+      setActiveTab("estadisticas");
+      q.set("tab", "estadisticas");
+      window.history.replaceState(null, "", `${window.location.pathname}?${q.toString()}`);
+    }
     if (tab === "services") setActiveTab("services");
     const highlight = q.get("highlight");
     if (highlight) {
@@ -710,7 +1141,12 @@ export default function AdminPanel() {
     const handler = (e: Event) => {
       if (!hasFullAdminRole(user)) return;
       const detail = (e as CustomEvent<{ transferId?: number | null }>).detail;
-      setActiveTab("recargas");
+      setActiveTab("estadisticas");
+      if (typeof window !== "undefined" && window.history.replaceState) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", "estadisticas");
+        window.history.replaceState(null, "", url.pathname + url.search);
+      }
       if (detail?.transferId != null && !Number.isNaN(detail.transferId)) {
         setHighlightedTransferId(detail.transferId);
         setTimeout(() => setHighlightedTransferId(null), 2800);
@@ -724,16 +1160,28 @@ export default function AdminPanel() {
   useEffect(() => {
     const handler = () => {
       if (!hasFullAdminRole(user)) return;
-      setActiveTab("payouts");
+      setActiveTab("estadisticas");
       if (typeof window !== "undefined" && window.history.replaceState) {
         const params = new URLSearchParams(window.location.search);
-        params.set("tab", "payouts");
+        params.set("tab", "estadisticas");
         window.history.replaceState(null, "", `/admin?${params.toString()}`);
       }
     };
     window.addEventListener("admin-open-payouts", handler);
     return () => window.removeEventListener("admin-open-payouts", handler);
   }, [user]);
+
+  /** Si quedó una pestaña financiera oculta activa, volver a estadísticas */
+  useEffect(() => {
+    if (!fullAdmin) return;
+    if (!["recargas", "saldo", "payouts"].includes(activeTab)) return;
+    setActiveTab("estadisticas");
+    if (typeof window !== "undefined" && window.history.replaceState) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", "estadisticas");
+      window.history.replaceState(null, "", url.pathname + url.search);
+    }
+  }, [fullAdmin, activeTab]);
 
   const [userFilters, setUserFilters] = useState({ role: "", name: "", email: "", lastName: "" });
   const [transferStatusFilter, setTransferStatusFilter] = useState<TransferStatusFilter>("");
@@ -959,6 +1407,7 @@ export default function AdminPanel() {
     name: string;
     email?: string | null;
     avatar?: string | null;
+    requestType?: "onboarding" | "renewal";
     user_identification?: string | null;
     professionalCredentialUrl?: string | null;
     identification_verified: "pending" | "verified" | "rejected";
@@ -966,6 +1415,7 @@ export default function AdminPanel() {
     transacction_verified: "pending" | "verified" | "rejected";
     transacction_code?: string | null;
     providerCategorySlug?: string | null;
+    visibilitySubscriptionEndsAt?: string | null;
   };
 
   const credentialSlideTitle = (assoc: AdminVerifyingStatusItem) =>
@@ -1001,6 +1451,22 @@ export default function AdminPanel() {
     enabled: fullAdmin && activeTab === "overview",
   });
   const pendingAccountChangeRequests: AdminAccountChangeRequest[] = adminAccountChangeReqData?.requests ?? [];
+
+  const { data: adminAuditLogData, isLoading: adminAuditLogLoading } = useQuery({
+    queryKey: ["admin-audit-log"],
+    queryFn: () => fetchWithAuth("/api/admin/audit-log?limit=80"),
+    enabled: fullAdmin && activeTab === "overview",
+  });
+  const auditItems: Array<{
+    id: string;
+    action: string;
+    adminUserId: string;
+    adminName?: string | null;
+    adminEmail?: string | null;
+    affectedUserId: string;
+    createdAt: any;
+    meta?: any;
+  }> = adminAuditLogData?.items ?? [];
 
   const resolveAccountChangeRequestMutation = useMutation({
     mutationFn: async (args: { id: number; action: "approve" | "reject" }) =>
@@ -1108,7 +1574,7 @@ export default function AdminPanel() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Header: compacto en móvil */}
       <div className="bg-background border-b border-border px-4 sm:px-6 py-3 sm:py-4">
         <div className="container mx-auto flex items-center justify-between gap-2">
@@ -1116,7 +1582,7 @@ export default function AdminPanel() {
             <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-mango-orange shrink-0" />
             <div className="min-w-0">
               <h1 className="text-lg sm:text-2xl font-bold truncate">Panel de Administración</h1>
-              <p className="text-gray-500 text-sm truncate">GenFeb</p>
+              <p className="text-muted-foreground text-sm truncate">GenFeb</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
@@ -1124,7 +1590,9 @@ export default function AdminPanel() {
               <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
             <Avatar className="h-8 w-8 sm:h-10 sm:w-10">
-              <AvatarFallback className="text-sm">{user?.name?.[0]}</AvatarFallback>
+              <AvatarFallback className="text-sm">
+                {(user?.firstName?.[0] ?? user?.email?.[0] ?? "?").toUpperCase()}
+              </AvatarFallback>
             </Avatar>
           </div>
         </div>
@@ -1147,7 +1615,7 @@ export default function AdminPanel() {
         >
           <div className="relative -mx-3 sm:mx-0 mb-4">
             <div className="overflow-x-auto overflow-y-hidden pb-1 scroll-smooth md:overflow-visible pr-2 md:pr-0">
-              <TabsList className="inline-flex w-max min-w-full md:flex md:flex-wrap md:w-auto md:min-w-0 h-auto flex-nowrap gap-1 p-1 rounded-lg border border-transparent md:border-0">
+              <TabsList className="inline-flex w-max min-w-full md:flex md:flex-wrap md:w-auto md:min-w-0 h-auto flex-nowrap gap-1 rounded-xl border border-border/60 bg-muted/25 p-1.5 md:border-border/50 md:bg-muted/20">
                 {fullAdmin && (
                   <TabsTrigger value="estadisticas" className="shrink-0 gap-1">
                     <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4 opacity-80" />
@@ -1162,26 +1630,12 @@ export default function AdminPanel() {
                 <TabsTrigger value="providers" className="shrink-0">Proveedores</TabsTrigger>
                 <TabsTrigger value="bookings" className="shrink-0">Reservas</TabsTrigger>
                 {fullAdmin && (
+                  <TabsTrigger value="categories" className="shrink-0">Categorías</TabsTrigger>
+                )}
+                {fullAdmin && (
                   <TabsTrigger value="services" className="gap-1.5 shrink-0">
                     <Layers className="h-4 w-4 shrink-0" />
                     Servicios
-                  </TabsTrigger>
-                )}
-                {fullAdmin && (
-                  <TabsTrigger value="recargas" className="shrink-0">Recargas</TabsTrigger>
-                )}
-                {fullAdmin && (
-                  <TabsTrigger value="saldo" className="gap-1.5 shrink-0">
-                    <Wallet className="h-4 w-4 shrink-0" />
-                    <span className="hidden sm:inline">Gestión de Saldo</span>
-                    <span className="sm:hidden">Saldo</span>
-                  </TabsTrigger>
-                )}
-                {fullAdmin && (
-                  <TabsTrigger value="payouts" className="gap-1.5 shrink-0">
-                    <Banknote className="h-4 w-4 shrink-0" />
-                    <span className="hidden sm:inline">Solicitudes de Retiro</span>
-                    <span className="sm:hidden">Retiros</span>
                   </TabsTrigger>
                 )}
                 <TabsTrigger value="roles" className="shrink-0">Roles</TabsTrigger>
@@ -1292,6 +1746,8 @@ export default function AdminPanel() {
                             {paged.map((assoc) => {
                               const identEnabled = assoc.identification_verified === "pending";
                               const txEnabled = assoc.transacction_verified === "pending";
+                              const reqLabel = assoc.requestType === "renewal" ? "Renovación" : "Nuevo asociado";
+                              const reqBadgeVariant = assoc.requestType === "renewal" ? "secondary" : "default";
                               return (
                                 <div key={assoc.userId} className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4">
                                   <div className="flex items-center justify-between gap-3">
@@ -1301,16 +1757,27 @@ export default function AdminPanel() {
                                       </Avatar>
                                       <div className="min-w-0">
                                         <p className="font-medium truncate">{assoc.name}</p>
-                                        {assoc.email ? <p className="text-sm text-gray-500 truncate">{assoc.email}</p> : null}
+                                        {assoc.email ? <p className="text-sm text-muted-foreground truncate">{assoc.email}</p> : null}
                                       </div>
                                     </div>
+                                    <Badge
+                                      className={
+                                        assoc.requestType === "renewal"
+                                          ? "shrink-0 border-transparent bg-indigo-600/15 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200"
+                                          : "shrink-0 border-transparent bg-emerald-600/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+                                      }
+                                      variant={reqBadgeVariant}
+                                    >
+                                      {reqLabel}
+                                    </Badge>
                                   </div>
 
+                                  {assoc.requestType === "renewal" ? null : (
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
                                         <p className="font-medium">Verificación de identificación</p>
-                                        <p className="text-xs text-gray-500 mt-1">
+                                        <p className="text-xs text-muted-foreground mt-1">
                                           Estado: {stateLabel(assoc.identification_verified)}
                                         </p>
                                       </div>
@@ -1328,113 +1795,124 @@ export default function AdminPanel() {
                                       </Badge>
                                     </div>
 
-                                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="shrink-0"
-                                          disabled={!assoc.avatar}
-                                          onClick={() =>
-                                            setAssocImageDialog({
-                                              open: true,
-                                              userId: assoc.userId,
-                                              revieweeName: assoc.name?.trim() || "—",
-                                              initialIndex: 0,
-                                              slides: [...associateVerificationSlides(assoc)],
-                                            })
-                                          }
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="shrink-0"
-                                          disabled={!assoc.user_identification}
-                                          onClick={() =>
-                                            setAssocImageDialog({
-                                              open: true,
-                                              userId: assoc.userId,
-                                              revieweeName: assoc.name?.trim() || "—",
-                                              initialIndex: 1,
-                                              slides: [...associateVerificationSlides(assoc)],
-                                            })
-                                          }
-                                        >
-                                          <FileText className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="icon"
-                                          className="shrink-0"
-                                          disabled={!assoc.professionalCredentialUrl}
-                                          onClick={() =>
-                                            setAssocImageDialog({
-                                              open: true,
-                                              userId: assoc.userId,
-                                              revieweeName: assoc.name?.trim() || "—",
-                                              initialIndex: 2,
-                                              slides: [...associateVerificationSlides(assoc)],
-                                            })
-                                          }
-                                          title={
-                                            assoc.providerCategorySlug === "transport"
-                                              ? "Ver licencia de conducir"
-                                              : "Ver documento profesional"
-                                          }
-                                        >
-                                          <Shield className="h-4 w-4" />
-                                        </Button>
-                                      </div>
+                                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="shrink-0"
+                                            disabled={!assoc.avatar}
+                                            onClick={() =>
+                                              setAssocImageDialog({
+                                                open: true,
+                                                userId: assoc.userId,
+                                                revieweeName: assoc.name?.trim() || "—",
+                                                initialIndex: 0,
+                                                slides: [...associateVerificationSlides(assoc)],
+                                              })
+                                            }
+                                          >
+                                            <Eye className="h-4 w-4" />
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="shrink-0"
+                                            disabled={!assoc.user_identification}
+                                            onClick={() =>
+                                              setAssocImageDialog({
+                                                open: true,
+                                                userId: assoc.userId,
+                                                revieweeName: assoc.name?.trim() || "—",
+                                                initialIndex: 1,
+                                                slides: [...associateVerificationSlides(assoc)],
+                                              })
+                                            }
+                                          >
+                                            <FileText className="h-4 w-4" />
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="shrink-0"
+                                            disabled={!assoc.professionalCredentialUrl}
+                                            onClick={() =>
+                                              setAssocImageDialog({
+                                                open: true,
+                                                userId: assoc.userId,
+                                                revieweeName: assoc.name?.trim() || "—",
+                                                initialIndex: 2,
+                                                slides: [...associateVerificationSlides(assoc)],
+                                              })
+                                            }
+                                            title={
+                                              assoc.providerCategorySlug === "transport"
+                                                ? "Ver licencia de conducir"
+                                                : "Ver documento profesional"
+                                            }
+                                          >
+                                            <Shield className="h-4 w-4" />
+                                          </Button>
+                                        </div>
 
-                                      <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0 sm:gap-2">
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="min-w-0 justify-center text-green-600"
-                                          disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
-                                          onClick={() =>
-                                            updateVerifyingStatusMutation.mutate({
-                                              userId: assoc.userId,
-                                              step: "identification",
-                                              action: "approve",
-                                            })
-                                          }
-                                        >
-                                          <CheckCircle className="h-4 w-4 shrink-0 sm:mr-1" />
-                                          <span className="truncate">Aprobar</span>
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="min-w-0 justify-center text-red-600"
-                                          disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
-                                          onClick={() =>
-                                            updateVerifyingStatusMutation.mutate({
-                                              userId: assoc.userId,
-                                              step: "identification",
-                                              action: "reject",
-                                            })
-                                          }
-                                        >
-                                          <XCircle className="h-4 w-4 shrink-0 sm:mr-1" />
-                                          <span className="truncate">Rechazar</span>
-                                        </Button>
+                                        <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0 sm:gap-2">
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="min-w-0 justify-center text-green-600"
+                                            disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
+                                            onClick={() =>
+                                              updateVerifyingStatusMutation.mutate({
+                                                userId: assoc.userId,
+                                                step: "identification",
+                                                action: "approve",
+                                              })
+                                            }
+                                          >
+                                            <CheckCircle className="h-4 w-4 shrink-0 sm:mr-1" />
+                                            <span className="truncate">Aprobar</span>
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="min-w-0 justify-center text-red-600"
+                                            disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
+                                            onClick={() =>
+                                              updateVerifyingStatusMutation.mutate({
+                                                userId: assoc.userId,
+                                                step: "identification",
+                                                action: "reject",
+                                              })
+                                            }
+                                          >
+                                            <XCircle className="h-4 w-4 shrink-0 sm:mr-1" />
+                                            <span className="truncate">Rechazar</span>
+                                          </Button>
+                                        </div>
                                       </div>
-                                    </div>
                                   </div>
+                                  )}
 
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
                                         <p className="font-medium">Recarga de 15$</p>
-                                        <p className="break-words text-xs text-gray-500 mt-1">
+                                        <p className="break-words text-xs text-muted-foreground mt-1">
                                           Fecha:{" "}
                                           {assoc.transacction_date
                                             ? new Date(assoc.transacction_date).toLocaleDateString("es-EC")
                                             : "—"}{" "}
                                           · Código: {assoc.transacction_code ?? "—"}
+                                          {assoc.visibilitySubscriptionEndsAt ? (
+                                            <>
+                                              {" "}
+                                              · Vence:{" "}
+                                              {new Date(assoc.visibilitySubscriptionEndsAt).toLocaleString("es-EC", {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                              })}
+                                            </>
+                                          ) : null}
                                         </p>
                                       </div>
                                       <Badge
@@ -1521,6 +1999,55 @@ export default function AdminPanel() {
                         );
                       })()
                     )}
+
+                    <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-medium">Historial de auditoría</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Registro de acciones sensibles: fecha, admin, acción y usuario afectado.
+                          </p>
+                        </div>
+                      </div>
+
+                      {adminAuditLogLoading ? (
+                        <div className="py-6 text-center text-sm text-muted-foreground">Cargando historial…</div>
+                      ) : auditItems.length === 0 ? (
+                        <div className="py-6 text-center text-sm text-muted-foreground">Sin eventos recientes.</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {auditItems.slice(0, 40).map((it) => {
+                            const d = new Date(it.createdAt?.toDate ? it.createdAt.toDate() : it.createdAt);
+                            const dateLabel = Number.isNaN(d.getTime())
+                              ? "—"
+                              : d.toLocaleString("es-EC", { dateStyle: "medium", timeStyle: "short" });
+                            const actionLabel =
+                              it.action === "subscription_payment_approved"
+                                ? "Pago mensual aprobado"
+                                : it.action === "subscription_payment_rejected"
+                                  ? "Pago mensual rechazado"
+                                  : it.action === "associate_onboarding_approved"
+                                    ? "Nuevo asociado aprobado"
+                                    : it.action === "associate_onboarding_rejected"
+                                      ? "Nuevo asociado rechazado"
+                                      : it.action === "account_change_request_approved"
+                                        ? "Cambio de datos aprobado"
+                                        : it.action === "account_change_request_rejected"
+                                          ? "Cambio de datos rechazado"
+                                          : it.action;
+                            return (
+                              <div key={it.id} className="rounded-lg border bg-background p-3 text-sm">
+                                <p className="font-medium">{actionLabel}</p>
+                                <p className="text-xs text-muted-foreground mt-1 break-words">
+                                  {dateLabel} · Admin: {(it.adminName ?? it.adminUserId) || "—"}
+                                    {it.adminEmail ? ` (${it.adminEmail})` : ""} · Usuario: {it.affectedUserId || "—"}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -2993,6 +3520,10 @@ export default function AdminPanel() {
 
           <TabsContent value="payouts">
             <AdminWithdrawalsTab toast={toast} enabled={fullAdmin} />
+          </TabsContent>
+
+          <TabsContent value="categories">
+            <AdminCategoriesTab />
           </TabsContent>
 
           <TabsContent value="roles">

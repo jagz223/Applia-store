@@ -360,7 +360,7 @@ export default function Notifications() {
     const from = params.get("from");
     const returnToRaw = params.get("returnTo");
     const returnTo = typeof returnToRaw === "string" && returnToRaw.trim() ? returnToRaw.trim() : null;
-    const backHref = returnTo ?? (from === "go" ? "/go/cargo" : "/dashboard");
+    const backHref = returnTo ?? (from === "go" ? "/go/taxi" : "/dashboard");
     return { from, returnTo, backHref };
   }, [location]);
 

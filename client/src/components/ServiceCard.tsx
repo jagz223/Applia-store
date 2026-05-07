@@ -50,12 +50,6 @@ export function ServiceCard({ service }: ServiceCardProps) {
               )}
             </div>
 
-            {/* Price tag */}
-            <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-2 group-hover:translate-y-0">
-              <div className="bg-primary text-white px-4 py-2 rounded-xl font-bold shadow-lg">
-                ${Number(service.price).toFixed(0)}
-              </div>
-            </div>
           </div>
 
           {/* Content */}
@@ -96,14 +90,7 @@ export function ServiceCard({ service }: ServiceCardProps) {
             </p>
 
             {/* Footer */}
-            <div className="mt-auto flex items-center justify-between pt-4 border-t border-border/50">
-              <div className="flex flex-col">
-                <span className="text-xs text-muted-foreground">Desde</span>
-                <span className="text-2xl font-bold text-primary">
-                  ${Number(service.price).toFixed(0)}
-                </span>
-              </div>
-              
+            <div className="mt-auto flex items-center justify-end pt-4 border-t border-border/50">
               <div className="flex items-center gap-2 rounded-full bg-secondary/10 px-4 py-2.5 text-sm font-bold text-secondary group-hover:bg-secondary group-hover:text-white transition-all duration-300">
                 Ver más
                 <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />

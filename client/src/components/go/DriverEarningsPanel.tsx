@@ -3,7 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AlertTriangle, Calendar, HandCoins, TrendingUp, Wallet } from "lucide-react";
 import { api } from "@shared/routes";
+import { MOBILITY_HISTORY_SUBTITLE } from "@shared/mobility-ui-labels";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
+import { useAuth } from "@/hooks/use-auth";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED, FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { useWallet, useWithdraw } from "@/hooks/use-mango-data";
 import { loadTripLog, type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
@@ -13,7 +15,6 @@ import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/use-auth";
 
 const money = (n: number) =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(n);
@@ -80,10 +81,10 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
   const tripsForPanel = useMemo(() => {
-    const all = open ? loadTripLog() : [];
+    const all = open ? loadTripLog(user?.id ?? null) : [];
     if (FEATURE_WALLET_RECHARGE_UI_ENABLED) return all;
     return all.filter((t) => t.payment === "cash" || t.payment === "bank_transfer");
-  }, [open]);
+  }, [open, user?.id]);
   const byDay = useMemo(() => groupTripsByLocalDay(tripsForPanel), [tripsForPanel]);
   const localTotal = useMemo(
     () => tripsForPanel.reduce((a, t) => a + (typeof t.amountUsd === "number" ? t.amountUsd : 0), 0),
@@ -149,7 +150,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
           <CardHeader className="p-3 pb-1">
             <CardTitle className="text-sm font-semibold">Ganancias en efectivo y transferencias</CardTitle>
             <p className="text-xs font-normal text-muted-foreground">
-              Total según viajes terminados en este dispositivo (Car Go / Pack Go). Se actualiza al completar cada
+              Total según viajes terminados en este dispositivo ({MOBILITY_HISTORY_SUBTITLE}). Se actualiza al completar cada
               servicio.
             </p>
           </CardHeader>
@@ -292,7 +293,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
 
       <Card>
         <CardHeader className="p-3 pb-2">
-          <CardTitle className="text-sm">Resumen Car Go (estimado)</CardTitle>
+          <CardTitle className="text-sm">Resumen local (estimado)</CardTitle>
           <p className="text-xs font-normal text-muted-foreground">
             {FEATURE_WALLET_RECHARGE_UI_ENABLED
               ? `Suma de viajes en este resumen: ${money(localTotal)}`

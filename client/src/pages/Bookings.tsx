@@ -2,7 +2,12 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/use-auth";
-import { useBookings, useConfirmBookingByClient, useUpdateBookingStatus } from "@/hooks/use-mango-data";
+import {
+  useBookings,
+  useConfirmBookingByClient,
+  useUpdateBookingStatus,
+  useAcknowledgeBookingProChanges,
+} from "@/hooks/use-mango-data";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +24,7 @@ import {
   Package,
   MessageSquare,
   ShieldCheck,
+  ClipboardList,
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -46,10 +52,12 @@ export default function Bookings() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { data: bookings, isLoading: bookingsLoading, isFetching, isError: bookingsError, refetch: refetchBookings } = useBookings({ enabled: isAuthenticated });
   const confirmPayment = useConfirmBookingByClient();
+  const acknowledgeProChanges = useAcknowledgeBookingProChanges();
   const updateStatus = useUpdateBookingStatus();
   const [location] = useLocation();
   const [highlightedBookingId, setHighlightedBookingId] = useState<number | null>(null);
   const [bookingToConfirm, setBookingToConfirm] = useState<(typeof list)[number] | null>(null);
+  const [bookingToAckPro, setBookingToAckPro] = useState<(typeof list)[number] | null>(null);
   const [subTab, setSubTab] = useState<"new" | "pending" | "done">("new");
   const [showAllHistory, setShowAllHistory] = useState(false);
 
@@ -63,6 +71,7 @@ export default function Bookings() {
     notes?: string | null;
     createdAt?: string | Date;
     paymentMethod?: string;
+    pendingClientAcknowledgment?: boolean;
     service?: { id: number; title: string; price?: string; provider?: { userId?: string; user?: { firstName?: string; lastName?: string } } };
   }>;
 
@@ -85,6 +94,8 @@ export default function Bookings() {
     const Icon = config.icon;
     const date = toDate(booking.date);
     const needsClientConfirmation = booking.status === "confirmed" && !booking.confirmedByClient;
+    const needsProChangeAck =
+      booking.status === "pending" && booking.pendingClientAcknowledgment === true;
     const offPlatformPay = isOffPlatformServiceBookingPayment(booking.paymentMethod);
     const cost = typeof booking.cost === "number" ? booking.cost : (booking.service?.price != null ? Number(booking.service.price) : 0);
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
@@ -96,7 +107,15 @@ export default function Bookings() {
         {...listItemMotion}
         className={isHighlighted ? "notification-highlight" : ""}
       >
-        <Card className={needsClientConfirmation ? "ring-2 ring-primary/50" : ""}>
+        <Card
+          className={
+            needsClientConfirmation
+              ? "ring-2 ring-primary/50"
+              : needsProChangeAck
+                ? "ring-2 ring-amber-500/40"
+                : ""
+          }
+        >
           <CardHeader className="pb-2">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <CardTitle className="text-lg">
@@ -119,6 +138,41 @@ export default function Bookings() {
             )}
           </CardHeader>
           <CardContent className="space-y-4">
+            {needsProChangeAck && (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/25 dark:bg-amber-500/15 p-4 space-y-3">
+                <p className="font-medium flex items-center gap-2 text-amber-900 dark:text-amber-100">
+                  <ClipboardList className="h-5 w-5 shrink-0" />
+                  Revisar cambios del asociado
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  El profesional indicó un monto o una fecha distintos. Debes aceptar esos datos para que pueda
+                  confirmar la reserva; si no estás de acuerdo, podés cancelar la reserva.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={() => setBookingToAckPro(booking)}
+                    disabled={updateStatus.isPending}
+                    className="gap-2 bg-amber-600 hover:bg-amber-600/90 text-white"
+                  >
+                    <ClipboardList className="h-4 w-4" />
+                    Revisar y aceptar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => updateStatus.mutate({ id: booking.id, status: "cancelled" })}
+                    disabled={updateStatus.isPending}
+                    className="gap-2"
+                  >
+                    {updateStatus.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <XCircle className="h-4 w-4" />
+                    )}
+                    Cancelar reserva
+                  </Button>
+                </div>
+              </div>
+            )}
             {needsClientConfirmation && (
               <div className="rounded-lg bg-primary/10 border border-primary/20 p-4 space-y-3">
                 <p className="font-medium flex items-center gap-2 text-primary">
@@ -170,7 +224,7 @@ export default function Bookings() {
                 </div>
               </div>
             )}
-            {booking.status === "pending" && (
+            {booking.status === "pending" && !needsProChangeAck && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
@@ -374,6 +428,70 @@ export default function Bookings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={bookingToAckPro != null} onOpenChange={(open) => !open && setBookingToAckPro(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Aceptar monto y fecha</DialogTitle>
+            <DialogDescription>
+              El asociado definió o actualizó el costo y/o la fecha de este servicio. Al aceptar, confirmás que
+              estás de acuerdo con esos datos; el asociado podrá pasar la reserva a confirmada. Si no estás de
+              acuerdo, podés cancelar la reserva desde la tarjeta.
+            </DialogDescription>
+          </DialogHeader>
+          {bookingToAckPro && (
+            <div className="mt-3 space-y-2 text-sm">
+              <p className="font-medium">Servicio: {(bookingToAckPro as { service?: { title?: string } }).service?.title ?? "Servicio"}</p>
+              <p className="text-muted-foreground">
+                Fecha y hora: {format(toDate(bookingToAckPro.date), "PPP p", { locale: es })}
+              </p>
+              <p className="text-muted-foreground">
+                Monto acordado:{" "}
+                <span className="font-semibold text-foreground">
+                  $
+                  {Number(
+                    typeof bookingToAckPro.cost === "number"
+                      ? bookingToAckPro.cost
+                      : bookingToAckPro.service?.price != null
+                        ? Number(bookingToAckPro.service.price)
+                        : 0
+                  ).toFixed(2)}{" "}
+                  USD
+                </span>
+              </p>
+            </div>
+          )}
+          <DialogFooter className="mt-4 flex flex-col sm:flex-row sm:justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setBookingToAckPro(null)} disabled={acknowledgeProChanges.isPending}>
+              Cerrar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                if (!bookingToAckPro) return;
+                acknowledgeProChanges.mutate(bookingToAckPro.id, {
+                  onSuccess: () => setBookingToAckPro(null),
+                });
+              }}
+              disabled={acknowledgeProChanges.isPending}
+              className="gap-2 bg-amber-600 hover:bg-amber-600/90 text-white"
+            >
+              {acknowledgeProChanges.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Registrando…
+                </>
+              ) : (
+                <>
+                  <ClipboardList className="h-4 w-4" />
+                  Acepto estos cambios
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
         <div className="container mx-auto px-4 py-8 max-w-4xl">
         <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-primary mb-6 transition-colors">

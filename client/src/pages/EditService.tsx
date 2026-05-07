@@ -167,8 +167,7 @@ export default function EditService() {
         <CardHeader>
           <CardTitle>Tu servicio y perfil</CardTitle>
           <CardDescription>
-            Mismo formulario que al registrarte como proveedor: nombre, precio, descripción, habilidades y biografía
-            pública.
+            Mismo formulario que al registrarte como proveedor: nombre, descripción, habilidades y biografía pública.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -196,15 +195,7 @@ export default function EditService() {
               <FormField
                 control={form.control}
                 name="price"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Precio ($)</FormLabel>
-                    <FormControl>
-                      <Input type="text" inputMode="decimal" placeholder="0" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                render={({ field }) => <input type="hidden" {...field} />}
               />
 
               <FormField
@@ -279,7 +270,7 @@ export default function EditService() {
           <AlertDialogHeader>
             <AlertDialogTitle>¿Guardar los cambios?</AlertDialogTitle>
             <AlertDialogDescription>
-              ¿Estás completamente seguro de que tu texto y tu precio son correctos? Revisa cuidadosamente antes de continuar.
+              ¿Estás completamente seguro de que tu texto es correcto? Revisa cuidadosamente antes de continuar.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -116,12 +116,14 @@ export default function VerifyProfessional() {
   const { data: currentProvider } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
   const provider = currentProvider ?? user?.provider;
+  // Nota: internamente detectamos la marca `transport`, pero en UI mostramos "movilidad" (Taxi/Delivery/Marketplace).
   const isCarGo = useMemo(() => isCarGoProvider(provider ?? undefined, categories), [provider, categories]);
   const enabled = Boolean(isAuthenticated && provider);
   const { data: verification, isLoading: verLoading } = useProfessionalVerification(enabled);
   const patchImage = usePatchProfessionalVerificationImage();
   const patchCredential = usePatchProfessionalVerificationCredential();
   const { data: verifyingStatus, isLoading: verifyingStatusLoading } = useVerifyingStatusMe(enabled);
+  const isRenewalSimple = (provider as any)?.isVerified === true;
 
   useEffect(() => {
     ensureDefaultVerifyReturnPath();
@@ -130,10 +132,13 @@ export default function VerifyProfessional() {
   /** Documento y pago enviados y en revisión: volver a la pantalla previa (el banner sigue hasta que admin verifique). */
   useEffect(() => {
     if (verLoading || verifyingStatusLoading || !verifyingStatus) return;
-    if (verifyingStatus.identification_verified !== "pending") return;
-    if (verifyingStatus.transacction_verified !== "pending") return;
+    const txPending = verifyingStatus.transacction_verified === "pending";
+    const idPending = verifyingStatus.identification_verified === "pending";
+    if (!txPending) return;
+    // Renovación simple: solo hay pago; onboarding: suele tener ambos en pending.
+    if (!isRenewalSimple && !idPending) return;
     setLocation(consumeVerifyReturnPath());
-  }, [verLoading, verifyingStatusLoading, verifyingStatus, setLocation]);
+  }, [verLoading, verifyingStatusLoading, verifyingStatus, isRenewalSimple, setLocation]);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -175,7 +180,7 @@ export default function VerifyProfessional() {
       toast({
         title: isCarGo ? "Licencia de conducir enviada" : "Documento profesional enviado",
         description: isCarGo
-          ? "Se guardó en Mis documentos. El equipo la revisará en tu verificación Car Go."
+          ? "Se guardó en Mis documentos. El equipo la revisará en tu verificación de movilidad."
           : "Se guardó en Mis documentos. El admin lo verá en tu verificación.",
       });
     } catch (err: unknown) {
@@ -223,6 +228,9 @@ export default function VerifyProfessional() {
   // Regla UI:
   // - pending/verified => carta "apagada" y sin edición
   // - rejected (o ausencia de doc) => carta "encendida" y editable
+  // Importante: si el usuario ya envió el pago pero todavía no envió documentos,
+  // debe poder seguir subiéndolos. Por eso el lock del paso 1 depende SOLO del estado
+  // de identificación (pending/verified), no del pago.
   const step1Locked =
     verifyingStatusLoading ||
     identificationVerifiedState === "pending" ||
@@ -241,15 +249,20 @@ export default function VerifyProfessional() {
         </Link>
       </Button>
 
-      <h1 className="text-2xl font-bold tracking-tight mb-2">Pasos para verificarse</h1>
+      <h1 className="text-2xl font-bold tracking-tight mb-2">
+        {isRenewalSimple ? "Renovación simple" : "Pasos para verificarse"}
+      </h1>
       <p className="text-muted-foreground text-sm mb-8">
-        {isCarGo
-          ? "Completa la verificación para que los clientes puedan usar tus servicios de transporte. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."
-          : "Completa ambos pasos. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."}
+        {isRenewalSimple
+          ? "Solo necesitas subir el comprobante de USD 15. No te pediremos documentos nuevamente."
+          : isCarGo
+            ? "Completa la verificación para que los clientes puedan usar tus servicios de movilidad. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."
+            : "Completa ambos pasos. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."}
       </p>
 
       <div className="flex flex-col gap-4">
-        <Card className={step1Locked ? "opacity-60 bg-muted/10" : ""}>
+        {!isRenewalSimple ? (
+          <Card className={step1Locked ? "opacity-60 bg-muted/10" : ""}>
           <CardHeader>
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -300,16 +313,19 @@ export default function VerifyProfessional() {
             <p className="text-xs text-muted-foreground mt-2">Solo JPG o PNG.</p>
           </CardContent>
         </Card>
+        ) : null}
 
         <Card className={step2Locked ? "opacity-60 bg-muted/10" : ""}>
           <CardHeader>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <CardTitle className="text-lg">{isCarGo ? "Cuota de asociado Car Go" : "Cuota por ser profesional"}</CardTitle>
+                <CardTitle className="text-lg">
+                  {isCarGo ? "Cuota de asociado · Servicios de movilidad" : "Cuota por ser profesional"}
+                </CardTitle>
                 <CardDescription>
                   {isCarGo
-                    ? "Es un pago de una sola vez (USD 15). Una vez verificado, podrás operar como asociado y los clientes podrán usar tus servicios de transporte en la plataforma."
-                    : "Es un pago de una sola vez (USD 15). Una vez verificado, ya estarás asociado a nosotros y podrás ofrecer tu servicio de forma pública."}
+                    ? "Es una cuota de USD 15 por mes de visibilidad en la plataforma. Con la primera validación podrás operar como asociado; cada mes debés renovar para seguir publicado. Si pagás antes de vencer el período, al validar el comprobante se suma un mes desde tu fecha de vencimiento actual."
+                    : "Es una cuota de USD 15 por mes para mantener tu servicio visible en el catálogo. Con la primera validación quedás publicado; cada mes debés renovar. Si pagás antes de vencer, al validar el comprobante se suma un mes desde tu vencimiento actual (no perdés lo ya pagado)."}
                 </CardDescription>
               </div>
               {step2Locked ? <Lock className="h-5 w-5 text-muted-foreground shrink-0" /> : null}
@@ -327,14 +343,15 @@ export default function VerifyProfessional() {
           </CardContent>
         </Card>
 
-        <Card className={uploadingCredential || patchCredential.isPending ? "opacity-90" : ""}>
+        {!isRenewalSimple ? (
+          <Card className={uploadingCredential || patchCredential.isPending ? "opacity-90" : ""}>
           <CardHeader>
             <div className="flex items-start justify-between gap-2">
               <div>
                 <CardTitle className="text-lg">{isCarGo ? "Licencia de conducir" : "Documento profesional"}</CardTitle>
                 <CardDescription>
                   {isCarGo
-                    ? "Sube una foto o PDF legible de tu licencia de conducir vigente (anverso y reverso en un solo archivo si aplica). Es requerida para la verificación Car Go."
+                    ? "Sube una foto o PDF legible de tu licencia de conducir vigente (anverso y reverso en un solo archivo si aplica). Es requerida para operar en servicios de movilidad."
                     : "Sube un certificado, título universitario o documento que avale tu profesión. Es requerido para la verificación."}
                 </CardDescription>
               </div>
@@ -383,6 +400,7 @@ export default function VerifyProfessional() {
             <p className="text-xs text-muted-foreground mt-2">Puedes subir JPG, PNG o PDF sin problema.</p>
           </CardContent>
         </Card>
+        ) : null}
       </div>
 
       {hasPayment && verification?.transferDate ? (

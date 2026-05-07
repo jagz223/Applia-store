@@ -27,6 +27,9 @@ import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./
 import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
+import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
+import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
+import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
 const getDb = async () => (await import("./db")).db;
 
 /**
@@ -79,7 +82,20 @@ export interface IStorage
   markConversationAsRead(conversationId: number, userId: string): Promise<void>;
   /** Oculta una conversación del historial de usuarios (sin borrar BD). */
   hideConversationForUsers(conversationId: number, userIds: string[]): Promise<void>;
-  
+  /** Actualiza campos de una conversación (p. ej. bookingId, período de gracia tras fin de servicio). */
+  patchConversation(conversationId: number, patch: Record<string, unknown>): Promise<void>;
+  /**
+   * Busca conversación de chat vinculada a una reserva solo por bookingId (sin reutilizar hilos de reservas anteriores).
+   */
+  findConversationForServiceBooking(booking: {
+    id: number;
+    userId?: string;
+    providerId?: number;
+    serviceId?: number;
+  }): Promise<any | null>;
+  /** Lista conversaciones para auditoría admin (sin filtro de gracia ni hiddenForUserIds). */
+  listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]>;
+
   // Roles de Usuario (perfil del usuario, no catálogo de roles)
   getUserRole(userId: string): Promise<any | undefined>;
   updateUserRole(userId: string, data: any): Promise<any>;
@@ -266,8 +282,15 @@ export interface IStorage
   // ==================== verifying_status (nueva colección) ====================
   getVerifyingStatusByUserId(userId: string): Promise<VerifyingStatus | null>;
   getPendingVerifyingStatuses(): Promise<VerifyingStatus[]>;
-  upsertVerifyingStatusIdentificationPending(userId: string): Promise<VerifyingStatus>;
-  upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus>;
+  upsertVerifyingStatusIdentificationPending(
+    userId: string,
+    requestType?: "onboarding" | "renewal",
+  ): Promise<VerifyingStatus>;
+  upsertVerifyingStatusTransactionPending(
+    userId: string,
+    transactionDate: string,
+    requestType?: "onboarding" | "renewal",
+  ): Promise<VerifyingStatus>;
   setVerifyingStatusIdentification(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
   setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
 
@@ -288,6 +311,8 @@ export interface IStorage
 
 export class InMemoryStorage implements IStorage {
   private bookings: any[] = [];
+  /** monthKey `YYYY-MM` → subcategoryId → conteo (misma semántica que Firestore). */
+  private subcategoryMonthlyBookingCounts = new Map<string, Map<number, number>>();
   private users: any[] = [];
   private userIdCounter = 1;
   
@@ -483,16 +508,54 @@ export class InMemoryStorage implements IStorage {
   }
   
   async createBooking(booking: any): Promise<any> {
-    const cost = typeof (booking as { cost?: number }).cost === "number" ? (booking as { cost?: number }).cost : 0;
+    const cost = 0;
     const newBooking = { ...booking, id: this.bookings.length + 1, cost, confirmedByClient: false };
     this.bookings.push(newBooking);
     return newBooking;
   }
+
+  async incrementSubcategoryMonthlyBookingCount(subcategoryId: number | null | undefined): Promise<void> {
+    const id = subcategoryId != null ? Number(subcategoryId) : NaN;
+    if (!Number.isFinite(id) || id <= 0) return;
+    const monthKey = getGenfebStatsMonthKey();
+    let inner = this.subcategoryMonthlyBookingCounts.get(monthKey);
+    if (!inner) {
+      inner = new Map();
+      this.subcategoryMonthlyBookingCounts.set(monthKey, inner);
+    }
+    inner.set(id, (inner.get(id) ?? 0) + 1);
+  }
+
+  async getMonthlyPopularSubcategoryBookingCounts(
+    monthKey: string,
+    limit: number
+  ): Promise<{ subcategoryId: number; count: number }[]> {
+    const inner = this.subcategoryMonthlyBookingCounts.get(monthKey);
+    if (!inner || inner.size === 0) return [];
+    const lim = Math.min(50, Math.max(1, Math.floor(limit)));
+    const rows = [...inner.entries()].map(([subcategoryId, count]) => ({ subcategoryId, count }));
+    rows.sort((a, b) => b.count - a.count || a.subcategoryId - b.subcategoryId);
+    return rows.slice(0, lim);
+  }
   
   async updateBookingStatus(id: number, status: string): Promise<any | undefined> {
     const booking = this.bookings.find(b => b.id === id);
-    if (booking) {
-      booking.status = status;
+    if (!booking) return undefined;
+    const prev = String((booking as { status?: string }).status ?? "pending");
+    const countNow = bookingTransitionCountsForMonthlySubcategoryDemand(
+      prev,
+      status,
+      (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted === true
+    );
+    (booking as { status: string }).status = status;
+    if (status === "completed") (booking as { completedAt?: Date }).completedAt = new Date();
+    if (countNow) {
+      (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted = true;
+      const svc = await this.getService(Number((booking as { serviceId?: number }).serviceId));
+      const subId = (svc as { subcategoryId?: number | null } | undefined)?.subcategoryId;
+      await this.incrementSubcategoryMonthlyBookingCount(
+        subId != null && Number.isFinite(Number(subId)) ? Number(subId) : null
+      );
     }
     return booking;
   }
@@ -506,7 +569,25 @@ export class InMemoryStorage implements IStorage {
       throw new Error("El servicio requiere confirmación previa del cliente para procesar los fondos retenidos");
     }
     const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
-    if (cost <= 0) throw new Error("Costo de reserva no definido");
+    if (cost <= 0) {
+      const prev = String(booking.status ?? "pending");
+      const countNow = bookingTransitionCountsForMonthlySubcategoryDemand(
+        prev,
+        "completed",
+        (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted === true
+      );
+      (booking as { status: string }).status = "completed";
+      (booking as { completedAt?: Date }).completedAt = new Date();
+      if (countNow) {
+        (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted = true;
+        const svc = await this.getService(Number((booking as { serviceId?: number }).serviceId));
+        const subId = (svc as { subcategoryId?: number | null } | undefined)?.subcategoryId;
+        await this.incrementSubcategoryMonthlyBookingCount(
+          subId != null && Number.isFinite(Number(subId)) ? Number(subId) : null
+        );
+      }
+      return booking;
+    }
     const commissionRate = await getPlatformCommissionRate();
     const commission = calcCommission(cost, commissionRate);
     const providerNet = calcProviderNet(cost, commissionRate);
@@ -551,8 +632,22 @@ export class InMemoryStorage implements IStorage {
         (providerUser as { totalEarnings: number }).totalEarnings = providerTotalEarnings + cost;
       }
     }
+    const prevStatusForDemand = String(booking.status ?? "pending");
     (booking as { status: string }).status = "completed";
     (booking as { completedAt?: Date }).completedAt = new Date();
+    const countDemandOnComplete = bookingTransitionCountsForMonthlySubcategoryDemand(
+      prevStatusForDemand,
+      "completed",
+      (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted === true
+    );
+    if (countDemandOnComplete) {
+      (booking as { monthlyDemandStatsCounted?: boolean }).monthlyDemandStatsCounted = true;
+      const svc = await this.getService(Number((booking as { serviceId?: number }).serviceId));
+      const subId = (svc as { subcategoryId?: number | null } | undefined)?.subcategoryId;
+      await this.incrementSubcategoryMonthlyBookingCount(
+        subId != null && Number.isFinite(Number(subId)) ? Number(subId) : null
+      );
+    }
 
     const now = new Date();
     const refId = String(bookingId);
@@ -766,7 +861,11 @@ export class InMemoryStorage implements IStorage {
     }
 
     const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
-    if (cost <= 0) throw new Error("Costo de reserva no definido");
+    if (cost <= 0) {
+      (booking as { status: string }).status = "cancelled";
+      (booking as { cancelledAt?: Date }).cancelledAt = new Date();
+      return { ...booking, status: "cancelled" };
+    }
     const client = this.users.find((u: { id?: string }) => u.id === booking.userId);
     if (!client) throw new Error("Usuario cliente no encontrado");
     const clientWallet = typeof (client as { wallet?: number }).wallet === "number" ? (client as { wallet: number }).wallet : 0;
@@ -801,6 +900,7 @@ export class InMemoryStorage implements IStorage {
     const booking = this.bookings.find(b => b.id === id);
     if (!booking) return undefined;
     (booking as { cost?: number }).cost = Number(cost);
+    (booking as { pendingClientAcknowledgment?: boolean }).pendingClientAcknowledgment = true;
     return booking;
   }
 
@@ -808,6 +908,15 @@ export class InMemoryStorage implements IStorage {
     const booking = this.bookings.find(b => b.id === id);
     if (!booking) return undefined;
     (booking as { date?: Date }).date = date;
+    (booking as { pendingClientAcknowledgment?: boolean }).pendingClientAcknowledgment = true;
+    return booking;
+  }
+
+  async acknowledgeBookingProChanges(bookingId: number, clientUserId: string): Promise<any | undefined> {
+    const booking = this.bookings.find(b => b.id === bookingId);
+    if (!booking) return undefined;
+    if ((booking as { userId?: string }).userId !== clientUserId) return undefined;
+    (booking as { pendingClientAcknowledgment?: boolean }).pendingClientAcknowledgment = false;
     return booking;
   }
 
@@ -819,11 +928,15 @@ export class InMemoryStorage implements IStorage {
     }
     if (booking.confirmedByClient === true) throw new Error("Esta reserva ya fue confirmada por el cliente");
     const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
-    if (cost <= 0) throw new Error("El costo de la reserva no está definido");
     const clientUserId = booking.userId;
     const providerId = booking.providerId;
     if (!clientUserId) throw new Error("Reserva sin cliente asociado");
     if (providerId == null) throw new Error("Reserva sin profesional asociado");
+
+    if (cost <= 0) {
+      (booking as { confirmedByClient: boolean }).confirmedByClient = true;
+      return { ...booking, confirmedByClient: true };
+    }
 
     if (isOffPlatformServiceBookingPayment((booking as { paymentMethod?: string }).paymentMethod)) {
       (booking as { confirmedByClient: boolean }).confirmedByClient = true;
@@ -921,12 +1034,29 @@ export class InMemoryStorage implements IStorage {
 
   // ============== CONVERSACIONES ==============
   
+  private serviceChatHideAtMs(c: any): number | null {
+    const t = c?.serviceChatHideFromUsersAt;
+    if (t == null) return null;
+    if (t instanceof Date) return t.getTime();
+    if (typeof t?.getTime === "function") return t.getTime();
+    if (typeof t === "number") return t;
+    if (typeof t === "string") {
+      const d = new Date(t);
+      return Number.isNaN(d.getTime()) ? null : d.getTime();
+    }
+    return null;
+  }
+
   async getConversationsByUser(userId: string): Promise<any[]> {
     const uid = String(userId ?? "");
+    const now = Date.now();
     return this.conversations.filter((c: any) => {
       if (c.participant1Id !== uid && c.participant2Id !== uid) return false;
       const hiddenFor = Array.isArray(c.hiddenForUserIds) ? c.hiddenForUserIds.map((x: any) => String(x)) : [];
-      return !hiddenFor.includes(uid);
+      if (hiddenFor.includes(uid)) return false;
+      const hideMs = this.serviceChatHideAtMs(c);
+      if (hideMs != null && now > hideMs) return false;
+      return true;
     });
   }
   
@@ -972,9 +1102,11 @@ export class InMemoryStorage implements IStorage {
   }
 
   async getUnreadCountByConversation(conversationId: number, userId: string): Promise<number> {
-    return this.messages.filter(
-      (m) => m.conversationId === conversationId && m.senderId !== userId && m.status !== "read"
-    ).length;
+    return this.messages.filter((m) => {
+      if (m.conversationId !== conversationId) return false;
+      if (m.type === "system" || m.senderId === CHAT_SYSTEM_SENDER_ID) return false;
+      return m.senderId !== userId && m.status !== "read";
+    }).length;
   }
   
   async createMessage(msg: any): Promise<any> {
@@ -1025,6 +1157,36 @@ export class InMemoryStorage implements IStorage {
     }
     (conv as any).hiddenForUserIds = Array.from(next);
     (conv as any).hiddenAt = new Date();
+  }
+
+  async patchConversation(conversationId: number, patch: Record<string, unknown>): Promise<void> {
+    const id = Number(conversationId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const conv = this.conversations.find((c: any) => Number(c?.id) === id);
+    if (!conv) return;
+    Object.assign(conv, patch);
+  }
+
+  async findConversationForServiceBooking(booking: {
+    id: number;
+    userId?: string;
+    providerId?: number;
+    serviceId?: number;
+  }): Promise<any | null> {
+    const bid = Number(booking.id);
+    const byBooking = this.conversations.find((c: any) => Number(c?.bookingId) === bid);
+    if (byBooking) return byBooking;
+    return null;
+  }
+
+  async listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]> {
+    const lim = Math.min(Math.max(Number(opts?.limit) || 200, 1), 500);
+    const sorted = [...this.conversations].sort((a: any, b: any) => {
+      const ta = a.lastMessageAt instanceof Date ? a.lastMessageAt.getTime() : 0;
+      const tb = b.lastMessageAt instanceof Date ? b.lastMessageAt.getTime() : 0;
+      return tb - ta;
+    });
+    return sorted.slice(0, lim);
   }
 
   // ============== ROLES ==============
@@ -1281,11 +1443,23 @@ export class InMemoryStorage implements IStorage {
     ];
   }
 
+  async updateCategory(_id: number, _data: Partial<Category>): Promise<Category | undefined> {
+    return undefined; // Dummy implementation
+  }
+
   async getSubcategories(_categoryId: number): Promise<import("./storage-contracts").Subcategory[]> {
     return [];
   }
 
   async getSubcategoryById(_id: number): Promise<import("./storage-contracts").Subcategory | undefined> {
+    return undefined;
+  }
+
+  async createSubcategory(data: Omit<import("./storage-contracts").Subcategory, "id">): Promise<import("./storage-contracts").Subcategory> {
+    return { id: 999, ...data } as import("./storage-contracts").Subcategory;
+  }
+
+  async updateSubcategory(_id: number, _data: Partial<import("./storage-contracts").Subcategory>): Promise<import("./storage-contracts").Subcategory | undefined> {
     return undefined;
   }
 
@@ -1319,6 +1493,8 @@ export class InMemoryStorage implements IStorage {
       category: insertProvider.category ?? null,
       subcategoryId: (insertProvider as any).subcategoryId ?? null,
       goBrands: (insertProvider as any).goBrands ?? null,
+      coursesCompleted: (insertProvider as { coursesCompleted?: string | null }).coursesCompleted ?? null,
+      certifications: (insertProvider as { certifications?: string | null }).certifications ?? null,
       profession: insertProvider.profession,
       bio: insertProvider.bio || "",
       yearsExperience: insertProvider.yearsExperience || 0,
@@ -1833,8 +2009,14 @@ export class InMemoryStorage implements IStorage {
       to.setHours(23, 59, 59, 999);
       list = list.filter((t: any) => new Date(t.createdAt).getTime() <= to.getTime());
     }
-    if (options?.amountMin != null) list = list.filter((t: any) => t.amount >= options.amountMin);
-    if (options?.amountMax != null) list = list.filter((t: any) => t.amount <= options.amountMax);
+    if (options?.amountMin != null) {
+      const min = options.amountMin;
+      list = list.filter((t: any) => t.amount >= min);
+    }
+    if (options?.amountMax != null) {
+      const max = options.amountMax;
+      list = list.filter((t: any) => t.amount <= max);
+    }
     list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     const total = list.length;
     const page = Math.max(1, options?.page ?? 1);
@@ -2229,10 +2411,14 @@ export class InMemoryStorage implements IStorage {
     return this.verifyingStatuses.get(userId) ?? null;
   }
 
-  async upsertVerifyingStatusIdentificationPending(userId: string): Promise<VerifyingStatus> {
+  async upsertVerifyingStatusIdentificationPending(
+    userId: string,
+    requestType: "onboarding" | "renewal" = "onboarding",
+  ): Promise<VerifyingStatus> {
     const cur = this.verifyingStatuses.get(userId);
     const next: VerifyingStatus = {
       user: userId,
+      requestType,
       identification_verified: "pending",
       transacction_date: cur?.transacction_date ?? null,
       // No tocar el estado del pago al subir identificación: null sigue null, pending sigue pending, etc.
@@ -2244,10 +2430,15 @@ export class InMemoryStorage implements IStorage {
     return next;
   }
 
-  async upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string): Promise<VerifyingStatus> {
+  async upsertVerifyingStatusTransactionPending(
+    userId: string,
+    transactionDate: string,
+    requestType: "onboarding" | "renewal" = "onboarding",
+  ): Promise<VerifyingStatus> {
     const cur = this.verifyingStatuses.get(userId);
     const next: VerifyingStatus = {
       user: userId,
+      requestType: cur?.requestType ?? requestType,
       identification_verified: cur?.identification_verified ?? "rejected",
       transacction_date: transactionDate,
       transacction_verified: "pending",

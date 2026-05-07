@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 
 const KNOB = 52;
 const PAD = 6;
@@ -112,11 +113,11 @@ export function SlideToCargoOnline({
   const label =
     goSlug === "pack"
       ? receiving
-        ? "Desliza para dejar de recibir envíos Pack Go"
-        : "Desliza para recibir envíos Pack Go"
+        ? `Desliza para dejar de recibir envíos (${MOBILITY_UI.delivery})`
+        : `Desliza para recibir envíos (${MOBILITY_UI.delivery})`
       : receiving
-        ? "Desliza para dejar de recibir viajes Car Go"
-        : "Desliza para recibir viajes Car Go";
+        ? "Desliza para dejar de recibir viajes de taxi"
+        : "Desliza para recibir viajes de taxi";
 
   return (
     <div

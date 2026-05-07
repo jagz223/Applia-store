@@ -183,4 +183,11 @@ export const FIRESTORE_COLLECTIONS = {
   PLATFORM_SETTINGS: "platform_settings",
   /** Peticiones de cambio de datos de cuenta (correo/nombre/teléfono). */
   ACCOUNT_CHANGE_REQUESTS: "account_change_requests",
+  /** Auditoría admin (acciones sensibles). */
+  ADMIN_AUDIT_LOG: "admin_audit_log",
+  /**
+   * Reservas por subcategoría en el mes (1 doc por `YYYY-MM`, campos `c_{subcategoryId}` = contador).
+   * Usado para popularidad en la home (Explorar).
+   */
+  STATS_SUBCATEGORY_BOOKINGS_MONTHLY: "stats_subcategory_bookings_monthly",
 } as const;

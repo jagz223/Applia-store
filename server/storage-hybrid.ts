@@ -9,9 +9,9 @@ import type { FirestoreStorage } from "./storage-firestore";
 const FIRESTORE_METHODS = new Set([
   "getUserById", "getUserByEmail", "getUserByPhone", "createUser", "updateUser", "updateUserPassword",
   "getUserRole", "updateUserRole",
-  "getCategories", "getSubcategories", "getSubcategoryById", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId",
+  "getCategories", "updateCategory", "getSubcategories", "getSubcategoryById", "createSubcategory", "updateSubcategory", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId",
   "getAllServices", "getService", "createService",
-  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
+  "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "acknowledgeBookingProChanges", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getPendingBookingRatings", "submitBookingRating",
   "getProfessionalVerificationByUserId", "upsertProfessionalVerificationImage", "upsertProfessionalVerificationCredential", "upsertProfessionalVerificationPayment",
   "getVerifyingStatusByUserId",
@@ -25,9 +25,11 @@ const FIRESTORE_METHODS = new Set([
   // Chat: debe persistir en Firestore para auditoría/admin.
   "getConversationsByUser", "createConversation", "getMessagesByConversation", "getLastMessageByConversation", "getUnreadCountByConversation",
   "createMessage", "markMessageAsRead", "markConversationAsRead", "hideConversationForUsers",
+  "patchConversation", "findConversationForServiceBooking", "listConversationsForAdmin",
 ]);
 
-export class HybridStorage implements IStorage {
+/** Delegador Firestore/memoria alineado con {@link IStorage} en tiempo de ejecución. */
+export class HybridStorage {
   constructor(
     private firestore: FirestoreStorage,
     private memory: IStorage,
@@ -49,8 +51,11 @@ export class HybridStorage implements IStorage {
   getUserRole(userId: string) { return this.delegate("getUserRole", [userId]); }
   updateUserRole(userId: string, data: any) { return this.delegate("updateUserRole", [userId, data]); }
   getCategories() { return this.delegate("getCategories", []); }
+  updateCategory(id: number, data: any) { return this.delegate("updateCategory", [id, data]); }
   getSubcategories(categoryId: number) { return this.delegate("getSubcategories", [categoryId]); }
   getSubcategoryById(id: number) { return this.delegate("getSubcategoryById", [id]); }
+  createSubcategory(data: any) { return this.delegate("createSubcategory", [data]); }
+  updateSubcategory(id: number, data: any) { return this.delegate("updateSubcategory", [id, data]); }
   getAllProviders(profession?: string) { return this.delegate("getAllProviders", [profession]); }
   getProvider(id: number) { return this.delegate("getProvider", [id]); }
   getProviderByUserId(userId: string) { return this.delegate("getProviderByUserId", [userId]); }
@@ -85,11 +90,15 @@ export class HybridStorage implements IStorage {
   getVerifyingStatusByUserId(userId: string) {
     return this.delegate("getVerifyingStatusByUserId", [userId]);
   }
-  upsertVerifyingStatusIdentificationPending(userId: string) {
-    return this.delegate("upsertVerifyingStatusIdentificationPending", [userId]);
+  upsertVerifyingStatusIdentificationPending(userId: string, requestType?: "onboarding" | "renewal") {
+    return this.delegate("upsertVerifyingStatusIdentificationPending", [userId, requestType]);
   }
-  upsertVerifyingStatusTransactionPending(userId: string, transactionDate: string) {
-    return this.delegate("upsertVerifyingStatusTransactionPending", [userId, transactionDate]);
+  upsertVerifyingStatusTransactionPending(
+    userId: string,
+    transactionDate: string,
+    requestType?: "onboarding" | "renewal"
+  ) {
+    return this.delegate("upsertVerifyingStatusTransactionPending", [userId, transactionDate, requestType]);
   }
   getPendingVerifyingStatuses() {
     return this.delegate("getPendingVerifyingStatuses", []);
@@ -108,6 +117,9 @@ export class HybridStorage implements IStorage {
   updateBookingStatus(id: number, status: string) { return this.delegate("updateBookingStatus", [id, status]); }
   updateBookingCost(id: number, cost: number) { return this.delegate("updateBookingCost", [id, cost]); }
   updateBookingSchedule(id: number, date: Date) { return this.delegate("updateBookingSchedule", [id, date]); }
+  acknowledgeBookingProChanges(bookingId: number, clientUserId: string) {
+    return this.delegate("acknowledgeBookingProChanges", [bookingId, clientUserId]);
+  }
   confirmBookingByClient(bookingId: number) { return this.delegate("confirmBookingByClient", [bookingId]); }
   completeBookingAndReleaseEscrow(bookingId: number) { return this.delegate("completeBookingAndReleaseEscrow", [bookingId]); }
   cancelBookingAndRefundClientEscrow(bookingId: number) { return this.delegate("cancelBookingAndRefundClientEscrow", [bookingId]); }
@@ -133,6 +145,20 @@ export class HybridStorage implements IStorage {
   markMessageAsRead(messageId: number) { return this.delegate("markMessageAsRead", [messageId]); }
   markConversationAsRead(conversationId: number, userId: string) { return this.delegate("markConversationAsRead", [conversationId, userId]); }
   hideConversationForUsers(conversationId: number, userIds: string[]) { return this.delegate("hideConversationForUsers", [conversationId, userIds]); }
+  patchConversation(conversationId: number, patch: Record<string, unknown>) {
+    return this.delegate("patchConversation", [conversationId, patch]);
+  }
+  findConversationForServiceBooking(booking: {
+    id: number;
+    userId?: string;
+    providerId?: number;
+    serviceId?: number;
+  }) {
+    return this.delegate("findConversationForServiceBooking", [booking]);
+  }
+  listConversationsForAdmin(opts?: { limit?: number }) {
+    return this.delegate("listConversationsForAdmin", [opts]);
+  }
   getFinancialReports(userId: string, period?: string) { return this.memory.getFinancialReports(userId, period); }
   getKPIs(userId: string) { return this.memory.getKPIs(userId); }
   getNotifications(userId: string, unreadOnly?: boolean) { return this.delegate("getNotifications", [userId, unreadOnly]); }

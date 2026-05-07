@@ -11,8 +11,10 @@ import { authenticateJWT } from "./routes-auth";
 import { requireAdminStaff, requireFullAdmin, requireStaffFromDb } from "./middleware-roles";
 import { userService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
+import { catalogService } from "./services";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
+import { applyServiceBookingChatLifecycle } from "./service-booking-chat";
 import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
 import { getMobilityFares, setMobilityFares } from "./mobility-fares";
@@ -20,6 +22,7 @@ import { getPackFares, setPackFares } from "./pack-fares";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
+import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
 import {
   getHiddenCategorySlugs,
   getHiddenCategorySlugsByRole,
@@ -29,10 +32,41 @@ import {
 } from "./category-visibility";
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
 import { isFullAdmin } from "@shared/roles";
+import {
+  extendVisibilitySubscriptionEndsAt,
+  parseVisibilitySubscriptionEndMs,
+} from "@shared/professional-listing-subscription";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
   return genFebStorage.getAllServices(undefined, undefined, undefined, undefined, true);
+}
+
+async function createAdminAuditEvent(args: {
+  action:
+    | "subscription_payment_approved"
+    | "subscription_payment_rejected"
+    | "associate_onboarding_approved"
+    | "associate_onboarding_rejected"
+    | "account_change_request_approved"
+    | "account_change_request_rejected";
+  adminUserId: string;
+  affectedUserId: string;
+  meta?: Record<string, unknown>;
+}) {
+  try {
+    const db = getFirestore();
+    if (!db) return;
+    await db.collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG).add({
+      action: args.action,
+      adminUserId: args.adminUserId,
+      affectedUserId: args.affectedUserId,
+      meta: args.meta ?? null,
+      createdAt: new Date(),
+    });
+  } catch (e) {
+    console.error("[admin-audit] Error:", e);
+  }
 }
 
 /**
@@ -344,6 +378,7 @@ export function registerAdminRoutes(app: Express): void {
         name: string;
         email?: string | null;
         avatar?: string | null;
+        requestType?: "onboarding" | "renewal";
         user_identification?: string | null;
         professionalCredentialUrl?: string | null;
         identification_verified: "pending" | "verified" | "rejected";
@@ -352,6 +387,8 @@ export function registerAdminRoutes(app: Express): void {
         transacction_code?: string | null;
         /** Slug de categoría del proveedor (p. ej. `transport` = Car Go). */
         providerCategorySlug?: string | null;
+        /** ISO fin de suscripción vigente (si existe). */
+        visibilitySubscriptionEndsAt?: string | null;
       }> = [];
 
       for (const st of pending ?? []) {
@@ -359,13 +396,18 @@ export function registerAdminRoutes(app: Express): void {
         if (!userId) continue;
 
         const provider = await genFebStorage.getProviderByUserId(userId);
+        const providerEndsAtRaw = (provider as any)?.visibilitySubscriptionEndsAt;
+        const providerEndsAtIso = (() => {
+          const ms = parseVisibilitySubscriptionEndMs(providerEndsAtRaw);
+          return ms == null ? null : new Date(ms).toISOString();
+        })();
         const catId = Number((provider as any)?.categoryId);
         const slugFromId =
           Number.isFinite(catId) && catId > 0 ? String((catById.get(catId) as any)?.slug ?? "") : "";
         const providerCategorySlug =
           (slugFromId || String((provider as any)?.category ?? "").trim()) || null;
 
-        // Filtrar por marca del proveedor (Pack Go / Shop Go / Car Go, etc.) si aplica al rol.
+        // Filtrar por marca del proveedor (Delivery / Pedidos / Taxi, etc.) si aplica al rol.
         if (hiddenSlugs.size > 0) {
           if (providerCategorySlug && hiddenSlugs.has(providerCategorySlug)) continue;
         }
@@ -381,12 +423,19 @@ export function registerAdminRoutes(app: Express): void {
 
         const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
         const transacction_code = profVer?.transferReceiptCode ?? null;
+        const storedType = (st as any)?.requestType as ("onboarding" | "renewal" | undefined);
+        const inferredType =
+          storedType ??
+          ((provider as any)?.isVerified === true && (st as any)?.transacction_verified === "pending" && (st as any)?.identification_verified !== "pending"
+            ? "renewal"
+            : "onboarding");
 
         items.push({
           userId,
           name,
           email,
           avatar,
+          requestType: inferredType,
           user_identification,
           professionalCredentialUrl: profVer?.professionalCredentialUrl ?? null,
           identification_verified: (st.identification_verified as any) ?? "rejected",
@@ -394,6 +443,7 @@ export function registerAdminRoutes(app: Express): void {
           transacction_verified: (st.transacction_verified as any) ?? "rejected",
           transacction_code,
           providerCategorySlug,
+          visibilitySubscriptionEndsAt: providerEndsAtIso,
         });
       }
 
@@ -401,6 +451,55 @@ export function registerAdminRoutes(app: Express): void {
     } catch (error) {
       console.error("Error listing verifying_status pending:", error);
       return res.status(500).json({ message: "Error al listar asociados" });
+    }
+  });
+
+  app.get("/api/admin/audit-log", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const limRaw = Number(req.query?.limit ?? 50);
+      const limit = Number.isFinite(limRaw) ? Math.max(1, Math.min(200, limRaw)) : 50;
+      const db = getFirestore();
+      if (!db) return res.json({ items: [], total: 0 });
+      const snap = await db
+        .collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG)
+        .orderBy("createdAt", "desc")
+        .limit(limit)
+        .get();
+      const rawItems = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+      const uniqueAdminIds = Array.from(
+        new Set(rawItems.map((it) => String(it.adminUserId ?? "").trim()).filter(Boolean)),
+      );
+      const adminById = new Map<string, { id: string; name: string; email: string | null }>();
+      await Promise.all(
+        uniqueAdminIds.map(async (id) => {
+          try {
+            const u = (await genFebStorage.getUserById(id)) as any;
+            const name =
+              (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) ||
+              u?.email ||
+              id;
+            const email = u?.email ?? null;
+            adminById.set(id, { id, name, email });
+          } catch {
+            adminById.set(id, { id, name: id, email: null });
+          }
+        }),
+      );
+
+      const items = rawItems.map((it) => {
+        const admin = adminById.get(String(it.adminUserId ?? "").trim()) ?? null;
+        return {
+          ...it,
+          adminName: admin?.name ?? null,
+          adminEmail: admin?.email ?? null,
+        };
+      });
+
+      return res.json({ items, total: items.length });
+    } catch (e) {
+      console.error("Error listing admin audit log:", e);
+      return res.status(500).json({ message: "Error al listar historial" });
     }
   });
 
@@ -446,6 +545,21 @@ export function registerAdminRoutes(app: Express): void {
         action: body.action,
         adminUserId: String(req.user.id),
       });
+
+      // --- Auditoría ---
+      try {
+        const userId = String((resolved as any)?.userId ?? "");
+        if (userId) {
+          await createAdminAuditEvent({
+            action: body.action === "approve" ? "account_change_request_approved" : "account_change_request_rejected",
+            adminUserId: String(req.user?.id ?? ""),
+            affectedUserId: userId,
+            meta: { requestId: id, field: String((resolved as any)?.field ?? "") },
+          });
+        }
+      } catch {
+        /* ignore */
+      }
 
       const userId = String((resolved as any)?.userId ?? "");
       const field = String((resolved as any)?.field ?? "");
@@ -554,6 +668,18 @@ export function registerAdminRoutes(app: Express): void {
           await maybeVerifyProfessional(userId);
         }
 
+        // --- Auditoría ---
+        try {
+          const isApprove = status === "verified";
+          await createAdminAuditEvent({
+            action: isApprove ? "associate_onboarding_approved" : "associate_onboarding_rejected",
+            adminUserId: String(req.user?.id ?? ""),
+            affectedUserId: userId,
+          });
+        } catch {
+          /* ignore */
+        }
+
         // --- Notificar al usuario ---
         try {
           const isApprove = status === "verified";
@@ -613,6 +739,41 @@ export function registerAdminRoutes(app: Express): void {
         let verificationReportId: number | null = null;
         if (status === "verified") {
           await maybeVerifyProfessional(userId);
+          try {
+            const providerAfter = await genFebStorage.getProviderByUserId(userId);
+            if (providerAfter) {
+              const approvalBase = (() => {
+                const raw = (updated as any)?.transacction_date;
+                const s = raw != null ? String(raw).trim() : "";
+                // `yyyy-MM-dd` → usar mediodía UTC para evitar bordes por TZ/DST.
+                if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00Z`);
+                return new Date();
+              })();
+              const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
+              const receipt = (profVer?.transferReceiptCode ?? "").trim();
+              const txDate = String((updated as any)?.transacction_date ?? "").trim();
+              const paymentKey = receipt && txDate ? `${receipt}|${txDate}` : "";
+
+              const alreadyApplied =
+                paymentKey &&
+                String((providerAfter as any)?.visibilitySubscriptionLastPaymentKey ?? "").trim() === paymentKey;
+
+              if (!alreadyApplied) {
+              const nextIso = extendVisibilitySubscriptionEndsAt(
+                (providerAfter as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
+                approvalBase,
+              );
+                await genFebStorage.updateProvider(Number((providerAfter as { id: number }).id), {
+                  visibilitySubscriptionEndsAt: nextIso,
+                  visibilitySubscriptionLastPaymentKey: paymentKey || null,
+                  visibilitySubscriptionLastPaymentApprovedAt: new Date(),
+                  visibilitySubscriptionLastPaymentApprovedBy: String(req.user?.id ?? ""),
+                } as any);
+              }
+            }
+          } catch (err) {
+            console.error("[admin] visibilitySubscriptionEndsAt extend:", err);
+          }
           
           // Reporte financiero (factura USD 15): completar pendiente o crear si faltaba al subir comprobante
           try {
@@ -725,6 +886,23 @@ export function registerAdminRoutes(app: Express): void {
           console.error("Error notificando resultado tx:", err);
         }
         // ----------------------------
+
+        // --- Auditoría ---
+        try {
+          const isApprove = status === "verified";
+          const provider = await genFebStorage.getProviderByUserId(userId);
+          const isRenewal = (provider as any)?.isVerified === true;
+          await createAdminAuditEvent({
+            action: isApprove
+              ? "subscription_payment_approved"
+              : "subscription_payment_rejected",
+            adminUserId: String(req.user?.id ?? ""),
+            affectedUserId: userId,
+            meta: { requestType: isRenewal ? "renewal" : "onboarding" },
+          });
+        } catch {
+          /* ignore */
+        }
 
         return res.status(200).json(updated);
       } catch (error: any) {
@@ -1283,6 +1461,7 @@ export function registerAdminRoutes(app: Express): void {
       }
 
       const updated = await genFebStorage.getBooking(bookingId);
+      await applyServiceBookingChatLifecycle(getIO(), genFebStorage, updated ?? current);
       return res.status(200).json(updated ?? current);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1290,6 +1469,42 @@ export function registerAdminRoutes(app: Express): void {
       }
       console.error("Error updating admin booking:", error);
       return res.status(500).json({ message: "Error al actualizar la reserva" });
+    }
+  });
+
+  /**
+   * GET /api/admin/conversations
+   * Lista conversaciones para auditoría (sin filtro de gracia de 24h ni ocultamiento por usuario).
+   */
+  app.get("/api/admin/conversations", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+      const conversations = await genFebStorage.listConversationsForAdmin({ limit });
+      return res.status(200).json({ conversations, total: conversations.length });
+    } catch (error) {
+      console.error("Error listing admin conversations:", error);
+      return res.status(500).json({ message: "Error al listar conversaciones" });
+    }
+  });
+
+  /**
+   * GET /api/admin/conversations/:id/messages
+   * Historial de mensajes para revisión interna (staff).
+   */
+  app.get("/api/admin/conversations/:id/messages", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
+    try {
+      const conversationId = Number(req.params.id);
+      if (!Number.isFinite(conversationId)) return res.status(400).json({ message: "ID inválido" });
+      const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+      const before = req.query.before != null ? Number(req.query.before) : undefined;
+      const { messages, hasMore } = await genFebStorage.getMessagesByConversation(conversationId, {
+        limit,
+        before: before && !Number.isNaN(before) ? before : undefined,
+      });
+      return res.status(200).json({ messages, hasMore });
+    } catch (error) {
+      console.error("Error fetching admin conversation messages:", error);
+      return res.status(500).json({ message: "Error al cargar mensajes" });
     }
   });
 
@@ -1336,73 +1551,75 @@ export function registerAdminRoutes(app: Express): void {
         };
         if (adminNote) notificationData.adminNote = adminNote;
 
-        await genFebStorage.createNotification({
-          userId,
-          type: "withdrawal_approved",
-          data: notificationData,
-        });
-        const io = getIO();
-        const bodyWithNote = adminNote ? `${approvedMessage} Nota: ${adminNote}` : approvedMessage;
-        if (io) {
-          io.to(`user:${userId}`).emit("notification", {
+        if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+          await genFebStorage.createNotification({
+            userId,
             type: "withdrawal_approved",
+            data: notificationData,
+          });
+          const io = getIO();
+          const bodyWithNote = adminNote ? `${approvedMessage} Nota: ${adminNote}` : approvedMessage;
+          if (io) {
+            io.to(`user:${userId}`).emit("notification", {
+              type: "withdrawal_approved",
+              title: "Retiro aprobado",
+              body: bodyWithNote,
+              data: { message: approvedMessage, amount: transfer.amount, transferId: transfer.id, adminNote: adminNote ?? undefined },
+            });
+          }
+          void notificationService.sendPushToUser(userId, {
             title: "Retiro aprobado",
             body: bodyWithNote,
-            data: { message: approvedMessage, amount: transfer.amount, transferId: transfer.id, adminNote: adminNote ?? undefined },
-          });
-        }
-        void notificationService.sendPushToUser(userId, {
-          title: "Retiro aprobado",
-          body: bodyWithNote,
-        }).catch(() => {});
+          }).catch(() => {});
 
-        // Notificar a los demás admins: el retiro ya fue procesado por otro admin (queda en historial para evitar duplicados)
-        const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
-        const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
-          ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
-        const allAdmins = await getFullAdminUsers(genFebStorage);
-        for (const admin of allAdmins ?? []) {
-          const aid = (admin as { id?: string }).id;
-          if (aid && aid !== adminUserId) {
-            await genFebStorage.createNotification({
-              userId: aid,
-              type: "admin",
-              data: {
-                type: "withdrawal_processed_by_other",
-                action: "approved",
-                message: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}. Ya no aparece en Solicitudes de Retiro.`,
-                professionalUserId: userId,
-                professionalName,
-                amount: transfer.amount,
-                amountFormatted,
-                processedByAdminId: adminUserId,
-                processedByAdminName: adminName,
-              },
-            });
-            // Push FCM a otros admins: mismo evento, pero fuera de tiempo real
-            void notificationService
-              .sendPushToUser(aid, {
-                title: "Retiro aprobado por otro admin",
-                body: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}.`,
+          // Notificar a los demás admins: el retiro ya fue procesado por otro admin (queda en historial para evitar duplicados)
+          const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
+          const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
+            ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
+          const allAdmins = await getFullAdminUsers(genFebStorage);
+          for (const admin of allAdmins ?? []) {
+            const aid = (admin as { id?: string }).id;
+            if (aid && aid !== adminUserId) {
+              await genFebStorage.createNotification({
+                userId: aid,
+                type: "admin",
                 data: {
-                  url: "/admin?tab=payouts",
-                  type: "admin",
-                  withdrawalType: "withdrawal_processed_by_other",
+                  type: "withdrawal_processed_by_other",
                   action: "approved",
+                  message: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}. Ya no aparece en Solicitudes de Retiro.`,
                   professionalUserId: userId,
                   professionalName,
+                  amount: transfer.amount,
                   amountFormatted,
+                  processedByAdminId: adminUserId,
+                  processedByAdminName: adminName,
                 },
-              })
-              .catch((err) => console.error("[push] Error notificando retiro aprobado por otro admin:", err));
+              });
+              void notificationService
+                .sendPushToUser(aid, {
+                  title: "Retiro aprobado por otro admin",
+                  body: `El retiro de ${professionalName} ($${amountFormatted} USD) fue aprobado por ${adminName}.`,
+                  data: {
+                    url: "/admin?tab=payouts",
+                    type: "admin",
+                    withdrawalType: "withdrawal_processed_by_other",
+                    action: "approved",
+                    professionalUserId: userId,
+                    professionalName,
+                    amountFormatted,
+                  },
+                })
+                .catch((err) => console.error("[push] Error notificando retiro aprobado por otro admin:", err));
+            }
           }
-        }
-        if (io) {
-          sendNotificationToAdmins(io, {
-            type: "withdrawal_processed_by_other",
-            action: "approved",
-            data: { professionalUserId: userId, professionalName, amountFormatted, processedByAdminName: adminName },
-          });
+          const ioBroadcast = getIO();
+          if (ioBroadcast) {
+            sendNotificationToAdmins(ioBroadcast, {
+              type: "withdrawal_processed_by_other",
+              action: "approved",
+              data: { professionalUserId: userId, professionalName, amountFormatted, processedByAdminName: adminName },
+            });
+          }
         }
 
         return res.status(200).json({ message: "Pago aprobado y registrado.", transfer, user: toPlainUser(user) });
@@ -1423,70 +1640,71 @@ export function registerAdminRoutes(app: Express): void {
         const rejectionData: Record<string, unknown> = { message: rejectedMessage };
         if (adminNote) rejectionData.adminNote = adminNote;
 
-        await genFebStorage.createNotification({
-          userId,
-          type: "withdrawal_rejected",
-          data: rejectionData,
-        });
-        const io = getIO();
-        const bodyReject = adminNote ? `${rejectedMessage} Nota: ${adminNote}` : rejectedMessage;
-        if (io) {
-          io.to(`user:${userId}`).emit("notification", {
+        if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+          await genFebStorage.createNotification({
+            userId,
             type: "withdrawal_rejected",
+            data: rejectionData,
+          });
+          const io = getIO();
+          const bodyReject = adminNote ? `${rejectedMessage} Nota: ${adminNote}` : rejectedMessage;
+          if (io) {
+            io.to(`user:${userId}`).emit("notification", {
+              type: "withdrawal_rejected",
+              title: "Retiro rechazado",
+              body: bodyReject,
+              data: { message: rejectedMessage, adminNote: adminNote ?? undefined },
+            });
+          }
+          void notificationService.sendPushToUser(userId, {
             title: "Retiro rechazado",
             body: bodyReject,
-            data: { message: rejectedMessage, adminNote: adminNote ?? undefined },
-          });
-        }
-        void notificationService.sendPushToUser(userId, {
-          title: "Retiro rechazado",
-          body: bodyReject,
-        }).catch(() => {});
+          }).catch(() => {});
 
-        // Notificar a los demás admins: el retiro fue rechazado por otro admin (queda en historial)
-        const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
-        const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
-          ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
-        const allAdmins = await getFullAdminUsers(genFebStorage);
-        for (const admin of allAdmins ?? []) {
-          const aid = (admin as { id?: string }).id;
-          if (aid && aid !== adminUserId) {
-            await genFebStorage.createNotification({
-              userId: aid,
-              type: "admin",
-              data: {
-                type: "withdrawal_processed_by_other",
-                action: "rejected",
-                message: `El retiro de ${professionalName} fue rechazado por ${adminName}. Los fondos fueron devueltos a su Saldo Genfeb.`,
-                professionalUserId: userId,
-                professionalName,
-                processedByAdminId: adminUserId,
-                processedByAdminName: adminName,
-              },
-            });
-            // Push FCM a otros admins: mismo evento, pero fuera de tiempo real
-            void notificationService
-              .sendPushToUser(aid, {
-                title: "Retiro rechazado por otro admin",
-                body: `El retiro de ${professionalName} fue rechazado por ${adminName}.`,
+          const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
+          const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
+            ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
+          const allAdmins = await getFullAdminUsers(genFebStorage);
+          for (const admin of allAdmins ?? []) {
+            const aid = (admin as { id?: string }).id;
+            if (aid && aid !== adminUserId) {
+              await genFebStorage.createNotification({
+                userId: aid,
+                type: "admin",
                 data: {
-                  url: "/admin?tab=payouts",
-                  type: "admin",
-                  withdrawalType: "withdrawal_processed_by_other",
+                  type: "withdrawal_processed_by_other",
                   action: "rejected",
+                  message: `El retiro de ${professionalName} fue rechazado por ${adminName}. Los fondos fueron devueltos a su Saldo Genfeb.`,
                   professionalUserId: userId,
                   professionalName,
+                  processedByAdminId: adminUserId,
+                  processedByAdminName: adminName,
                 },
-              })
-              .catch((err) => console.error("[push] Error notificando retiro rechazado por otro admin:", err));
+              });
+              void notificationService
+                .sendPushToUser(aid, {
+                  title: "Retiro rechazado por otro admin",
+                  body: `El retiro de ${professionalName} fue rechazado por ${adminName}.`,
+                  data: {
+                    url: "/admin?tab=payouts",
+                    type: "admin",
+                    withdrawalType: "withdrawal_processed_by_other",
+                    action: "rejected",
+                    professionalUserId: userId,
+                    professionalName,
+                  },
+                })
+                .catch((err) => console.error("[push] Error notificando retiro rechazado por otro admin:", err));
+            }
           }
-        }
-        if (io) {
-          sendNotificationToAdmins(io, {
-            type: "withdrawal_processed_by_other",
-            action: "rejected",
-            data: { professionalUserId: userId, professionalName, processedByAdminName: adminName },
-          });
+          const ioBroadcast = getIO();
+          if (ioBroadcast) {
+            sendNotificationToAdmins(ioBroadcast, {
+              type: "withdrawal_processed_by_other",
+              action: "rejected",
+              data: { professionalUserId: userId, professionalName, processedByAdminName: adminName },
+            });
+          }
         }
 
         return res.status(200).json({ message: "Retiro rechazado; fondos devueltos al Saldo Genfeb del usuario.", user: toPlainUser(user) });
@@ -1534,6 +1752,84 @@ export function registerAdminRoutes(app: Express): void {
     } catch (error) {
       console.error("Error building admin dashboard stats:", error);
       return res.status(500).json({ message: "Error al cargar estadísticas" });
+    }
+  });
+
+  // ==================== CATEGORÍAS Y SUBCATEGORÍAS ====================
+  const updateCategorySchema = z.object({
+    name: z.string().min(1).max(200).optional(),
+    slug: z.string().max(200).optional(),
+    icon: z.string().max(100).optional(),
+  });
+
+  /** Lista completa de categorías (incluye legacy tipo legal/financial en `categories`) para gestión en admin. */
+  app.get("/api/admin/categories", authenticateJWT, requireFullAdmin, async (_req, res) => {
+    try {
+      const categories = await catalogService.getCategories();
+      return res.status(200).json(categories ?? []);
+    } catch (error) {
+      console.error("Error listing admin categories:", error);
+      return res.status(500).json({ message: "Error al listar categorías" });
+    }
+  });
+
+  app.patch("/api/admin/categories/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id) || id <= 0) return res.status(400).json({ message: "ID inválido" });
+      const parsed = updateCategorySchema.parse(req.body);
+      
+      const updated = await catalogService.updateCategory(id, parsed as any);
+      if (!updated) return res.status(404).json({ message: "Categoría no encontrada" });
+      return res.status(200).json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      console.error("Error updating category:", error);
+      return res.status(500).json({ message: "Error al actualizar categoría" });
+    }
+  });
+
+  const createSubcategorySchema = z.object({
+    name: z.string().min(1).max(200),
+    slug: z.string().min(1).max(200),
+    categoryId: z.number().int().positive(),
+    categorySlug: z.string().optional(),
+    icon: z.string().optional(),
+  });
+
+  app.post("/api/admin/subcategories", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const parsed = createSubcategorySchema.parse(req.body);
+      const created = await catalogService.createSubcategory(parsed);
+      return res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      console.error("Error creating subcategory:", error);
+      return res.status(500).json({ message: "Error al crear subcategoría" });
+    }
+  });
+
+  const updateSubcategorySchema = z.object({
+    name: z.string().min(1).max(200).optional(),
+    slug: z.string().max(200).optional(),
+    categoryId: z.number().int().positive().optional(),
+    categorySlug: z.string().optional(),
+    icon: z.string().optional(),
+  });
+
+  app.patch("/api/admin/subcategories/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id) || id <= 0) return res.status(400).json({ message: "ID inválido" });
+      const parsed = updateSubcategorySchema.parse(req.body);
+      
+      const updated = await catalogService.updateSubcategory(id, parsed);
+      if (!updated) return res.status(404).json({ message: "Subcategoría no encontrada" });
+      return res.status(200).json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      console.error("Error updating subcategory:", error);
+      return res.status(500).json({ message: "Error al actualizar subcategoría" });
     }
   });
 

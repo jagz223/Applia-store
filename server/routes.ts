@@ -114,6 +114,7 @@ export async function registerRoutes(
       if (!st) {
         return res.json({
           user: userId,
+          requestType: null,
           identification_verified: "rejected",
           transacction_date: null,
           transacction_verified: null,
@@ -122,6 +123,7 @@ export async function registerRoutes(
 
       return res.json({
         user: st.user ?? userId,
+        requestType: (st as any)?.requestType ?? null,
         identification_verified: st.identification_verified,
         transacction_date: st.transacction_date ?? null,
         transacction_verified: st.transacction_verified,
@@ -156,7 +158,7 @@ export async function registerRoutes(
       await genFebStorage.upsertProfessionalVerificationImage(userId, body.imageUrl);
 
       // Cambiar estado en verifying_status → identification_verified = pending
-      await genFebStorage.upsertVerifyingStatusIdentificationPending(userId);
+      await genFebStorage.upsertVerifyingStatusIdentificationPending(userId, "onboarding" as any);
 
       // --- Notificar a administradores ---
       try {
@@ -266,10 +268,8 @@ export async function registerRoutes(
       if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
 
       const st = await genFebStorage.getVerifyingStatusByUserId(userId);
-      // Solo bloqueamos si el admin ya aprobó el pago. En "pending" o "rejected"
-      // puede reenviar comprobante/fecha y se actualizan los campos (merge en Firestore).
-      if (st?.transacction_verified === "verified") {
-        return res.status(409).json({ message: "El pago ya fue verificado" });
+      if (st?.transacction_verified === "pending") {
+        return res.status(409).json({ message: "Ya hay un comprobante de pago en revisión. Espera la validación del equipo." });
       }
 
       const body = patchProfessionalVerificationPaymentBody.parse(req.body);
@@ -279,7 +279,9 @@ export async function registerRoutes(
       });
 
       // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
-      await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate);
+      const requestType =
+        (provider as any)?.isVerified === true ? ("renewal" as const) : ("onboarding" as const);
+      await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate, requestType as any);
 
       // Un solo cargo pendiente por usuario: evita duplicados si reenvía comprobante.
       try {
@@ -350,7 +352,7 @@ export async function registerRoutes(
 
   // Catálogo público: registrar ANTES de GenFeb para que /api/provider-categories/availability y /api/services coincidan
   app.get(api.categories.list.path, async (_req, res) => {
-    const categories = await catalogService.getCategories();
+    const categories = await catalogService.getCategoriesForPublicCatalog();
     res.json(categories);
   });
   app.get("/api/subcategories", async (req, res) => {
@@ -372,6 +374,13 @@ export async function registerRoutes(
   });
   app.get(api.categories.homeAssociateCounts.path, async (_req, res) => {
     res.json(await catalogService.getHomeCategoryAssociateCounts());
+  });
+  app.post(api.categories.monthlyPopularSubcategories.path, async (req, res) => {
+    const parsed = api.categories.monthlyPopularSubcategories.input.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+    }
+    res.json(await catalogService.getMonthlyPopularSubcategoryBookingCountsForHome(parsed.data.limit));
   });
   app.get(api.providers.list.path, async (req, res) => {
     const profession = (req.query.profession as string)?.trim() || undefined;
@@ -401,7 +410,7 @@ export async function registerRoutes(
     const isGeneralCatalogExplore = categoryId == null && providerCategoryId == null;
     if (isGeneralCatalogExplore && list?.length) {
       const mobilitySlugs = new Set(MOBILITY_GO_PROVIDER_SLUGS.map((s) => String(s).toLowerCase()));
-      const cats = await catalogService.getCategories();
+      const cats = await catalogService.getCategoriesForPublicCatalog();
       list = list.filter((s: any) => {
         const p = s?.provider as { category?: string; categoryId?: number } | undefined;
         if (!p) return true;
@@ -579,6 +588,8 @@ export async function registerRoutes(
         (v) => (v === "" || v === null || v === undefined ? undefined : v),
         z.union([z.string(), z.number()]).optional().nullable()
       ),
+      coursesCompleted: z.string().trim().max(8000).optional(),
+      certifications: z.string().trim().max(8000).optional(),
     });
 
   const createProviderBodySchemaStrict = insertProviderSchema
@@ -590,12 +601,16 @@ export async function registerRoutes(
     .extend({
       bio: professionalBioFieldSchema,
       skills: providerSkillsSchema,
+      goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).optional(),
       /** Título público del único servicio (listado / edición). Si no se envía, se deriva de profesión o nombre. */
       serviceTitle: z.string().trim().max(500).optional(),
       /** Qué incluye la oferta; si no se envía o va vacío, se usa la biografía como texto inicial del servicio. */
       serviceDescription: z.string().trim().max(5000).optional(),
       /** Solo categoría Car Go (`transport`): datos del vehículo; validación adicional en el handler. */
       vehicle: z.any().optional(),
+      /** Fix Go / Man Go: texto libre guardado en el perfil (Firestore). */
+      coursesCompleted: z.string().trim().max(8000).optional(),
+      certifications: z.string().trim().max(8000).optional(),
     });
   const updateProviderBodySchema = z.object({
     category: providerCategorySchema.optional(),
@@ -623,6 +638,8 @@ export async function registerRoutes(
         serviceDescription: serviceDescriptionFromClient,
         vehicle: vehicleFromBody,
         goBrands,
+        coursesCompleted: coursesCompletedRaw,
+        certifications: certificationsRaw,
         ...providerInsert
       } = data;
 
@@ -657,17 +674,32 @@ export async function registerRoutes(
         }
         return res.status(409).json({ message: "Ya tienes un perfil de proveedor" });
       }
+      const coursesCompleted =
+        typeof coursesCompletedRaw === "string" && coursesCompletedRaw.trim() !== "" ? coursesCompletedRaw.trim() : undefined;
+      const certifications =
+        typeof certificationsRaw === "string" && certificationsRaw.trim() !== "" ? certificationsRaw.trim() : undefined;
+
       const provider = await catalogService.createProvider({
         userId,
         categoryId: providerInsert.categoryId ?? undefined,
         category: providerInsert.category ?? null,
         subcategoryId: providerInsert.subcategoryId ?? undefined,
-        goBrands: Array.isArray(goBrands) ? Array.from(new Set(["transport", ...goBrands])) : ["transport"],
+        ...(isGoDriverCategory
+          ? {
+              goBrands: Array.isArray(goBrands)
+                ? Array.from(new Set(goBrands))
+                : catForSignup?.slug === "delivery"
+                  ? ["delivery"]
+                  : ["transport"],
+            }
+          : {}),
         profession: providerInsert.profession,
         bio: providerInsert.bio ?? "",
         yearsExperience: providerInsert.yearsExperience ?? 0,
         hourlyRate: providerInsert.hourlyRate ?? null,
         skills: providerInsert.skills ?? [],
+        ...(coursesCompleted != null ? { coursesCompleted } : {}),
+        ...(certifications != null ? { certifications } : {}),
       } as any);
       if (keepStaffRole) {
         // Solo administrador pleno: verificado en catálogo sin flujo de verificación de plataforma.

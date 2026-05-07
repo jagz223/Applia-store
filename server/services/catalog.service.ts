@@ -4,13 +4,27 @@
  */
 
 import type { ICatalogStorage, ProviderUpdate, ServiceUpdate } from "../storage-contracts";
+import type { IStorage } from "../storage-genfeb";
+import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
 import type { InsertProvider, InsertService } from "@shared/schema";
+import { excludeLegacySubcategoryCategoryDocuments } from "@shared/catalog-category-utils";
+import { computeListingPublished } from "@shared/professional-listing-subscription";
 
 export class CatalogService {
-  constructor(private readonly storage: ICatalogStorage) {}
+  constructor(private readonly storage: IStorage) {}
 
   async getCategories() {
     return this.storage.getCategories();
+  }
+
+  /** Lista para UI pública: sin documentos legacy que duplican slugs de subcategorías (legal, financial, etc.). */
+  async getCategoriesForPublicCatalog() {
+    const all = await this.storage.getCategories();
+    return excludeLegacySubcategoryCategoryDocuments(all);
+  }
+
+  async updateCategory(id: number, data: import("@shared/schema").Category) {
+    return this.storage.updateCategory(id, data);
   }
 
   async getSubcategories(categoryId: number) {
@@ -19,6 +33,14 @@ export class CatalogService {
 
   async getSubcategoryById(id: number) {
     return this.storage.getSubcategoryById(id);
+  }
+
+  async createSubcategory(data: Omit<import("../storage-contracts").Subcategory, "id">) {
+    return this.storage.createSubcategory(data);
+  }
+
+  async updateSubcategory(id: number, data: Partial<import("../storage-contracts").Subcategory>) {
+    return this.storage.updateSubcategory(id, data);
   }
 
   async getAllProviders(profession?: string, category?: string, categoryId?: number) {
@@ -78,7 +100,7 @@ export class CatalogService {
   /**
    * Conteos reales de asociados por marca (Fix Go / Pro Go / Man Go) para la home.
    * Pro Go = suma de proveedores en subcategorías legal y financial (bajo categoría professional).
-   * Car Go / Shop Go / Pack Go = proveedores cuya categoría base coincide con el slug.
+   * Taxi / Pedidos / Delivery = proveedores cuya categoría base coincide con el slug.
    */
   async getHomeCategoryAssociateCounts(): Promise<{
     fixGo: number;
@@ -101,10 +123,17 @@ export class CatalogService {
       this.storage.getAllProviders(),
       professional ? this.storage.getSubcategories(Number(professional.id)) : Promise.resolve([]),
     ]);
-    const verifiedProviders = allProviders.filter((p) => !!(p as { isVerified?: boolean | null }).isVerified);
+    const verifiedProviders = allProviders.filter((p) =>
+      computeListingPublished({
+        isVerifiedIdentity: (p as { isVerified?: boolean | null }).isVerified === true,
+        visibilitySubscriptionEndsAt: (p as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
+        isFullAdmin: false,
+      }),
+    );
 
     const legalSub = subcategories.find((s) => s.slug === "legal");
     const financialSub = subcategories.find((s) => s.slug === "financial");
+    const tutoringSub = subcategories.find((s) => s.slug === "tutoring");
 
     const countByCategoryId = (catId: number | undefined) => {
       if (catId == null || Number.isNaN(Number(catId))) return 0;
@@ -119,16 +148,31 @@ export class CatalogService {
 
     const legalId = legalSub?.id;
     const financialId = financialSub?.id;
+    const tutoringId = tutoringSub?.id;
+    const proGoIds = [legalId, financialId, tutoringId].filter(
+      (id): id is number => id != null && !Number.isNaN(Number(id)),
+    );
     const proGo =
-      legalId == null && financialId == null
+      proGoIds.length === 0
         ? 0
         : verifiedProviders.filter((p) => {
             const sid = (p as { subcategoryId?: number | null }).subcategoryId;
             if (sid == null || Number.isNaN(Number(sid))) return false;
-            return sid === legalId || sid === financialId;
+            return proGoIds.includes(Number(sid));
           }).length;
 
     return { fixGo, proGo, manGo, carGo, shopGo, packGo };
+  }
+
+  /** Top subcategorías por reservas en el mes calendario (Ecuador), para la home. */
+  async getMonthlyPopularSubcategoryBookingCountsForHome(limit: number): Promise<{
+    monthKey: string;
+    items: { subcategoryId: number; count: number }[];
+  }> {
+    const monthKey = getGenfebStatsMonthKey();
+    const lim = Math.min(50, Math.max(1, Math.floor(limit)));
+    const items = await this.storage.getMonthlyPopularSubcategoryBookingCounts(monthKey, lim);
+    return { monthKey, items };
   }
 
   /**
@@ -137,7 +181,7 @@ export class CatalogService {
    */
   async getProviderCategoryAvailability(): Promise<Record<string, boolean>> {
     const [categories, services] = await Promise.all([
-      this.storage.getCategories(),
+      this.getCategoriesForPublicCatalog(),
       this.storage.getAllServices(),
     ]);
     const availability: Record<string, boolean> = {};

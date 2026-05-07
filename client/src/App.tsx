@@ -10,6 +10,7 @@ import { Footer } from "@/components/Footer";
 import { PushForegroundHandler } from "@/components/PushForegroundHandler";
 import { PushPermissionReminder } from "@/components/PushPermissionReminder";
 import { SocketProvider } from "@/hooks/use-socket";
+import { ServiceBookingChatListener } from "@/components/chat/ServiceBookingChatListener";
 import { ExploreCategoryProvider } from "@/contexts/ExploreCategoryContext";
 import { RatingGate } from "@/components/RatingGate";
 
@@ -45,6 +46,7 @@ import Politics from "@/pages/Politics";
 import NotFound from "@/pages/not-found";
 import Notifications from "@/pages/Notifications";
 import { ProfessionalVerificationBanner } from "@/components/ProfessionalVerificationBanner";
+import { ListingSubscriptionRibbon } from "@/components/ListingSubscriptionRibbon";
 import { ProviderTermsGate } from "@/components/ProviderTermsGate";
 import VerifyProfessional from "@/pages/VerifyProfessional";
 import VerifyProfessionalPayment from "@/pages/VerifyProfessionalPayment";
@@ -66,7 +68,7 @@ function MainRouter() {
       <Route path="/" component={HomePage} />
       <Route path="/explore" component={Explore} />
       <Route path="/categories" component={Categories} />
-      <Route path="/taxi" component={TaxiRide} />
+      <Route path="/taxi">{() => <TaxiRide />}</Route>
       {/* Rutas legacy (mantener por compatibilidad, pero el shell nuevo vive en /go/*). */}
       <Route path="/driver/go-genfeb" component={DriverGoGenfebWithGoChat} />
       <Route path="/driver/go-genfeb/configuracion" component={CargoDriverSettings} />
@@ -155,15 +157,29 @@ function GoRouter() {
   );
   return (
     <Switch>
-      {/* Cliente (pedir servicio): mover flujo existente /taxi a esta sección */}
-      <Route path="/go/cargo" component={GoCargoClient} />
-      {/* Conductor (recibir viajes): panel de conducción */}
-      <Route path="/go/cargo/driver" component={GoCargoDriver} />
-      <Route path="/go/cargo/driver/settings" component={GoCargoDriverSettings} />
+      {/* Canonical (rebrand) */}
+      {/* Cliente (pedir servicio) */}
+      <Route path="/go/taxi" component={GoCargoClient} />
+      {/* Conductor (recibir viajes) */}
+      <Route path="/go/taxi/driver" component={GoCargoDriver} />
+      <Route path="/go/taxi/driver/settings" component={GoCargoDriverSettings} />
+
+      {/* Legacy (compat): mantener por links/vistas ya configuradas */}
+      <Route path="/go/cargo">{() => <Redirect to="/go/taxi" />}</Route>
+      <Route path="/go/cargo/driver">{() => <Redirect to="/go/taxi/driver" />}</Route>
+      <Route path="/go/cargo/driver/settings">{() => <Redirect to="/go/taxi/driver/settings" />}</Route>
+
       <Route path="/go/shop" component={GoShopRoute} />
-      <Route path="/go/pack" component={GoPackRoute} />
-      <Route path="/go/pack/driver" component={GoPackDriver} />
-      <Route path="/go/pack/driver/settings" component={GoPackDriverSettings} />
+      {/* Delivery canonical */}
+      <Route path="/go/delivery" component={GoPackRoute} />
+      <Route path="/go/delivery/driver" component={GoPackDriver} />
+      <Route path="/go/delivery/driver/settings" component={GoPackDriverSettings} />
+
+      {/* Legacy (compat) */}
+      <Route path="/go/pack">{() => <Redirect to="/go/delivery" />}</Route>
+      <Route path="/go/pack/driver">{() => <Redirect to="/go/delivery/driver" />}</Route>
+      <Route path="/go/pack/driver/settings">{() => <Redirect to="/go/delivery/driver/settings" />}</Route>
+
       <Route component={NotFound} />
     </Switch>
   );
@@ -172,12 +188,16 @@ function GoRouter() {
 function App() {
   const [location] = useLocation();
   const inGoShell = location === "/go" || location.startsWith("/go/");
+  /** En /chat el input va fijo abajo; el footer global quedaría “entre” mensajes y barra — se oculta en esta ruta. */
+  const showGlobalFooter =
+    location.split("?")[0] !== "/chat";
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <SocketProvider>
           <ExploreCategoryProvider>
+            <ServiceBookingChatListener />
             <PushForegroundHandler />
             {/* Recordatorio global para activar push si están apagadas */}
             <div className="pointer-events-none fixed left-1/2 top-2 z-[80] w-[min(100%,28rem)] -translate-x-1/2 px-3">
@@ -191,13 +211,14 @@ function App() {
                 <GoRouter />
               </GoShellLayout>
             ) : (
-              <div className="flex flex-col min-h-screen bg-background font-sans">
+              <div className="flex min-h-screen flex-col bg-background font-sans">
                 <Navigation />
                 <ProfessionalVerificationBanner />
-                <main className="flex-grow">
+                <ListingSubscriptionRibbon />
+                <main className="flex min-h-0 flex-1 flex-col">
                   <MainRouter />
                 </main>
-                <Footer />
+                {showGlobalFooter ? <Footer /> : null}
               </div>
             )}
             <Toaster />

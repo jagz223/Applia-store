@@ -7,17 +7,33 @@ import { getAdminAndSupportUsers, getFullAdminUsers } from "./staff-users";
 import { z } from "zod";
 import { notificationService } from "./services/notification.service";
 import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
+import { applyServiceBookingChatLifecycle, ensureConversationWhenBookingCreated } from "./service-booking-chat";
 import { calcCommission, calcProviderNet, commissionDisplayPercents } from "@shared/platform-commission";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { isFullAdmin } from "@shared/roles";
 import { isWalletAtOrBelowDebtCap, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { isOffPlatformServiceBookingPayment, serviceBookingPaymentLabel } from "@shared/booking-payment";
+import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
+import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
 
 /** Mensajes por página en el chat (paginación). Balance entre UX y carga en servidor. */
 export const CHAT_MESSAGES_PAGE_SIZE = 25;
+
+function conversationTimestampToIso(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString();
+  if (typeof (v as { toDate?: () => Date }).toDate === "function") {
+    return (v as { toDate: () => Date }).toDate().toISOString();
+  }
+  if (typeof (v as { toMillis?: () => number }).toMillis === "function") {
+    return new Date((v as { toMillis: () => number }).toMillis()).toISOString();
+  }
+  if (typeof v === "string") return v;
+  return null;
+}
 
 // ============== ESQUEMAS DE VALIDACIÓN ==============
 
@@ -59,7 +75,7 @@ const uploadDocumentSchema = z.object({
 const sendMessageSchema = z.object({
   conversationId: z.number(),
   content: z.string().min(1),
-  type: z.enum(["text", "image", "file", "location"]).default("text"), // location = compartir ubicación en el chat
+  type: z.enum(["text", "image", "file", "location", "system"]).default("text"),
 });
 
 // User role schemas
@@ -200,6 +216,7 @@ export async function registerGenFebRoutes(
           })
           .catch((err) => console.error("[push] Error notificando nueva reserva:", err));
       }
+      await ensureConversationWhenBookingCreated(getIO(), storage, booking);
       res.status(201).json(booking);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -215,19 +232,60 @@ export async function registerGenFebRoutes(
     try {
       const booking = await storage.getBooking(Number(req.params.id));
       if (!booking) return res.status(404).json({ message: "Booking not found" });
-      const b = booking as { serviceId?: number };
+      const b = booking as { serviceId?: number; providerId?: number };
       let serviceTitle: string | undefined;
+      let providerId: number | undefined = b.providerId;
       if (b.serviceId != null) {
         const service = await storage.getService(b.serviceId);
         serviceTitle = service?.title;
+        if (providerId == null && service != null && typeof (service as { providerId?: number }).providerId === "number") {
+          providerId = (service as { providerId: number }).providerId;
+        }
       }
-      res.json({ ...booking, serviceTitle });
+      res.json({ ...booking, serviceTitle, providerId });
     } catch (error) {
       console.error("Error fetching booking:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
-  
+
+  // GET /api/bookings/:id/chat-conversation — ID de conversación del chat de esta reserva (solo cliente o profesional de la reserva)
+  app.get("/api/bookings/:id/chat-conversation", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const bookingId = Number(req.params.id);
+      if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID inválido" });
+      const booking = await storage.getBooking(bookingId);
+      if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
+      const b = booking as { userId?: string; providerId?: number; serviceId?: number };
+      const isClient = b.userId === userId;
+      const provider = await storage.getProviderByUserId(userId);
+      const isProvider =
+        provider != null && Number((provider as { id?: number }).id) === Number(b.providerId);
+      if (!isClient && !isProvider) {
+        return res.status(403).json({ message: "No tienes acceso a esta reserva" });
+      }
+      const conv = await storage.findConversationForServiceBooking({
+        id: bookingId,
+        userId: b.userId,
+        providerId: b.providerId,
+        serviceId: b.serviceId,
+      });
+      if (!conv) {
+        return res.status(404).json({
+          message: "La conversación de esta reserva aún no está lista. Intenta de nuevo en unos segundos.",
+        });
+      }
+      const convId = Number((conv as { id?: number }).id);
+      if (!Number.isFinite(convId)) return res.status(500).json({ message: "Error interno" });
+      res.json({ conversationId: convId });
+    } catch (error) {
+      console.error("Error chat-conversation:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // PATCH /api/bookings/:id/status - Actualizar estado de reserva (cliente solo puede cancelar; profesional con restricciones)
   app.patch("/api/bookings/:id/status", authenticateJWT, async (req: any, res) => {
     try {
@@ -276,16 +334,6 @@ export async function registerGenFebRoutes(
           if (bid.confirmedByClient !== true) {
             return res.status(403).json({
               message: "El servicio requiere confirmación previa del cliente para procesar los fondos retenidos",
-            });
-          }
-        }
-        // No permitir confirmar la reserva si el profesional no ha asignado un costo
-        if (data.status === "confirmed") {
-          const cost = bid.cost;
-          const costNum = typeof cost === "number" ? cost : Number(cost);
-          if (!Number.isFinite(costNum) || costNum <= 0) {
-            return res.status(400).json({
-              message: "Debes asignar un costo a la reserva antes de confirmarla. Edita el monto en Solicitudes pendientes y guárdalo.",
             });
           }
         }
@@ -415,6 +463,8 @@ export async function registerGenFebRoutes(
           });
         }
       }
+
+      await applyServiceBookingChatLifecycle(getIO(), storage, booking);
 
       res.json(booking);
     } catch (error) {
@@ -570,6 +620,28 @@ export async function registerGenFebRoutes(
         });
       }
       console.error("Error confirm-client:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/bookings/:id/acknowledge-pro-changes - Cliente acepta monto/fecha que definió el profesional (pendiente)
+  app.post("/api/bookings/:id/acknowledge-pro-changes", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const bookingId = Number(req.params.id);
+      if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID de reserva inválido" });
+      const existing = await storage.getBooking(bookingId);
+      if (!existing) return res.status(404).json({ message: "Reserva no encontrada" });
+      const bid = existing as { userId?: string };
+      if (bid.userId !== userId) {
+        return res.status(403).json({ message: "Solo el cliente de la reserva puede confirmar estos cambios" });
+      }
+      const updated = await storage.acknowledgeBookingProChanges(bookingId, userId);
+      if (!updated) return res.status(500).json({ message: "No se pudo actualizar la reserva" });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error acknowledge-pro-changes:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -921,54 +993,56 @@ export async function registerGenFebRoutes(
       const userName = (user as { name?: string; firstName?: string; lastName?: string }).name
         ?? ([((user as { firstName?: string }).firstName ?? ""), ((user as { lastName?: string }).lastName ?? "")].filter(Boolean).join(" ") || (user as { email?: string }).email || "Usuario");
 
-      // Notificación persistente para cada admin (aparece en la campana al cargar o al conectarse)
-      const adminUsers = await getFullAdminUsers(storage);
-      for (const admin of adminUsers ?? []) {
-        const adminId = (admin as { id?: string }).id;
-        if (adminId) {
-          await storage.createNotification({
-            userId: adminId,
-            type: "admin",
-            data: {
-              type: "withdrawal_requested",
-              message: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
-              userId,
-              userName,
-              amount: parsed.data.amount,
-              amountFormatted,
-            },
+      if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+        // Notificación persistente para cada admin (aparece en la campana al cargar o al conectarse)
+        const adminUsers = await getFullAdminUsers(storage);
+        for (const admin of adminUsers ?? []) {
+          const adminId = (admin as { id?: string }).id;
+          if (adminId) {
+            await storage.createNotification({
+              userId: adminId,
+              type: "admin",
+              data: {
+                type: "withdrawal_requested",
+                message: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
+                userId,
+                userName,
+                amount: parsed.data.amount,
+                amountFormatted,
+              },
+            });
+          }
+        }
+
+        const io = getIO();
+        if (io) {
+          sendNotificationToAdmins(io, {
+            type: "withdrawal_requested",
+            message: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
+            data: { userId, userName, amount: parsed.data.amount, amountFormatted },
           });
         }
-      }
 
-      const io = getIO();
-      if (io) {
-        sendNotificationToAdmins(io, {
-          type: "withdrawal_requested",
-          message: "Un profesional solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.",
-          data: { userId, userName, amount: parsed.data.amount, amountFormatted },
-        });
+        // Push FCM para cada admin (si no tienen la app abierta)
+        void Promise.all(
+          (adminUsers ?? []).map((admin: { id?: string }) => {
+            const adminId = admin?.id;
+            if (!adminId) return;
+            return notificationService.sendPushToUser(adminId, {
+              title: "Nueva solicitud de retiro",
+              body: `${userName} solicitó retirar $${amountFormatted} USD. Revisa Solicitudes de Retiro en el Panel de Administración.`,
+              data: {
+                url: "/admin?tab=payouts",
+                type: "admin",
+                withdrawalType: "withdrawal_requested",
+                userId,
+                userName,
+                amountFormatted,
+              },
+            });
+          })
+        ).catch((err) => console.error("[push] Error notificando admins por retiro:", err));
       }
-
-      // Push FCM para cada admin (si no tienen la app abierta)
-      void Promise.all(
-        (adminUsers ?? []).map((admin: { id?: string }) => {
-          const adminId = admin?.id;
-          if (!adminId) return;
-          return notificationService.sendPushToUser(adminId, {
-            title: "Nueva solicitud de retiro",
-            body: `${userName} solicitó retirar $${amountFormatted} USD. Revisa Solicitudes de Retiro en el Panel de Administración.`,
-            data: {
-              url: "/admin?tab=payouts",
-              type: "admin",
-              withdrawalType: "withdrawal_requested",
-              userId,
-              userName,
-              amountFormatted,
-            },
-          });
-        })
-      ).catch((err) => console.error("[push] Error notificando admins por retiro:", err));
       return res.status(200).json({ message: "Retiro solicitado. Aparecerás en Panel de Administración → Solicitudes de Retiro para que el administrador procese la transferencia.", ok: true });
     } catch (error) {
       console.error("Error requesting withdraw:", error);
@@ -1041,8 +1115,9 @@ export async function registerGenFebRoutes(
       const rejected = bookings.filter((b: { status?: string }) => b.status === "rejected");
       const completedCount = completed.length;
       const rejectedCount = rejected.length;
-      const totalEarnings = completed.reduce((sum: number, b: { cost?: number }) => {
-        const cost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
+      const totalEarnings = completed.reduce((sum: number, b: (typeof completed)[number]) => {
+        const raw = b.cost;
+        const cost = typeof raw === "number" ? raw : Number(raw) || 0;
         return sum + calcProviderNet(cost, statsCommissionRate);
       }, 0);
       const now = new Date();
@@ -1119,44 +1194,46 @@ export async function registerGenFebRoutes(
         currency: "USD",
       });
 
-      // Notificación interna (Socket.io) a admins para alerta en tiempo real
-      const io = getIO();
-      if (io) {
-        const adminNotification = {
-          type: "recharge_pending",
-          data: {
-            message: "Nueva solicitud de recarga",
-            transferId: (transfer as { id?: number }).id,
-            userId,
-            amount: parsed.data.amount,
-            userName: name,
-          },
-          timestamp: new Date(),
-        };
-        sendNotificationToAdmins(io, adminNotification);
-        console.log("[recharge] Notificación interna emitida a admins, transferId:", (transfer as { id?: number }).id);
-      } else {
-        console.warn("[recharge] getIO() es null: no se pudo enviar notificación en tiempo real a admins");
-      }
-
-      // Notificar a todo el staff (admin + Soporte TI): nueva recarga pendiente de aprobación (FCM)
-      const allAdmins = await getFullAdminUsers(storage);
-      const amountStr = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(parsed.data.amount);
-      const tid = (transfer as { id?: number }).id;
-      const adminPushUrl = tid != null ? `/admin?tab=recargas&highlight=${tid}` : "/admin?tab=recargas";
-      void Promise.all(
-        (allAdmins ?? []).map((admin: { id?: string }) =>
-          notificationService.sendPushToUser(admin.id!, {
-            title: "Nueva solicitud de recarga",
-            body: `${name} ha solicitado una recarga de ${amountStr}. Revisa el panel de administración.`,
+      if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+        // Notificación interna (Socket.io) a admins para alerta en tiempo real
+        const io = getIO();
+        if (io) {
+          const adminNotification = {
+            type: "recharge_pending",
             data: {
-              type: "recharge_pending",
-              url: adminPushUrl,
-              transferId: String(tid ?? ""),
+              message: "Nueva solicitud de recarga",
+              transferId: (transfer as { id?: number }).id,
+              userId,
+              amount: parsed.data.amount,
+              userName: name,
             },
-          })
-        )
-      ).catch((err) => console.error("[push] Error notificando a admins por recarga:", err));
+            timestamp: new Date(),
+          };
+          sendNotificationToAdmins(io, adminNotification);
+          console.log("[recharge] Notificación interna emitida a admins, transferId:", (transfer as { id?: number }).id);
+        } else {
+          console.warn("[recharge] getIO() es null: no se pudo enviar notificación en tiempo real a admins");
+        }
+
+        // Notificar a todo el staff (admin + Soporte TI): nueva recarga pendiente de aprobación (FCM)
+        const allAdmins = await getFullAdminUsers(storage);
+        const amountStr = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(parsed.data.amount);
+        const tid = (transfer as { id?: number }).id;
+        const adminPushUrl = tid != null ? `/admin?tab=recargas&highlight=${tid}` : "/admin?tab=recargas";
+        void Promise.all(
+          (allAdmins ?? []).map((admin: { id?: string }) =>
+            notificationService.sendPushToUser(admin.id!, {
+              title: "Nueva solicitud de recarga",
+              body: `${name} ha solicitado una recarga de ${amountStr}. Revisa el panel de administración.`,
+              data: {
+                type: "recharge_pending",
+                url: adminPushUrl,
+                transferId: String(tid ?? ""),
+              },
+            })
+          )
+        ).catch((err) => console.error("[push] Error notificando a admins por recarga:", err));
+      }
 
       res.status(201).json(transfer);
     } catch (error: any) {
@@ -1188,7 +1265,7 @@ export async function registerGenFebRoutes(
       const transfer = await storage.createTransfer(parsed.data);
       const data = parsed.data;
 
-      if (data.status === "completed" && data.userId && data.amount != null) {
+      if (data.status === "completed" && data.userId && data.amount != null && !SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
         const amountFormatted = new Intl.NumberFormat("es-EC", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
@@ -1261,7 +1338,10 @@ export async function registerGenFebRoutes(
       const newStatus = parsed.data.status;
 
       // Notificar al usuario cuando su recarga pasa a aprobada o rechazada (interna Socket.io + FCM push)
-      if (newStatus === "completed" || newStatus === "rejected") {
+      if (
+        !SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS &&
+        (newStatus === "completed" || newStatus === "rejected")
+      ) {
         const uid = (transfer as { userId?: string; amount?: number }).userId;
         const amount = (transfer as { amount?: number }).amount;
         const amountFormatted =
@@ -1485,6 +1565,10 @@ export async function registerGenFebRoutes(
             
           return {
             ...c,
+            serviceEndedAt: conversationTimestampToIso((c as any).serviceEndedAt),
+            serviceChatHideFromUsersAt: conversationTimestampToIso((c as any).serviceChatHideFromUsersAt),
+            bookingId: (c as any).bookingId ?? null,
+            kind: (c as any).kind ?? null,
             otherParticipant: { 
               id: String(otherUser?.id ?? otherId), 
               name,
@@ -1569,9 +1653,12 @@ export async function registerGenFebRoutes(
       const convs = await storage.getConversationsByUser(userId);
       const conv = convs.find((c: any) => Number(c.id) === data.conversationId);
       if (!conv) return res.status(403).json({ message: "No tienes acceso a esta conversación" });
+      const isSystemMessage = data.type === "system";
       const message = await storage.createMessage({
-        ...data,
-        senderId: userId,
+        conversationId: data.conversationId,
+        content: data.content,
+        type: data.type,
+        senderId: isSystemMessage ? CHAT_SYSTEM_SENDER_ID : userId,
         status: "sent",
       });
       const recipientId =
@@ -1580,21 +1667,32 @@ export async function registerGenFebRoutes(
 
       const msgType = String((message as { type?: string }).type ?? data.type ?? "text");
       const messagePreview =
-        msgType === "image"
-          ? "📷 Comprobante de pago"
-          : msgType === "location"
-            ? "📍 Ubicación compartida"
-            : String(message.content ?? "").slice(0, 120);
+        msgType === "system"
+          ? "Mensaje del sistema"
+          : msgType === "image"
+            ? "📷 Comprobante de pago"
+            : msgType === "location"
+              ? "📍 Ubicación compartida"
+              : String(message.content ?? "").slice(0, 120);
 
-      await storage.createNotification({
-        userId: recipientIdStr,
-        type: "message",
-        data: {
+      if (!isSystemMessage) {
+        await storage.createNotification({
+          userId: recipientIdStr,
+          type: "message",
+          data: {
+            conversationId: message.conversationId,
+            preview: messagePreview,
+            messageId: message.id,
+          },
+        });
+
+        void notificationService.sendNewMessageNotification({
+          recipientId,
           conversationId: message.conversationId,
           preview: messagePreview,
-          messageId: message.id,
-        },
-      });
+          senderId: userId,
+        });
+      }
 
       const io = getIO();
       if (io) {
@@ -1605,12 +1703,6 @@ export async function registerGenFebRoutes(
         });
       }
 
-      void notificationService.sendNewMessageNotification({
-        recipientId,
-        conversationId: message.conversationId,
-        preview: messagePreview,
-        senderId: userId,
-      });
       res.status(201).json(message);
     } catch (error) {
       if (error instanceof z.ZodError) {

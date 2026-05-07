@@ -7,6 +7,7 @@ import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquar
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider, useWallet } from "@/hooks/use-mango-data";
+import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { providerHasGoBrand } from "@shared/provider-go";
 import { DriverCargoMap } from "@/components/driver/DriverCargoMap";
@@ -242,8 +243,11 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   useEffect(() => {
     setReceivingCargo(loadGoReceiving("cargo"));
     setReceivingPack(loadGoReceiving("pack"));
-    setTrips(loadTripLog());
   }, []);
+
+  useEffect(() => {
+    setTrips(loadTripLog(user?.id ?? null));
+  }, [user?.id]);
 
   useEffect(() => {
     if (!goDriverUi) return;
@@ -360,8 +364,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   useEffect(() => {
     if (!incomingOpen || !incomingModule) return;
     if (activeRideIdRef.current) return;
-    const target = incomingModule === "pack" ? "/go/pack/driver" : "/go/cargo/driver";
-    const cur = goSlug === "pack" ? "/go/pack/driver" : "/go/cargo/driver";
+    const target = incomingModule === "pack" ? "/go/delivery/driver" : "/go/taxi/driver";
+    const cur = goSlug === "pack" ? "/go/delivery/driver" : "/go/taxi/driver";
     if (target !== cur) setLocation(target);
   }, [incomingOpen, incomingModule, setLocation, goSlug]);
 
@@ -390,20 +394,23 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       if (p.rideId !== activeRideIdRef.current) return;
       const snap = activeRideOfferRef.current;
       if (snap) {
-        appendDriverTripLog({
-          id: p.rideId,
-          endedAt: new Date().toISOString(),
-          durationMin: Math.max(1, Math.round((snap.durationSec ?? 0) / 60)),
-          amountUsd: snap.estimatedUsd ?? 0,
-          payment:
-            snap.paymentMethod === "genfeb"
-              ? "genfeb"
-              : snap.paymentMethod === "bank_transfer"
-                ? "bank_transfer"
-                : "cash",
-          goSlug: goSlug === "pack" ? "pack" : "cargo",
-        });
-        setTrips(loadTripLog());
+        appendDriverTripLog(
+          {
+            id: p.rideId,
+            endedAt: new Date().toISOString(),
+            durationMin: Math.max(1, Math.round((snap.durationSec ?? 0) / 60)),
+            amountUsd: snap.estimatedUsd ?? 0,
+            payment:
+              snap.paymentMethod === "genfeb"
+                ? "genfeb"
+                : snap.paymentMethod === "bank_transfer"
+                  ? "bank_transfer"
+                  : "cash",
+            goSlug: goSlug === "pack" ? "pack" : "cargo",
+          },
+          user?.id ?? null
+        );
+        setTrips(loadTripLog(user?.id ?? null));
         rateTargetRef.current = { rideId: p.rideId, targetName: snap.rider?.name ?? "Cliente" };
         setRateStars(5);
         setRateDialogOpen(true);
@@ -462,7 +469,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       socket.off(`${rideSocketPrefix}completed`, onCompleted);
       socket.off(`${rideSocketPrefix}cancelled`, onCancelled);
     };
-  }, [socket, toast, resetChat, activeConversationId, queryClient, rideSocketPrefix, goDriverUi]);
+  }, [socket, toast, resetChat, activeConversationId, queryClient, rideSocketPrefix, goDriverUi, goSlug, user?.id]);
 
   const submitRideRating = useCallback(async () => {
     const tgt = rateTargetRef.current;
@@ -851,7 +858,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     const activeModule = cargoActive ? "cargo" : packActive ? "pack" : null;
     if (!activeModule) return;
     if (goSlug !== activeModule) {
-      setLocation(activeModule === "pack" ? "/go/pack/driver" : "/go/cargo/driver");
+      setLocation(activeModule === "pack" ? "/go/delivery/driver" : "/go/taxi/driver");
     }
   }, [authLoading, isAuthenticated, goSlug, setLocation]);
 
@@ -883,7 +890,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
-        <p className="text-sm text-muted-foreground">Cargando Car Go…</p>
+        <p className="text-sm text-muted-foreground">Cargando vista de conductor…</p>
       </div>
     );
   }
@@ -1113,7 +1120,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             </span>
             <div className="min-w-0 space-y-2">
               <h1 className="font-display text-xl font-bold tracking-tight text-emerald-950 dark:text-emerald-50 sm:text-2xl">
-                {goSlug === "pack" ? "Disponible para envíos Pack Go" : "Disponible para servicios Car Go"}
+                {goSlug === "pack"
+                  ? `Disponible para envíos de ${MOBILITY_UI.delivery}`
+                  : `Disponible para ${MOBILITY_UI.taxiService.toLowerCase()}`}
               </h1>
               <p className="text-sm leading-relaxed text-emerald-950/90 dark:text-emerald-50/90">
                 {goSlug === "pack"
@@ -1126,12 +1135,12 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       ) : (
         <>
           <h1 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            {goSlug === "pack" ? "Pack Go" : "Car Go"}
+            {goSlug === "pack" ? MOBILITY_UI.delivery : MOBILITY_UI.taxiService}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {goSlug === "pack"
-              ? "Mapa en vivo y conexión para recibir solicitudes de envío Pack Go. Desliza el control para activar o detener la recepción de envíos."
-              : "Mapa en vivo y conexión para recibir solicitudes Car Go. Desliza el control para activar o detener la recepción de viajes."}
+              ? `Mapa en vivo y conexión para recibir solicitudes de ${MOBILITY_UI.delivery.toLowerCase()}. Desliza el control para activar o detener la recepción de envíos.`
+              : `Mapa en vivo y conexión para recibir solicitudes de ${MOBILITY_UI.taxiService.toLowerCase()}. Desliza el control para activar o detener la recepción de viajes.`}
           </p>
         </>
       )}
@@ -1188,7 +1197,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
                     </span>
                     <div className="min-w-0 flex-1 space-y-1">
                       <p className="font-display text-sm font-bold leading-tight text-emerald-950 dark:text-emerald-50">
-                        {goSlug === "pack" ? "Disponible · Pack Go" : "Disponible · Car Go"}
+                        {goSlug === "pack" ? `Disponible · ${MOBILITY_UI.delivery}` : `Disponible · ${MOBILITY_UI.taxiService}`}
                       </p>
                       <p className="text-[10px] leading-snug text-emerald-950/80 dark:text-emerald-50/85">
                         {goSlug === "pack"
@@ -1290,7 +1299,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       <Dialog open={FEATURE_WALLET_RECHARGE_UI_ENABLED && driverWalletOpen} onOpenChange={setDriverWalletOpen}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
-            <DialogTitle>Saldo GenFeb · Car Go</DialogTitle>
+            <DialogTitle>Saldo GenFeb · Conductor</DialogTitle>
             <DialogDescription>
               {FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? (
                 <>

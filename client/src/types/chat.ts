@@ -16,6 +16,14 @@ export interface ConversationEnriched {
   participant1Id: string;
   participant2Id: string;
   serviceId?: number;
+  /** Reserva vinculada (chat de servicio marketplace). */
+  bookingId?: number | null;
+  /** p. ej. `service_booking` para conversaciones vinculadas a una reserva. */
+  kind?: string | null;
+  /** Cuando la reserva pasó a completada/cancelada (ISO). */
+  serviceEndedAt?: string | null;
+  /** Tras esta fecha/hora la conversación ya no aparece para usuarios normales (ISO). Los admins siguen viendo el historial en auditoría. */
+  serviceChatHideFromUsersAt?: string | null;
   lastMessageAt: string | Date | null;
   createdAt: string | Date | null;
   otherParticipant: ChatParticipant;
@@ -43,7 +51,7 @@ export interface MessagesPage {
 export interface SendMessageInput {
   conversationId: number;
   content: string;
-  type?: "text" | "image" | "file" | "location";
+  type?: "text" | "image" | "file" | "location" | "system";
 }
 
 export interface CreateConversationInput {

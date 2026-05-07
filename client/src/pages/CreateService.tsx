@@ -180,21 +180,11 @@ export default function CreateService() {
                 />
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="price"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Precio ($)</FormLabel>
-                      <FormControl>
-                        <Input type="number" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+              <FormField
+                control={form.control}
+                name="price"
+                render={({ field }) => <input type="hidden" {...field} />}
+              />
 
               <FormField
                 control={form.control}

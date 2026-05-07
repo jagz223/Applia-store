@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Smile, Send } from "lucide-react";
+import { Send } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface MessageInputProps {
   value: string;
@@ -9,6 +10,8 @@ interface MessageInputProps {
   disabled?: boolean;
   isSending?: boolean;
   placeholder?: string;
+  /** Clases en el contenedor exterior (p. ej. quitar borde si el padre ya lo dibuja). */
+  className?: string;
 }
 
 export function MessageInput({
@@ -18,6 +21,7 @@ export function MessageInput({
   disabled,
   isSending,
   placeholder,
+  className,
 }: MessageInputProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -27,7 +31,12 @@ export function MessageInput({
   };
 
   return (
-    <div className="p-4 border-t border-border">
+    <div
+      className={cn(
+        "flex min-h-[4.25rem] flex-col justify-center border-t border-border p-4",
+        className,
+      )}
+    >
       <div className="flex items-center gap-2">
         <Input
           placeholder={placeholder || "Escribe un mensaje..."}
@@ -37,9 +46,6 @@ export function MessageInput({
           onKeyDown={handleKeyDown}
           disabled={disabled}
         />
-        <Button type="button" variant="ghost" size="icon" className="shrink-0">
-          <Smile className="w-5 h-5" />
-        </Button>
         <Button
           type="button"
           className="shrink-0 bg-primary hover:bg-primary/90"

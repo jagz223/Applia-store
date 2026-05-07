@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { useCategories, useCategoryVisibility, useServices, useSubcategories } from "@/hooks/use-mango-data";
-import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
+import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { ServiceListItem } from "@/components/ServiceListItem";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp, Bookmark, Layers } from "lucide-react";
@@ -106,9 +106,9 @@ export default function Explore() {
     const slug = (cat as { slug?: string }).slug;
     if (slug && hiddenSlugs.has(slug)) return;
     const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
-    if (slug === "transport") return setLocation(`/go/cargo${fromQs}`);
+    if (slug === "transport") return setLocation(`/go/taxi${fromQs}`);
     if (slug === "marketplace") return setLocation(`/go/shop${fromQs}`);
-    if (slug === "delivery") return setLocation(`/go/pack${fromQs}`);
+    if (slug === "delivery") return setLocation(`/go/delivery${fromQs}`);
   }, [categories, providerCategoryFromUrl, exploreFrom, setLocation, hiddenSlugs]);
 
   const verifiedServices = useMemo(
@@ -133,7 +133,7 @@ export default function Explore() {
     const slug = (cat as { slug?: string } | undefined)?.slug;
     if (slug === "transport") {
       const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
-      setLocation(`/go/cargo${fromQs}`);
+      setLocation(`/go/taxi${fromQs}`);
       return;
     }
     if (slug === "marketplace") {
@@ -143,7 +143,7 @@ export default function Explore() {
     }
     if (slug === "delivery") {
       const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
-      setLocation(`/go/pack${fromQs}`);
+      setLocation(`/go/delivery${fromQs}`);
       return;
     }
     setSelectedProviderCategoryId(id);
@@ -163,7 +163,7 @@ export default function Explore() {
   };
 
   const hasCategorySelected = selectedProviderCategoryId != null && selectedProviderCategoryData;
-  const categoryDisplayName = hasCategorySelected ? getCategoryDisplayName(selectedProviderCategoryData!) : null;
+  const categoryDisplayName = hasCategorySelected ? ((selectedProviderCategoryData as any)?.name ?? "") : null;
 
   useEffect(() => {
     setExploreCategoryDisplayName(categoryDisplayName);
@@ -177,7 +177,7 @@ export default function Explore() {
 
   const filterSummaryLabel = useMemo(() => {
     const parts: string[] = [];
-    if (selectedProviderCategoryData) parts.push(getCategoryDisplayName(selectedProviderCategoryData));
+    if (selectedProviderCategoryData) parts.push((selectedProviderCategoryData as any)?.name ?? "");
     else parts.push("Todos");
     if (selectedSubcategoryData) parts.push(selectedSubcategoryData.name);
     if (search.trim()) parts.push(`"${search.trim()}"`);
@@ -380,7 +380,7 @@ export default function Explore() {
                       }`}
                     >
                       <CategoryIcon name={(cat as { icon?: string }).icon ?? "HelpCircle"} className="h-4 w-4" />
-                      {getCategoryDisplayName(cat)}
+                      {(cat as any).name}
                     </button>
                   ))}
                 </div>
@@ -431,7 +431,7 @@ export default function Explore() {
             <span className="text-sm text-muted-foreground">Filtros:</span>
             {selectedProviderCategoryData && (
               <Badge variant="secondary" className="gap-1 pr-1">
-                {getCategoryDisplayName(selectedProviderCategoryData)}
+                {(selectedProviderCategoryData as any)?.name}
                 <button
                   onClick={() => setProviderCategory(undefined)}
                   className="ml-1 p-0.5 hover:bg-muted rounded-full"

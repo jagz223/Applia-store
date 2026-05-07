@@ -2,7 +2,8 @@ import { cn } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
-import { hasAdminRole } from "@/lib/auth-utils";
+import { useAssociateOnboardingIncomplete } from "@/hooks/use-associate-onboarding-incomplete";
+import { hasAdminRole, canAccessAssociateActivityDashboard } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
@@ -50,7 +51,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useEffect, useMemo } from "react";
@@ -111,8 +112,8 @@ export function Navigation() {
     ? typeof (walletData as { rating?: number } | undefined)?.rating === "number"
       ? (walletData as { rating: number }).rating
       : 5
-    : typeof (user as { rating?: number } | null)?.rating === "number"
-      ? (user as { rating: number }).rating
+    : user != null && typeof (user as { rating?: unknown }).rating === "number"
+      ? (user as unknown as { rating: number }).rating
       : 5;
   const formatWallet = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
@@ -157,6 +158,9 @@ export function Navigation() {
 
   /** Mostrar opciones de profesional si tiene perfil de proveedor o rol professional (por si el perfil no carga). */
   const isProfessional = !!providerProfile || (user as { role?: string } | null)?.role === "professional";
+  const hasProviderForDashboard =
+    !!providerProfile || !!(user as { provider?: unknown } | null)?.provider;
+  const canAccessActivityDashboard = canAccessAssociateActivityDashboard(user, hasProviderForDashboard);
   /** Panel "Mis servicios" visible solo si tiene al menos un servicio activo (condición distinta a Crear servicio). */
   const activeServices = myServices.filter((s) => s.isActive !== false);
   /** Cualquier servicio propio (aunque esté inactivo) para poder abrir el panel y editar. */
@@ -168,6 +172,12 @@ export function Navigation() {
   const isCarGoDriver = !!providerProfile && isCarGoProvider(providerProfile, categories);
   const isVerifiedCarGoDriver = providerProfile?.isVerified === true && isCarGoDriver;
   const canSeeMobility = !hiddenSlugs.has("transport");
+  const { incomplete: associateOnboardingIncomplete, associatePanelHref } = useAssociateOnboardingIncomplete();
+  const associateNavPath = location.split("?")[0];
+  const showAssociateOnboardingBanner =
+    isAuthenticated && associateOnboardingIncomplete && associateNavPath !== "/become-pro";
+  /** Panel / continuar alta: perfil proveedor, rol professional, o onboarding marcado en localStorage. */
+  const showAssociatePanelButton = !isVerifiedCarGoDriver && (isProfessional || associateOnboardingIncomplete);
 
   const getServiceIcon = (service: any) => {
     const iconName = service?.category?.icon ?? service?.category?.type ?? service?.category?.slug;
@@ -255,9 +265,9 @@ export function Navigation() {
           )}
           {canSeeMobility && (isAdmin || (isProfessional && !myServicesLoading && isCarGoDriver)) && (
             <DropdownMenuItem asChild>
-              <Link href="/go/cargo/driver" className="flex items-center gap-2 w-full">
+              <Link href="/go/taxi/driver" className="flex items-center gap-2 w-full">
                 <Car className="h-4 w-4" />
-                <span>Go</span>
+                <span>Driver!</span>
               </Link>
             </DropdownMenuItem>
           )}
@@ -428,25 +438,25 @@ export function Navigation() {
           
           {isAuthenticated ? (
             <>
-              {isProfessional && !isVerifiedCarGoDriver ? (
+              {showAssociatePanelButton ? (
                  <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
-                   <Link href="/professional-dashboard">
+                   <Link href={associatePanelHref}>
                      <Briefcase className="h-4 w-4" />
                      <span>Panel Asociado</span>
                    </Link>
                  </Button>
-              ) : showBecomePro && !isProfessional ? (
+              ) : showBecomePro && !isProfessional && !associateOnboardingIncomplete ? (
                 <Button variant="outline" className="hidden sm:flex border-primary text-primary hover:bg-primary/10" asChild>
                   <Link href="/become-pro">Convertirse en Asociado</Link>
                 </Button>
-              ) : (
+              ) : canAccessActivityDashboard ? (
                  <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
                    <Link href="/dashboard">
                      <LayoutDashboard className="h-4 w-4" />
                      <span>Dashboard</span>
                    </Link>
                  </Button>
-              )}
+              ) : null}
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -464,20 +474,22 @@ export function Navigation() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {isProfessional && !isVerifiedCarGoDriver && (
+                  {showAssociatePanelButton && (
                     <DropdownMenuItem asChild>
-                      <Link href="/professional-dashboard" className="flex items-center">
+                      <Link href={associatePanelHref} className="flex items-center">
                         <Briefcase className="mr-2 h-4 w-4" />
                         Panel Asociado
                       </Link>
                     </DropdownMenuItem>
                   )}
+                  {canAccessActivityDashboard && (
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard" className="flex items-center">
                       <LayoutDashboard className="mr-2 h-4 w-4" />
                       Panel de Control
                     </Link>
                   </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem asChild>
                     <Link href="/bookings" className="flex items-center">
                       <Calendar className="mr-2 h-4 w-4" />
@@ -605,9 +617,9 @@ export function Navigation() {
                     </Link>
                   </>
                 )}
-                {isProfessional && !isVerifiedCarGoDriver && (
+                {showAssociatePanelButton && (
                   <>
-                    <Link href="/professional-dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                    <Link href={associatePanelHref} className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Panel Asociado
                     </Link>
                     {SHOW_CREATE_SERVICE && (
@@ -631,12 +643,12 @@ export function Navigation() {
                 )}
                 {canSeeMobility && (isAdmin || (isProfessional && isCarGoDriver && !myServicesLoading)) && (
                   <Link
-                    href="/go/cargo/driver"
+                    href="/go/taxi/driver"
                     className="text-lg font-medium flex items-center gap-2 hover:text-primary transition-colors"
                     onClick={() => setMobileOpen(false)}
                   >
                     <Car className="h-5 w-5 shrink-0" />
-                    Go
+                    Driver!
                   </Link>
                 )}
                 {isAuthenticated && (
@@ -656,9 +668,11 @@ export function Navigation() {
                     )}
                   </>
                 )}
+                {canAccessActivityDashboard && (
                 <Link href="/dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mi Panel
                 </Link>
+                )}
                 {SHOW_PAYMENTS && (
                   <Link href="/payments" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                     Pagos
@@ -736,6 +750,22 @@ export function Navigation() {
           </Sheet>
         </div>
       </div>
+      {showAssociateOnboardingBanner && (
+        <div className="border-t border-primary/20 bg-muted/50 dark:border-primary/30 dark:bg-muted/40">
+          <div className="container max-w-7xl mx-auto px-2 min-[400px]:px-4 sm:px-6 lg:px-8 py-2">
+            <Alert className="rounded-lg border-border bg-card py-2 text-card-foreground shadow-sm sm:py-3 dark:bg-card/90 [&>svg]:text-secondary">
+              <AlertTriangle className="h-4 w-4" aria-hidden />
+              <AlertTitle className="text-sm font-medium text-foreground">Registro de asociado sin terminar</AlertTitle>
+              <AlertDescription className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <span>Puedes continuar donde lo dejaste y completar tu perfil como asociado.</span>
+                <Button size="sm" className="shrink-0 bg-primary text-primary-foreground hover:bg-primary/90" asChild>
+                  <Link href="/become-pro">Continuar registro</Link>
+                </Button>
+              </AlertDescription>
+            </Alert>
+          </div>
+        </div>
+      )}
     </nav>
 
     {/* Panel Mi Servicio */}
@@ -836,12 +866,6 @@ export function Navigation() {
                         <h3 className="font-bold text-base text-foreground truncate">{panelService.title ?? "—"}</h3>
 
                         <div className="flex flex-wrap items-center gap-2 mt-2">
-                          <Badge
-                            variant="outline"
-                            className="bg-amber-500/15 text-amber-700 dark:text-amber-400 dark:bg-amber-500/20 border-amber-500/30 font-semibold"
-                          >
-                            {panelService.price ?? "—"} USD/h
-                          </Badge>
                           <span className="text-xs text-muted-foreground">{getServiceBrand(panelService)}</span>
                         </div>
 

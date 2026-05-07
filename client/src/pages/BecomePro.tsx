@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { api } from "@shared/routes";
 import { setVerifyReturnPath } from "@/lib/verify-return-path";
+import { markAssociateOnboardingStarted, clearAssociateOnboardingStarted } from "@/lib/associate-onboarding-storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,7 +29,7 @@ import {
   SERVICE_DESCRIPTION_INLINE_HINT,
   ServiceDescriptionInfoButton,
 } from "@/components/ServiceDescriptionHints";
-import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
+import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryCanonicalName } from "@shared/default-categories";
 
 /** Solo categorías válidas para proveedor (excluye legal/financial, que son subcategorías). */
 const PROVIDER_CATEGORY_SLUGS = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
@@ -91,10 +92,16 @@ const becomeProCategoryFields = {
   subcategoryId: z.number().int().positive().optional().nullable(),
 };
 
-/** Car Go + Pack Go: bloque de perfil/servicio no se muestra; no exigimos título ni biografía (superRefine). */
+const becomeProTradeFields = {
+  coursesCompleted: z.string().optional(),
+  certifications: z.string().optional(),
+};
+
+/** Transporte + delivery: bloque de perfil/servicio no se muestra; no exigimos título ni biografía (superRefine). */
 function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
   return insertProviderSchema
     .extend(becomeProCategoryFields)
+    .extend(becomeProTradeFields)
     .extend({
       bio: z.string().trim().max(700, { message: "Máximo 700 caracteres." }),
       skills: providerSkillsSchema,
@@ -109,6 +116,38 @@ function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
     .superRefine((data, ctx) => {
       const slug = categories.find((c) => c.id === data.categoryId)?.slug;
       if (slug === "transport" || slug === "delivery") return;
+
+      const needsSub =
+        slug === "technical" || slug === "maintenance" || slug === "professional";
+      if (needsSub && (data.subcategoryId == null || Number(data.subcategoryId) <= 0)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Selecciona una subcategoría.",
+          path: ["subcategoryId"],
+        });
+      }
+
+      const isTrade = slug === "technical" || slug === "maintenance";
+      if (isTrade) {
+        const courses = (data.coursesCompleted ?? "").trim();
+        const certs = (data.certifications ?? "").trim();
+        if (courses.length < 10) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Indica los cursos o formación realizados (mínimo 10 caracteres).",
+            path: ["coursesCompleted"],
+          });
+        }
+        if (certs.length < 10) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Indica tus certificaciones (mínimo 10 caracteres).",
+            path: ["certifications"],
+          });
+        }
+        return;
+      }
+
       const title = data.serviceTitle.trim();
       if (title.length < 2) {
         ctx.addIssue({
@@ -166,6 +205,8 @@ export default function BecomePro() {
       hourlyRate: "50",
       serviceTitle: "",
       serviceDescription: "",
+      coursesCompleted: "",
+      certifications: "",
       vehicle: { ...DEFAULT_VEHICLE_FORM },
     },
   });
@@ -180,17 +221,26 @@ export default function BecomePro() {
   const isCarGo = selectedCategorySlug === "transport";
   const isPackGo = selectedCategorySlug === "delivery";
   const isGoDriverCategory = isCarGo || isPackGo;
+  const isTradeCategory = selectedCategorySlug === "technical" || selectedCategorySlug === "maintenance";
+  const isFocusCatalogCategory =
+    selectedCategorySlug === "professional" ||
+    selectedCategorySlug === "technical" ||
+    selectedCategorySlug === "maintenance";
+  const needsSubcategory =
+    selectedCategorySlug === "technical" ||
+    selectedCategorySlug === "maintenance" ||
+    selectedCategorySlug === "professional";
   const [enablePackGoSoon, setEnablePackGoSoon] = useState(true);
   const [enableShopGoSoon, setEnableShopGoSoon] = useState(true);
   const [enableCarGoAlso, setEnableCarGoAlso] = useState(true);
   const goOfferKind = useMemo(() => {
     if (!isGoDriverCategory) return "carro" as const;
     if (vehicleType === "motorcycle") return "moto" as const;
-    if (vehicleType === "pickup_truck") return "camion" as const;
+    if (vehicleType === "pickup_truck" || vehicleType === "truck") return "camion" as const;
     return "carro" as const;
   }, [isGoDriverCategory, vehicleType]);
 
-  /** Al elegir Car Go / Pack Go ocultamos el bloque de perfil; limpiamos valores por si el usuario cambió de otra categoría. */
+  /** Al elegir taxi o delivery ocultamos el bloque de perfil; limpiamos valores por si el usuario cambió de otra categoría. */
   useEffect(() => {
     if (!isGoDriverCategory) return;
     form.setValue("profession", "");
@@ -200,9 +250,70 @@ export default function BecomePro() {
     form.setValue("yearsExperience", 0);
     form.setValue("hourlyRate", "");
     form.setValue("skills", []);
+    form.setValue("coursesCompleted", "");
+    form.setValue("certifications", "");
   }, [isGoDriverCategory, form]);
 
-  // Si elige Pack Go, por defecto sugerimos habilitar Car Go también (el usuario puede desmarcar).
+  useEffect(() => {
+    if (isTradeCategory) {
+      // Mantener campos de perfil/servicio (bio, nombre, descripción, habilidades) para que el registro
+      // en Técnicos y Mantenimiento sea coherente con Editar servicio.
+      // Solo limpiamos el campo específico de "Profesión / Título", porque en oficios puede ser confuso.
+      form.setValue("profession", "");
+    }
+  }, [isTradeCategory, form]);
+
+  const categoryIntro = useMemo(() => {
+    if (!isFocusCatalogCategory) return null;
+    if (selectedCategorySlug === "professional") {
+      return "Para profesionales (abogados, contadores, psicólogos, asesores): describe tu oferta con un título claro, qué incluye y tu enfoque de trabajo.";
+    }
+    if (selectedCategorySlug === "technical") {
+      return "Para servicios técnicos (computación, electrónica, redes): aclara qué reparas/instalas, el alcance del trabajo y tus habilidades clave.";
+    }
+    if (selectedCategorySlug === "maintenance") {
+      return "Para mantenimiento (refrigeración, plomería, electricidad, aires): detalla el servicio, qué incluye y tu experiencia práctica.";
+    }
+    return null;
+  }, [isFocusCatalogCategory, selectedCategorySlug]);
+
+  const contextualPlaceholders = useMemo(() => {
+    if (!isFocusCatalogCategory) {
+      return {
+        profession: "Ej. Plomero, Diseñador gráfico",
+        serviceTitle: "Ej. Asesoría legal laboral para PYMEs",
+        serviceDescription: "Qué incluye esta oferta: alcance, entregables, duración o lo que cubre el precio.",
+        bio: "Quién eres, tu especialidad, cómo trabajas y qué pueden esperar los clientes. Entre 50 y 700 caracteres.",
+      };
+    }
+    if (selectedCategorySlug === "professional") {
+      return {
+        profession: "Ej. Abogado, Contador, Psicólogo",
+        serviceTitle: "Ej. Asesoría contable para emprendedores",
+        serviceDescription:
+          "Ej. Qué incluye: revisión, diagnóstico, entrega de documentos, tiempos estimados, alcance del acompañamiento.",
+        bio: "Tu experiencia, tu enfoque (cómo trabajas), qué tipo de casos tomas y qué pueden esperar los clientes. 50–700 caracteres.",
+      };
+    }
+    if (selectedCategorySlug === "technical") {
+      return {
+        profession: "Ej. Técnico en computación, Técnico electrónico",
+        serviceTitle: "Ej. Reparación de PC y laptops (diagnóstico + arreglo)",
+        serviceDescription:
+          "Ej. Qué incluye: diagnóstico, reparación, pruebas, instalación de software, tiempos de entrega, qué NO incluye.",
+        bio: "Tu experiencia en equipos/marcas, cómo trabajas, garantías, tiempos y forma de diagnóstico. 50–700 caracteres.",
+      };
+    }
+    return {
+      profession: "Ej. Técnico en refrigeración, Plomero, Electricista",
+      serviceTitle: "Ej. Mantenimiento preventivo de aires acondicionados",
+      serviceDescription:
+        "Ej. Qué incluye: limpieza, revisión, pruebas, materiales incluidos/no incluidos, duración aproximada.",
+      bio: "Tu experiencia, zonas, tipo de trabajos, materiales/herramientas y tu forma de trabajo. 50–700 caracteres.",
+    };
+  }, [isFocusCatalogCategory, selectedCategorySlug]);
+
+  // Si elige Delivery, por defecto sugerimos habilitar también transporte (taxi); el usuario puede desmarcar.
   useEffect(() => {
     if (isPackGo) setEnableCarGoAlso(true);
   }, [isPackGo]);
@@ -252,6 +363,13 @@ export default function BecomePro() {
     }
   }, [existingProfile, setLocation]);
 
+  /** Marca onboarding en curso para recordatorios y enlace «Panel Asociado» → /become-pro. */
+  useEffect(() => {
+    if (!isAuthenticated || authLoading || profileLoading) return;
+    if (existingProfile) return;
+    markAssociateOnboardingStarted();
+  }, [isAuthenticated, authLoading, profileLoading, existingProfile]);
+
   if (authLoading || profileLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -292,12 +410,40 @@ export default function BecomePro() {
       vehiclePayload = parsed.data;
     }
 
-    const { vehicle: _vehicleForm, ...rest } = data;
+    const { vehicle: _vehicleForm, coursesCompleted: coursesRaw, certifications: certsRaw, ...rest } = data;
     void _vehicleForm;
+
+    const isTrade = slug === "technical" || slug === "maintenance";
+    const coursesTrim = (coursesRaw ?? "").trim();
+    const certsTrim = (certsRaw ?? "").trim();
+
+    let professionOut = rest.profession;
+    let bioOut = rest.bio;
+    let serviceTitleOut = data.serviceTitle;
+    let serviceDescriptionOut = data.serviceDescription;
+    let skillsOut = data.skills ?? [];
+
+    if (isTrade) {
+      professionOut = coursesTrim.split("\n")[0]?.slice(0, 200) || "Servicios técnicos";
+      bioOut = [`Formación y cursos:\n${coursesTrim}`, `Certificaciones:\n${certsTrim}`].join("\n\n");
+      const subLabel = subcategories.find((s) => s.id === data.subcategoryId)?.name ?? "Servicio";
+      serviceTitleOut = subLabel;
+      serviceDescriptionOut = certsTrim.length > 0 ? certsTrim : coursesTrim;
+      skillsOut = certsTrim
+        .split(/[,;\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 25);
+      if (skillsOut.length === 0 && certsTrim.length > 0) {
+        skillsOut = [certsTrim.slice(0, 120)];
+      }
+    }
 
     createProvider.mutate(
       {
         ...rest,
+        profession: professionOut,
+        bio: bioOut,
         categoryId: data.categoryId,
         category: slug ?? data.category ?? undefined,
         ...(goDriver
@@ -310,13 +456,22 @@ export default function BecomePro() {
             }
           : {}),
         subcategoryId: data.subcategoryId ?? undefined,
-        skills: goDriver ? [] : data.skills,
-        serviceTitle: data.serviceTitle,
-        serviceDescription: data.serviceDescription,
+        skills: goDriver ? [] : skillsOut,
+        serviceTitle: serviceTitleOut,
+        serviceDescription: serviceDescriptionOut,
         ...(goDriver && vehiclePayload ? { vehicle: vehiclePayload } : {}),
-      } as InsertProvider & { serviceTitle?: string; serviceDescription?: string; vehicle?: typeof vehiclePayload },
+        ...(isTrade && coursesTrim ? { coursesCompleted: coursesTrim } : {}),
+        ...(isTrade && certsTrim ? { certifications: certsTrim } : {}),
+      } as InsertProvider & {
+        serviceTitle?: string;
+        serviceDescription?: string;
+        vehicle?: typeof vehiclePayload;
+        coursesCompleted?: string;
+        certifications?: string;
+      },
       {
         onSuccess: () => {
+          clearAssociateOnboardingStarted();
           setVerifyReturnPath("/professional-dashboard");
           // Navegar antes de invalidar queries: si `existingProfile` pasa a existir mientras sigues en /become-pro,
           // el efecto redirigiría al panel y anularía la ida a verificación.
@@ -336,7 +491,11 @@ export default function BecomePro() {
     <div className="container max-w-2xl py-12 px-4">
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-display font-bold text-primary mb-2">
-          {isCarGo ? "Registro Car Go" : isPackGo ? "Registro Pack Go" : "Datos de proveedor"}
+          {isCarGo
+            ? `Registro · ${getCategoryCanonicalName({ slug: "transport" })}`
+            : isPackGo
+              ? `Registro · ${getCategoryCanonicalName({ slug: "delivery" })}`
+              : "Datos de proveedor"}
         </h1>
         <p className="text-muted-foreground">
           {isGoDriverCategory ? (
@@ -362,8 +521,8 @@ export default function BecomePro() {
           <CardTitle>{isGoDriverCategory ? "Conductor y vehículo" : "Perfil de proveedor"}</CardTitle>
           <CardDescription>
             {isGoDriverCategory
-              ? "Placa, tipo y estado del vehículo son obligatorios. Puedes completar título del servicio, tarifa y biografía más adelante en tu panel. Tu cuenta debe ser verificada: al guardar, te pediremos identificación y licencia (u otro documento según categoría)."
-              : "Indica tu categoría, profesión, experiencia y tarifa. No se publica nada hasta la verificación: al guardar, te llevamos a subir tus archivos para que el equipo revise tu solicitud."}
+              ? "Placa, tipo y estado del vehículo son obligatorios. Puedes completar título del servicio y biografía más adelante en tu panel. Tu cuenta debe ser verificada: al guardar, te pediremos identificación y licencia (u otro documento según categoría)."
+              : "Indica tu categoría, profesión y experiencia. No se publica nada hasta la verificación: al guardar, te llevamos a subir tus archivos para que el equipo revise tu solicitud."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -392,7 +551,7 @@ export default function BecomePro() {
                           ?.filter((cat) => cat.id != null)
                           .map((cat) => (
                             <SelectItem key={String(cat.id)} value={String(cat.id)}>
-                              {getCategoryDisplayName(cat)}
+                              {getCategoryCanonicalName(cat)}
                             </SelectItem>
                           ))}
                       </SelectContent>
@@ -408,8 +567,15 @@ export default function BecomePro() {
                   <Select
                     onValueChange={(v) => {
                       const kind = (v as "moto" | "carro" | "camion") ?? "carro";
+                      const cur = form.getValues("vehicle.vehicle_type") as VehicleType | undefined;
                       const wanted: VehicleType =
-                        kind === "moto" ? "motorcycle" : kind === "camion" ? "pickup_truck" : "car";
+                        kind === "moto"
+                          ? "motorcycle"
+                          : kind === "camion"
+                            ? cur === "truck" || cur === "pickup_truck"
+                              ? cur
+                              : "pickup_truck"
+                            : "car";
                       form.setValue("vehicle.vehicle_type", wanted);
                     }}
                     value={goOfferKind}
@@ -432,10 +598,15 @@ export default function BecomePro() {
                   name="subcategoryId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Subcategoría (opcional)</FormLabel>
+                      <FormLabel>{needsSubcategory ? "Subcategoría" : "Subcategoría (opcional)"}</FormLabel>
+                      <FormDescription className="text-xs">
+                        {needsSubcategory
+                          ? "Elige tu especialidad según la categoría (por ejemplo en Servicios Técnicos, Mantenimiento o Servicios Profesionales)."
+                          : "Afina tu perfil en el catálogo si aplica."}
+                      </FormDescription>
                       <Select
                         onValueChange={(v) => field.onChange(v === "none" || !v ? undefined : Number(v))}
-                        value={field.value != null ? String(field.value) : "none"}
+                        value={field.value != null ? String(field.value) : needsSubcategory ? undefined : "none"}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -443,7 +614,7 @@ export default function BecomePro() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="none">Ninguna</SelectItem>
+                          {!needsSubcategory ? <SelectItem value="none">Ninguna</SelectItem> : null}
                           {subcategories.map((sub) => (
                             <SelectItem key={String(sub.id)} value={String(sub.id)}>
                               {sub.name}
@@ -462,13 +633,13 @@ export default function BecomePro() {
                   <p className="font-semibold">También habilitar</p>
                   <p className="text-sm text-muted-foreground">
                     {isCarGo
-                      ? "Los conductores Car Go pueden operar también en Pack Go y Shop Go."
-                      : "Los repartidores Pack Go pueden operar también en Car Go y Shop Go."}
+                      ? `Quienes ofrecen ${getCategoryCanonicalName({ slug: "transport" })} pueden activar también Delivery y Marketplace.`
+                      : `Quienes ofrecen ${getCategoryCanonicalName({ slug: "delivery" })} pueden activar también transporte (taxi) y Marketplace.`}
                   </p>
                   {isCarGo ? (
                     <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
                       <span className="min-w-0">
-                        <span className="font-medium">Pack Go</span>
+                        <span className="font-medium">Delivery</span>
                       </span>
                       <input
                         type="checkbox"
@@ -480,7 +651,7 @@ export default function BecomePro() {
                   ) : (
                     <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
                       <span className="min-w-0">
-                        <span className="font-medium">Car Go</span>
+                        <span className="font-medium">Servicios de transporte (Taxi)</span>
                       </span>
                       <input
                         type="checkbox"
@@ -492,7 +663,7 @@ export default function BecomePro() {
                   )}
                   <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
                     <span className="min-w-0">
-                      <span className="font-medium">Shop Go</span>{" "}
+                      <span className="font-medium">Marketplace</span>{" "}
                       <span className="text-xs text-muted-foreground">(Próximamente activo)</span>
                     </span>
                     <input
@@ -762,7 +933,86 @@ export default function BecomePro() {
                 </div>
               )}
 
-              {!isGoDriverCategory && (
+              {!isGoDriverCategory && isFocusCatalogCategory && categoryIntro ? (
+                <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+                  <p className="text-sm font-semibold text-foreground">Guía rápida</p>
+                  <p className="text-sm text-muted-foreground mt-1">{categoryIntro}</p>
+                </div>
+              ) : null}
+
+              {!isGoDriverCategory && isTradeCategory && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="coursesCompleted"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nombre de los cursos realizados</FormLabel>
+                        <FormDescription className="text-xs">
+                          Formación técnica, talleres o programas relacionados con tu especialidad (Servicios Técnicos o Mantenimiento).
+                        </FormDescription>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Ej. Curso de instalaciones sanitarias IPAC 2023; Certificación en refrigeración doméstica…"
+                            className="min-h-[100px] resize-y"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="certifications"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Certificaciones obtenidas</FormLabel>
+                        <FormDescription className="text-xs">
+                          Títulos, carnés o certificados que respaldan tu trabajo.
+                        </FormDescription>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Ej. Certificado EPA sección 608; carné de electricista habilitado…"
+                            className="min-h-[100px] resize-y"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="hourlyRate"
+                    render={({ field }) => (
+                      <input
+                        type="hidden"
+                        name={field.name}
+                        ref={field.ref}
+                        onBlur={field.onBlur}
+                        onChange={field.onChange}
+                        value={field.value ?? ""}
+                      />
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="yearsExperience"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Años de experiencia</FormLabel>
+                        <FormControl>
+                          <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value, 10) || 0)} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+
+              {!isGoDriverCategory && isFocusCatalogCategory && (
                 <>
                   <FormField
                     control={form.control}
@@ -771,7 +1021,7 @@ export default function BecomePro() {
                       <FormItem>
                         <FormLabel>Profesión / Título</FormLabel>
                         <FormControl>
-                          <Input placeholder="Ej. Plomero, Diseñador gráfico" {...field} />
+                          <Input placeholder={contextualPlaceholders.profession} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -788,7 +1038,7 @@ export default function BecomePro() {
                           Título público de tu servicio en el catálogo (editable después en «Editar servicio»).
                         </FormDescription>
                         <FormControl>
-                          <Input placeholder="Ej. Asesoría legal laboral para PYMEs" {...field} />
+                          <Input placeholder={contextualPlaceholders.serviceTitle} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -811,7 +1061,7 @@ export default function BecomePro() {
                         </p>
                         <FormControl>
                           <Textarea
-                            placeholder="Qué incluye esta oferta: alcance, entregables, duración o lo que cubre el precio."
+                            placeholder={contextualPlaceholders.serviceDescription}
                             className="min-h-[120px] resize-y"
                             {...field}
                           />
@@ -824,35 +1074,33 @@ export default function BecomePro() {
                     )}
                   />
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="yearsExperience"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Años de experiencia</FormLabel>
-                          <FormControl>
-                            <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value, 10) || 0)} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="hourlyRate"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Tarifa por hora (USD)</FormLabel>
-                          <FormControl>
-                            <Input type="number" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
+                  <FormField
+                    control={form.control}
+                    name="hourlyRate"
+                    render={({ field }) => (
+                      <input
+                        type="hidden"
+                        name={field.name}
+                        ref={field.ref}
+                        onBlur={field.onBlur}
+                        onChange={field.onChange}
+                        value={field.value ?? ""}
+                      />
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="yearsExperience"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Años de experiencia</FormLabel>
+                        <FormControl>
+                          <Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value, 10) || 0)} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
                   <ProviderSkillsField control={form.control} name="skills" />
 
@@ -871,7 +1119,7 @@ export default function BecomePro() {
                         </FormDescription>
                         <FormControl>
                           <Textarea
-                            placeholder="Quién eres, tu especialidad, cómo trabajas y qué pueden esperar los clientes. Entre 50 y 700 caracteres."
+                            placeholder={contextualPlaceholders.bio}
                             className="min-h-[140px] resize-y"
                             maxLength={700}
                             {...field}
@@ -889,13 +1137,7 @@ export default function BecomePro() {
               )}
 
               <Button type="submit" className="w-full text-lg h-12" disabled={createProvider.isPending}>
-                {createProvider.isPending
-                  ? isCarGo
-                    ? "Guardando y abriendo verificación…"
-                    : "Guardando y abriendo verificación…"
-                  : isCarGo
-                    ? "Guardar e ir a verificación"
-                    : "Guardar e ir a verificación"}
+                {createProvider.isPending ? "Guardando y abriendo verificación…" : "Guardar e ir a verificación"}
               </Button>
             </form>
           </Form>

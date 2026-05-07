@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { BarChart3, CalendarRange, Loader2, Users, Briefcase, ClipboardList, Wallet, ShieldAlert } from "lucide-react";
+import { BarChart3, CalendarRange, Loader2, Users, Briefcase, ClipboardList, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,7 @@ import {
   type AdminDashboardPeriod,
   type AdminDashboardStatsResponse,
 } from "@/hooks/use-mango-data";
+import { cn } from "@/lib/utils";
 
 const PERIOD_OPTIONS: { value: AdminDashboardPeriod; label: string; short: string }[] = [
   { value: "day", label: "Hoy", short: "Día" },
@@ -16,15 +17,6 @@ const PERIOD_OPTIONS: { value: AdminDashboardPeriod; label: string; short: strin
   { value: "month", label: "Este mes", short: "Mes" },
   { value: "year", label: "Este año", short: "Año" },
 ];
-
-function formatUsd(n: number) {
-  return new Intl.NumberFormat("es-EC", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n);
-}
 
 function StatBar({ label, value, max, classNameBar }: { label: string; value: number; max: number; classNameBar?: string }) {
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
@@ -54,7 +46,7 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
 
   return (
     <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 xl:grid-cols-3">
-      <Card className="min-w-0 border-border/80 shadow-sm">
+      <Card className="min-w-0 border-border/80 bg-card shadow-sm">
         <CardHeader className="pb-2 space-y-1">
           <CardTitle className="text-base flex items-center gap-2">
             <Users className="h-4 w-4 text-mango-orange shrink-0" />
@@ -64,11 +56,11 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
         </CardHeader>
         <CardContent className="space-y-3 pt-0">
           <div className="grid grid-cols-2 gap-2 text-sm">
-            <div className="rounded-lg bg-muted/40 px-2.5 py-2 min-w-0">
+            <div className="rounded-lg bg-muted/40 px-2.5 py-2 min-w-0 dark:bg-muted/25">
               <p className="text-[11px] text-muted-foreground truncate">Asociados</p>
               <p className="text-xl font-semibold tabular-nums">{s.users.professionals}</p>
             </div>
-            <div className="rounded-lg bg-muted/40 px-2.5 py-2 min-w-0">
+            <div className="rounded-lg bg-muted/40 px-2.5 py-2 min-w-0 dark:bg-muted/25">
               <p className="text-[11px] text-muted-foreground truncate">Clientes</p>
               <p className="text-xl font-semibold tabular-nums">{s.users.clients}</p>
             </div>
@@ -83,7 +75,7 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 border-border/80 shadow-sm">
+      <Card className="min-w-0 border-border/80 bg-card shadow-sm">
         <CardHeader className="pb-2 space-y-1">
           <CardTitle className="text-base flex items-center gap-2">
             <ClipboardList className="h-4 w-4 text-mango-orange shrink-0" />
@@ -100,7 +92,7 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 border-border/80 shadow-sm min-[400px]:col-span-2 xl:col-span-1">
+      <Card className="min-w-0 border-border/80 bg-card shadow-sm min-[400px]:col-span-2 xl:col-span-1">
         <CardHeader className="pb-2 space-y-1">
           <CardTitle className="text-base flex items-center gap-2">
             <Briefcase className="h-4 w-4 text-mango-orange shrink-0" />
@@ -110,11 +102,11 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
         </CardHeader>
         <CardContent className="space-y-3 pt-0">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-            <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+            <div className="rounded-lg bg-muted/40 px-2.5 py-2 dark:bg-muted/25">
               <p className="text-[11px] text-muted-foreground">Serv. activos</p>
               <p className="text-lg font-semibold tabular-nums">{s.services.active}</p>
             </div>
-            <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+            <div className="rounded-lg bg-muted/40 px-2.5 py-2 dark:bg-muted/25">
               <p className="text-[11px] text-muted-foreground">Inactivos</p>
               <p className="text-lg font-semibold tabular-nums">{s.services.inactive}</p>
             </div>
@@ -123,16 +115,6 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
               <p className="text-lg font-semibold tabular-nums text-amber-900 dark:text-amber-100">
                 {s.pendingVerificationAssociates}
               </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2 text-xs sm:text-sm">
-            <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2.5 py-2 min-w-0">
-              <span className="text-muted-foreground truncate">Recargas en espera</span>
-              <span className="font-semibold tabular-nums shrink-0">{s.pendingRechargeRequests}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2.5 py-2 min-w-0">
-              <span className="text-muted-foreground truncate">Retiros pendientes</span>
-              <span className="font-semibold tabular-nums shrink-0">{s.pendingWithdrawalRequests}</span>
             </div>
           </div>
         </CardContent>
@@ -152,18 +134,13 @@ function PeriodSection({ p, range }: { p: AdminDashboardStatsResponse["period"];
     p.bookingsCreatedTotal
   );
 
-  const movementMax = numMax(
-    p.newUsersTotal,
-    p.bookingsCreatedTotal,
-    p.userRechargesCompleted.count,
-    p.adminBalanceCredits.count
-  );
+  const movementMax = numMax(p.newUsersTotal, p.bookingsCreatedTotal);
 
   const fromLabel = format(new Date(range.from), "d MMM", { locale: es });
   const toLabel = format(new Date(range.to), "d MMM yyyy", { locale: es });
 
   return (
-    <Card className="border-border/80 shadow-sm min-w-0">
+    <Card className="border-border/80 bg-card shadow-sm min-w-0">
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
           <CalendarRange className="h-4 w-4 text-mango-orange shrink-0" />
@@ -176,63 +153,33 @@ function PeriodSection({ p, range }: { p: AdminDashboardStatsResponse["period"];
       <CardContent className="space-y-6 pt-0">
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-2">Resumen numérico</p>
-          <div className="grid grid-cols-2 min-[360px]:grid-cols-3 sm:grid-cols-4 gap-2">
-            <div className="rounded-lg border bg-card px-2 py-2.5 min-w-0">
+          <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2 max-w-xl">
+            <div className="rounded-lg border border-border/70 bg-card px-2 py-2.5 min-w-0">
               <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Nuevos registros</p>
               <p className="text-lg sm:text-xl font-semibold tabular-nums">{p.newUsersTotal}</p>
               <p className="text-[10px] text-muted-foreground truncate">
                 {p.newProfessionals} asoc. · {p.newClients} cli.
               </p>
             </div>
-            <div className="rounded-lg border bg-card px-2 py-2.5 min-w-0">
+            <div className="rounded-lg border border-border/70 bg-card px-2 py-2.5 min-w-0">
               <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Reservas nuevas</p>
               <p className="text-lg sm:text-xl font-semibold tabular-nums">{p.bookingsCreatedTotal}</p>
-            </div>
-            <div className="rounded-lg border bg-card px-2 py-2.5 min-w-0">
-              <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Recargas aprobadas</p>
-              <p className="text-lg sm:text-xl font-semibold tabular-nums">{p.userRechargesCompleted.count}</p>
-              <p className="text-[10px] text-muted-foreground truncate">{formatUsd(p.userRechargesCompleted.totalUsd)}</p>
-            </div>
-            <div className="rounded-lg border bg-card px-2 py-2.5 min-w-0 col-span-2 min-[360px]:col-span-1 sm:col-span-1">
-              <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Gestión saldo (admin)</p>
-              <p className="text-lg sm:text-xl font-semibold tabular-nums">{p.adminBalanceCredits.count}</p>
-              <p className="text-[10px] text-muted-foreground truncate">{formatUsd(p.adminBalanceCredits.totalUsd)}</p>
-            </div>
-            <div className="rounded-lg border bg-card px-2 py-2.5 min-w-0">
-              <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Recargas rechazadas</p>
-              <p className="text-lg sm:text-xl font-semibold tabular-nums">{p.userRechargesRejected}</p>
-            </div>
-            <div className="rounded-lg border bg-card px-2 py-2.5 min-w-0">
-              <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Solic. recarga (nuevas)</p>
-              <p className="text-lg sm:text-xl font-semibold tabular-nums">{p.userRechargesPendingCreated}</p>
             </div>
           </div>
         </div>
 
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-2">Comparativo (barras)</p>
-          <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-3">
+          <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-3 dark:bg-muted/15">
             <StatBar label="Usuarios nuevos" value={p.newUsersTotal} max={movementMax} />
             <StatBar label="Reservas creadas" value={p.bookingsCreatedTotal} max={movementMax} classNameBar="bg-violet-500/85" />
-            <StatBar
-              label="Recargas aprobadas (cant.)"
-              value={p.userRechargesCompleted.count}
-              max={movementMax}
-              classNameBar="bg-emerald-600/85"
-            />
-            <StatBar
-              label="Créditos admin (cant.)"
-              value={p.adminBalanceCredits.count}
-              max={movementMax}
-              classNameBar="bg-sky-600/80"
-            />
           </div>
         </div>
 
         {p.bookingsCreatedTotal > 0 && (
           <div>
             <p className="text-xs font-medium text-muted-foreground mb-2">Reservas nuevas por estado actual</p>
-            <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-3 dark:bg-muted/15">
               <StatBar label="Pendiente" value={bc.pending} max={bookingCreatedMax} />
               <StatBar label="Confirmada" value={bc.confirmed} max={bookingCreatedMax} classNameBar="bg-violet-500/85" />
               <StatBar label="En curso" value={bc.in_progress} max={bookingCreatedMax} classNameBar="bg-amber-500/90" />
@@ -252,7 +199,7 @@ export function AdminStatisticsPanel({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-4 min-w-0">
-      <Card className="border-border/80 shadow-sm overflow-hidden">
+      <Card className="border-border/80 bg-card shadow-sm overflow-hidden">
         <CardHeader className="pb-3 space-y-3">
           <div className="flex flex-col gap-3 min-[380px]:flex-row min-[380px]:items-start min-[380px]:justify-between">
             <div className="min-w-0 space-y-1">
@@ -261,7 +208,7 @@ export function AdminStatisticsPanel({ enabled }: { enabled: boolean }) {
                 Estadísticas
               </CardTitle>
               <CardDescription className="text-xs sm:text-sm">
-                Números y barras del negocio. Filtra por periodo para ver registros y movimientos.
+                Números y barras del negocio. Filtra por periodo para ver registros y actividad.
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-1.5 shrink-0 w-full min-[380px]:w-auto min-[380px]:justify-end">
@@ -271,7 +218,10 @@ export function AdminStatisticsPanel({ enabled }: { enabled: boolean }) {
                   type="button"
                   variant={period === opt.value ? "default" : "outline"}
                   size="sm"
-                  className="h-8 px-2.5 sm:px-3 text-xs sm:text-sm flex-1 min-[380px]:flex-none min-w-[4.25rem]"
+                  className={cn(
+                    "h-8 px-2.5 sm:px-3 text-xs sm:text-sm flex-1 min-[380px]:flex-none min-w-[4.25rem]",
+                    period !== opt.value && "border-border bg-background hover:bg-muted/50 dark:hover:bg-muted/30"
+                  )}
                   onClick={() => setPeriod(opt.value)}
                 >
                   <span className="sm:hidden">{opt.short}</span>
@@ -303,10 +253,6 @@ export function AdminStatisticsPanel({ enabled }: { enabled: boolean }) {
         <>
           <SnapshotSection s={data.snapshot} />
           <PeriodSection p={data.period} range={data.range} />
-          <p className="text-[11px] sm:text-xs text-muted-foreground flex items-center gap-1.5 px-0.5">
-            <Wallet className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            Las recargas aprobadas son solicitudes de usuario aceptadas; la gestión de saldo son abonos directos desde el panel.
-          </p>
         </>
       )}
     </div>

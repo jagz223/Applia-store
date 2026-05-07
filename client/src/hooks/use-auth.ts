@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type UseMutateFunction } from "@tanstack/react-query";
 import { api } from "@shared/routes";
 import { User } from "@shared/models/auth";
 import { redirectToHomeAfterLogout } from "@/lib/auth-utils";
@@ -70,7 +70,7 @@ export interface UseAuthReturn {
   user: AuthUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (credentials: { email: string; password: string }) => void;
+  login: UseMutateFunction<Awaited<ReturnType<typeof login>>, Error, { email: string; password: string }, unknown>;
   logout: () => void;
   isLoggingIn: boolean;
   isLoggingOut: boolean;

@@ -2,12 +2,24 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { 
-  DollarSign, TrendingUp, Calendar, Users, 
-  Star, Clock, CreditCard, FileText, Download,
-  BarChart3, PieChart, Activity, Loader2, MessageSquare,
-  CheckCircle2, XCircle, Banknote, CircleDollarSign, Inbox, PlayCircle, History, UserPlus, Receipt,
-  AlertTriangle, ShieldCheck, Wallet, Building2
+import {
+  Star,
+  Clock,
+  CreditCard,
+  FileText,
+  Download,
+  BarChart3,
+  Loader2,
+  MessageSquare,
+  CheckCircle2,
+  XCircle,
+  Inbox,
+  PlayCircle,
+  History,
+  UserPlus,
+  Receipt,
+  ShieldCheck,
+  Calendar,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,43 +38,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton";
 import { useAuth } from "@/hooks/use-auth";
 import { isCarGoProvider } from "@shared/provider-car-go";
-import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
-import { FEATURE_WALLET_RECHARGE_UI_ENABLED, FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { useCategories } from "@/hooks/use-mango-data";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
 import { useSocketBookings } from "@/hooks/use-socket";
 import {
   useBookingsByProvider,
   useUpdateBookingStatus,
-  useUpdateBookingCost,
   useUpdateBookingSchedule,
   useProfessionalStats,
-  useWallet,
-  useWithdraw,
   useWalletTransfers,
   useCurrentProvider,
-  usePlatformCommissionRate,
 } from "@/hooks/use-mango-data";
 import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
-import { useToast } from "@/hooks/use-toast";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
-import {
-  calcCommission,
-  calcProviderNet,
-  PLATFORM_COMMISSION_RATE,
-  commissionDisplayPercents,
-} from "@shared/platform-commission";
-import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
-
-const formatUsd = (n: number) =>
-  new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
-
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pendiente" },
   { value: "confirmed", label: "Confirmada" },
@@ -134,94 +129,6 @@ function getTransferMetaForProfessional(t: any) {
   return { amountColor, label, dateStr, isPending, isCredit, isDebit };
 }
 
-function ProfessionalTransactions() {
-  const [page, setPage] = useState(1);
-  const { data, isLoading } = useWalletTransfers({ page, limit: 10 });
-  const transfers = data?.transfers ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / 10));
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
-        <Receipt className="w-8 h-8 animate-pulse" />
-        <p className="text-sm">Cargando transacciones…</p>
-      </div>
-    );
-  }
-
-  if (transfers.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
-        <Receipt className="w-8 h-8 opacity-60" />
-        <p className="text-sm">Aún no tienes transacciones.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {transfers.map((t: any) => {
-        const { amountColor, label, dateStr } = getTransferMetaForProfessional(t);
-        return (
-          <div
-            key={t.id}
-            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 border border-border rounded-lg bg-card"
-          >
-            <div className="flex items-start gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                <Banknote className="w-4 h-4 text-primary" />
-              </div>
-              <div className="min-w-0 space-y-1">
-                <p className="font-medium text-sm truncate">{label}</p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {t.description || "Sin descripción"}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col items-end gap-1 shrink-0">
-              <p className={`font-semibold text-sm ${amountColor}`}>
-                {formatWalletAmount(t.amount)}
-              </p>
-              <p className="text-xs text-muted-foreground">{dateStr}</p>
-              <Badge variant={t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"}>
-                {t.status === "pending_approval"
-                  ? "Pendiente"
-                  : t.status === "completed"
-                    ? "Completado"
-                    : "Rechazado"}
-              </Badge>
-            </div>
-          </div>
-        );
-      })}
-      <div className="flex items-center justify-between pt-2">
-        <p className="text-xs text-muted-foreground">
-          Página {page} de {totalPages}
-        </p>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            Anterior
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            Siguiente
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ResumenActividad() {
   const { data: stats, isLoading } = useProfessionalStats();
   const total = (stats?.completedCount ?? 0) + (stats?.rejectedCount ?? 0);
@@ -230,10 +137,10 @@ function ResumenActividad() {
 
   if (isLoading) {
     return (
-      <Card className="mb-6 border-border bg-card">
+      <Card className="card-industrial mb-6 border-border/60 shadow-sm">
         <CardHeader>
           <CardTitle>Resumen de Actividad</CardTitle>
-          <CardDescription>Estadísticas de servicios completados, rechazados y ganancias</CardDescription>
+          <CardDescription>Estadísticas de servicios completados y rechazados</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -243,48 +150,42 @@ function ResumenActividad() {
   }
 
   return (
-    <Card className="mb-6 border-border bg-card">
-      <CardHeader>
-        <CardTitle>Resumen de Actividad</CardTitle>
-        <CardDescription>Estadísticas de servicios completados, rechazados y ganancias</CardDescription>
+    <Card className="card-industrial mb-6 overflow-hidden border-border/60 shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg sm:text-xl">Resumen de Actividad</CardTitle>
+        <CardDescription>Estadísticas de servicios completados y rechazados</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          {/* Ganancias Totales - resaltada */}
-          <Card className="border-2 border-green-500/30 bg-green-500/5 dark:bg-green-500/10">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-foreground">Ganancias Totales</CardTitle>
-              <Banknote className="h-5 w-5 text-green-600 dark:text-green-400" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-700 dark:text-green-400">
-                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(stats?.totalEarnings ?? 0)}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">Todo lo generado con tus servicios completados</p>
-            </CardContent>
-          </Card>
-
+      <CardContent className="pt-2">
+        <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
           {/* Servicios Completados */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Servicios Completados</CardTitle>
-              <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+          <Card className="card-industrial flex min-h-[140px] flex-col border-border/50 bg-muted/5 shadow-sm transition-all hover:border-primary/25 hover:shadow-md">
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium leading-snug text-muted-foreground">
+                Servicios Completados
+              </CardTitle>
+              <div className="rounded-full bg-green-500/15 p-2 ring-1 ring-green-500/20">
+                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" aria-hidden />
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats?.completedCount ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">Servicios con estado completado</p>
+            <CardContent className="flex flex-1 flex-col justify-end pt-0">
+              <div className="font-display text-3xl font-bold tabular-nums">{stats?.completedCount ?? 0}</div>
+              <p className="mt-1 text-xs text-muted-foreground">Servicios con estado completado</p>
             </CardContent>
           </Card>
 
           {/* Servicios Rechazados */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Servicios Rechazados</CardTitle>
-              <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+          <Card className="card-industrial flex min-h-[140px] flex-col border-border/50 bg-muted/5 shadow-sm transition-all hover:border-primary/25 hover:shadow-md">
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium leading-snug text-muted-foreground">
+                Servicios Rechazados
+              </CardTitle>
+              <div className="rounded-full bg-red-500/15 p-2 ring-1 ring-red-500/20">
+                <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" aria-hidden />
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats?.rejectedCount ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">Servicios con estado rechazado</p>
+            <CardContent className="flex flex-1 flex-col justify-end pt-0">
+              <div className="font-display text-3xl font-bold tabular-nums">{stats?.rejectedCount ?? 0}</div>
+              <p className="mt-1 text-xs text-muted-foreground">Servicios con estado rechazado</p>
             </CardContent>
           </Card>
         </div>
@@ -344,26 +245,15 @@ const BOOKINGS_SUB_TABS = ["pending", "in_progress", "ready", "history"] as cons
 type BookingsSubTab = (typeof BOOKINGS_SUB_TABS)[number];
 
 function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBookingId?: number | null }) {
-  const { data: commissionInfo } = usePlatformCommissionRate();
-  const commissionRate = commissionInfo?.commissionRate ?? PLATFORM_COMMISSION_RATE;
-  const { platformPercent: platUiPct, providerPercent: provUiPct } = commissionDisplayPercents(commissionRate);
   const { data: bookings, isLoading, isFetching } = useBookingsByProvider();
   const updateStatus = useUpdateBookingStatus();
-  const updateCost = useUpdateBookingCost();
   const updateSchedule = useUpdateBookingSchedule();
   const { notifyBookingUpdate } = useSocketBookings();
-  const [costInputs, setCostInputs] = useState<Record<number, string>>({});
   const [scheduleInputs, setScheduleInputs] = useState<Record<number, { date: string; time: string }>>({});
-  const [pendingChange, setPendingChange] = useState<
-    | null
-    | {
-        bookingId: number;
-        kind: "cost" | "schedule";
-        costValue?: number;
-        scheduleValue?: { date: string; time: string };
-      }
-  >(null);
-  const [cashWarningBooking, setCashWarningBooking] = useState<BookingItem | null>(null);
+  const [pendingScheduleChange, setPendingScheduleChange] = useState<null | {
+    bookingId: number;
+    scheduleValue: { date: string; time: string };
+  }>(null);
   const [subTab, setSubTab] = useState<BookingsSubTab>("pending");
   const PAGE_SIZE = 10;
   const [pageBySubTab, setPageBySubTab] = useState<Record<BookingsSubTab, number>>({
@@ -477,26 +367,12 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
       : "Cliente";
     const isPending = booking.status === "pending";
     const canComplete = booking.confirmedByClient === true;
-    const savedCost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost) || 0;
-    const refPrice = booking.service?.price != null ? Number(booking.service.price) : 0;
-    const currentCost = savedCost > 0 ? savedCost : refPrice;
-    const costDisplay = costInputs[booking.id] ?? String(currentCost);
-    const parsedCostDisplay = parseFloat(String(costDisplay).replace(",", "."));
-    const costForCommission = Number.isFinite(parsedCostDisplay) ? parsedCostDisplay : Number(currentCost || 0);
-    const commission = costForCommission > 0 ? calcCommission(costForCommission, commissionRate) : 0;
-    const providerNet = costForCommission > 0 ? calcProviderNet(costForCommission, commissionRate) : 0;
-    const hasValidCost = savedCost > 0;
     const scheduleDisplay = scheduleInputs[booking.id] ?? { date: dateStr, time: timeStr };
-    const requestSaveCost = () => {
-      const num = parseFloat(costDisplay.replace(",", "."));
-      if (!Number.isFinite(num) || num < 0) return;
-      setPendingChange({ bookingId: booking.id, kind: "cost", costValue: num });
-    };
     const requestSaveSchedule = () => {
       const iso = `${scheduleDisplay.date}T${scheduleDisplay.time}:00`;
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) return;
-      setPendingChange({ bookingId: booking.id, kind: "schedule", scheduleValue: scheduleDisplay });
+      setPendingScheduleChange({ bookingId: booking.id, scheduleValue: scheduleDisplay });
     };
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
 
@@ -525,24 +401,6 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="font-medium text-foreground">{booking.service?.title ?? "Servicio"}</p>
-            {booking.paymentMethod === "cash" && (
-              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
-                <Banknote className="h-3 w-3" />
-                EFECTIVO
-              </Badge>
-            )}
-            {booking.paymentMethod === "bank_transfer" && (
-              <Badge variant="outline" className="bg-sky-50 text-sky-800 border-sky-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
-                <Building2 className="h-3 w-3" />
-                TRANSFERENCIA
-              </Badge>
-            )}
-            {booking.paymentMethod === "wallet" && (
-              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] h-5 py-0 px-1.5 flex items-center gap-1">
-                <CircleDollarSign className="h-3 w-3" />
-                SALDO GENFEB
-              </Badge>
-            )}
           </div>
           <p className="text-sm text-muted-foreground">Cliente: {clientName}</p>
           {isPending ? (
@@ -569,46 +427,6 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
             </div>
           ) : (
             <p className="text-xs text-muted-foreground mt-1">{format(date, "PPP p", { locale: es })}</p>
-          )}
-          <div className="flex flex-wrap items-center gap-2 mt-2">
-            <span className="text-sm font-medium text-foreground">Costo (USD):</span>
-            {isPending ? (
-              <>
-                <Input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  placeholder={refPrice > 0 ? String(refPrice) : "0.00"}
-                  className="w-28 h-9 text-sm font-medium border-primary/30 focus-visible:ring-primary"
-                  value={costDisplay}
-                  onChange={(e) => setCostInputs((prev) => ({ ...prev, [booking.id]: e.target.value }))}
-                  disabled={updateCost.isPending}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                onClick={requestSaveCost}
-                  disabled={updateCost.isPending}
-                >
-                  {updateCost.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar costo"}
-                </Button>
-                {!hasValidCost && (
-                  <span className="text-xs text-amber-600 dark:text-amber-500">Asigna el monto y guarda antes de confirmar la reserva.</span>
-                )}
-                {FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && costForCommission > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    Neto asociado: <span className="font-medium text-foreground">${providerNet.toFixed(2)}</span> ({provUiPct}%) ·
-                    Comisión: <span className="font-medium text-foreground">${commission.toFixed(2)}</span> ({platUiPct}%)
-                  </span>
-                )}
-              </>
-            ) : (
-              <span className="text-sm font-semibold text-primary">${Number(currentCost).toFixed(2)}</span>
-            )}
-          </div>
-          {!isPending && booking.service?.price != null && (
-            <p className="text-xs text-muted-foreground mt-0.5">Precio ref. servicio: ${Number(booking.service.price).toFixed(0)}</p>
           )}
           {booking.notes && (
             <p className="text-sm text-muted-foreground mt-2 line-clamp-2">Notas: {booking.notes}</p>
@@ -637,15 +455,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                       <Select
                       value={booking.status}
                       onValueChange={(value) => {
-                        if (
-                          value === "in_progress" &&
-                          isOffPlatformServiceBookingPayment(booking.paymentMethod) &&
-                          FEATURE_OFF_PLATFORM_COMMISSION_ENABLED
-                        ) {
-                          setCashWarningBooking(booking);
-                        } else {
-                          executeStatusUpdate(booking.id, value);
-                        }
+                        executeStatusUpdate(booking.id, value);
                       }}
                       disabled={updateStatus.isPending}
                     >
@@ -657,10 +467,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                           <SelectItem
                             key={opt.value}
                             value={opt.value}
-                            disabled={
-                              ((opt.value === "completed" || opt.value === "in_progress") && !canComplete) ||
-                              (opt.value === "confirmed" && isPending && !hasValidCost)
-                            }
+                            disabled={(opt.value === "completed" || opt.value === "in_progress") && !canComplete}
                           >
                             {opt.label}
                           </SelectItem>
@@ -670,11 +477,9 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {isPending && !hasValidCost
-                    ? "Asigna un monto y pulsa Guardar costo antes de confirmar la reserva."
-                    : !canComplete && (booking.status === "confirmed" || booking.status === "in_progress")
-                      ? "Debes esperar a que el cliente confirme el pago antes de marcar como En proceso o Completada."
-                      : "Cambiar estado de la reserva"}
+                  {!canComplete && (booking.status === "confirmed" || booking.status === "in_progress")
+                    ? "Espera a que el cliente confirme la reserva en la app antes de marcar En proceso o Completada."
+                    : "Cambiar estado de la reserva"}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -692,43 +497,21 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     );
   }
 
-  const isConfirmSaving =
-    pendingChange?.kind === "cost"
-      ? updateCost.isPending
-      : pendingChange?.kind === "schedule"
-        ? updateSchedule.isPending
-        : false;
+  const isConfirmSaving = updateSchedule.isPending;
 
-  const handleConfirmChange = () => {
-    if (!pendingChange) return;
-
-    if (pendingChange.kind === "cost") {
-      const costValue = pendingChange.costValue;
-      if (costValue == null || !Number.isFinite(costValue) || costValue < 0) return;
-      updateCost.mutate(
-        { id: pendingChange.bookingId, cost: costValue },
-        {
-          onSuccess: () => {
-            setCostInputs((prev) => ({ ...prev, [pendingChange.bookingId]: String(costValue) }));
-            setPendingChange(null);
-          },
-        },
-      );
-      return;
-    }
-
-    const scheduleValue = pendingChange.scheduleValue;
-    if (!scheduleValue) return;
+  const handleConfirmScheduleChange = () => {
+    if (!pendingScheduleChange) return;
+    const scheduleValue = pendingScheduleChange.scheduleValue;
     const iso = `${scheduleValue.date}T${scheduleValue.time}:00`;
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return;
 
     updateSchedule.mutate(
-      { id: pendingChange.bookingId, date: d.toISOString() },
+      { id: pendingScheduleChange.bookingId, date: d.toISOString() },
       {
         onSuccess: () => {
-          setScheduleInputs((prev) => ({ ...prev, [pendingChange.bookingId]: scheduleValue }));
-          setPendingChange(null);
+          setScheduleInputs((prev) => ({ ...prev, [pendingScheduleChange.bookingId]: scheduleValue }));
+          setPendingScheduleChange(null);
         },
       },
     );
@@ -736,97 +519,31 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 
   return (
     <>
-      <Dialog open={cashWarningBooking !== null && FEATURE_OFF_PLATFORM_COMMISSION_ENABLED} onOpenChange={(open) => (!open ? setCashWarningBooking(null) : undefined)}>
+      <Dialog open={pendingScheduleChange != null} onOpenChange={(open) => (!open ? setPendingScheduleChange(null) : undefined)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <div className="flex items-center gap-2 text-amber-600 mb-2">
-              <AlertTriangle className="h-5 w-5" />
-              <DialogTitle>
-                {cashWarningBooking?.paymentMethod === "bank_transfer"
-                  ? "Pago por transferencia"
-                  : "Servicio en efectivo"}
-              </DialogTitle>
-            </div>
-            <DialogDescription className="text-foreground">
-              {cashWarningBooking?.paymentMethod === "bank_transfer" ? (
-                <>
-                  Acordaste cobrar <strong>fuera del saldo de la app</strong> (transferencia). Al marcar el servicio como completado, la plataforma descontará la comisión del <strong>10%</strong> de tu Saldo Genfeb.
-                </>
-              ) : (
-                <>
-                  Como este servicio se pagará en <strong>efectivo</strong>, la plataforma descontará automáticamente una comisión del <strong>10%</strong> de tu Saldo Genfeb cuando finalices el trabajo.
-                </>
-              )}
+            <DialogTitle>¿Actualizar fecha del servicio?</DialogTitle>
+            <DialogDescription>
+              Si confirmas, se guardará la nueva fecha y hora y se notificará al cliente si corresponde.
             </DialogDescription>
           </DialogHeader>
 
-          {cashWarningBooking && FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && (
-            <div className="bg-muted p-4 rounded-lg space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Costo del servicio:</span>
-                <span className="font-semibold">${Number(cashWarningBooking.cost || 0).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-sm text-amber-700 dark:text-amber-500">
-                <span>Comisión a descontar (10%):</span>
-                <span className="font-bold">-${(Number(cashWarningBooking.cost || 0) * 0.1).toFixed(2)}</span>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-2 border-t pt-2">
-                * El descuento se aplicará a tu Saldo Genfeb al marcar el servicio como completado. Puede quedar en negativo si no tienes saldo suficiente en tu Saldo Genfeb.
+          {pendingScheduleChange?.scheduleValue && (
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>
+                Fecha y hora:{" "}
+                <span className="font-medium text-foreground">
+                  {pendingScheduleChange.scheduleValue.date} — {pendingScheduleChange.scheduleValue.time}
+                </span>
               </p>
             </div>
           )}
 
-          <DialogFooter className="mt-4">
-            <Button type="button" variant="outline" onClick={() => setCashWarningBooking(null)} disabled={updateStatus.isPending}>
-              Cancelar
-            </Button>
-            <Button 
-              type="button" 
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              onClick={() => {
-                if (cashWarningBooking) {
-                  executeStatusUpdate(cashWarningBooking.id, "in_progress");
-                  setCashWarningBooking(null);
-                }
-              }} 
-              disabled={updateStatus.isPending}
-            >
-              {updateStatus.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Entendido e iniciar servicio"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={pendingChange != null} onOpenChange={(open) => (!open ? setPendingChange(null) : undefined)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>¿Estás seguro de este cambio?</DialogTitle>
-            <DialogDescription>
-              Si confirmas, se actualizará el servicio y se enviarán las notificaciones correspondientes.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="text-sm text-muted-foreground space-y-1">
-            {pendingChange?.kind === "cost" && pendingChange.costValue != null && (
-              <p>
-                Monto: <span className="font-medium text-foreground">${pendingChange.costValue.toFixed(2)} USD</span>
-              </p>
-            )}
-            {pendingChange?.kind === "schedule" && pendingChange.scheduleValue && (
-              <p>
-                Fecha y hora:{" "}
-                <span className="font-medium text-foreground">
-                  {pendingChange.scheduleValue.date} - {pendingChange.scheduleValue.time}
-                </span>
-              </p>
-            )}
-          </div>
-
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPendingChange(null)} disabled={isConfirmSaving}>
+            <Button type="button" variant="outline" onClick={() => setPendingScheduleChange(null)} disabled={isConfirmSaving}>
               Cancelar
             </Button>
-            <Button type="button" onClick={handleConfirmChange} disabled={isConfirmSaving}>
+            <Button type="button" onClick={handleConfirmScheduleChange} disabled={isConfirmSaving}>
               {isConfirmSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirmar"}
             </Button>
           </DialogFooter>
@@ -837,7 +554,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
         <CardHeader>
           <CardTitle className="text-xl leading-tight">Gestión de reservas</CardTitle>
           <CardDescription>
-            Solicitudes de clientes: asigna precios, confirma reservas y actualiza el estado de cada servicio.
+            Solicitudes de clientes: puedes cambiar la fecha acordada y actualizar el estado de cada reserva.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -1045,131 +762,6 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
   );
 }
 
-/** Dialog de resumen de actividad y export CSV (movimientos, ingresos, pagos solicitados). */
-function EconomicReportDialog({
-  open,
-  onOpenChange,
-  walletData
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  walletData: { wallet?: number; totalEarnings?: number; withdrawingFunds?: number } | undefined;
-}) {
-  const { data: transfersData, isLoading } = useWalletTransfers({
-    page: 1,
-    limit: 500,
-    enabled: open,
-  });
-  const transfers = transfersData?.transfers ?? [];
-  const totalEarnings = typeof walletData?.totalEarnings === "number" ? walletData.totalEarnings : 0;
-  const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
-  const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number"
-    ? (walletData as { withdrawingFunds: number }).withdrawingFunds
-    : 0;
-  const totalWithdrawn = transfers
-    .filter((t: { transferType?: string; status?: string }) => t.transferType === "withdrawal" && t.status === "completed")
-    .reduce((sum: number, t: { amount?: number }) => sum + (typeof t.amount === "number" ? t.amount : 0), 0);
-
-  const downloadCsv = () => {
-    const headers = ["Fecha", "Tipo", "Descripción", "Monto (USD)", "Estado"];
-    const typeLabels: Record<string, string> = {
-      service_payment: "Ingreso por servicio",
-      recharge: "Abono saldo GenFeb",
-      withdrawal: "Cobro a cuenta",
-    };
-    const statusLabels: Record<string, string> = {
-      pending_approval: "Pendiente aprobación",
-      completed: "Completado",
-      rejected: "Rechazado",
-    };
-    const rows = transfers.map((t: { createdAt?: unknown; transferType?: string; description?: string; amount?: number; status?: string }) => [
-      (() => { const d = parseTransferDate(t.createdAt); return d ? format(d, "yyyy-MM-dd HH:mm", { locale: es }) : ""; })(),
-      typeLabels[t.transferType ?? ""] ?? t.transferType ?? "",
-      t.description ?? "",
-      typeof t.amount === "number" ? t.amount.toFixed(2) : "",
-      statusLabels[t.status ?? ""] ?? t.status ?? "",
-    ]);
-    const csv = [headers.join(","), ...rows.map((r: string[]) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `reporte-actividad-${format(new Date(), "yyyy-MM-dd")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Resumen de actividad</DialogTitle>
-          <DialogDescription>
-            Ingresos, abonos y cobros registrados en la plataforma. Puedes descargar el historial en CSV.
-          </DialogDescription>
-        </DialogHeader>
-        {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Ingresos totales</p>
-                <p className="font-semibold text-lg">{formatUsd(totalEarnings)}</p>
-              </div>
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Pagos completados</p>
-                <p className="font-semibold text-lg">{formatUsd(totalWithdrawn)}</p>
-              </div>
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Saldo GenFeb</p>
-                <p className="font-semibold text-lg">{formatUsd(wallet)}</p>
-              </div>
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-muted-foreground">Pago en proceso</p>
-                <p className="font-semibold text-lg">{withdrawingFunds > 0 ? formatUsd(withdrawingFunds) : "—"}</p>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Últimos {transfers.length} movimientos. Estado: Pendiente aprobación / Completado / Rechazado.
-            </p>
-            <div className="max-h-48 overflow-y-auto rounded border text-sm">
-              {transfers.length === 0 ? (
-                <p className="p-4 text-muted-foreground text-center">Sin movimientos aún.</p>
-              ) : (
-                <ul className="divide-y">
-                  {transfers.slice(0, 20).map((t: { id?: number; createdAt?: unknown; description?: string; amount?: number; status?: string; transferType?: string }) => {
-                    const d = parseTransferDate(t.createdAt);
-                    return (
-                    <li key={t.id ?? Math.random()} className="flex justify-between items-center p-2">
-                      <span className="text-muted-foreground truncate">
-                        {d ? format(d, "dd/MM/yyyy", { locale: es }) : ""} · {t.description ?? t.transferType ?? ""}
-                      </span>
-                      <span className="font-medium tabular-nums">{typeof t.amount === "number" ? formatUsd(t.amount) : ""}</span>
-                    </li>
-                  );
-                  })}
-                </ul>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cerrar
-              </Button>
-              <Button onClick={downloadCsv}>
-                <FileText className="h-4 w-4 mr-2" />
-                Descargar CSV
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function InvoicesTabContent() {
   const [page, setPage] = useState(1);
   const [pulseReportId, setPulseReportId] = useState<number | null>(null);
@@ -1199,17 +791,14 @@ function InvoicesTabContent() {
     },
   });
 
-  const { data, isLoading: transfersLoading } = useWalletTransfers({ page, limit: 10 });
-  const transfers = data?.transfers ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / 10));
+  // Nota: este tab muestra únicamente el pago mensual USD 15 (suscripción).
 
   const verificationRows = useMemo(
     () => (invoiceList ?? []).filter((inv) => inv.type === "verification"),
     [invoiceList],
   );
 
-  const isLoading = invoicesLoading || transfersLoading;
+  const isLoading = invoicesLoading;
 
   useEffect(() => {
     const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
@@ -1312,7 +901,7 @@ function InvoicesTabContent() {
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Comprobantes de verificación, abonos de saldo y descarga en PDF</CardDescription>
+          <CardDescription>Historial y descarga en PDF del pago mensual (USD 15) para ser asociado</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
@@ -1322,16 +911,16 @@ function InvoicesTabContent() {
     );
   }
 
-  if (verificationRows.length === 0 && transfers.length === 0) {
+  if (verificationRows.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Comprobantes de verificación, abonos de saldo y descarga en PDF</CardDescription>
+          <CardDescription>Historial y descarga en PDF del pago mensual (USD 15) para ser asociado</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <FileText className="h-8 w-8 opacity-60" />
-          <p className="text-sm">Aún no tienes facturas disponibles.</p>
+          <p className="text-sm">Aún no tienes pagos de suscripción registrados.</p>
         </CardContent>
       </Card>
     );
@@ -1342,13 +931,13 @@ function InvoicesTabContent() {
       <CardHeader>
         <CardTitle>Facturas</CardTitle>
         <CardDescription>
-          Incluye el cargo de verificación (USD 15), abonos a tu saldo GenFeb y el resto de movimientos con comprobante
+          Historial y descarga en PDF del pago mensual (USD 15) para ser asociado
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {verificationRows.length > 0 && (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-foreground">Verificación profesional</p>
+            <p className="text-sm font-medium text-foreground">Suscripción mensual (USD 15)</p>
             {verificationRows.map((inv) => {
               const reportKey = inv.reportId ?? inv.id;
               if (reportKey == null) return null;
@@ -1417,130 +1006,27 @@ function InvoicesTabContent() {
           </div>
         )}
 
-        {transfers.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-foreground">Abonos y otros movimientos</p>
-            {transfers.map((t: TransferForInvoice & { id: number; status?: string }) => {
-              const label = getTransferTypeLabel(t.transferType);
-              const dateStr = parseTransferDate(t.createdAt)
-                ? format(parseTransferDate(t.createdAt)!, "dd MMM yyyy HH:mm", { locale: es })
-                : "—";
-              return (
-                <div
-                  key={t.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card"
-                >
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <Receipt className="w-4 h-4 text-primary" />
-                    </div>
-                    <div className="min-w-0 space-y-1">
-                      <p className="font-medium text-sm">{label}</p>
-                      <p className="text-xs text-muted-foreground truncate">{t.description || "Sin descripción"}</p>
-                      <p className="text-xs text-muted-foreground">{dateStr}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <p className="font-semibold text-sm">{formatWalletAmount(t.amount)}</p>
-                    <Badge
-                      variant={
-                        t.status === "completed" ? "default" : t.status === "rejected" ? "destructive" : "secondary"
-                      }
-                    >
-                      {t.status === "pending_approval" ? "Pendiente" : t.status === "completed" ? "Completado" : "Rechazado"}
-                    </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        userForInvoice &&
-                        downloadInvoicePdf(
-                          {
-                            id: t.id,
-                            amount: t.amount,
-                            transferType: t.transferType,
-                            description: t.description,
-                            createdAt: t.createdAt,
-                            status: t.status,
-                          },
-                          userForInvoice,
-                        )
-                      }
-                      disabled={!userForInvoice || t.status !== "completed"}
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Generar factura
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-            <div className="flex items-center justify-between pt-2">
-              <p className="text-xs text-muted-foreground">
-                Página {page} de {totalPages}
-              </p>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                >
-                  Siguiente
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
 }
 
-const DASHBOARD_TABS = ["overview", "bookings", "transactions", "invoices"] as const;
+const DASHBOARD_TABS = ["overview", "bookings", "invoices"] as const;
 
 function ProfessionalDashboardInner() {
   const { user } = useAuth();
-  const { data: commissionRateInfo } = usePlatformCommissionRate();
-  const dashboardCommissionRate = commissionRateInfo?.commissionRate ?? PLATFORM_COMMISSION_RATE;
-  const earningNetForDashboard = (cost: number) =>
-    FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? calcProviderNet(cost, dashboardCommissionRate) : cost;
   const { data: providerProfile, isLoading: providerProfileLoading } = useCurrentProvider();
   const queryClient = useQueryClient();
-  const { notifyBookingUpdate } = useSocketBookings();
-  const { toast } = useToast();
   const [location, setLocation] = useLocation();
-  const [timeRange, setTimeRange] = useState("month");
-  const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false);
-  const [reportDialogOpen, setReportDialogOpen] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState("");
-  const { data: walletData } = useWallet({ enabled: FEATURE_WALLET_RECHARGE_UI_ENABLED });
   const isProfessionalRole = (user as { role?: string } | null)?.role === "professional";
   const showBecomeProBanner = isProfessionalRole && !providerProfileLoading && !providerProfile;
-  const withdrawMutation = useWithdraw();
-  const wallet = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
-  const isProviderDebtCapped = !!(walletData as { isProviderDebtCapped?: boolean })?.isProviderDebtCapped;
-  const providerWalletFloorUsd =
-    typeof (walletData as { providerWalletFloorUsd?: number })?.providerWalletFloorUsd === "number"
-      ? (walletData as { providerWalletFloorUsd: number }).providerWalletFloorUsd
-      : PROVIDER_WALLET_FLOOR_USD;
-  const withdrawingFunds = typeof (walletData as { withdrawingFunds?: number })?.withdrawingFunds === "number"
-    ? (walletData as { withdrawingFunds: number }).withdrawingFunds
-    : 0;
-  const userBankName = (user as { bankName?: string })?.bankName ?? "";
-  const userAccountNumber = (user as { accountNumber?: string })?.accountNumber ?? "";
-  const hasBankData = Boolean(typeof userBankName === "string" && userBankName.trim() && typeof userAccountNumber === "string" && userAccountNumber.trim());
-  const pendingWithdrawal = withdrawingFunds > 0;
 
   const getTabFromUrl = () => {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const tab = new URLSearchParams(search).get("tab");
+    if (tab === "transactions") return "overview";
     const t =
       tab && DASHBOARD_TABS.includes(tab as (typeof DASHBOARD_TABS)[number]) ? tab : "overview";
-    if (t === "transactions" && !FEATURE_WALLET_RECHARGE_UI_ENABLED) return "overview";
     return t;
   };
   const [currentTab, setCurrentTabState] = useState(getTabFromUrl);
@@ -1638,16 +1124,9 @@ function ProfessionalDashboardInner() {
   };
 
   const { data: overviewStats } = useProfessionalStats();
-  const totalEarnings = overviewStats?.totalEarnings ?? 0;
-  const earningsThisMonth = overviewStats?.earningsThisMonth ?? 0;
-  const earningsLastMonth = overviewStats?.earningsLastMonth ?? 0;
   const pendingOrActiveCount = overviewStats?.pendingOrActiveCount ?? 0;
-  const completedCountOverview = overviewStats?.completedCount ?? 0;
-  const earningsChange = earningsLastMonth > 0
-    ? ((earningsThisMonth - earningsLastMonth) / earningsLastMonth) * 100
-    : (earningsThisMonth > 0 ? 100 : 0);
 
-  const { data: providerBookings, isLoading: providerBookingsLoading } = useBookingsByProvider();
+  const { data: providerBookings } = useBookingsByProvider();
   const bookingsSafe = (providerBookings ?? []) as Array<{
     status?: string;
     cost?: number | string;
@@ -1660,20 +1139,6 @@ function ProfessionalDashboardInner() {
     [bookingsSafe],
   );
 
-  const offPlatformCompletedEarnings = useMemo(() => {
-    const list = completedBookings.filter((b) => isOffPlatformServiceBookingPayment(b.paymentMethod));
-    let cash = 0;
-    let transfer = 0;
-    for (const b of list) {
-      const raw = typeof b.cost === "number" ? b.cost : Number(b.cost);
-      const cost = Number.isFinite(raw) ? raw : 0;
-      const net = FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? calcProviderNet(cost, dashboardCommissionRate) : cost;
-      if (b.paymentMethod === "cash") cash += net;
-      else if (b.paymentMethod === "bank_transfer") transfer += net;
-    }
-    return { count: list.length, cash, transfer, total: cash + transfer };
-  }, [completedBookings, dashboardCommissionRate]);
-
   const bookingPendingCount = useMemo(
     () => bookingsSafe.filter((b) => b.status === "pending").length,
     [bookingsSafe],
@@ -1683,43 +1148,6 @@ function ProfessionalDashboardInner() {
     () => bookingsSafe.filter((b) => b.status === "cancelled").length,
     [bookingsSafe],
   );
-
-  const last6Months = useMemo(() => {
-    const now = new Date();
-    return Array.from({ length: 6 }, (_, idx) => {
-      const d = new Date(now);
-      d.setDate(1);
-      d.setHours(0, 0, 0, 0);
-      d.setMonth(now.getMonth() - (5 - idx));
-      return d;
-    });
-  }, []);
-
-  const monthlyEarnings = useMemo(() => {
-    const computeMonthLabel = (d: Date) => {
-      const raw = format(d, "MMM", { locale: es });
-      return raw.replace(".", "").charAt(0).toUpperCase() + raw.replace(".", "").slice(1);
-    };
-
-    const toCost = (v: unknown) => {
-      const n = typeof v === "number" ? v : Number(v);
-      return Number.isFinite(n) ? n : 0;
-    };
-
-    return last6Months.map((monthDate) => {
-      const year = monthDate.getFullYear();
-      const month = monthDate.getMonth();
-      const earnings = completedBookings.reduce((sum, b) => {
-        const completedAt = toDate((b as any).completedAt ?? (b as any).date);
-        if (Number.isNaN(completedAt.getTime())) return sum;
-        if (completedAt.getFullYear() !== year || completedAt.getMonth() !== month) return sum;
-        return sum + earningNetForDashboard(toCost((b as any).cost));
-      }, 0);
-      return { month: computeMonthLabel(monthDate), earnings };
-    });
-  }, [completedBookings, last6Months, dashboardCommissionRate]);
-
-  const monthlyEarningsMax = useMemo(() => Math.max(...monthlyEarnings.map((m) => m.earnings), 0), [monthlyEarnings]);
 
   const providerUserId = (providerProfile as any)?.userId as string | undefined;
   const { data: reviewStats } = useQuery({
@@ -1740,65 +1168,17 @@ function ProfessionalDashboardInner() {
     },
   });
 
-  const ratingAverage = Number(
-    reviewStats?.averageRating ?? (FEATURE_WALLET_RECHARGE_UI_ENABLED ? walletData?.rating : undefined) ?? 0,
-  );
-  const ratingTotalReviews = Number(
-    reviewStats?.totalReviews ?? (FEATURE_WALLET_RECHARGE_UI_ENABLED ? walletData?.ratingCount : undefined) ?? 0,
-  );
+  const ratingAverage = Number(reviewStats?.averageRating ?? 0);
+  const ratingTotalReviews = Number(reviewStats?.totalReviews ?? 0);
   const ratingDistribution = reviewStats?.distribution ?? { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
   const ratingStarsTotal = ratingTotalReviews || 0;
-  const ratingPercentage = ratingStarsTotal > 0 ? (ratingAverage / 5) * 100 : 0;
-
-  const incomeByCategoryTop3 = useMemo(() => {
-    const toCost = (v: unknown) => {
-      const n = typeof v === "number" ? v : Number(v);
-      return Number.isFinite(n) ? n : 0;
-    };
-
-    const map = new Map<string, number>();
-    for (const b of completedBookings) {
-      const service = (b as any).service;
-      const categoryName =
-        service?.category?.name ||
-        service?.category?.type ||
-        service?.subcategory?.name ||
-        service?.title ||
-        (b as any).serviceId?.toString?.() ||
-        "Servicio";
-      const prev = map.get(categoryName) ?? 0;
-      map.set(categoryName, prev + earningNetForDashboard(toCost((b as any).cost)));
-    }
-
-    const total = Array.from(map.values()).reduce((sum, v) => sum + v, 0);
-    return Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([name, value]) => ({
-        name,
-        value,
-        percent: total > 0 ? Math.round((value / total) * 100) : 0,
-      }));
-  }, [completedBookings, dashboardCommissionRate]);
-
-  const earningsTrendDelta =
-    monthlyEarnings.length > 0 ? monthlyEarnings[monthlyEarnings.length - 1].earnings - monthlyEarnings[0].earnings : 0;
-  const earningsTrendPositive = earningsTrendDelta >= 0;
-
-  const totalEarnings6m = useMemo(
-    () => monthlyEarnings.reduce((sum, m) => sum + (Number.isFinite(m.earnings) ? m.earnings : 0), 0),
-    [monthlyEarnings],
-  );
-
-  const avgEarnings6m = useMemo(() => (monthlyEarnings.length > 0 ? totalEarnings6m / monthlyEarnings.length : 0), [totalEarnings6m, monthlyEarnings]);
 
   // Panel del asociado (Mi actividad): ocultar secciones específicas por UI.
-  const SHOW_PRO_MONTHLY_EARNINGS = false;
   const SHOW_PRO_RATING_BREAKDOWN = false;
   const SHOW_PRO_QUICK_ACTIONS = false;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Header */}
       <div className="bg-background border-b border-border px-4 sm:px-6 py-4">
         <div className="container mx-auto max-w-full flex flex-col sm:flex-row items-center justify-center sm:justify-between gap-4 text-center sm:text-left">
@@ -1808,131 +1188,15 @@ function ProfessionalDashboardInner() {
             </div>
             <div>
               <h1 className="text-xl sm:text-2xl font-bold">Mi actividad</h1>
-              <p className="text-gray-500 text-sm sm:text-base">
-                {FEATURE_WALLET_RECHARGE_UI_ENABLED
-                  ? "Resumen de servicios, ingresos y movimientos"
-                  : "Resumen de servicios e ingresos (efectivo y transferencias completados)"}
+              <p className="text-muted-foreground text-sm sm:text-base">
+                Resumen de servicios, reservas y calificación
               </p>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full sm:w-auto">
-            {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-            <Button variant="outline" size="sm" className="flex-1 sm:flex-initial min-w-0" onClick={() => setReportDialogOpen(true)}>
-              <FileText className="h-4 w-4 mr-2 shrink-0" />
-              <span className="truncate">Exportar resumen</span>
-            </Button>
-            )}
-            {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-block">
-                    <Button
-                      size="sm"
-                      className="flex-1 sm:flex-initial min-w-0"
-                      disabled={pendingWithdrawal}
-                      onClick={() => !pendingWithdrawal && setWithdrawDialogOpen(true)}
-                    >
-                      <CreditCard className="h-4 w-4 mr-2 shrink-0" />
-                      <span className="truncate">Cobrar ingresos</span>
-            </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {pendingWithdrawal ? "Solicitud en revisión por el administrador" : "Solicitar que te abonen a la cuenta registrada en tu perfil"}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Dialog cobrar ingresos */}
-      {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-      <Dialog open={withdrawDialogOpen} onOpenChange={setWithdrawDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Cobrar ingresos</DialogTitle>
-            <DialogDescription>
-              El monto quedará en &quot;Pago en proceso&quot; y el equipo revisará la solicitud en el panel de administración para abonarte a la cuenta que indicaste.
-            </DialogDescription>
-          </DialogHeader>
-          {!hasBankData ? (
-            <div className="space-y-4 py-2">
-              <p className="text-sm text-amber-600 dark:text-amber-500">
-                Para cobrar tus ingresos debes indicar en tu perfil la cuenta donde quieres recibir el pago (entidad financiera y número de cuenta).
-              </p>
-              <Button asChild variant="outline">
-                <Link href="/settings" onClick={() => setWithdrawDialogOpen(false)}>Ir a Configuración</Link>
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-4 py-2">
-              <p className="text-sm text-muted-foreground">Saldo GenFeb: <strong>{formatUsd(wallet)}</strong></p>
-              <div className="space-y-2">
-                <Label htmlFor="withdraw-amount">Monto a cobrar (USD)</Label>
-                <Input
-                  id="withdraw-amount"
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  placeholder="0.00"
-                  value={withdrawAmount}
-                  onChange={(e) => setWithdrawAmount(e.target.value)}
-                  disabled={withdrawMutation.isPending}
-                />
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setWithdrawDialogOpen(false)} disabled={withdrawMutation.isPending}>
-                  Cancelar
-                </Button>
-                <Button
-                  disabled={
-                    withdrawMutation.isPending ||
-                    !(parseFloat(withdrawAmount) > 0) ||
-                    parseFloat(withdrawAmount) > wallet
-                  }
-                  onClick={() => {
-                    const num = parseFloat(withdrawAmount);
-                    if (!Number.isFinite(num) || num <= 0 || num > wallet) return;
-                    withdrawMutation.mutate(num, {
-                      onSuccess: () => {
-                        setWithdrawAmount("");
-                        setWithdrawDialogOpen(false);
-                        toast({
-                          title: "Solicitud enviada",
-                          description: "Tu solicitud quedará en el panel de administración para que te abonen a tu cuenta.",
-                        });
-                      },
-                      onError: (err: Error) => {
-                        toast({ title: "Error", description: err.message, variant: "destructive" });
-                      },
-                    });
-                  }}
-                >
-                  {withdrawMutation.isPending ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Procesando…
-                    </>
-                  ) : (
-                    "Solicitar pago"
-                  )}
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-      )}
-
-      {/* Dialog Generar Reporte */}
-      {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-      <EconomicReportDialog open={reportDialogOpen} onOpenChange={setReportDialogOpen} walletData={walletData} />
-      )}
-
-      <div className="container mx-auto max-w-full py-6 px-4 overflow-x-hidden">
+      <div className="container mx-auto max-w-6xl py-6 px-4 sm:px-6 overflow-x-hidden">
         {/* Banner: completar perfil profesional si el paso se omitió */}
         {showBecomeProBanner && (
           <Card className="mb-6 border-2 border-mango-orange/50 bg-mango-orange/5">
@@ -1940,7 +1204,7 @@ function ProfessionalDashboardInner() {
               <div className="text-center sm:text-left">
                 <h2 className="text-lg font-semibold text-foreground mb-1">Completa tu perfil de asociado</h2>
                 <p className="text-sm text-muted-foreground">
-                  Aún no has configurado tu perfil como asociado. Completa categoría, descripción y tarifa para publicar tu servicio y recibir reservas.
+                  Aún no has configurado tu perfil como asociado. Completa categoría y descripción para publicar tu servicio y recibir reservas.
                 </p>
               </div>
               <Button asChild className="shrink-0">
@@ -1953,185 +1217,56 @@ function ProfessionalDashboardInner() {
           </Card>
         )}
 
-        {/* Resumen de Actividad (estadísticas de rendimiento) */}
-        <ResumenActividad />
+        {/* Bloque superior: resumen + KPIs alineados al mismo ancho */}
+        <div className="mx-auto w-full max-w-5xl space-y-5">
+          <ResumenActividad />
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6 gap-4 mb-6">
-          {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-          <>
-          <Card className={cn(wallet < 0 && "border-amber-500/40")}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Saldo GenFeb (cartera)</CardTitle>
-              <Wallet className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div
-                className={cn(
-                  "text-2xl font-bold tabular-nums",
-                  wallet < 0 && "text-amber-600 dark:text-amber-500",
-                )}
-              >
-                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(
-                  wallet,
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Cartera en plataforma. Con efectivo/transfer, GenFeb retiene comisión; puede quedar deuda.
-              </p>
-              {isProviderDebtCapped ? (
-                <p className="text-xs text-amber-800 dark:text-amber-200 mt-2 flex items-start gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden />
-                  Llegaste al límite: no aceptarás más servicios en efectivo/transfer hasta recargar. Puedes seguir con
-                  pago en Saldo GenFeb para reducir la deuda.
-                </p>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          <Card className="border-amber-500/35 bg-amber-500/[0.06] dark:bg-amber-500/10 dark:border-amber-500/40">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden />
-                Máx. saldo negativo
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold tabular-nums leading-tight">
-                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(
-                  providerWalletFloorUsd,
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">Piso mínimo en efectivo o transferencia</p>
-              {isProviderDebtCapped ? (
-                <p className="text-xs text-amber-800 dark:text-amber-200 mt-2 leading-snug">
-                  Estás en el tope permitido hasta regularizar la cartera.
-                </p>
-              ) : null}
-            </CardContent>
-          </Card>
-          </>
-          )}
-
-          {!FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-            <Card className="border-emerald-600/30 bg-emerald-50/90 dark:border-emerald-500/35 dark:bg-emerald-950/25">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium leading-snug">Ganancias en efectivo y transferencias</CardTitle>
-                <Banknote className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
+            <Card className="card-industrial flex min-h-[140px] flex-col border-border/50 bg-muted/5 shadow-sm transition-all hover:border-primary/25 hover:shadow-md">
+              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium leading-snug text-muted-foreground">
+                  Reservas en curso
+                </CardTitle>
+                <div className="rounded-full bg-orange-500/15 p-2 ring-1 ring-orange-500/25">
+                  <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400" aria-hidden />
+                </div>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold tabular-nums">{formatUsd(offPlatformCompletedEarnings.total)}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {offPlatformCompletedEarnings.count} servicio(s) completado(s) · Efectivo{" "}
-                  {formatUsd(offPlatformCompletedEarnings.cash)} · Transferencia{" "}
-                  {formatUsd(offPlatformCompletedEarnings.transfer)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-2 leading-snug">
-                  Total al marcar como completadas las reservas pagadas fuera de saldo digital. Sin cartera ni
-                  movimientos de wallet.
-                </p>
+              <CardContent className="flex flex-1 flex-col justify-end pt-0">
+                <div className="font-display text-3xl font-bold tabular-nums">{pendingOrActiveCount}</div>
+                <p className="mt-1 text-xs text-muted-foreground">Pendientes, confirmadas o en proceso</p>
               </CardContent>
             </Card>
-          )}
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Ingresos Totales</CardTitle>
-              <DollarSign className="h-4 w-4 text-green-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(totalEarnings)}
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className={earningsChange >= 0 ? "text-green-500" : "text-red-500"}>
-                  {earningsChange >= 0 ? "+" : ""}{earningsChange.toFixed(1)}%
-                </span>
-                <span className="text-gray-500">vs mes anterior</span>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Este Mes</CardTitle>
-              <TrendingUp className="h-4 w-4 text-blue-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(earningsThisMonth)}
-              </div>
-              <p className="text-xs text-gray-500">Ingresos de este mes</p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Reservas en curso</CardTitle>
-              <Clock className="h-4 w-4 text-orange-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{pendingOrActiveCount}</div>
-              <p className="text-xs text-gray-500">Pendientes, confirmadas o en proceso</p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Calificación</CardTitle>
-              <Star className="h-4 w-4 text-yellow-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold flex items-center gap-2">
-                {ratingAverage.toFixed(1)} <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
-              </div>
-              <p className="text-xs text-gray-500">{ratingTotalReviews} reseñas</p>
-            </CardContent>
-          </Card>
+            <Card className="card-industrial flex min-h-[140px] flex-col border-border/50 bg-muted/5 shadow-sm transition-all hover:border-primary/25 hover:shadow-md">
+              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium leading-snug text-muted-foreground">
+                  Calificación
+                </CardTitle>
+                <div className="rounded-full bg-amber-500/15 p-2 ring-1 ring-amber-500/25">
+                  <Star className="h-5 w-5 text-amber-600 dark:text-amber-400" aria-hidden />
+                </div>
+              </CardHeader>
+              <CardContent className="flex flex-1 flex-col justify-end pt-0">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display text-3xl font-bold tabular-nums">{ratingAverage.toFixed(1)}</span>
+                  <Star className="h-6 w-6 fill-amber-400 text-amber-500" aria-hidden />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{ratingTotalReviews} reseñas</p>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         {/* Tabs */}
-        <Tabs value={currentTab} onValueChange={setTab} className="space-y-4">
-          <TabsList className="w-full flex flex-nowrap justify-start sm:justify-center overflow-x-auto h-auto min-h-10 gap-1 p-2 sm:p-1 sm:flex-wrap sm:h-10 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
+        <Tabs value={currentTab} onValueChange={setTab} className="mx-auto mt-8 w-full max-w-5xl space-y-5">
+          <TabsList className="inline-flex h-auto min-h-11 w-full max-w-full flex-nowrap justify-center gap-1 overflow-x-auto rounded-xl border border-border/60 bg-muted/30 p-1.5 sm:flex-wrap sm:justify-center [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
             <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
             <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>
-            {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-            <TabsTrigger value="transactions" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Movimientos</TabsTrigger>
-            )}
             <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Facturas</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {SHOW_PRO_MONTHLY_EARNINGS && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Ingresos Mensuales</CardTitle>
-                  <CardDescription>Evolución de tus ingresos en los últimos 6 meses</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-64 flex items-end justify-between gap-2">
-                      {monthlyEarnings.map((data, index) => {
-                        const heightPct = monthlyEarningsMax > 0 ? (data.earnings / monthlyEarningsMax) * 100 : 0;
-                        return (
-                      <div key={index} className="flex-1 flex flex-col items-center gap-2">
-                        <div 
-                          className="w-full bg-mango-orange rounded-t transition-all hover:bg-mango-orange/80"
-                          style={{ 
-                                height: `${heightPct}%`,
-                                minHeight: "20px",
-                          }}
-                        />
-                        <span className="text-xs text-gray-500">{data.month}</span>
-                        <span className="text-xs font-medium">${data.earnings}</span>
-                      </div>
-                        );
-                      })}
-                  </div>
-                </CardContent>
-              </Card>
-              )}
-
+          <TabsContent value="overview" className="mt-4 outline-none">
+            <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6">
               {SHOW_PRO_RATING_BREAKDOWN && (
               <Card>
                 <CardHeader>
@@ -2152,7 +1287,7 @@ function ProfessionalDashboardInner() {
                       <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
                     </div>
                           <Progress value={pct} className="flex-1" />
-                          <span className="text-sm text-gray-500 w-12 text-right">{count}</span>
+                          <span className="text-sm text-muted-foreground w-12 text-right">{count}</span>
                   </div>
                       );
                     })}
@@ -2160,25 +1295,43 @@ function ProfessionalDashboardInner() {
               </Card>
               )}
 
-              {/* Booking Stats */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="leading-tight text-xl sm:text-2xl">Estadísticas de Reservas</CardTitle>
+              {/* Booking Stats — mismo estilo que las tarjetas superiores */}
+              <Card className="card-industrial border-border/60 shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg sm:text-xl">Estadísticas de reservas</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
+                    Desglose por estado en tu lista de reservas
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
-                    <div className="p-4 bg-green-50 rounded-lg">
-                      <div className="text-2xl font-bold text-green-600">{completedBookings.length}</div>
-                      <div className="text-sm text-gray-500">Completadas</div>
-                    </div>
-                    <div className="p-4 bg-orange-50 dark:bg-orange-950/35 dark:border dark:border-orange-900/40 rounded-lg">
-                      <div className="text-2xl font-bold text-orange-600">{bookingPendingCount}</div>
-                      <div className="text-sm text-gray-500">Pendientes</div>
-                    </div>
-                    <div className="p-4 bg-red-50 rounded-lg">
-                      <div className="text-2xl font-bold text-red-600">{bookingCancelledCount}</div>
-                      <div className="text-sm text-gray-500">Canceladas</div>
-                    </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+                    <Card className="card-industrial border-border/50 bg-muted/5 text-center shadow-sm transition-all hover:border-green-500/30">
+                      <CardContent className="space-y-2 px-4 pb-5 pt-6">
+                        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-green-500/15 ring-1 ring-green-500/20">
+                          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" aria-hidden />
+                        </div>
+                        <p className="font-display text-3xl font-bold tabular-nums">{completedBookings.length}</p>
+                        <p className="text-sm text-muted-foreground">Completadas</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="card-industrial border-border/50 bg-muted/5 text-center shadow-sm transition-all hover:border-orange-500/30">
+                      <CardContent className="space-y-2 px-4 pb-5 pt-6">
+                        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-orange-500/15 ring-1 ring-orange-500/25">
+                          <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400" aria-hidden />
+                        </div>
+                        <p className="font-display text-3xl font-bold tabular-nums">{bookingPendingCount}</p>
+                        <p className="text-sm text-muted-foreground">Pendientes</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="card-industrial border-border/50 bg-muted/5 text-center shadow-sm transition-all hover:border-red-500/30">
+                      <CardContent className="space-y-2 px-4 pb-5 pt-6">
+                        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-red-500/15 ring-1 ring-red-500/20">
+                          <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" aria-hidden />
+                        </div>
+                        <p className="font-display text-3xl font-bold tabular-nums">{bookingCancelledCount}</p>
+                        <p className="text-sm text-muted-foreground">Canceladas</p>
+                      </CardContent>
+                    </Card>
                   </div>
                 </CardContent>
               </Card>
@@ -2189,6 +1342,7 @@ function ProfessionalDashboardInner() {
                   <CardTitle>Acciones Rápidas</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
+                  <SubscriptionStatusButton variant="outline" className="w-full justify-start" />
                   <Button variant="outline" className="w-full justify-start">
                     <CreditCard className="h-4 w-4 mr-2" />
                     Solicitar pago a mi cuenta
@@ -2210,20 +1364,6 @@ function ProfessionalDashboardInner() {
           <TabsContent value="bookings">
             <ProviderBookingsTab highlightedBookingId={highlightedBookingId} />
           </TabsContent>
-
-          {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-          <TabsContent value="transactions">
-            <Card>
-              <CardHeader>
-                <CardTitle>Historial de movimientos</CardTitle>
-                <CardDescription>Todas tus transacciones y ganancias</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ProfessionalTransactions />
-              </CardContent>
-            </Card>
-          </TabsContent>
-          )}
 
           <TabsContent value="invoices">
             <InvoicesTabContent />

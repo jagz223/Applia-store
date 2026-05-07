@@ -310,7 +310,7 @@ export default function Settings() {
         </Button>
         <div>
           <h1 className="text-2xl font-bold">Configuración</h1>
-          <p className="text-sm text-muted-foreground">Gestiona tu perfil y datos de cuenta bancaria</p>
+          <p className="text-sm text-muted-foreground">Gestiona tu perfil y preferencias</p>
         </div>
       </div>
 
@@ -467,50 +467,7 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 leading-snug">
-                <Building2 className="h-5 w-5 shrink-0" />
-                Datos de cuenta bancaria para pagos de servicio
-              </CardTitle>
-              <CardDescription>
-                Indica el banco y el número de cuenta donde recibir pagos por tus servicios. Solo se permiten dígitos,
-                espacios y guiones en el número de cuenta.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <FormField
-                control={form.control}
-                name="bankName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nombre del banco</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ej. Banco Pichincha" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="accountNumber"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Número de cuenta</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Solo dígitos, espacios o guiones"
-                        {...field}
-                        onChange={(e) => field.onChange(sanitizeAccountNumber(e.target.value))}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </CardContent>
-          </Card>
+          {/* Sección banco oculta temporalmente */}
 
           <div className="flex justify-end gap-3">
             <Button type="button" variant="outline" asChild>
@@ -573,8 +530,7 @@ export default function Settings() {
         <CardContent className="flex flex-col items-center">
           <div className="text-sm text-muted-foreground mb-6 leading-relaxed space-y-3 w-full max-w-lg">
             <p className="text-center font-medium">
-              Al desactivar tu cuenta, tu perfil y servicios serán eliminados de la plataforma. 
-              Perderás el acceso inmediato a tu panel y balance.
+              Perderás el acceso inmediato a tu panel.
             </p>
             <div className="bg-destructive/10 p-3 rounded-lg border border-destructive/20 text-xs text-left">
               <strong>Qué se borrará:</strong> Todo tu perfil, avatar, ubicación e historial de mensajes.<br/>
@@ -624,11 +580,6 @@ export default function Settings() {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-destructive text-lg font-bold">Confirmación Final</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground leading-relaxed">
-              {((user as any)?.wallet > 0 || (user as any)?.pendingBalance > 0) ? (
-                <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive font-medium text-sm">
-                  Aviso: Tienes un total de ${(Number((user as any)?.wallet || 0) + Number((user as any)?.pendingBalance || 0)).toFixed(2)} entre Saldo Genfeb y montos en reserva. Quedará inaccesible de inmediato.
-                </div>
-              ) : null}
               ¿Estás seguro de finalizar? Todo el proceso de borrado comenzará de forma inmediata y perderás el acceso permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>

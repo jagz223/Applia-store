@@ -225,14 +225,14 @@ function emitRideCancelled(
     io.to(`user:${uid}`).emit("cargo:ride:cancelled", payload);
   }
 
-  // Push al pasajero si no está viendo /go/cargo.
+  // Push al pasajero si no está viendo Go (Taxi).
   try {
     const pth = getUserActivePath(String(ride.riderUserId));
-    if (!pth || !pth.startsWith("/go/cargo")) {
+    if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
       void notificationService.sendPushToUser(ride.riderUserId, {
-        title: "Car Go",
+        title: "Servicio de taxi",
         body: cancelledBy === "driver" ? "El conductor canceló el viaje." : "El viaje fue cancelado.",
-        data: { url: "/go/cargo", type: "cargo_ride_cancelled", rideId: ride.id },
+        data: { url: "/go/taxi", type: "cargo_ride_cancelled", rideId: ride.id },
       });
     }
   } catch {}
@@ -293,17 +293,17 @@ async function offerNextDriver(
     expiresAt: ride.offerExpiresAt,
   });
 
-  // Guardar oferta pendiente para “recovery” si el driver no estaba en /go/cargo/driver.
+  // Guardar oferta pendiente para “recovery” si el driver no estaba en Go (Taxi driver).
   pendingOfferByDriverId.set(driverId, { rideId: ride.id, expiresAt: ride.offerExpiresAt!, module: "cargo" });
 
   // Push al driver si no está viendo la vista de driver (o no reportó ruta).
   try {
     const pth = getUserActivePath(String(driverId));
-    if (!pth || !pth.startsWith("/go/cargo/driver")) {
+    if (!pth || (!pth.startsWith("/go/taxi/driver") && !pth.startsWith("/go/cargo/driver"))) {
       void notificationService.sendPushToUser(driverId, {
-        title: "Car Go",
+        title: "Servicio de taxi",
         body: "Tienes un servicio disponible. Abre para aceptar o rechazar.",
-        data: { url: "/go/cargo/driver", type: "cargo_ride_offer", rideId: ride.id },
+        data: { url: "/go/taxi/driver", type: "cargo_ride_offer", rideId: ride.id },
       });
     }
   } catch {}
@@ -330,53 +330,50 @@ function safeNumber(v: unknown, fallback = 0): number {
 
 async function buildRiderPublic(riderUserId: string) {
   const u = await genFebStorage.getUserById(riderUserId);
-  const fn = String((u as any)?.firstName ?? "").trim();
-  const ln = String((u as any)?.lastName ?? "").trim();
-  const nn = String((u as any)?.name ?? "").trim();
-  const email = String((u as any)?.email ?? "").trim();
+  const rec = (u ?? undefined) as Record<string, unknown> | undefined;
+  const fn = String(rec?.firstName ?? "").trim();
+  const ln = String(rec?.lastName ?? "").trim();
+  const nn = String(rec?.name ?? "").trim();
+  const email = String(rec?.email ?? "").trim();
   // Mantener compatibilidad: el cliente arma el nombre completo como en el chat.
   const name = nn || fn || "Pasajero";
   const profileImageUrl =
-    (u?.profileImageUrl as string) ||
-    (u?.profile_image_url as string) ||
-    (u?.imageUrl as string) ||
-    ((u as any)?.avatar as string) ||
+    (rec?.profileImageUrl as string) ||
+    (rec?.profile_image_url as string) ||
+    (rec?.imageUrl as string) ||
+    (rec?.avatar as string) ||
     null;
-  const phone = String((u as any)?.phone ?? "").trim() || null;
-  const rating = safeNumber((u as any)?.rating, 0);
-  const ratingCount = safeNumber((u as any)?.ratingCount, 0);
-  const completedTrips = safeNumber((u as any)?.completedTrips, 0);
+  const phone = String(rec?.phone ?? "").trim() || null;
+  const rating = safeNumber(rec?.rating, 0);
+  const ratingCount = safeNumber(rec?.ratingCount, 0);
+  const completedTrips = safeNumber(rec?.completedTrips, 0);
   return { name, lastName: ln, profileImageUrl, phone, rating, ratingCount, completedTrips, email };
 }
 
 async function buildDriverPublic(driverUserId: string) {
   const u = await genFebStorage.getUserById(driverUserId);
+  const rec = (u ?? undefined) as Record<string, unknown> | undefined;
   const provider = await catalogService.getProviderByUserId(driverUserId);
   const vehicle = provider
     ? await genFebStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id)
     : null;
-  const fn = String((u as any)?.firstName ?? "").trim();
-  const ln = String((u as any)?.lastName ?? "").trim();
-  const nn = String((u as any)?.name ?? "").trim();
+  const fn = String(rec?.firstName ?? "").trim();
+  const ln = String(rec?.lastName ?? "").trim();
+  const nn = String(rec?.name ?? "").trim();
   // Mantener compatibilidad: el cliente arma el nombre completo como en el chat.
   const name = nn || fn || "Conductor";
   const profileImageUrl =
-    (u?.profileImageUrl as string) ||
-    (u?.profile_image_url as string) ||
-    (u?.imageUrl as string) ||
-    ((u as any)?.avatar as string) ||
+    (rec?.profileImageUrl as string) ||
+    (rec?.profile_image_url as string) ||
+    (rec?.imageUrl as string) ||
+    (rec?.avatar as string) ||
     null;
   const phone =
-    String(
-      (u as any)?.phone ??
-        (u as any)?.phoneNumber ??
-        (u as any)?.phone_number ??
-        (u as any)?.phone_number_e164 ??
-        ""
-    ).trim() || null;
-  const rating = safeNumber((u as any)?.rating, 0);
-  const ratingCount = safeNumber((u as any)?.ratingCount, 0);
-  const completedTrips = safeNumber((u as any)?.completedTrips, 0);
+    String(rec?.phone ?? rec?.phoneNumber ?? rec?.phone_number ?? rec?.phone_number_e164 ?? "").trim() ||
+    null;
+  const rating = safeNumber(rec?.rating, 0);
+  const ratingCount = safeNumber(rec?.ratingCount, 0);
+  const completedTrips = safeNumber(rec?.completedTrips, 0);
   return {
     userId: driverUserId,
     name,
@@ -392,7 +389,7 @@ async function buildDriverPublic(driverUserId: string) {
           brand: vehicle.brand as string,
           model: vehicle.model as string,
           licensePlate: vehicle.license_plate as string,
-          color: (vehicle.exterior_color as string) || null,
+          color: (vehicle as { exterior_color?: string }).exterior_color ?? null,
         }
       : null,
   };
@@ -647,14 +644,14 @@ export function registerMobilityRideRoutes(app: Express) {
         conversationId,
       });
 
-      // Push al pasajero solo si no está viendo /go/cargo (o no reportó ruta).
+      // Push al pasajero solo si no está viendo Go (Taxi) (o no reportó ruta).
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/cargo")) {
+        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Car Go",
+            title: "Servicio de taxi",
             body: "Tu viaje fue aceptado. Abre para ver a tu conductor.",
-            data: { url: "/go/cargo", type: "cargo_ride_matched", rideId },
+            data: { url: "/go/taxi", type: "cargo_ride_matched", rideId },
           });
         }
       } catch {}
@@ -765,11 +762,11 @@ export function registerMobilityRideRoutes(app: Express) {
       io.to(`user:${driverUserId}`).emit("cargo:ride:started", { rideId });
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/cargo")) {
+        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Car Go",
+            title: "Servicio de taxi",
             body: "Tu viaje inició.",
-            data: { url: "/go/cargo", type: "cargo_ride_started", rideId },
+            data: { url: "/go/taxi", type: "cargo_ride_started", rideId },
           });
         }
       } catch {}
@@ -799,11 +796,11 @@ export function registerMobilityRideRoutes(app: Express) {
       io.to(`user:${driverUserId}`).emit("cargo:ride:driver_searching", { rideId });
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/cargo")) {
+        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Car Go",
+            title: "Servicio de taxi",
             body: "Tu conductor ya está coordinando la recogida.",
-            data: { url: "/go/cargo", type: "cargo_driver_searching", rideId },
+            data: { url: "/go/taxi", type: "cargo_driver_searching", rideId },
           });
         }
       } catch {}
@@ -885,11 +882,11 @@ export function registerMobilityRideRoutes(app: Express) {
       }
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || !pth.startsWith("/go/cargo")) {
+        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
           void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Car Go",
+            title: "Servicio de taxi",
             body: "Tu viaje terminó.",
-            data: { url: "/go/cargo", type: "cargo_ride_completed", rideId },
+            data: { url: "/go/taxi", type: "cargo_ride_completed", rideId },
           });
         }
       } catch {}
@@ -900,7 +897,7 @@ export function registerMobilityRideRoutes(app: Express) {
     }
   });
 
-  // POST /api/mobility/rides/:rideId/rate - Calificar al otro participante (Car Go)
+  // POST /api/mobility/rides/:rideId/rate - Calificar al otro participante (Taxi)
   app.post("/api/mobility/rides/:rideId/rate", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id as string;

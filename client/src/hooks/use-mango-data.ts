@@ -1,5 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
+import {
+  LISTING_SUBSCRIPTION_WARNING_DAYS,
+  listingSubscriptionDaysRemaining,
+} from "@shared/professional-listing-subscription";
 import { type InsertProvider, type InsertService, type InsertBooking, type ServiceWithProvider } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { debouncedRefetch } from "@/lib/refetch-utils";
@@ -29,6 +33,23 @@ export function useCategories() {
   });
 }
 
+/** Lista completa de categorías para el panel admin (incluye documentos legacy legal/financial en `categories`). */
+export const ADMIN_CATEGORIES_QUERY_KEY = ["/api/admin/categories"] as const;
+
+export function useAdminCategories() {
+  return useQuery({
+    queryKey: ADMIN_CATEGORIES_QUERY_KEY,
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/admin/categories", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("No se pudieron cargar las categorías (admin)");
+      return api.categories.list.responses[200].parse(await res.json());
+    },
+  });
+}
+
 export interface Subcategory {
   id: number;
   name: string;
@@ -48,6 +69,94 @@ export function useSubcategories(categoryId: number | null | undefined) {
       return res.json() as Promise<Subcategory[]>;
     },
     enabled: categoryId != null && !Number.isNaN(Number(categoryId)) && Number(categoryId) >= 1,
+  });
+}
+
+export function useUpdateCategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (data: { id: number; name?: string; slug?: string; icon?: string }) => {
+      const { id, ...payload } = data;
+      const token = getToken();
+      const res = await fetch(`/api/admin/categories/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.message || "Error al actualizar categoría");
+      return resData;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.categories.list.path] });
+      debouncedRefetch(queryClient, [api.categories.list.path]);
+      queryClient.invalidateQueries({ queryKey: ADMIN_CATEGORIES_QUERY_KEY });
+      toast({ title: "Categoría actualizada", description: "Los cambios se han guardado exitosamente." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Error al actualizar", variant: "destructive" });
+    },
+  });
+}
+
+export function useCreateSubcategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (data: Omit<Subcategory, "id">) => {
+      const token = getToken();
+      const res = await fetch(`/api/admin/subcategories`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.message || "Error al crear subcategoría");
+      return resData;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/subcategories", variables.categoryId] });
+      toast({ title: "Subcategoría creada", description: "La subcategoría ha sido creada." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Error al crear", variant: "destructive" });
+    },
+  });
+}
+
+export function useUpdateSubcategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (data: { id: number; categoryId: number } & Partial<Omit<Subcategory, "id">>) => {
+      const { id, categoryId, ...payload } = data;
+      const token = getToken();
+      const res = await fetch(`/api/admin/subcategories/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.message || "Error al actualizar subcategoría");
+      return { data: resData, categoryId };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/subcategories", result.categoryId] });
+      toast({ title: "Subcategoría actualizada", description: "Los cambios se han guardado." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Error al actualizar", variant: "destructive" });
+    },
   });
 }
 
@@ -181,9 +290,33 @@ export function useCurrentProvider() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     refetchInterval: (query) => {
-      const d = query.state.data as { isVerified?: boolean } | null | undefined;
+      const d = query.state.data as {
+        isVerified?: boolean;
+        isListingPublished?: boolean;
+        visibilitySubscriptionEndsAt?: string | null;
+        subscriptionDaysRemaining?: number | null;
+      } | null | undefined;
       if (d == null) return false;
-      return d.isVerified === true ? false : 20_000;
+
+      let daysRemaining: number | null = d.subscriptionDaysRemaining ?? null;
+      if (
+        (daysRemaining == null || Number.isNaN(daysRemaining)) &&
+        d.visibilitySubscriptionEndsAt
+      ) {
+        daysRemaining = listingSubscriptionDaysRemaining(d.visibilitySubscriptionEndsAt);
+      }
+
+      const nearRenewalWindow =
+        d.isVerified === true &&
+        typeof daysRemaining === "number" &&
+        daysRemaining <= LISTING_SUBSCRIPTION_WARNING_DAYS + 1 &&
+        daysRemaining >= 0;
+
+      if (nearRenewalWindow) return 60_000;
+
+      if (d.isVerified !== true) return 20_000;
+
+      return false;
     },
   });
 }
@@ -198,6 +331,8 @@ export function useCreateProvider() {
         serviceTitle?: string;
         serviceDescription?: string;
         vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle;
+        coursesCompleted?: string;
+        certifications?: string;
       }
     ) => {
       const token = getToken();
@@ -557,10 +692,15 @@ export function useUpdateBookingStatus() {
         },
         body: JSON.stringify({ status }),
       });
-      if (!res.ok) throw new Error("No se pudo actualizar el estado");
-      return api.bookings.updateStatus.responses[200].parse(await res.json());
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((json as { message?: string }).message ?? "No se pudo actualizar el estado");
+      }
+      const parsed = api.bookings.updateStatus.responses[200].safeParse(json);
+      return parsed.success ? parsed.data : json;
     },
-    onSuccess: (_data, { status }) => {
+    onSuccess: (_data, { id, status }) => {
+      queryClient.invalidateQueries({ queryKey: ["booking", id] });
       // Refrescar inmediatamente la lista de reservas para que la UI se actualice al instante.
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
@@ -573,6 +713,14 @@ export function useUpdateBookingStatus() {
         debouncedRefetch(queryClient, ["/api/professional/stats"]);
       }
       toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: "No se pudo cambiar el estado",
+        description: message,
+        variant: "destructive",
+      });
     },
   });
 }
@@ -599,7 +747,8 @@ export function useUpdateBookingCost() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["booking", id] });
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       debouncedRefetch(queryClient, [api.bookings.list.path]);
@@ -634,12 +783,44 @@ export function useUpdateBookingSchedule() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["booking", id] });
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       debouncedRefetch(queryClient, [api.bookings.list.path]);
       debouncedRefetch(queryClient, ["/api/bookings/provider"]);
       toast({ title: "Fecha actualizada", description: "La fecha del servicio se ha guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+/** Cliente confirma que acepta el último monto/fecha definidos por el profesional (reserva pendiente). */
+export function useAcknowledgeBookingProChanges() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (bookingId: number) => {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${bookingId}/acknowledge-pro-changes`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { message?: string }).message || "No se pudo registrar tu aceptación");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
+      toast({
+        title: "Cambios aceptados",
+        description: "El asociado ya puede confirmar la reserva con el monto y la fecha acordados.",
+      });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -1216,6 +1397,8 @@ export type ProfessionalVerificationDto = {
 
 export type VerifyingStatusMeDto = {
   user: string;
+  /** null para compat con docs viejos / sin requestType aún */
+  requestType?: "onboarding" | "renewal" | null;
   identification_verified: "rejected" | "pending" | "verified";
   transacction_date: string | null;
   /** null = aún no hay intento de pago registrado */

@@ -1,3 +1,7 @@
+/**
+ * Carrusel de vídeos para la home. La página puede pasar `videos` cuando exista
+ * configuración remota o estática; si no, usa los MP4 por defecto en `public/assets/videos/`.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";

@@ -3,6 +3,8 @@
  * Usado al iniciar sesión para sincronizar el estado de la campana.
  */
 
+import { filterOutWalletRelatedNotifications } from "@/lib/notification-filters";
+
 export interface ClientNotification {
   id: string;
   type: string;
@@ -54,7 +56,7 @@ export async function fetchNotificationsFromServer(token: string): Promise<Clien
   });
   if (!res.ok) return [];
   const list: ApiNotification[] = await res.json();
-  const notifications = list.map(toClientNotification);
+  const notifications = filterOutWalletRelatedNotifications(list.map(toClientNotification));
   notifications.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   return notifications;
 }
