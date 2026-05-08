@@ -63,10 +63,22 @@ export function computeListingPublished(args: {
  * Tras cada pago mensual USD 15 validado: +1 mes calendario desde max(ahora, fin actual).
  */
 export function extendVisibilitySubscriptionEndsAt(prevEndsAtRaw: unknown, approvalAt: Date = new Date()): string {
+  return extendVisibilitySubscriptionEndsAtByMonths(prevEndsAtRaw, 1, approvalAt);
+}
+
+/**
+ * Tras pago validado: +N meses calendario desde max(ahora, fin actual).
+ */
+export function extendVisibilitySubscriptionEndsAtByMonths(
+  prevEndsAtRaw: unknown,
+  months: number,
+  approvalAt: Date = new Date(),
+): string {
   const prevMs = parseVisibilitySubscriptionEndMs(prevEndsAtRaw);
   const nowMs = approvalAt.getTime();
   const baseMs = prevMs != null && prevMs > nowMs ? prevMs : nowMs;
-  return addMonths(new Date(baseMs), 1).toISOString();
+  const m = Number.isFinite(months) ? Math.max(1, Math.min(12, Math.trunc(months))) : 1;
+  return addMonths(new Date(baseMs), m).toISOString();
 }
 
 export function listingSubscriptionDaysRemaining(endsAtRaw: unknown, nowMs: number = Date.now()): number | null {

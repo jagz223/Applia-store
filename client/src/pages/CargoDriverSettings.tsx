@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Car, CreditCard, Loader2, Route, Star } from "lucide-react";
+import { ArrowLeft, Car, LayoutDashboard, Loader2, Route, Star } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
@@ -9,17 +9,9 @@ import { resolveVehicleKind } from "@/components/driver/cargo-map-markers";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { loadTripLog, type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton";
-import { useToast } from "@/hooks/use-toast";
-import { useQueryClient } from "@tanstack/react-query";
-
-/** Solo permite dígitos, espacios y guiones en número de cuenta. */
-function sanitizeAccountNumber(value: string): string {
-  return value.replace(/[^\d\s\-]/g, "").replace(/\s+/g, " ").trim();
-}
 
 const VEHICLE_LABEL: Record<string, string> = {
   motorcycle: "Moto",
@@ -31,14 +23,9 @@ const VEHICLE_LABEL: Record<string, string> = {
 export default function CargoDriverSettings() {
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
   const [localTrips, setLocalTrips] = useState<CargoDriverTripLog[]>([]);
-  const [bankName, setBankName] = useState("");
-  const [accountNumber, setAccountNumber] = useState("");
-  const [bankSaving, setBankSaving] = useState(false);
 
   const allowed = !!provider?.isVerified && isCarGoProvider(provider, categories);
 
@@ -63,14 +50,11 @@ export default function CargoDriverSettings() {
   });
 
   useEffect(() => {
-    setLocalTrips(loadTripLog(user?.id ?? null));
-  }, [user?.id]);
-
-  useEffect(() => {
-    const u = user as any;
-    setBankName(String(u?.bankName ?? ""));
-    setAccountNumber(String(u?.accountNumber ?? ""));
-  }, [user]);
+    // Preferir email para evitar colisiones si el backend cambia el tipo de id.
+    const accountKey =
+      (user as any)?.email != null ? String((user as any).email) : (user as any)?.id != null ? String((user as any).id) : null;
+    setLocalTrips(loadTripLog(accountKey));
+  }, [user?.id, user?.email]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -128,16 +112,28 @@ export default function CargoDriverSettings() {
   return (
     <div className="w-full min-w-0 bg-gradient-to-b from-muted/20 to-background pb-10">
       <div className="container mx-auto max-w-lg px-4 pt-6">
-        <div className="mb-6 flex items-center gap-3">
+        <div className="mb-6 flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="icon" className="shrink-0" asChild>
-            <Link href="/go/taxi/driver" aria-label="Volver a Go">
+            <Link href="/go/taxi/driver" aria-label="Volver a Taxi">
               <ArrowLeft className="h-5 w-5" />
             </Link>
           </Button>
-          <div>
+          <div className="min-w-0 flex-1">
             <h1 className="font-display text-2xl font-bold text-foreground">Taxi — Configuración</h1>
             <p className="text-sm text-muted-foreground">Tu panel como conductor (no el panel general de asociado).</p>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto shrink-0 whitespace-nowrap"
+            asChild
+          >
+            <Link href="/professional-dashboard" aria-label="Abrir panel de asociado">
+              <LayoutDashboard className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Panel de Asociado</span>
+              <span className="sm:hidden">Asociado</span>
+            </Link>
+          </Button>
         </div>
 
         <Card className="mb-4 overflow-hidden border-primary/20 shadow-sm">
@@ -216,68 +212,8 @@ export default function CargoDriverSettings() {
           </CardContent>
         </Card>
 
-        <Card className="mt-4">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base leading-snug">
-              <CreditCard className="h-5 w-5 shrink-0 text-primary" />
-              Datos de cuenta bancaria para pagos de servicio
-            </CardTitle>
-            <CardDescription>
-              Misma cuenta que en Configuración general: aquí puedes editarla y queda enlazada a tu perfil.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">Banco</p>
-              <Input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Ej. Banco Pichincha" />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">Número de cuenta</p>
-              <Input
-                value={accountNumber}
-                onChange={(e) => setAccountNumber(e.target.value)}
-                placeholder="Ej. 2100-1234-5678-9012"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Solo dígitos, espacios y guiones.
-              </p>
-            </div>
-            <Button
-              type="button"
-              className="w-full"
-              disabled={bankSaving}
-              onClick={async () => {
-                const token = localStorage.getItem("token");
-                if (!token) return;
-                setBankSaving(true);
-                try {
-                  const body = {
-                    bankName: bankName.trim() || undefined,
-                    accountNumber: accountNumber ? sanitizeAccountNumber(accountNumber) : undefined,
-                  };
-                  const res = await fetch("/api/auth/profile", {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                    body: JSON.stringify(body),
-                  });
-                  const data = (await res.json().catch(() => ({}))) as { user?: any; message?: string };
-                  if (!res.ok) throw new Error(data.message || "No se pudo guardar");
-                  if (data.user) queryClient.setQueryData(["user"], data.user);
-                  toast({ title: "Datos bancarios guardados", description: "Se actualizaron correctamente." });
-                } catch (e) {
-                  toast({ title: "Error", description: e instanceof Error ? e.message : "No se pudo guardar.", variant: "destructive" });
-                } finally {
-                  setBankSaving(false);
-                }
-              }}
-            >
-              {bankSaving ? "Guardando…" : "Guardar datos bancarios"}
-            </Button>
-          </CardContent>
-        </Card>
-
         <Button className="mt-8 w-full" variant="secondary" asChild>
-          <Link href="/go/taxi/driver">Volver a Go</Link>
+          <Link href="/go/taxi/driver">Volver a servicios de Taxi</Link>
         </Button>
       </div>
     </div>

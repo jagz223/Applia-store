@@ -81,10 +81,13 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
   const tripsForPanel = useMemo(() => {
-    const all = open ? loadTripLog(user?.id ?? null) : [];
+    // Preferir email para evitar colisiones si el backend cambia el tipo de id.
+    const accountKey =
+      (user as any)?.email != null ? String((user as any).email) : (user as any)?.id != null ? String((user as any).id) : null;
+    const all = open ? loadTripLog(accountKey) : [];
     if (FEATURE_WALLET_RECHARGE_UI_ENABLED) return all;
     return all.filter((t) => t.payment === "cash" || t.payment === "bank_transfer");
-  }, [open, user?.id]);
+  }, [open, user?.id, (user as any)?.email]);
   const byDay = useMemo(() => groupTripsByLocalDay(tripsForPanel), [tripsForPanel]);
   const localTotal = useMemo(
     () => tripsForPanel.reduce((a, t) => a + (typeof t.amountUsd === "number" ? t.amountUsd : 0), 0),
@@ -291,70 +294,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
         </>
       )}
 
-      <Card>
-        <CardHeader className="p-3 pb-2">
-          <CardTitle className="text-sm">Resumen local (estimado)</CardTitle>
-          <p className="text-xs font-normal text-muted-foreground">
-            {FEATURE_WALLET_RECHARGE_UI_ENABLED
-              ? `Suma de viajes en este resumen: ${money(localTotal)}`
-              : `Solo efectivo y transferencias · total ${money(localTotal)}`}
-          </p>
-        </CardHeader>
-        <CardContent className="p-3 pt-0 space-y-0">
-          {byDay.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Aún no hay viajes en el detalle. Completa carreras para ver el desglose por día.</p>
-          ) : (
-            <ul className="space-y-4 max-h-[min(40vh,320px)] overflow-y-auto pr-0.5">
-              {byDay.map((day) => (
-                <li key={day.key} className="rounded-lg border border-border/80 bg-card/50">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/50 px-3 py-2">
-                    <span className="text-sm font-semibold capitalize text-foreground">
-                      {formatDayHeading(day.key, tKey)}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {day.count} {day.count === 1 ? "viaje" : "viajes"} · {money(day.totalUsd)}
-                    </span>
-                  </div>
-                  <ul className="divide-y divide-border/60">
-                    {day.trips.map((t) => (
-                      <li
-                        key={t.id}
-                        className="grid grid-cols-[1fr_auto] items-start gap-x-2 gap-y-0.5 px-3 py-2 text-xs"
-                      >
-                        <div>
-                          <span className="text-foreground font-medium">
-                            {(() => {
-                              try {
-                                return new Intl.DateTimeFormat("es-EC", { timeStyle: "short" }).format(
-                                  new Date(t.endedAt)
-                                );
-                              } catch {
-                                return "—";
-                              }
-                            })()}
-                          </span>
-                          <span className="text-muted-foreground">
-                            {" "}
-                            · {t.durationMin} min ·{" "}
-                            {t.payment === "genfeb"
-                              ? "GenFeb"
-                              : t.payment === "bank_transfer"
-                                ? "Transferencia"
-                                : "Efectivo"}
-                          </span>
-                        </div>
-                        <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {money(t.amountUsd)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      {/* Oculto por solicitud: el resumen era local (no oficial). */}
 
       {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
         <>

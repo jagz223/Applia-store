@@ -5,7 +5,8 @@ import {
   Users, DollarSign, FileText, Star, Settings, Eye,
   BarChart3, Shield, Bell, Database, Layers,
   CheckCircle, XCircle, Clock, TrendingUp, UserPlus,
-  Search, ChevronLeft, ChevronRight, Loader2, Wallet, Banknote, History, Inbox, PlayCircle
+  Search, ChevronLeft, ChevronRight, Loader2, Wallet, Banknote, History, Inbox, PlayCircle, CreditCard,
+  Check, ChevronsUpDown
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole, hasFullAdminRole } from "@/lib/auth-utils";
 import {
@@ -46,12 +47,6 @@ import {
   useAdminWithdrawals,
   useProcessWithdrawal,
   useAdminWithdrawalHistory,
-  usePlatformCommissionRate,
-  usePatchPlatformCommissionRate,
-  usePlatformMobilityFares,
-  usePatchPlatformMobilityFares,
-  usePlatformPackFares,
-  usePatchPlatformPackFares,
   type WithdrawalHistoryStatus,
   type WithdrawalHistoryItem,
   useAdminCategories,
@@ -60,13 +55,20 @@ import {
   useCreateSubcategory,
   useUpdateSubcategory,
   type Subcategory,
+  usePlatformMobilityFares,
+  usePatchPlatformMobilityFares,
+  usePlatformPackFares,
+  usePatchPlatformPackFares,
+  usePlatformSubscriptionFees,
+  usePatchPlatformSubscriptionFees,
 } from "@/hooks/use-mango-data";
-import { calcCommission, calcProviderNet, PLATFORM_COMMISSION_RATE, commissionDisplayPercents } from "@shared/platform-commission";
+import { calcCommission, calcProviderNet, PLATFORM_COMMISSION_RATE } from "@shared/platform-commission";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate, isValidDate } from "@/lib/date-utils";
+import { cn } from "@/lib/utils";
 import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
 import { AnimatePresence, motion } from "framer-motion";
@@ -774,9 +776,9 @@ function AdminCategoriesTab() {
                       "Fix Go": "bg-blue-500/15 text-blue-400 border-blue-500/30",
                       "Man Go": "bg-orange-500/15 text-orange-400 border-orange-500/30",
                       "Pro Go": "bg-purple-500/15 text-purple-400 border-purple-500/30",
-                      "Pack Go": "bg-green-500/15 text-green-400 border-green-500/30",
+                      "Delivery": "bg-green-500/15 text-green-400 border-green-500/30",
                       "Shop Go": "bg-pink-500/15 text-pink-400 border-pink-500/30",
-                      "Car Go": "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+                      "Servicio de Taxi": "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
                     };
                     return categories.map((cat: any) => {
                       // Direct brand: category slug maps directly (technical→Fix Go, etc.)
@@ -1011,24 +1013,28 @@ export default function AdminPanel() {
   const fullAdmin = hasFullAdminRole(user);
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: platformCommission } = usePlatformCommissionRate();
-  const patchPlatformCommission = usePatchPlatformCommissionRate();
-  const platformCommissionRate = platformCommission?.commissionRate ?? PLATFORM_COMMISSION_RATE;
+  const { data: adminCategoriesRaw = [] } = useAdminCategories();
+  const { data: mobilityFares } = usePlatformMobilityFares({ enabled: fullAdmin });
+  const patchMobilityFares = usePatchPlatformMobilityFares();
+  const { data: packFares } = usePlatformPackFares({ enabled: fullAdmin });
+  const patchPackFares = usePatchPlatformPackFares();
+  const { data: subscriptionFees } = usePlatformSubscriptionFees({ enabled: fullAdmin });
+  const patchSubscriptionFees = usePatchPlatformSubscriptionFees();
+  // Comisión oculta: mantenemos variables por compatibilidad con JSX existente,
+  // pero la UI no mostrará ni editará comisión.
+  const platformCommissionRate = PLATFORM_COMMISSION_RATE;
+  const patchPlatformCommission = useMemo(
+    () => ({ isPending: false, mutateAsync: async (_p: number) => ({}) }),
+    []
+  );
+  // Comisión deshabilitada: se oculta la UI de comisión (no tomamos comisiones).
   const [commissionEditOpen, setCommissionEditOpen] = useState(false);
   const [commissionConfirmOpen, setCommissionConfirmOpen] = useState(false);
   const [commissionDraftPercent, setCommissionDraftPercent] = useState(10);
   const [commissionPendingPercent, setCommissionPendingPercent] = useState<number | null>(null);
-  const [faresDraft, setFaresDraft] = useState(() => ({
-    motoBase: 1.75,
-    motoPerKm: 0.5,
-    autoBaseDay: 1.5,
-    autoBaseNight: 1.75,
-    autoPerKm: 0.85,
-    autoPet: 1.0,
-    camionetaBase: 20.0,
-    camionetaPerKm: 1.25,
-    camionetaPet: 2.0,
-  }));
+  const [mobilityFaresDraft, setMobilityFaresDraft] = useState<any>(null);
+  const [packFaresDraft, setPackFaresDraft] = useState<any>(null);
+  const [subscriptionFeesDraft, setSubscriptionFeesDraft] = useState<Record<string, number> | null>(null);
   const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== "undefined") {
@@ -1041,23 +1047,23 @@ export default function AdminPanel() {
     }
     return "overview";
   });
-  const { data: mobilityFaresData } = usePlatformMobilityFares({ enabled: activeTab === "settings" });
-  const patchMobilityFares = usePatchPlatformMobilityFares();
-  const { data: packFaresData } = usePlatformPackFares({ enabled: activeTab === "settings" });
-  const patchPackFares = usePatchPlatformPackFares();
-  const [packFaresDraft, setPackFaresDraft] = useState(() => ({
-    motoBase: 1.75,
-    motoPerKm: 0.5,
-    autoBase: 2.25,
-    autoPerKm: 0.85,
-    camionetaBase: 20.0,
-    camionetaPerKm: 1.25,
-  }));
   const [userPage, setUserPage] = useState(1);
   const [providersPage, setProvidersPage] = useState(1);
   const [overviewPendingProvidersPage, setOverviewPendingProvidersPage] = useState(1);
   const [overviewRecentBookingsPage, setOverviewRecentBookingsPage] = useState(1);
   const [adminTransfersPage, setAdminTransfersPage] = useState(1);
+
+  useEffect(() => {
+    if (mobilityFares?.fares && mobilityFaresDraft == null) setMobilityFaresDraft(mobilityFares.fares);
+  }, [mobilityFares?.fares, mobilityFaresDraft]);
+  useEffect(() => {
+    const pf = (packFares as any)?.fares;
+    if (pf && packFaresDraft == null) setPackFaresDraft(pf);
+  }, [(packFares as any)?.fares, packFaresDraft]);
+  useEffect(() => {
+    const cur = (subscriptionFees as any)?.feesBySlug as Record<string, number> | undefined;
+    if (cur && subscriptionFeesDraft == null) setSubscriptionFeesDraft(cur);
+  }, [(subscriptionFees as any)?.feesBySlug, subscriptionFeesDraft]);
 
   // Abrir pestaña Recargas y leer highlight desde la URL o desde evento (clic en notificación)
   const [highlightedTransferId, setHighlightedTransferId] = useState<number | null>(null);
@@ -1068,35 +1074,6 @@ export default function AdminPanel() {
       setLocation("/");
     }
   }, [authLoading, user, setLocation]);
-
-  useEffect(() => {
-    const f = mobilityFaresData?.fares;
-    if (!f) return;
-    setFaresDraft({
-      motoBase: f.moto.baseUsd,
-      motoPerKm: f.moto.perKmUsd,
-      autoBaseDay: f.auto.baseDayUsd,
-      autoBaseNight: f.auto.baseNightUsd,
-      autoPerKm: f.auto.perKmUsd,
-      autoPet: f.auto.petExtraUsd,
-      camionetaBase: f.camioneta.baseUsd,
-      camionetaPerKm: f.camioneta.perKmUsd,
-      camionetaPet: f.camioneta.petExtraUsd,
-    });
-  }, [mobilityFaresData?.fares]);
-
-  useEffect(() => {
-    const f = packFaresData?.fares as any;
-    if (!f) return;
-    setPackFaresDraft({
-      motoBase: f.moto.baseUsd,
-      motoPerKm: f.moto.perKmUsd,
-      autoBase: f.auto.baseUsd,
-      autoPerKm: f.auto.perKmUsd,
-      camionetaBase: f.camioneta.baseUsd,
-      camionetaPerKm: f.camioneta.perKmUsd,
-    });
-  }, [packFaresData?.fares]);
 
   useEffect(() => {
     const search = typeof window !== "undefined" ? window.location.search : "";
@@ -1194,6 +1171,9 @@ export default function AdminPanel() {
   const [brandProviderSearch, setBrandProviderSearch] = useState("");
   const [brandProviderMinRating, setBrandProviderMinRating] = useState<number>(0);
   const [brandProviderSort, setBrandProviderSort] = useState<"rating_desc" | "rating_asc" | "name_asc" | "active_desc">("rating_desc");
+  const [brandProviderSubcategoryId, setBrandProviderSubcategoryId] = useState<string>("");
+  const [brandProviderSubcategoryOpen, setBrandProviderSubcategoryOpen] = useState(false);
+  const [brandProviderSubcategoryQuery, setBrandProviderSubcategoryQuery] = useState("");
 
   // Proveedores -> Servicios activos (staff)
   const [activeServicesSearch, setActiveServicesSearch] = useState("");
@@ -1341,13 +1321,58 @@ export default function AdminPanel() {
   const serviceBrands: AdminServiceBrand[] = serviceBrandsData?.brands ?? [];
   const selectedBrand = (serviceBrands ?? []).find((b) => b.categoryId === selectedBrandCategoryId) ?? null;
 
+  const { data: brandSubcategoriesData } = useQuery({
+    queryKey: ["admin-brand-subcategories", selectedBrandCategoryId],
+    queryFn: async () => {
+      if (selectedBrandCategoryId == null) return [];
+      return fetchWithAuth(`/api/subcategories?categoryId=${encodeURIComponent(String(selectedBrandCategoryId))}`);
+    },
+    enabled: fullAdmin && activeTab === "services" && selectedBrandCategoryId != null,
+    staleTime: 30_000,
+  });
+  const brandSubcategories =
+    ((brandSubcategoriesData as any) ?? []) as Array<{ id: number; name: string; slug?: string }>;
+
+  const brandProviderSubcategoryName = useMemo(() => {
+    if (!brandProviderSubcategoryId) return "Todas";
+    const id = Number(brandProviderSubcategoryId);
+    const found = brandSubcategories.find((s) => Number(s.id) === id);
+    return found?.name ?? "Todas";
+  }, [brandProviderSubcategoryId, brandSubcategories]);
+
+  const brandSubcategoriesDisplayed = useMemo(() => {
+    const q = brandProviderSubcategoryQuery.trim().toLowerCase();
+    const list = brandSubcategories ?? [];
+    if (!q) return list.slice(0, 30);
+    return list.filter((s) => String(s.name ?? "").toLowerCase().includes(q)).slice(0, 30);
+  }, [brandSubcategories, brandProviderSubcategoryQuery]);
+
+  useEffect(() => {
+    if (!brandProviderSubcategoryOpen) setBrandProviderSubcategoryQuery("");
+  }, [brandProviderSubcategoryOpen]);
+
+  useEffect(() => {
+    // Al cambiar de marca, resetear filtro de subcategoría.
+    setBrandProviderSubcategoryId("");
+    setBrandProviderSubcategoryOpen(false);
+    setBrandProviderSubcategoryQuery("");
+  }, [selectedBrandCategoryId]);
+
   const { data: brandProvidersData, isLoading: brandProvidersLoading } = useQuery({
-    queryKey: ["admin-service-brand-providers", selectedBrandCategoryId, brandProviderSearch, brandProviderMinRating, brandProviderSort],
+    queryKey: [
+      "admin-service-brand-providers",
+      selectedBrandCategoryId,
+      brandProviderSearch,
+      brandProviderMinRating,
+      brandProviderSort,
+      brandProviderSubcategoryId,
+    ],
     queryFn: () => {
       const params = new URLSearchParams();
       if (brandProviderSearch.trim()) params.set("search", brandProviderSearch.trim());
       if (brandProviderMinRating > 0) params.set("minRating", String(brandProviderMinRating));
       if (brandProviderSort) params.set("sort", brandProviderSort);
+      if (brandProviderSubcategoryId) params.set("subcategoryId", brandProviderSubcategoryId);
       return fetchWithAuth(`/api/admin/service-brands/${selectedBrandCategoryId}/providers?${params.toString()}`);
     },
     enabled: fullAdmin && activeTab === "services" && selectedBrandCategoryId != null,
@@ -1414,6 +1439,9 @@ export default function AdminPanel() {
     transacction_date: string | null;
     transacction_verified: "pending" | "verified" | "rejected";
     transacction_code?: string | null;
+    subscriptionMonths?: number | null;
+    subscriptionMonthlyUsd?: number | null;
+    subscriptionTotalUsd?: number | null;
     providerCategorySlug?: string | null;
     visibilitySubscriptionEndsAt?: string | null;
   };
@@ -1464,13 +1492,17 @@ export default function AdminPanel() {
     adminName?: string | null;
     adminEmail?: string | null;
     affectedUserId: string;
+    affectedUserName?: string | null;
+    affectedUserEmail?: string | null;
     createdAt: any;
     meta?: any;
   }> = adminAuditLogData?.items ?? [];
+  const [auditLogPage, setAuditLogPage] = useState(1);
+  const AUDIT_LOG_PAGE_SIZE = 5;
 
   const resolveAccountChangeRequestMutation = useMutation({
-    mutationFn: async (args: { id: number; action: "approve" | "reject" }) =>
-      patchWithAuth(`/api/admin/account-change-requests/${args.id}`, { action: args.action }),
+    mutationFn: async (args: { id: number; action: "approve" | "reject"; reason?: string }) =>
+      patchWithAuth(`/api/admin/account-change-requests/${args.id}`, { action: args.action, reason: args.reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-account-change-requests-pending"] });
       toast({ title: "Actualizado", description: "La petición fue procesada correctamente." });
@@ -1485,8 +1517,12 @@ export default function AdminPanel() {
       userId: string;
       step: "identification" | "transaction";
       action: "approve" | "reject";
+      reason?: string;
     }) => {
-      return patchWithAuth(`/api/admin/verifying-status/${args.userId}/${args.step}`, { action: args.action });
+      return patchWithAuth(`/api/admin/verifying-status/${args.userId}/${args.step}`, {
+        action: args.action,
+        reason: args.reason,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-verifying-status-pending"] });
@@ -1503,6 +1539,15 @@ export default function AdminPanel() {
       });
     },
   });
+
+  const [rejectModal, setRejectModal] = useState<{
+    open: boolean;
+    userId: string;
+    userName: string;
+    step: "identification" | "transaction" | "account_change";
+    requestId?: number;
+    reason: string;
+  }>({ open: false, userId: "", userName: "", step: "transaction", reason: "" });
 
   const [assocImageDialog, setAssocImageDialog] = useState<{
     open: boolean;
@@ -1710,7 +1755,16 @@ export default function AdminPanel() {
                                       variant="outline"
                                       className="text-red-600"
                                       disabled={resolveAccountChangeRequestMutation.isPending}
-                                      onClick={() => resolveAccountChangeRequestMutation.mutate({ id: r.id, action: "reject" })}
+                                      onClick={() =>
+                                        setRejectModal({
+                                          open: true,
+                                          userId: r.userId,
+                                          userName: who,
+                                          step: "account_change",
+                                          requestId: r.id,
+                                          reason: "",
+                                        })
+                                      }
                                     >
                                       Rechazar
                                     </Button>
@@ -1744,10 +1798,15 @@ export default function AdminPanel() {
                         return (
                           <>
                             {paged.map((assoc) => {
-                              const identEnabled = assoc.identification_verified === "pending";
-                              const txEnabled = assoc.transacction_verified === "pending";
+                              // Permitir al admin corregir/revertir un rechazo anterior sin depender de que el usuario re-subiera.
+                              const identEnabled =
+                                assoc.identification_verified === "pending" || assoc.identification_verified === "rejected";
+                              const txEnabled =
+                                assoc.transacction_verified === "pending" || assoc.transacction_verified === "rejected";
                               const reqLabel = assoc.requestType === "renewal" ? "Renovación" : "Nuevo asociado";
                               const reqBadgeVariant = assoc.requestType === "renewal" ? "secondary" : "default";
+                              const showIdentificationCard =
+                                assoc.requestType !== "renewal" && assoc.identification_verified !== "verified";
                               return (
                                 <div key={assoc.userId} className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4">
                                   <div className="flex items-center justify-between gap-3">
@@ -1772,7 +1831,7 @@ export default function AdminPanel() {
                                     </Badge>
                                   </div>
 
-                                  {assoc.requestType === "renewal" ? null : (
+                                  {showIdentificationCard ? (
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
@@ -1878,10 +1937,12 @@ export default function AdminPanel() {
                                             className="min-w-0 justify-center text-red-600"
                                             disabled={!identEnabled || updateVerifyingStatusMutation.isPending}
                                             onClick={() =>
-                                              updateVerifyingStatusMutation.mutate({
+                                              setRejectModal({
+                                                open: true,
                                                 userId: assoc.userId,
+                                                userName: assoc.name?.trim() || "—",
                                                 step: "identification",
-                                                action: "reject",
+                                                reason: "",
                                               })
                                             }
                                           >
@@ -1891,12 +1952,24 @@ export default function AdminPanel() {
                                         </div>
                                       </div>
                                   </div>
-                                  )}
+                                  ) : null}
 
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
-                                        <p className="font-medium">Recarga de 15$</p>
+                                        <p className="font-medium">
+                                          Suscripción{" "}
+                                          {typeof assoc.subscriptionMonths === "number" && assoc.subscriptionMonths > 1
+                                            ? `(${assoc.subscriptionMonths} meses)`
+                                            : "(1 mes)"}{" "}
+                                          (
+                                          {typeof assoc.subscriptionTotalUsd === "number" && Number.isFinite(assoc.subscriptionTotalUsd)
+                                            ? `${assoc.subscriptionTotalUsd.toFixed(2)} USD`
+                                            : typeof assoc.subscriptionMonthlyUsd === "number" && Number.isFinite(assoc.subscriptionMonthlyUsd)
+                                              ? `${Number(assoc.subscriptionMonthlyUsd).toFixed(2)} USD`
+                                              : "15.00 USD"}
+                                          )
+                                        </p>
                                         <p className="break-words text-xs text-muted-foreground mt-1">
                                           Fecha:{" "}
                                           {assoc.transacction_date
@@ -1944,7 +2017,7 @@ export default function AdminPanel() {
                                         }
                                       >
                                         <CheckCircle className="h-4 w-4 shrink-0 sm:mr-1" />
-                                        <span className="truncate">Aprobar</span>
+                                        <span className="truncate">Aprobar suscripción</span>
                                       </Button>
                                       <Button
                                         size="sm"
@@ -1952,15 +2025,17 @@ export default function AdminPanel() {
                                         className="min-w-0 justify-center text-red-600"
                                         disabled={!txEnabled || updateVerifyingStatusMutation.isPending}
                                         onClick={() =>
-                                          updateVerifyingStatusMutation.mutate({
+                                          setRejectModal({
+                                            open: true,
                                             userId: assoc.userId,
+                                            userName: assoc.name?.trim() || "—",
                                             step: "transaction",
-                                            action: "reject",
+                                            reason: "",
                                           })
                                         }
                                       >
                                         <XCircle className="h-4 w-4 shrink-0 sm:mr-1" />
-                                        <span className="truncate">Rechazar</span>
+                                        <span className="truncate">Rechazar suscripción</span>
                                       </Button>
                                     </div>
                                   </div>
@@ -2015,8 +2090,41 @@ export default function AdminPanel() {
                       ) : auditItems.length === 0 ? (
                         <div className="py-6 text-center text-sm text-muted-foreground">Sin eventos recientes.</div>
                       ) : (
-                        <div className="space-y-2">
-                          {auditItems.slice(0, 40).map((it) => {
+                        (() => {
+                          const totalPages = Math.max(1, Math.ceil(auditItems.length / AUDIT_LOG_PAGE_SIZE));
+                          const safePage = Math.min(totalPages, Math.max(1, auditLogPage));
+                          const start = (safePage - 1) * AUDIT_LOG_PAGE_SIZE;
+                          const end = start + AUDIT_LOG_PAGE_SIZE;
+                          const paged = auditItems.slice(start, end);
+                          return (
+                            <>
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs text-muted-foreground">
+                                  Página {safePage} de {totalPages} · {auditItems.length} eventos
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={safePage <= 1}
+                                    onClick={() => setAuditLogPage((p) => Math.max(1, p - 1))}
+                                  >
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Anterior
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={safePage >= totalPages}
+                                    onClick={() => setAuditLogPage((p) => Math.min(totalPages, p + 1))}
+                                  >
+                                    Siguiente
+                                    <ChevronRight className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {paged.map((it) => {
                             const d = new Date(it.createdAt?.toDate ? it.createdAt.toDate() : it.createdAt);
                             const dateLabel = Number.isNaN(d.getTime())
                               ? "—"
@@ -2040,12 +2148,17 @@ export default function AdminPanel() {
                                 <p className="font-medium">{actionLabel}</p>
                                 <p className="text-xs text-muted-foreground mt-1 break-words">
                                   {dateLabel} · Admin: {(it.adminName ?? it.adminUserId) || "—"}
-                                    {it.adminEmail ? ` (${it.adminEmail})` : ""} · Usuario: {it.affectedUserId || "—"}
+                                    {it.adminEmail ? ` (${it.adminEmail})` : ""} · Usuario:{" "}
+                                    {(it.affectedUserName ?? it.affectedUserId) || "—"}
+                                    {it.affectedUserEmail ? ` (${it.affectedUserEmail})` : ""}
                                 </p>
                               </div>
                             );
-                          })}
-                        </div>
+                                })}
+                              </div>
+                            </>
+                          );
+                        })()
                       )}
                     </div>
                   </div>
@@ -2434,6 +2547,76 @@ export default function AdminPanel() {
                         </Select>
                       </div>
                       <div className="sm:col-span-3">
+                        <Label>Subcategoría</Label>
+                        <Popover
+                          open={brandProviderSubcategoryOpen}
+                          onOpenChange={setBrandProviderSubcategoryOpen}
+                          modal={false}
+                        >
+                          <PopoverAnchor asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={brandProviderSubcategoryOpen}
+                              className={cn("w-full justify-between font-normal", "text-left")}
+                              onClick={() => setBrandProviderSubcategoryOpen(true)}
+                            >
+                              <span className={cn("truncate", !brandProviderSubcategoryId && "text-foreground")}>
+                                {brandProviderSubcategoryName}
+                              </span>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
+                            </Button>
+                          </PopoverAnchor>
+                          <PopoverContent
+                            className="w-[var(--radix-popover-trigger-width)] min-w-[min(100vw-2rem,22rem)] p-0"
+                            align="start"
+                            onOpenAutoFocus={(e) => e.preventDefault()}
+                          >
+                            <Command shouldFilter={false}>
+                              <CommandInput
+                                placeholder="Buscar subcategoría…"
+                                value={brandProviderSubcategoryQuery}
+                                onValueChange={setBrandProviderSubcategoryQuery}
+                              />
+                              <CommandList>
+                                <CommandEmpty>Sin resultados.</CommandEmpty>
+                                <CommandGroup>
+                                  <CommandItem
+                                    value="__all__"
+                                    onSelect={() => {
+                                      setBrandProviderSubcategoryId("");
+                                      setBrandProviderSubcategoryOpen(false);
+                                    }}
+                                  >
+                                    <Check className={cn("mr-2 h-4 w-4", !brandProviderSubcategoryId ? "opacity-100" : "opacity-0")} />
+                                    Todas
+                                  </CommandItem>
+                                  {brandSubcategoriesDisplayed.map((s) => (
+                                    <CommandItem
+                                      key={s.id}
+                                      value={String(s.id)}
+                                      onSelect={() => {
+                                        setBrandProviderSubcategoryId(String(s.id));
+                                        setBrandProviderSubcategoryOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          brandProviderSubcategoryId === String(s.id) ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      <span className="truncate">{s.name}</span>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="sm:col-span-3">
                         <Label>Mínimo de estrellas: {brandProviderMinRating}</Label>
                         <Slider
                           value={[brandProviderMinRating]}
@@ -2562,7 +2745,7 @@ export default function AdminPanel() {
                 <CardTitle>Visibilidad por rol</CardTitle>
                 <CardDescription>
                   Oculta marcas activas para un rol específico (no afecta a <strong>admin</strong>). Ejemplo: que{" "}
-                  <strong>Soporte TI</strong> no vea <strong>Pack Go / Shop Go / Car Go</strong>.
+                  <strong>Soporte TI</strong> no vea <strong>Delivery / Shop Go / Servicio de Taxi</strong>.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -2728,7 +2911,6 @@ export default function AdminPanel() {
                         const costForCalc = Number.isFinite(costValueNum) ? costValueNum : currentCostNum;
                         const commission = calcCommission(costForCalc, platformCommissionRate);
                         const providerNet = calcProviderNet(costForCalc, platformCommissionRate);
-                        const { platformPercent: platPctRow } = commissionDisplayPercents(platformCommissionRate);
                         const schedDate = edits.scheduleDate ?? dateStr;
                         const schedTime = edits.scheduleTime ?? timeStr;
                         const statusValue = edits.status ?? String(b.status ?? "");
@@ -2757,7 +2939,7 @@ export default function AdminPanel() {
                                   {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(currentCost || 0)}
                                 </span>
                                 <p className="text-xs text-muted-foreground">
-                                  Comisión ({platPctRow}%):{" "}
+                                  Comisión:{" "}
                                   {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(commission)} ·
                                   Neto asociado:{" "}
                                   {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(providerNet)}
@@ -3558,35 +3740,90 @@ export default function AdminPanel() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-xl border border-border bg-muted/30 p-4">
-                    <div className="space-y-1 min-w-0">
-                      <p className="font-semibold text-foreground">Comisión de plataforma</p>
-                      <p className="text-sm text-muted-foreground">
-                        {platformCommission ? (
-                          <>
-                            La plataforma retiene <strong>{platformCommission.platformPercent}%</strong> de cada servicio
-                            completado; el asociado recibe <strong>{platformCommission.providerPercent}%</strong>.
-                          </>
-                        ) : (
-                          "Cargando configuración…"
-                        )}
+                  <div className="rounded-xl border border-border bg-muted/30 p-4">
+                    <p className="font-semibold text-foreground">Comisión</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Actualmente <strong className="text-foreground">no se aplican comisiones</strong> en la plataforma.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CreditCard className="h-5 w-5 text-primary" />
+                    Suscripción mensual por categoría
+                  </CardTitle>
+                  <CardDescription>
+                    Define cuánto cuesta la mensualidad de visibilidad (USD) para cada categoría. Aplica al flujo de pago del asociado/driver.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {!fullAdmin ? (
+                    <p className="text-sm text-muted-foreground">Solo administrador puede editar mensualidades.</p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {adminCategoriesRaw
+                          .filter((c: any) => typeof c?.slug === "string" && String(c.slug).trim().length > 0)
+                          .map((c: any) => {
+                            const slug = String(c.slug);
+                            const label = CATEGORY_DISPLAY_NAMES?.[slug] ?? getCategoryDisplayName(c) ?? String(c?.name ?? slug);
+                            const v = subscriptionFeesDraft?.[slug];
+                            return (
+                              <div key={slug} className="rounded-xl border border-border bg-muted/20 p-4">
+                                <p className="font-semibold text-foreground">{label}</p>
+                                <p className="mt-0.5 text-xs text-muted-foreground">Slug: {slug}</p>
+                                <div className="mt-3 space-y-1">
+                                  <Label>Mensualidad (USD)</Label>
+                                  <Input
+                                    inputMode="decimal"
+                                    value={v ?? ""}
+                                    placeholder="15"
+                                    onChange={(e) => {
+                                      const raw = e.target.value;
+                                      const n = raw === "" ? NaN : Number(raw);
+                                      setSubscriptionFeesDraft((prev) => ({
+                                        ...(prev ?? {}),
+                                        [slug]: Number.isFinite(n) ? n : (prev?.[slug] ?? 0),
+                                      }));
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          disabled={patchSubscriptionFees.isPending || !subscriptionFeesDraft}
+                          onClick={async () => {
+                            if (!subscriptionFeesDraft) return;
+                            try {
+                              await patchSubscriptionFees.mutateAsync(subscriptionFeesDraft);
+                              toast({ title: "Guardado", description: "Mensualidades por categoría actualizadas." });
+                            } catch (e) {
+                              toast({ title: "Error", description: e instanceof Error ? e.message : "No se pudo guardar", variant: "destructive" });
+                            }
+                          }}
+                        >
+                          Guardar mensualidades
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!subscriptionFeesDraft}
+                          onClick={() => setSubscriptionFeesDraft({})}
+                        >
+                          Resetear a default (15)
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Si una categoría no tiene valor, se usa <strong className="text-foreground">15 USD</strong> por defecto.
                       </p>
-                    </div>
-                    {fullAdmin ? (
-                      <Button
-                        variant="default"
-                        className="shrink-0 bg-primary hover:bg-primary/90"
-                        onClick={() => {
-                          setCommissionDraftPercent(platformCommission?.platformPercent ?? 10);
-                          setCommissionEditOpen(true);
-                        }}
-                      >
-                        Configurar
-                      </Button>
-                    ) : (
-                      <p className="text-xs text-muted-foreground shrink-0">Solo administrador puede editar.</p>
-                    )}
-                  </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
 
@@ -3594,185 +3831,248 @@ export default function AdminPanel() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Settings className="h-5 w-5 text-primary" />
-                    Tarifas Car Go / envíos
+                    Movilidad (Taxi y Delivery)
                   </CardTitle>
                   <CardDescription>
-                    Tarifa base y costo por km. Auto/Camioneta incluyen extra opcional por mascota (solo si el usuario marca la opción).
+                    Configura tarifas de referencia (base y por kilómetro) para Taxi y Delivery.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
-                    <p className="font-semibold">Delivery / Compras — Moto</p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Tarifa base (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.motoBase} onChange={(e) => setFaresDraft((s) => ({ ...s, motoBase: Number(e.target.value) }))} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Costo por km (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.motoPerKm} onChange={(e) => setFaresDraft((s) => ({ ...s, motoPerKm: Number(e.target.value) }))} />
-                      </div>
-                    </div>
-                  </div>
+                <CardContent className="space-y-6">
+                  {!fullAdmin ? (
+                    <p className="text-sm text-muted-foreground">Solo administrador puede editar tarifas.</p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                        <div className="rounded-xl border border-border bg-muted/20 p-4">
+                          <p className="font-semibold text-foreground">Taxi (movilidad)</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Auto: base día/noche + por km · Moto/Camioneta: base + por km. Pet Car suma un extra.
+                          </p>
+                          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div className="space-y-1">
+                              <Label>Auto · Base día</Label>
+                              <Input
+                                value={mobilityFaresDraft?.auto?.baseDayUsd ?? ""}
+                                onChange={(e) =>
+                                  setMobilityFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    auto: { ...(s?.auto ?? {}), baseDayUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Auto · Base noche</Label>
+                              <Input
+                                value={mobilityFaresDraft?.auto?.baseNightUsd ?? ""}
+                                onChange={(e) =>
+                                  setMobilityFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    auto: { ...(s?.auto ?? {}), baseNightUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Auto · USD por km</Label>
+                              <Input
+                                value={mobilityFaresDraft?.auto?.perKmUsd ?? ""}
+                                onChange={(e) =>
+                                  setMobilityFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    auto: { ...(s?.auto ?? {}), perKmUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Pet Car · Extra</Label>
+                              <Input
+                                value={mobilityFaresDraft?.auto?.petExtraUsd ?? ""}
+                                onChange={(e) =>
+                                  setMobilityFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    auto: { ...(s?.auto ?? {}), petExtraUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Moto · Base</Label>
+                              <Input
+                                value={mobilityFaresDraft?.moto?.baseUsd ?? ""}
+                                onChange={(e) =>
+                                  setMobilityFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    moto: { ...(s?.moto ?? {}), baseUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Moto · USD por km</Label>
+                              <Input
+                                value={mobilityFaresDraft?.moto?.perKmUsd ?? ""}
+                                onChange={(e) =>
+                                  setMobilityFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    moto: { ...(s?.moto ?? {}), perKmUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Camioneta · Base</Label>
+                              <Input
+                                value={mobilityFaresDraft?.camioneta?.baseUsd ?? ""}
+                                onChange={(e) =>
+                                  setMobilityFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    camioneta: { ...(s?.camioneta ?? {}), baseUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Camioneta · USD por km</Label>
+                              <Input
+                                value={mobilityFaresDraft?.camioneta?.perKmUsd ?? ""}
+                                onChange={(e) =>
+                                  setMobilityFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    camioneta: { ...(s?.camioneta ?? {}), perKmUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-4">
+                            <Button
+                              disabled={patchMobilityFares.isPending || !mobilityFaresDraft}
+                              onClick={async () => {
+                                try {
+                                  await patchMobilityFares.mutateAsync(mobilityFaresDraft);
+                                  toast({ title: "Guardado", description: "Tarifas de Taxi actualizadas." });
+                                } catch (e) {
+                                  toast({ title: "Error", description: e instanceof Error ? e.message : "No se pudo guardar", variant: "destructive" });
+                                }
+                              }}
+                            >
+                              Guardar Taxi
+                            </Button>
+                          </div>
+                        </div>
 
-                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
-                    <p className="font-semibold">Transporte Personas — Auto</p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Base día (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.autoBaseDay} onChange={(e) => setFaresDraft((s) => ({ ...s, autoBaseDay: Number(e.target.value) }))} />
+                        <div className="rounded-xl border border-border bg-muted/20 p-4">
+                          <p className="font-semibold text-foreground">Delivery</p>
+                          <p className="mt-1 text-sm text-muted-foreground">Base + por km por tipo de vehículo.</p>
+                          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div className="space-y-1">
+                              <Label>Moto · Base</Label>
+                              <Input
+                                value={packFaresDraft?.moto?.baseUsd ?? ""}
+                                onChange={(e) =>
+                                  setPackFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    moto: { ...(s?.moto ?? {}), baseUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Moto · USD por km</Label>
+                              <Input
+                                value={packFaresDraft?.moto?.perKmUsd ?? ""}
+                                onChange={(e) =>
+                                  setPackFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    moto: { ...(s?.moto ?? {}), perKmUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Auto · Base</Label>
+                              <Input
+                                value={packFaresDraft?.auto?.baseUsd ?? ""}
+                                onChange={(e) =>
+                                  setPackFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    auto: { ...(s?.auto ?? {}), baseUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Auto · USD por km</Label>
+                              <Input
+                                value={packFaresDraft?.auto?.perKmUsd ?? ""}
+                                onChange={(e) =>
+                                  setPackFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    auto: { ...(s?.auto ?? {}), perKmUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Camioneta · Base</Label>
+                              <Input
+                                value={packFaresDraft?.camioneta?.baseUsd ?? ""}
+                                onChange={(e) =>
+                                  setPackFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    camioneta: { ...(s?.camioneta ?? {}), baseUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Camioneta · USD por km</Label>
+                              <Input
+                                value={packFaresDraft?.camioneta?.perKmUsd ?? ""}
+                                onChange={(e) =>
+                                  setPackFaresDraft((s: any) => ({
+                                    ...(s ?? {}),
+                                    camioneta: { ...(s?.camioneta ?? {}), perKmUsd: Number(e.target.value) },
+                                  }))
+                                }
+                                inputMode="decimal"
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-4">
+                            <Button
+                              disabled={patchPackFares.isPending || !packFaresDraft}
+                              onClick={async () => {
+                                try {
+                                  await patchPackFares.mutateAsync(packFaresDraft);
+                                  toast({ title: "Guardado", description: "Tarifas de Delivery actualizadas." });
+                                } catch (e) {
+                                  toast({ title: "Error", description: e instanceof Error ? e.message : "No se pudo guardar", variant: "destructive" });
+                                }
+                              }}
+                            >
+                              Guardar Delivery
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Base noche (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.autoBaseNight} onChange={(e) => setFaresDraft((s) => ({ ...s, autoBaseNight: Number(e.target.value) }))} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Costo por km (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.autoPerKm} onChange={(e) => setFaresDraft((s) => ({ ...s, autoPerKm: Number(e.target.value) }))} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Extra mascota (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.autoPet} onChange={(e) => setFaresDraft((s) => ({ ...s, autoPet: Number(e.target.value) }))} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
-                    <p className="font-semibold">Carga / Personas+ — Camioneta</p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Tarifa base (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.camionetaBase} onChange={(e) => setFaresDraft((s) => ({ ...s, camionetaBase: Number(e.target.value) }))} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Costo por km (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.camionetaPerKm} onChange={(e) => setFaresDraft((s) => ({ ...s, camionetaPerKm: Number(e.target.value) }))} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Extra mascota (USD)</Label>
-                        <Input type="number" step="0.01" value={faresDraft.camionetaPet} onChange={(e) => setFaresDraft((s) => ({ ...s, camionetaPet: Number(e.target.value) }))} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button
-                      disabled={!fullAdmin || patchMobilityFares.isPending}
-                      onClick={async () => {
-                        try {
-                          await patchMobilityFares.mutateAsync({
-                            moto: { baseUsd: faresDraft.motoBase, perKmUsd: faresDraft.motoPerKm },
-                            auto: {
-                              baseDayUsd: faresDraft.autoBaseDay,
-                              baseNightUsd: faresDraft.autoBaseNight,
-                              perKmUsd: faresDraft.autoPerKm,
-                              petExtraUsd: faresDraft.autoPet,
-                            },
-                            camioneta: {
-                              baseUsd: faresDraft.camionetaBase,
-                              perKmUsd: faresDraft.camionetaPerKm,
-                              petExtraUsd: faresDraft.camionetaPet,
-                            },
-                          });
-                          toast({ title: "Guardado", description: "Tarifas actualizadas correctamente." });
-                        } catch (e: any) {
-                          toast({ title: "Error", description: e?.message || "No se pudo guardar.", variant: "destructive" });
-                        }
-                      }}
-                    >
-                      {patchMobilityFares.isPending ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Guardando…
-                        </>
-                      ) : (
-                        "Guardar tarifas"
-                      )}
-                    </Button>
-                  </div>
-                  {!fullAdmin ? <p className="text-xs text-muted-foreground">Solo administrador completo puede editar.</p> : null}
-                </CardContent>
-              </Card>
-
-              <Card className="border-border bg-card shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Settings className="h-5 w-5 text-primary" />
-                    Tarifas predeterminadas — Pack Go
-                  </CardTitle>
-                  <CardDescription>
-                    Pack Go permite <strong>Moto</strong>, <strong>Auto</strong> y <strong>Camioneta</strong>. No hay Pet Car.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
-                    <p className="font-semibold">Moto</p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Tarifa base (USD)</Label>
-                        <Input type="number" step="0.01" value={packFaresDraft.motoBase} onChange={(e) => setPackFaresDraft((s) => ({ ...s, motoBase: Number(e.target.value) }))} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Costo por km (USD)</Label>
-                        <Input type="number" step="0.01" value={packFaresDraft.motoPerKm} onChange={(e) => setPackFaresDraft((s) => ({ ...s, motoPerKm: Number(e.target.value) }))} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
-                    <p className="font-semibold">Auto</p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Tarifa base (USD)</Label>
-                        <Input type="number" step="0.01" value={packFaresDraft.autoBase} onChange={(e) => setPackFaresDraft((s) => ({ ...s, autoBase: Number(e.target.value) }))} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Costo por km (USD)</Label>
-                        <Input type="number" step="0.01" value={packFaresDraft.autoPerKm} onChange={(e) => setPackFaresDraft((s) => ({ ...s, autoPerKm: Number(e.target.value) }))} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
-                    <p className="font-semibold">Camioneta</p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Tarifa base (USD)</Label>
-                        <Input type="number" step="0.01" value={packFaresDraft.camionetaBase} onChange={(e) => setPackFaresDraft((s) => ({ ...s, camionetaBase: Number(e.target.value) }))} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Costo por km (USD)</Label>
-                        <Input type="number" step="0.01" value={packFaresDraft.camionetaPerKm} onChange={(e) => setPackFaresDraft((s) => ({ ...s, camionetaPerKm: Number(e.target.value) }))} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button
-                      disabled={!fullAdmin || patchPackFares.isPending}
-                      onClick={async () => {
-                        try {
-                          await patchPackFares.mutateAsync({
-                            moto: { baseUsd: packFaresDraft.motoBase, perKmUsd: packFaresDraft.motoPerKm },
-                            auto: { baseUsd: packFaresDraft.autoBase, perKmUsd: packFaresDraft.autoPerKm },
-                            camioneta: { baseUsd: packFaresDraft.camionetaBase, perKmUsd: packFaresDraft.camionetaPerKm },
-                          });
-                        } catch (e: any) {
-                          toast({ title: "Error", description: e?.message || "No se pudo guardar.", variant: "destructive" });
-                        }
-                      }}
-                    >
-                      {patchPackFares.isPending ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Guardando…
-                        </>
-                      ) : (
-                        "Guardar tarifas Pack Go"
-                      )}
-                    </Button>
-                  </div>
-                  {!fullAdmin ? <p className="text-xs text-muted-foreground">Solo administrador completo puede editar.</p> : null}
+                    </>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -3788,6 +4088,81 @@ export default function AdminPanel() {
           slides={assocImageDialog.slides}
           initialIndex={assocImageDialog.initialIndex}
         />
+
+        <Dialog
+          open={rejectModal.open}
+          onOpenChange={(o) => {
+            if (!o) setRejectModal({ open: false, userId: "", userName: "", step: "transaction", reason: "" });
+          }}
+        >
+          <DialogContent className="sm:max-w-lg border-border bg-card text-foreground">
+            <DialogHeader>
+              <DialogTitle>
+                {rejectModal.step === "transaction"
+                  ? "Rechazar suscripción"
+                  : rejectModal.step === "identification"
+                    ? "Rechazar identificación"
+                    : "Rechazar cambio de datos"}
+              </DialogTitle>
+              <DialogDescription>
+                Este motivo se enviará al usuario en la notificación. Sé claro y específico.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Usuario: <span className="font-medium text-foreground">{rejectModal.userName || rejectModal.userId}</span>
+              </p>
+              <div className="space-y-2">
+                <Label>Motivo del rechazo</Label>
+                <Textarea
+                  value={rejectModal.reason}
+                  onChange={(e) => setRejectModal((s) => ({ ...s, reason: e.target.value }))}
+                  placeholder="Ej: El comprobante no coincide con la fecha / La foto del documento está borrosa / Falta el lado posterior, etc."
+                  className="min-h-[120px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Mínimo 3 caracteres. Evita datos sensibles.
+                </p>
+              </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRejectModal({ open: false, userId: "", userName: "", step: "transaction", reason: "" })}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={
+                  (rejectModal.step === "account_change"
+                    ? resolveAccountChangeRequestMutation.isPending
+                    : updateVerifyingStatusMutation.isPending) || rejectModal.reason.trim().length < 3
+                }
+                onClick={() => {
+                  const reason = rejectModal.reason.trim();
+                  const userId = rejectModal.userId;
+                  const step = rejectModal.step;
+                  const requestId = rejectModal.requestId;
+                  setRejectModal({ open: false, userId: "", userName: "", step: "transaction", reason: "" });
+                  if (step === "account_change") {
+                    if (typeof requestId === "number" && requestId > 0) {
+                      resolveAccountChangeRequestMutation.mutate({ id: requestId, action: "reject", reason });
+                    } else {
+                      toast({ title: "Error", description: "No se encontró el id de la petición.", variant: "destructive" });
+                    }
+                    return;
+                  }
+                  updateVerifyingStatusMutation.mutate({ userId, step, action: "reject", reason });
+                }}
+              >
+                Rechazar y notificar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={commissionEditOpen} onOpenChange={setCommissionEditOpen}>
           <DialogContent className="sm:max-w-md border-border bg-card text-foreground">

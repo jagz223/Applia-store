@@ -1,7 +1,7 @@
 import TaxiRide from "@/pages/TaxiRide";
 
 /**
- * Pack Go (cliente) usa el mismo layout que Car Go, pero el flujo/socket/API apuntan a Pack.
+ * Delivery (cliente) usa el mismo layout que Taxi, pero el flujo/socket/API apuntan a Pack.
  * Para mantener el “copiar literalmente todo”, en esta primera iteración reutilizamos el componente
  * y solo cambiamos la ruta (el ajuste de endpoints/eventos se hace en la siguiente pasada).
  */

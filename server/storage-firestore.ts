@@ -3164,6 +3164,14 @@ class FirestoreStorageImpl implements IStorage {
       professionalCredentialUrl: data.professionalCredentialUrl != null ? String(data.professionalCredentialUrl) : null,
       transferReceiptCode: data.transferReceiptCode != null ? String(data.transferReceiptCode) : null,
       transferDate: data.transferDate != null ? String(data.transferDate) : null,
+      subscriptionMonths:
+        typeof data.subscriptionMonths === "number" && Number.isFinite(data.subscriptionMonths)
+          ? Math.max(1, Math.min(12, Math.trunc(data.subscriptionMonths)))
+          : null,
+      subscriptionMonthlyUsd:
+        typeof data.subscriptionMonthlyUsd === "number" && Number.isFinite(data.subscriptionMonthlyUsd)
+          ? Math.max(0, Number(data.subscriptionMonthlyUsd))
+          : null,
       createdAt: data.createdAt as any,
       updatedAt: data.updatedAt as any,
     } as ProfessionalVerification;
@@ -3198,7 +3206,7 @@ class FirestoreStorageImpl implements IStorage {
 
   async upsertProfessionalVerificationPayment(
     userId: string,
-    data: { transferReceiptCode: string; transferDate: string }
+    data: { transferReceiptCode: string; transferDate: string; subscriptionMonths: number; subscriptionMonthlyUsd?: number }
   ): Promise<ProfessionalVerification> {
     if (!this.db) throw new Error("Firestore no configurado");
     const ref = this.db.collection(FIRESTORE_COLLECTIONS.PROFESSIONAL_VERIFICATIONS).doc(userId);
@@ -3216,6 +3224,10 @@ class FirestoreStorageImpl implements IStorage {
       professionalCredentialUrl,
       transferReceiptCode: data.transferReceiptCode.trim(),
       transferDate: data.transferDate.trim(),
+      ...(typeof data.subscriptionMonthlyUsd === "number" && Number.isFinite(data.subscriptionMonthlyUsd)
+        ? { subscriptionMonthlyUsd: Math.max(0, data.subscriptionMonthlyUsd) }
+        : {}),
+      subscriptionMonths: Math.max(1, Math.min(12, Math.trunc(data.subscriptionMonths))),
       updatedAt: new Date(),
     };
     if (!snap.exists) {
@@ -3318,7 +3330,8 @@ class FirestoreStorageImpl implements IStorage {
     await ref.set(
       {
         user: userId,
-        requestType: (existing as any)?.requestType ?? requestType,
+        // Importante: si el pago es de renovación, debe reflejarse siempre.
+        requestType,
         identification_verified: existing?.identification_verified ?? "rejected",
         transacction_date: transactionDate,
         transacction_verified: "pending",
@@ -3373,7 +3386,9 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) throw new Error("Firestore no configurado");
     const existing = await this.getVerifyingStatusByUserId(userId);
     if (!existing) throw new Error("Verificación no encontrada");
-    if (existing.identification_verified !== "pending") throw new Error("La identificación ya no está en pending");
+    // Permitir revertir un rechazo anterior (rejected→verified) sin exigir re-subida.
+    // Solo bloquear si ya está verificado.
+    if (existing.identification_verified === "verified") throw new Error("La identificación ya fue verificada");
 
     await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update({
       identification_verified: status,
@@ -3389,9 +3404,8 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) throw new Error("Firestore no configurado");
     const existing = await this.getVerifyingStatusByUserId(userId);
     if (!existing) throw new Error("Verificación no encontrada");
-    if (existing.transacction_verified == null || existing.transacction_verified !== "pending") {
-      throw new Error("La transacción ya no está en pending");
-    }
+    if (existing.transacction_verified == null) throw new Error("Aún no hay comprobante de pago");
+    if (existing.transacction_verified === "verified") throw new Error("La transacción ya fue verificada");
 
     await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update({
       transacction_verified: status,

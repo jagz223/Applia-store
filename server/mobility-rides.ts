@@ -12,13 +12,10 @@ import { getIO, getUserActivePath } from "./socket";
 import { genFebStorage } from "./storage-genfeb";
 import { catalogService } from "./services";
 import { notificationService } from "./services/notification.service";
-import { getPlatformCommissionRate } from "./platform-commission-rate";
-import { roundToCents } from "@shared/platform-commission";
-import { canAffordOffPlatformCommission, minCommissionForEstimatedTrip } from "@shared/wallet-limits";
-import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
+import crypto from "crypto";
 
 export type TaxiVehicleKind = "moto" | "auto" | "pet_car" | "camioneta";
-export type TaxiPaymentMethod = "genfeb" | "cash" | "bank_transfer";
+export type TaxiPaymentMethod = "cash" | "bank_transfer";
 
 /** Mapa UI taxi → tipo vehículo proveedor (vehículo registrado). */
 const TAXI_TO_PROVIDER_VEHICLE: Record<TaxiVehicleKind, string> = {
@@ -38,7 +35,14 @@ type RideRecord = {
   vehicleType: TaxiVehicleKind;
   paymentMethod: TaxiPaymentMethod;
   paymentConfirmed: boolean;
+  /** Oferta del cliente (monto editable). */
   estimatedUsd: number;
+  /** Referencia sugerida calculada por el cliente (tarifas Admin). */
+  suggestedUsd?: number;
+  /** Si existe, este ride se muestra en el “market” (ofertas por negociar) hasta esta fecha. */
+  marketVisibleUntil?: number;
+  /** Contraofertas del driver: driverId -> { amountUsd, expiresAt }. */
+  counterOffers?: Record<string, { amountUsd: number; expiresAt: number }>;
   distanceM: number;
   durationSec: number;
   start: { lat: number; lon: number; label: string };
@@ -95,15 +99,6 @@ function driverIsBusy(driverId: string): boolean {
     if (r.driverUserId === driverId && (r.status === "matched" || r.status === "in_progress")) return true;
   }
   return false;
-}
-
-async function driverCanAcceptOffPlatformRide(estimatedUsd: number, driverUserId: string): Promise<boolean> {
-  const rate = await getPlatformCommissionRate();
-  const minC = minCommissionForEstimatedTrip(estimatedUsd, rate);
-  if (minC <= 0) return true;
-  const u = await genFebStorage.getUserById(driverUserId);
-  const w = typeof (u as { wallet?: number })?.wallet === "number" ? (u as { wallet: number }).wallet : 0;
-  return canAffordOffPlatformCommission(w, minC);
 }
 
 function nextOfferTtlMs(): number {
@@ -244,6 +239,8 @@ async function offerNextDriver(
   rider: { name: string; profileImageUrl: string | null }
 ) {
   if (ride.status !== "searching") return;
+  // Rides "por negociar" no deben entrar al flujo clásico de ofertas por socket.
+  if (typeof ride.marketVisibleUntil === "number") return;
 
   const timers = ensureRideTimers(ride.id);
   if (timers.offerTimeoutId) {
@@ -258,12 +255,6 @@ async function offerNextDriver(
     if (driverIsBusy(nextId)) continue;
     const declinedAt = ride.declinedAtByDriverId?.[nextId];
     if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
-    const isOff =
-      ride.paymentMethod === "cash" || ride.paymentMethod === "bank_transfer";
-    if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && isOff) {
-      const ok = await driverCanAcceptOffPlatformRide(ride.estimatedUsd, nextId);
-      if (!ok) continue;
-    }
     driverId = nextId;
     break;
   }
@@ -289,6 +280,7 @@ async function offerNextDriver(
     vehicleType: ride.vehicleType,
     paymentMethod: ride.paymentMethod,
     estimatedUsd: ride.estimatedUsd,
+    suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
     petEnabled: ride.petEnabled,
     expiresAt: ride.offerExpiresAt,
   });
@@ -326,6 +318,14 @@ async function offerNextDriver(
 function safeNumber(v: unknown, fallback = 0): number {
   const n = typeof v === "string" ? Number(v) : (v as number);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function roundToCents(n: number): number {
+  return Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+}
+
+function isStandardOffer(offerUsd: number, suggestedUsd: number): boolean {
+  return Math.abs(roundToCents(offerUsd) - roundToCents(suggestedUsd)) <= 0.01;
 }
 
 async function buildRiderPublic(riderUserId: string) {
@@ -433,6 +433,55 @@ export function registerMobilityRideRoutes(app: Express) {
       return res.status(500).json({ message: e?.message ?? "Error" });
     }
   });
+
+  // Market: rides "por negociar" (oferta != sugerido) aún en searching y vigentes.
+  app.get("/api/mobility/rides/market", authenticateJWT, async (req: any, res) => {
+    try {
+      const driverUserId = req.user?.id as string;
+      if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const now = Date.now();
+      const base = Array.from(rides.values())
+        .filter(
+          (r) =>
+            r.status === "searching" &&
+            r.driverUserId == null &&
+            typeof r.marketVisibleUntil === "number" &&
+            r.marketVisibleUntil >= now
+        )
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(0, 100)
+        .map((r) => ({
+          rideId: r.id,
+          createdAt: r.createdAt,
+          riderUserId: r.riderUserId,
+          start: r.start,
+          end: r.end,
+          distanceM: r.distanceM,
+          durationSec: r.durationSec,
+          vehicleType: r.vehicleType,
+          paymentMethod: r.paymentMethod,
+          suggestedUsd: r.suggestedUsd ?? r.estimatedUsd,
+          estimatedUsd: r.estimatedUsd,
+          expiresAt: r.marketVisibleUntil,
+          petEnabled: r.petEnabled,
+        }));
+
+      const enriched = await Promise.all(
+        base.map(async (x) => {
+          try {
+            const rider = await buildRiderPublic(x.riderUserId);
+            return { ...x, rider };
+          } catch {
+            return { ...x, rider: { name: "Usuario", profileImageUrl: null } };
+          }
+        })
+      );
+
+      res.json({ offers: enriched });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
   const rateSchema = z.object({
     stars: z.number().min(1).max(5),
     target: z.enum(["driver", "rider"]),
@@ -460,7 +509,12 @@ export function registerMobilityRideRoutes(app: Express) {
         durationSec: number;
         vehicleType: TaxiVehicleKind;
         paymentMethod: TaxiPaymentMethod;
+        /** Oferta del cliente */
         estimatedUsd: number;
+        /** Referencia sugerida (tarifas Admin) */
+        suggestedUsd?: number;
+        /** Si el usuario editó manualmente la oferta en UI */
+        offerEdited?: boolean;
         petEnabled?: boolean;
       };
 
@@ -475,31 +529,17 @@ export function registerMobilityRideRoutes(app: Express) {
         return res.status(400).json({ message: "Datos incompletos" });
       }
 
+      if (body.paymentMethod !== "cash" && body.paymentMethod !== "bank_transfer") {
+        return res.status(400).json({ message: "Método de pago no permitido para este servicio." });
+      }
+
       let candidates = freshDriversForVehicle(body.vehicleType);
       candidates = rankDriversByNearest(body.start, candidates);
 
-      if (body.paymentMethod === "genfeb") {
-        const u = await genFebStorage.getUserById(riderUserId);
-        const w = typeof (u as { wallet?: number })?.wallet === "number" ? (u as { wallet: number }).wallet : 0;
-        const need = roundToCents(
-          typeof body.estimatedUsd === "number" ? body.estimatedUsd : Number(body.estimatedUsd) || 0
-        );
-        if (w < need) {
-          return res.status(400).json({ message: "Saldo insuficiente para pagar con Saldo GenFeb." });
-        }
-      } else if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
-        const rate = await getPlatformCommissionRate();
-        const minC = minCommissionForEstimatedTrip(body.estimatedUsd, rate);
-        if (minC > 0) {
-          const eligible: typeof candidates = [];
-          for (const c of candidates) {
-            const u = await genFebStorage.getUserById(c.userId);
-            const w = typeof (u as { wallet?: number })?.wallet === "number" ? (u as { wallet: number }).wallet : 0;
-            if (canAffordOffPlatformCommission(w, minC)) eligible.push(c);
-          }
-          candidates = eligible;
-        }
-      }
+      const offerUsd = roundToCents(Math.max(0, safeNumber(body.estimatedUsd, 0)));
+      const suggestedUsd = roundToCents(Math.max(0, safeNumber(body.suggestedUsd, offerUsd)));
+      // Negociación desactivada por ahora: siempre seguimos el flujo clásico.
+      const standard = true;
 
       const id = crypto.randomUUID();
       const ride: RideRecord = {
@@ -509,8 +549,13 @@ export function registerMobilityRideRoutes(app: Express) {
         status: "searching",
         vehicleType: body.vehicleType,
         paymentMethod: body.paymentMethod,
-        paymentConfirmed: body.paymentMethod === "genfeb",
-        estimatedUsd: body.estimatedUsd,
+        paymentConfirmed: true,
+        estimatedUsd: offerUsd,
+        suggestedUsd,
+        // El ride debe permanecer visible mientras el usuario sigue buscando.
+        // El TTL 60s aplica a contraofertas, no al “market” del ride.
+        marketVisibleUntil: undefined,
+        counterOffers: undefined,
         distanceM: body.distanceM,
         durationSec: body.durationSec,
         start: body.start,
@@ -542,7 +587,9 @@ export function registerMobilityRideRoutes(app: Express) {
       // El pasajero debe seguir buscando hasta cancelar manualmente.
       // (Se evita el toast rojo "No hay drivers disponibles" cuando solo hubo rechazos o no había drivers en ese momento.)
 
-      if (ride.offeredDriverIds.length > 0) {
+      // Flujo rápido: si la oferta coincide con la referencia sugerida, ofertamos como siempre.
+      // Flujo negociado: no ofertamos automáticamente; se muestra en el “market” para drivers.
+      if (standard && ride.offeredDriverIds.length > 0) {
         await offerNextDriver(io, ride, rider);
       }
 
@@ -581,18 +628,6 @@ export function registerMobilityRideRoutes(app: Express) {
         return res.json({ ok: true, accepted: false });
       }
 
-      const isOff =
-        ride.paymentMethod === "cash" || ride.paymentMethod === "bank_transfer";
-      if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED && isOff) {
-        const ok = await driverCanAcceptOffPlatformRide(ride.estimatedUsd, driverUserId);
-        if (!ok) {
-          return res.status(409).json({
-            message:
-              "Límite de deuda con GenFeb o comisión excede el piso. Acepta viajes con Saldo GenFeb o recarga y vuelve a activarte.",
-          });
-        }
-      }
-
       /** Carrera: solo un conductor gana. */
       if (ride.driverUserId != null) {
         return res.status(409).json({ message: "Otro conductor ya tomó este viaje" });
@@ -626,7 +661,8 @@ export function registerMobilityRideRoutes(app: Express) {
         await genFebStorage.createMessage({
           conversationId,
           senderId: driverUserId,
-          content: "Iniciado chat con tu conductor/pasajero.",
+          content:
+            "Chat iniciado. Aquí pueden acordar el precio final del servicio. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
           type: "text",
           status: "sent",
         });
@@ -670,6 +706,147 @@ export function registerMobilityRideRoutes(app: Express) {
       res.json({ ok: true, accepted: true, rideId, conversationId });
     } catch (e: any) {
       console.error("[mobility] respond", e);
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  // Aceptar desde el “market” (ofertas por negociar):
+  // Para evitar carreras (2 drivers aceptando a la vez), NO hacemos match directo.
+  // En su lugar, enviamos una "oferta" al usuario y el usuario decide aceptar.
+  app.post("/api/mobility/rides/:rideId/market/accept", authenticateJWT, async (req: any, res) => {
+    try {
+      const driverUserId = req.user?.id as string;
+      if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const rideId = req.params.rideId as string;
+      const ride = rides.get(rideId);
+      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (ride.status !== "searching") return res.status(409).json({ message: "Este viaje ya no está disponible" });
+      if (ride.driverUserId != null) return res.status(409).json({ message: "Otro conductor ya tomó este viaje" });
+      const now = Date.now();
+      if (typeof ride.marketVisibleUntil === "number" && ride.marketVisibleUntil < now) {
+        return res.status(409).json({ message: "La oferta expiró" });
+      }
+      if (driverIsBusy(driverUserId)) {
+        return res.status(409).json({ message: "Estás en servicio. No puedes aceptar otra oferta." });
+      }
+      const io = getIO();
+      if (!io) return res.status(500).json({ message: "Socket no disponible" });
+
+      // Registrar como "contraoferta" por el MISMO monto del cliente (aceptando su oferta).
+      ride.counterOffers = ride.counterOffers ?? {};
+      const expiresAt = Date.now() + 60_000;
+      ride.counterOffers[driverUserId] = { amountUsd: ride.estimatedUsd, expiresAt };
+
+      const driver = await buildDriverPublic(driverUserId);
+      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:counteroffer", {
+        rideId,
+        driver,
+        amountUsd: ride.estimatedUsd,
+        expiresAt,
+      });
+
+      res.json({ ok: true, proposed: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  // Contraoferta del driver al usuario (TTL 60s).
+  app.post("/api/mobility/rides/:rideId/counteroffer", authenticateJWT, async (req: any, res) => {
+    try {
+      const driverUserId = req.user?.id as string;
+      if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const rideId = req.params.rideId as string;
+      const ride = rides.get(rideId);
+      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (ride.status !== "searching") return res.status(409).json({ message: "Este viaje ya no está disponible" });
+      if (ride.driverUserId != null) return res.status(409).json({ message: "Otro conductor ya tomó este viaje" });
+      const now = Date.now();
+      if (typeof ride.marketVisibleUntil === "number" && ride.marketVisibleUntil < now) {
+        return res.status(409).json({ message: "La oferta expiró" });
+      }
+      if (driverIsBusy(driverUserId)) {
+        return res.status(409).json({ message: "Estás en servicio. No puedes contraofertar ahora." });
+      }
+      const amt = roundToCents(Math.max(0, safeNumber((req.body as any)?.amountUsd, 0)));
+      if (!Number.isFinite(amt)) return res.status(400).json({ message: "Monto inválido" });
+      ride.counterOffers = ride.counterOffers ?? {};
+      const expiresAt = Date.now() + 60_000;
+      ride.counterOffers[driverUserId] = { amountUsd: amt, expiresAt };
+
+      const io = getIO();
+      if (io) {
+        const driver = await buildDriverPublic(driverUserId);
+        io.to(`user:${ride.riderUserId}`).emit("cargo:ride:counteroffer", {
+          rideId,
+          driver,
+          amountUsd: amt,
+          expiresAt,
+        });
+      }
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  // Aceptar contraoferta (usuario): al aceptar, queda asignado ese driver inmediatamente.
+  app.post("/api/mobility/rides/:rideId/counteroffer/:driverId/accept", authenticateJWT, async (req: any, res) => {
+    try {
+      const riderUserId = req.user?.id as string;
+      if (!riderUserId) return res.status(401).json({ message: "Unauthorized" });
+      const rideId = req.params.rideId as string;
+      const driverId = req.params.driverId as string;
+      const ride = rides.get(rideId);
+      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (ride.riderUserId !== riderUserId) return res.status(403).json({ message: "Sin acceso" });
+      if (ride.status !== "searching") return res.status(409).json({ message: "Este viaje ya no está disponible" });
+      if (ride.driverUserId != null) return res.status(409).json({ message: "Otro conductor ya tomó este viaje" });
+
+      const co = ride.counterOffers?.[driverId];
+      if (!co) return res.status(404).json({ message: "Contraoferta no encontrada" });
+      if (Date.now() > co.expiresAt) return res.status(409).json({ message: "La contraoferta expiró" });
+      if (driverIsBusy(driverId)) return res.status(409).json({ message: "El driver ya está ocupado" });
+
+      // Aplicar monto final
+      ride.estimatedUsd = roundToCents(Math.max(0, safeNumber(co.amountUsd, ride.estimatedUsd)));
+      ride.driverUserId = driverId;
+      ride.status = "matched";
+      ride.marketVisibleUntil = undefined;
+      ride.counterOffers = undefined;
+      clearRideTimers(ride.id);
+
+      const io = getIO();
+      if (!io) return res.status(500).json({ message: "Socket no disponible" });
+
+      const driver = await buildDriverPublic(driverId);
+      const pres = onlineDrivers.get(driverId);
+      const driverLat = pres?.lat;
+      const driverLon = pres?.lon;
+      let conversationId: number | null = null;
+      try {
+        const conv = await genFebStorage.createConversation({
+          participant1Id: ride.riderUserId,
+          participant2Id: driverId,
+        });
+        conversationId = Number((conv as { id: number }).id);
+        ride.conversationId = conversationId;
+        await genFebStorage.createMessage({
+          conversationId,
+          senderId: driverId,
+          content:
+            "Chat iniciado. Aquí pueden acordar el precio final del servicio. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
+          type: "text",
+          status: "sent",
+        });
+      } catch {}
+
+      const rider = await buildRiderPublic(ride.riderUserId);
+      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:matched", { rideId, driver, driverLat, driverLon, conversationId });
+      io.to(`user:${driverId}`).emit("cargo:ride:accepted", { rideId, rider, conversationId });
+
+      res.json({ ok: true, accepted: true, rideId, conversationId });
+    } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
     }
   });
@@ -820,7 +997,6 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
       if (ride.driverUserId !== driverUserId) return res.status(403).json({ message: "Sin acceso" });
       if (ride.status !== "in_progress") return res.status(409).json({ message: "El viaje aún no está iniciado" });
-      if (ride.paymentMethod === "genfeb") return res.status(409).json({ message: "Pago ya confirmado por saldo" });
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
@@ -844,25 +1020,11 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
       if (ride.driverUserId !== driverUserId) return res.status(403).json({ message: "Sin acceso" });
       if (ride.status !== "in_progress") return res.status(409).json({ message: "El viaje no está en curso" });
-      if (ride.paymentMethod !== "genfeb" && !ride.paymentConfirmed) {
-        return res.status(409).json({ message: "Confirma el pago antes de terminar" });
-      }
 
       if (ride.financialsSettled) {
         return res.json({ ok: true, rideId, alreadySettled: true });
       }
 
-      try {
-        await genFebStorage.applyMobilityRideSettlement({
-          rideId,
-          riderUserId: ride.riderUserId,
-          driverUserId,
-          estimatedUsd: ride.estimatedUsd,
-          paymentMethod: ride.paymentMethod,
-        });
-      } catch (err: any) {
-        return res.status(409).json({ message: err?.message ?? "No se pudo finalizar el viaje" });
-      }
       ride.financialsSettled = true;
 
       const io = getIO();
@@ -1003,6 +1165,8 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
             for (const ride of rides.values()) {
               if (ride.status !== "searching") continue;
               if (!rideWantsPresence(ride, pres)) continue;
+              // Rides "por negociar" (market) no se ofertan automáticamente al activar presencia.
+              if (typeof ride.marketVisibleUntil === "number") continue;
               const inserted = insertDriverByDistance(ride, user.id);
               if (!inserted) continue;
 

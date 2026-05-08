@@ -44,6 +44,7 @@ import { isCarGoProvider } from "@shared/provider-car-go";
 import { useCategories } from "@/hooks/use-mango-data";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
 import { useSocketBookings } from "@/hooks/use-socket";
+import { loadTripLog } from "@/lib/cargo-driver-storage";
 import {
   useBookingsByProvider,
   useUpdateBookingStatus,
@@ -51,7 +52,9 @@ import {
   useProfessionalStats,
   useWalletTransfers,
   useCurrentProvider,
+  useVerifyingStatusMe,
 } from "@/hooks/use-mango-data";
+import { listingSubscriptionDaysRemaining } from "@shared/professional-listing-subscription";
 import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Link, useLocation } from "wouter";
@@ -1016,15 +1019,30 @@ const DASHBOARD_TABS = ["overview", "bookings", "invoices"] as const;
 function ProfessionalDashboardInner() {
   const { user } = useAuth();
   const { data: providerProfile, isLoading: providerProfileLoading } = useCurrentProvider();
+  const { data: verifyingStatus } = useVerifyingStatusMe(Boolean(providerProfile));
+  const { data: categories = [] } = useCategories();
   const queryClient = useQueryClient();
   const [location, setLocation] = useLocation();
   const isProfessionalRole = (user as { role?: string } | null)?.role === "professional";
   const showBecomeProBanner = isProfessionalRole && !providerProfileLoading && !providerProfile;
+  const isTaxiDriver = useMemo(
+    () => !!(providerProfile?.isVerified && isCarGoProvider(providerProfile, categories)),
+    [providerProfile, categories],
+  );
+
+  const driverTripCount = useMemo(() => {
+    if (!isTaxiDriver) return null;
+    // Preferir email para evitar colisiones si el backend cambia el tipo de id.
+    const accountKey =
+      (user as any)?.email != null ? String((user as any).email) : (user as any)?.id != null ? String((user as any).id) : null;
+    return loadTripLog(accountKey).length;
+  }, [isTaxiDriver, (user as any)?.id, (user as any)?.email]);
 
   const getTabFromUrl = () => {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const tab = new URLSearchParams(search).get("tab");
     if (tab === "transactions") return "overview";
+    if (tab === "bookings" && isTaxiDriver) return "overview";
     const t =
       tab && DASHBOARD_TABS.includes(tab as (typeof DASHBOARD_TABS)[number]) ? tab : "overview";
     return t;
@@ -1119,6 +1137,7 @@ function ProfessionalDashboardInner() {
   }, []);
 
   const setTab = (value: string) => {
+    if (isTaxiDriver && value === "bookings") return;
     setCurrentTabState(value);
     setLocation(`/professional-dashboard?tab=${value}`);
   };
@@ -1175,7 +1194,26 @@ function ProfessionalDashboardInner() {
 
   // Panel del asociado (Mi actividad): ocultar secciones específicas por UI.
   const SHOW_PRO_RATING_BREAKDOWN = false;
-  const SHOW_PRO_QUICK_ACTIONS = false;
+  const subscriptionSummary = useMemo(() => {
+    const p = providerProfile as
+      | {
+          isVerified?: boolean;
+          isListingPublished?: boolean;
+          visibilitySubscriptionEndsAt?: string | null;
+          subscriptionDaysRemaining?: number | null;
+        }
+      | null
+      | undefined;
+    if (!p?.isVerified) return null;
+    const endsAt = p.visibilitySubscriptionEndsAt ?? null;
+    const days =
+      p.subscriptionDaysRemaining ??
+      (endsAt ? listingSubscriptionDaysRemaining(endsAt) : null) ??
+      null;
+    const pending = verifyingStatus?.transacction_verified === "pending";
+    const expired = p.isListingPublished === false || (typeof days === "number" && days <= 0);
+    return { days, pending, expired };
+  }, [providerProfile, verifyingStatus?.transacction_verified]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -1219,23 +1257,35 @@ function ProfessionalDashboardInner() {
 
         {/* Bloque superior: resumen + KPIs alineados al mismo ancho */}
         <div className="mx-auto w-full max-w-5xl space-y-5">
-          <ResumenActividad />
+          {!isTaxiDriver ? <ResumenActividad /> : null}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
-            <Card className="card-industrial flex min-h-[140px] flex-col border-border/50 bg-muted/5 shadow-sm transition-all hover:border-primary/25 hover:shadow-md">
-              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium leading-snug text-muted-foreground">
-                  Reservas en curso
-                </CardTitle>
-                <div className="rounded-full bg-orange-500/15 p-2 ring-1 ring-orange-500/25">
-                  <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400" aria-hidden />
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-1 flex-col justify-end pt-0">
-                <div className="font-display text-3xl font-bold tabular-nums">{pendingOrActiveCount}</div>
-                <p className="mt-1 text-xs text-muted-foreground">Pendientes, confirmadas o en proceso</p>
-              </CardContent>
-            </Card>
+            {!isTaxiDriver ? (
+              <Card className="card-industrial flex min-h-[140px] flex-col border-border/50 bg-muted/5 shadow-sm transition-all hover:border-primary/25 hover:shadow-md">
+                <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium leading-snug text-muted-foreground">
+                    Reservas en curso
+                  </CardTitle>
+                  <div className="rounded-full bg-orange-500/15 p-2 ring-1 ring-orange-500/25">
+                    <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400" aria-hidden />
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-1 flex-col justify-end pt-0">
+                  <div className="font-display text-3xl font-bold tabular-nums">{pendingOrActiveCount}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">Pendientes, confirmadas o en proceso</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="card-industrial flex min-h-[140px] flex-col border-border/50 bg-muted/5 text-center shadow-sm transition-all hover:border-primary/25">
+                <CardContent className="space-y-2 px-4 pb-5 pt-6">
+                  <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+                    <History className="h-5 w-5 text-primary" aria-hidden />
+                  </div>
+                  <p className="font-display text-3xl font-bold tabular-nums">{driverTripCount ?? 0}</p>
+                  <p className="text-sm text-muted-foreground">Viajes completados (Taxi)</p>
+                </CardContent>
+              </Card>
+            )}
 
             <Card className="card-industrial flex min-h-[140px] flex-col border-border/50 bg-muted/5 shadow-sm transition-all hover:border-primary/25 hover:shadow-md">
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
@@ -1259,14 +1309,55 @@ function ProfessionalDashboardInner() {
 
         {/* Tabs */}
         <Tabs value={currentTab} onValueChange={setTab} className="mx-auto mt-8 w-full max-w-5xl space-y-5">
-          <TabsList className="inline-flex h-auto min-h-11 w-full max-w-full flex-nowrap justify-center gap-1 overflow-x-auto rounded-xl border border-border/60 bg-muted/30 p-1.5 sm:flex-wrap sm:justify-center [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
-            <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Resumen</TabsTrigger>
-            <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Reservas</TabsTrigger>
-            <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">Facturas</TabsTrigger>
-          </TabsList>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <TabsList className="inline-flex h-auto min-h-11 w-full max-w-full flex-nowrap justify-center gap-1 overflow-x-auto rounded-xl border border-border/60 bg-muted/30 p-1.5 sm:flex-wrap sm:justify-center [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30">
+              <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">
+                Resumen
+              </TabsTrigger>
+              {!isTaxiDriver ? (
+                <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">
+                  Reservas
+                </TabsTrigger>
+              ) : null}
+              <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">
+                Facturas
+              </TabsTrigger>
+            </TabsList>
+            <SubscriptionStatusButton variant="outline" className="w-full sm:w-auto" />
+          </div>
 
           <TabsContent value="overview" className="mt-4 outline-none">
             <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6">
+              <Card className="card-industrial border-border/60 shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg sm:text-xl">Suscripción de visibilidad</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
+                    Controla la visibilidad de tu servicio en el catálogo.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="text-sm">
+                  {subscriptionSummary ? (
+                    <div className="flex flex-col gap-1">
+                      <p>
+                        <span className="text-muted-foreground">Estado:</span>{" "}
+                        <span className="font-semibold text-foreground">
+                          {subscriptionSummary.pending ? "En revisión" : subscriptionSummary.expired ? "Vencido" : "Activo"}
+                        </span>
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Tiempo restante:</span>{" "}
+                        <span className="font-semibold text-foreground">
+                          {typeof subscriptionSummary.days === "number" ? `Te quedan ${subscriptionSummary.days} día(s)` : "—"}
+                        </span>
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Esta sección aparece cuando tu cuenta está registrada como asociado.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
               {SHOW_PRO_RATING_BREAKDOWN && (
               <Card>
                 <CardHeader>
@@ -1336,34 +1427,14 @@ function ProfessionalDashboardInner() {
                 </CardContent>
               </Card>
 
-              {SHOW_PRO_QUICK_ACTIONS && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Acciones Rápidas</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <SubscriptionStatusButton variant="outline" className="w-full justify-start" />
-                  <Button variant="outline" className="w-full justify-start">
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    Solicitar pago a mi cuenta
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <FileText className="h-4 w-4 mr-2" />
-                    Descargar reporte de impuestos
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Calendar className="h-4 w-4 mr-2" />
-                    Ver calendario de pagos
-                  </Button>
-                </CardContent>
-              </Card>
-              )}
             </div>
           </TabsContent>
 
-          <TabsContent value="bookings">
-            <ProviderBookingsTab highlightedBookingId={highlightedBookingId} />
-          </TabsContent>
+          {!isTaxiDriver ? (
+            <TabsContent value="bookings">
+              <ProviderBookingsTab highlightedBookingId={highlightedBookingId} />
+            </TabsContent>
+          ) : null}
 
           <TabsContent value="invoices">
             <InvoicesTabContent />
@@ -1401,16 +1472,12 @@ function ProfessionalDashboardAccessGate() {
       setLocation("/");
       return;
     }
-    if (isVerifiedCarGoDriver) {
-      setLocation("/");
-      return;
-    }
   }, [stillLoading, isAuthenticated, providerProfile, isVerifiedCarGoDriver, setLocation]);
 
   if (stillLoading) {
     return <AccessGateLoading message="Cargando panel de asociado…" />;
   }
-  if (!isAuthenticated || !providerProfile || isVerifiedCarGoDriver) {
+  if (!isAuthenticated || !providerProfile) {
     return <AccessGateLoading message="Redirigiendo al inicio…" />;
   }
 

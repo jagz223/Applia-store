@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,7 @@ import {
   usePatchProfessionalVerificationPayment,
   useCurrentProvider,
   useCategories,
+  usePlatformSubscriptionFees,
   VERIFICATION_STATUS_ME,
   type VerifyingStatusMeDto,
 } from "@/hooks/use-mango-data";
@@ -34,12 +36,13 @@ import { useToast } from "@/hooks/use-toast";
 import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
 
 const BANK_ACCOUNT_NUMBER = "7700896747";
-const VERIFY_AMOUNT_USD = 15;
+const DEFAULT_VERIFY_AMOUNT_USD = 15;
 
 export default function VerifyProfessionalPayment() {
   const { isAuthenticated, user } = useAuth();
   const { data: currentProvider } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
+  const { data: subscriptionFees } = usePlatformSubscriptionFees();
   const provider = currentProvider ?? user?.provider;
   const isCarGo = useMemo(() => isCarGoProvider(provider ?? undefined, categories), [provider, categories]);
   const [, setLocation] = useLocation();
@@ -51,8 +54,23 @@ export default function VerifyProfessionalPayment() {
   }, []);
   const [transferDate, setTransferDate] = useState<Date | undefined>(undefined);
   const [transferCode, setTransferCode] = useState<string>("");
+  const [subscriptionMonths, setSubscriptionMonths] = useState<number>(1);
+  const categorySlug = useMemo(() => {
+    const direct = typeof (provider as any)?.category === "string" ? String((provider as any).category).trim() : "";
+    if (direct) return direct;
+    const id = Number((provider as any)?.categoryId);
+    if (!Number.isFinite(id)) return "";
+    const cat = categories.find((c: any) => Number(c?.id) === id);
+    return typeof (cat as any)?.slug === "string" ? String((cat as any).slug).trim() : "";
+  }, [provider, categories]);
+  const monthlyUsd = useMemo(() => {
+    const map = (subscriptionFees as any)?.feesBySlug as Record<string, number> | undefined;
+    const v = map && categorySlug ? Number(map[categorySlug]) : NaN;
+    return Number.isFinite(v) ? v : DEFAULT_VERIFY_AMOUNT_USD;
+  }, [subscriptionFees, categorySlug]);
   const [copied, setCopied] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const totalUsd = useMemo(() => monthlyUsd * subscriptionMonths, [monthlyUsd, subscriptionMonths]);
 
   const isFormValid = useMemo(() => {
     return transferDate != null && transferCode.trim() !== "";
@@ -75,6 +93,7 @@ export default function VerifyProfessionalPayment() {
       {
         transferDate: transferDateStr,
         transferReceiptCode: transferCode.trim(),
+        subscriptionMonths,
       },
       {
         onSuccess: async () => {
@@ -146,7 +165,7 @@ export default function VerifyProfessionalPayment() {
 
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
-            Cuota de visibilidad — {VERIFY_AMOUNT_USD} USD / mes
+            Cuota de visibilidad — {monthlyUsd} USD / mes
           </h1>
           <p className="text-muted-foreground mt-1">
             Transferí el monto indicado y registrá la fecha (solo día) y el código. La cuota se renueva cada mes para
@@ -155,7 +174,7 @@ export default function VerifyProfessionalPayment() {
             {isCarGo ? (
               <>
                 {" "}
-                Este paso también forma parte de la verificación para que los clientes puedan usar tus servicios Car Go.
+                Este paso también forma parte de la verificación para que los clientes puedan usar tus servicios de Taxi.
               </>
             ) : null}
           </p>
@@ -166,11 +185,32 @@ export default function VerifyProfessionalPayment() {
             <CardHeader>
               <CardTitle className="text-lg">Datos de la transferencia</CardTitle>
               <CardDescription>
-                Monto por período: <strong>{VERIFY_AMOUNT_USD} USD</strong>. Completá los datos para que el equipo valide
-                tu pago (activación o renovación mensual).
+                Selecciona cuántos meses estás pagando. Total: <strong>{totalUsd} USD</strong>.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <Label>Meses a pagar</Label>
+                <Select value={String(subscriptionMonths)} onValueChange={(v) => setSubscriptionMonths(Math.max(1, Math.min(12, Number(v) || 1)))}>
+                  <SelectTrigger className="w-full sm:max-w-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 12 }).map((_, i) => {
+                      const m = i + 1;
+                      return (
+                        <SelectItem key={m} value={String(m)}>
+                          {m} mes{m === 1 ? "" : "es"} ({monthlyUsd * m} USD)
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Puedes pagar hasta 12 meses (1 año). El equipo validará tu comprobante y se sumarán los meses aprobados.
+                </p>
+              </div>
+
               <div className="space-y-2">
                 <Label>Fecha de la transferencia</Label>
                 <p className="text-xs text-muted-foreground">Solo fecha (día), sin hora.</p>
@@ -221,7 +261,7 @@ export default function VerifyProfessionalPayment() {
                 {paymentMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
-                Registré el pago de {VERIFY_AMOUNT_USD} USD
+                Registré el pago de {totalUsd} USD
               </Button>
             </CardContent>
           </Card>
@@ -230,7 +270,7 @@ export default function VerifyProfessionalPayment() {
             <CardHeader>
               <CardTitle className="text-lg">Transferencia bancaria</CardTitle>
               <CardDescription>
-                Escanea el código QR o usa el número de cuenta. Transfiere exactamente {VERIFY_AMOUNT_USD} USD.
+                Escanea el código QR o usa el número de cuenta. Transfiere exactamente {totalUsd} USD.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col items-center">
@@ -272,8 +312,8 @@ export default function VerifyProfessionalPayment() {
           <DialogHeader>
             <DialogTitle>¿Confirmas el pago?</DialogTitle>
             <DialogDescription>
-              Solo confirmá si ya transferiste {VERIFY_AMOUNT_USD} USD con los datos indicados. El equipo validará el
-              comprobante y extenderá tu visibilidad un mes desde tu vencimiento actual si renovás anticipado.
+              Solo confirmá si ya transferiste {totalUsd} USD con los datos indicados. El equipo validará el comprobante
+              y extenderá tu visibilidad por {subscriptionMonths} mes(es) desde tu vencimiento actual si renovás anticipado.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

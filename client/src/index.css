@@ -33,14 +33,18 @@
 
     --card: 0 0% 100%;
     --card-foreground: 216 35% 16%;
-    --card-border: 215 22% 91%;
+    --card-border: 215 18% 86%;
 
     --popover: 0 0% 100%;
     --popover-foreground: 216 35% 16%;
-    --popover-border: 215 22% 91%;
+    --popover-border: 215 18% 86%;
 
-    --border: 215 20% 88%;
-    --input: 215 20% 88%;
+    /**
+     * Modo claro: bordes un poco más contrastados para que no “desaparezcan”
+     * sobre fondos muy claros, sin verse pesados.
+     */
+    --border: 215 18% 82%;
+    --input: 215 18% 82%;
     --ring: 172 100% 33%;
 
     --sidebar: 215 32% 97%;

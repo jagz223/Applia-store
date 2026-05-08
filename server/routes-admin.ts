@@ -19,6 +19,7 @@ import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
 import { getMobilityFares, setMobilityFares } from "./mobility-fares";
 import { getPackFares, setPackFares } from "./pack-fares";
+import { getSubscriptionFeesByCategorySlug, setSubscriptionFeesByCategorySlug } from "./subscription-fees";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
@@ -33,7 +34,7 @@ import {
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
 import { isFullAdmin } from "@shared/roles";
 import {
-  extendVisibilitySubscriptionEndsAt,
+  extendVisibilitySubscriptionEndsAtByMonths,
   parseVisibilitySubscriptionEndMs,
 } from "@shared/professional-listing-subscription";
 
@@ -155,6 +156,17 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  /** Lectura pública de mensualidad por categoría (UI pago/renovación). */
+  app.get("/api/platform/subscription-fees", async (_req, res) => {
+    try {
+      const feesBySlug = await getSubscriptionFeesByCategorySlug();
+      return res.json({ feesBySlug });
+    } catch (e) {
+      console.error("[subscription-fees] GET", e);
+      return res.status(500).json({ message: "Error al leer mensualidades" });
+    }
+  });
+
   /** Solo administrador completo: actualizar porcentaje de comisión de plataforma. */
   app.patch(
     "/api/admin/platform-commission-rate",
@@ -199,6 +211,22 @@ export function registerAdminRoutes(app: Express): void {
     } catch (e) {
       console.error("[mobility-fares] PATCH", e);
       return res.status(500).json({ message: "Error al guardar tarifas" });
+    }
+  });
+
+  const subscriptionFeesPatchSchema = z.object({
+    feesBySlug: z.record(z.string().min(1).max(80), z.number().min(0).max(10_000)),
+  });
+
+  app.patch("/api/admin/subscription-fees", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const parsed = subscriptionFeesPatchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      const saved = await setSubscriptionFeesByCategorySlug(parsed.data.feesBySlug);
+      return res.json({ feesBySlug: saved });
+    } catch (e) {
+      console.error("[subscription-fees] PATCH", e);
+      return res.status(500).json({ message: "Error al guardar mensualidades" });
     }
   });
 
@@ -389,6 +417,10 @@ export function registerAdminRoutes(app: Express): void {
         providerCategorySlug?: string | null;
         /** ISO fin de suscripción vigente (si existe). */
         visibilitySubscriptionEndsAt?: string | null;
+        /** Suscripción: meses y monto del comprobante (si existe). */
+        subscriptionMonths?: number | null;
+        subscriptionMonthlyUsd?: number | null;
+        subscriptionTotalUsd?: number | null;
       }> = [];
 
       for (const st of pending ?? []) {
@@ -423,6 +455,18 @@ export function registerAdminRoutes(app: Express): void {
 
         const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
         const transacction_code = profVer?.transferReceiptCode ?? null;
+        const subscriptionMonths =
+          typeof (profVer as any)?.subscriptionMonths === "number" && Number.isFinite((profVer as any).subscriptionMonths)
+            ? Math.max(1, Math.min(12, Math.trunc((profVer as any).subscriptionMonths)))
+            : null;
+        const subscriptionMonthlyUsd =
+          typeof (profVer as any)?.subscriptionMonthlyUsd === "number" && Number.isFinite((profVer as any).subscriptionMonthlyUsd)
+            ? Math.max(0, Number((profVer as any).subscriptionMonthlyUsd))
+            : null;
+        const subscriptionTotalUsd =
+          subscriptionMonths != null && subscriptionMonthlyUsd != null
+            ? Math.round(subscriptionMonths * subscriptionMonthlyUsd * 100) / 100
+            : null;
         const storedType = (st as any)?.requestType as ("onboarding" | "renewal" | undefined);
         const inferredType =
           storedType ??
@@ -444,6 +488,9 @@ export function registerAdminRoutes(app: Express): void {
           transacction_code,
           providerCategorySlug,
           visibilitySubscriptionEndsAt: providerEndsAtIso,
+          subscriptionMonths,
+          subscriptionMonthlyUsd,
+          subscriptionTotalUsd,
         });
       }
 
@@ -470,6 +517,9 @@ export function registerAdminRoutes(app: Express): void {
       const uniqueAdminIds = Array.from(
         new Set(rawItems.map((it) => String(it.adminUserId ?? "").trim()).filter(Boolean)),
       );
+      const uniqueAffectedIds = Array.from(
+        new Set(rawItems.map((it) => String(it.affectedUserId ?? "").trim()).filter(Boolean)),
+      );
       const adminById = new Map<string, { id: string; name: string; email: string | null }>();
       await Promise.all(
         uniqueAdminIds.map(async (id) => {
@@ -487,12 +537,32 @@ export function registerAdminRoutes(app: Express): void {
         }),
       );
 
+      const affectedById = new Map<string, { id: string; name: string; email: string | null }>();
+      await Promise.all(
+        uniqueAffectedIds.map(async (id) => {
+          try {
+            const u = (await genFebStorage.getUserById(id)) as any;
+            const name =
+              (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) ||
+              u?.email ||
+              id;
+            const email = u?.email ?? null;
+            affectedById.set(id, { id, name, email });
+          } catch {
+            affectedById.set(id, { id, name: id, email: null });
+          }
+        }),
+      );
+
       const items = rawItems.map((it) => {
         const admin = adminById.get(String(it.adminUserId ?? "").trim()) ?? null;
+        const affected = affectedById.get(String(it.affectedUserId ?? "").trim()) ?? null;
         return {
           ...it,
           adminName: admin?.name ?? null,
           adminEmail: admin?.email ?? null,
+          affectedUserName: affected?.name ?? null,
+          affectedUserEmail: affected?.email ?? null,
         };
       });
 
@@ -537,7 +607,10 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "id inválido" });
-      const schema = z.object({ action: z.enum(["approve", "reject"]) });
+      const schema = z.object({
+        action: z.enum(["approve", "reject"]),
+        reason: z.string().trim().min(3).max(600).optional(),
+      });
       const body = schema.parse(req.body);
 
       const resolved = await genFebStorage.resolveAccountChangeRequest({
@@ -545,6 +618,11 @@ export function registerAdminRoutes(app: Express): void {
         action: body.action,
         adminUserId: String(req.user.id),
       });
+
+      const rejectReason = body.action === "reject" ? String(body.reason ?? "").trim() : "";
+      if (body.action === "reject" && rejectReason.length < 3) {
+        return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
+      }
 
       // --- Auditoría ---
       try {
@@ -554,7 +632,11 @@ export function registerAdminRoutes(app: Express): void {
             action: body.action === "approve" ? "account_change_request_approved" : "account_change_request_rejected",
             adminUserId: String(req.user?.id ?? ""),
             affectedUserId: userId,
-            meta: { requestId: id, field: String((resolved as any)?.field ?? "") },
+            meta: {
+              requestId: id,
+              field: String((resolved as any)?.field ?? ""),
+              ...(body.action === "reject" ? { reason: rejectReason } : null),
+            },
           });
         }
       } catch {
@@ -610,8 +692,8 @@ export function registerAdminRoutes(app: Express): void {
 
       if (userId && allowed && body.action === "reject") {
         const title = `${capLabel(field)}: rechazado`;
-        const bodyText = "Revisa o vuelve a solicitar el cambio en Configuración.";
-        const notifData = { field, url: "/settings", message: bodyText, title };
+        const bodyText = `Tu solicitud fue rechazada. Motivo: ${rejectReason}`;
+        const notifData = { field, url: "/settings", message: bodyText, title, reason: rejectReason };
         const created = await genFebStorage.createNotification({
           userId,
           type: "account_change_request_rejected",
@@ -649,6 +731,7 @@ export function registerAdminRoutes(app: Express): void {
 
   const verifyingStatusActionSchema = z.object({
     action: z.enum(["approve", "reject"]),
+    reason: z.string().trim().min(3).max(600).optional(),
   });
 
   app.patch(
@@ -662,6 +745,10 @@ export function registerAdminRoutes(app: Express): void {
 
         const parsed = verifyingStatusActionSchema.parse(req.body);
         const status = parsed.action === "approve" ? "verified" : "rejected";
+        const rejectReason = status === "rejected" ? String(parsed.reason ?? "").trim() : "";
+        if (status === "rejected" && rejectReason.length < 3) {
+          return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
+        }
 
         const updated = await genFebStorage.setVerifyingStatusIdentification(userId, status as any);
         if (status === "verified") {
@@ -675,6 +762,7 @@ export function registerAdminRoutes(app: Express): void {
             action: isApprove ? "associate_onboarding_approved" : "associate_onboarding_rejected",
             adminUserId: String(req.user?.id ?? ""),
             affectedUserId: userId,
+            meta: isApprove ? undefined : { reason: rejectReason },
           });
         } catch {
           /* ignore */
@@ -686,7 +774,7 @@ export function registerAdminRoutes(app: Express): void {
           const title = isApprove ? "Identificación aprobada" : "Identificación rechazada";
           const msg = isApprove
             ? "Tu identificación ha sido aprobada correctamente."
-            : "Tu identificación ha sido rechazada. Por favor, intenta subir una imagen más clara de tu documento.";
+            : `Tu identificación ha sido rechazada. Motivo: ${rejectReason}`;
 
           await genFebStorage.createNotification({
             userId,
@@ -734,6 +822,10 @@ export function registerAdminRoutes(app: Express): void {
 
         const parsed = verifyingStatusActionSchema.parse(req.body);
         const status = parsed.action === "approve" ? "verified" : "rejected";
+        const rejectReason = status === "rejected" ? String(parsed.reason ?? "").trim() : "";
+        if (status === "rejected" && rejectReason.length < 3) {
+          return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
+        }
 
         const updated = await genFebStorage.setVerifyingStatusTransaction(userId, status as any);
         let verificationReportId: number | null = null;
@@ -749,18 +841,27 @@ export function registerAdminRoutes(app: Express): void {
                 if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00Z`);
                 return new Date();
               })();
-              const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
+                const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
               const receipt = (profVer?.transferReceiptCode ?? "").trim();
+              const months =
+                typeof (profVer as any)?.subscriptionMonths === "number" && Number.isFinite((profVer as any).subscriptionMonths)
+                  ? Math.max(1, Math.min(12, Math.trunc((profVer as any).subscriptionMonths)))
+                  : 1;
+                const monthlyUsd =
+                  typeof (profVer as any)?.subscriptionMonthlyUsd === "number" && Number.isFinite((profVer as any).subscriptionMonthlyUsd)
+                    ? Math.max(0, Number((profVer as any).subscriptionMonthlyUsd))
+                    : 15;
               const txDate = String((updated as any)?.transacction_date ?? "").trim();
-              const paymentKey = receipt && txDate ? `${receipt}|${txDate}` : "";
+              const paymentKey = receipt && txDate ? `${receipt}|${txDate}|${months}` : "";
 
               const alreadyApplied =
                 paymentKey &&
                 String((providerAfter as any)?.visibilitySubscriptionLastPaymentKey ?? "").trim() === paymentKey;
 
               if (!alreadyApplied) {
-              const nextIso = extendVisibilitySubscriptionEndsAt(
+              const nextIso = extendVisibilitySubscriptionEndsAtByMonths(
                 (providerAfter as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
+                months,
                 approvalBase,
               );
                 await genFebStorage.updateProvider(Number((providerAfter as { id: number }).id), {
@@ -791,13 +892,22 @@ export function registerAdminRoutes(app: Express): void {
                 const rid = alreadyDone.id != null ? Number(alreadyDone.id) : NaN;
                 verificationReportId = Number.isFinite(rid) ? rid : null;
               } else {
+                const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
+                const months =
+                  typeof (profVer as any)?.subscriptionMonths === "number" && Number.isFinite((profVer as any).subscriptionMonths)
+                    ? Math.max(1, Math.min(12, Math.trunc((profVer as any).subscriptionMonths)))
+                    : 1;
+                const monthlyUsd =
+                  typeof (profVer as any)?.subscriptionMonthlyUsd === "number" && Number.isFinite((profVer as any).subscriptionMonthlyUsd)
+                    ? Math.max(0, Number((profVer as any).subscriptionMonthlyUsd))
+                    : 15;
                 const created = await genFebStorage.createFinancialReport({
                   userId,
                   type: "verification_fee",
-                  amount: "15.00",
+                  amount: (monthlyUsd * months).toFixed(2),
                   currency: "USD",
                   status: "completed",
-                  description: "Pago por verificación de cuenta profesional (activación)",
+                  description: `Pago por suscripción de visibilidad (${months} mes(es))`,
                   createdAt: new Date(),
                 });
                 const cr = created?.id != null ? Number(created.id) : NaN;
@@ -826,7 +936,7 @@ export function registerAdminRoutes(app: Express): void {
           const title = isApprove ? "Pago verificado" : "Pago rechazado";
           const msg = isApprove
             ? "Tu comprobante de pago ha sido verificado correctamente."
-            : "Tu comprobante de pago ha sido rechazado. Por favor, verifica los datos de la transferencia e intenta nuevamente.";
+            : `Tu comprobante de pago ha sido rechazado. Motivo: ${rejectReason}`;
 
           const txNotifyData = (() => {
             const base: Record<string, unknown> = {
@@ -898,7 +1008,10 @@ export function registerAdminRoutes(app: Express): void {
               : "subscription_payment_rejected",
             adminUserId: String(req.user?.id ?? ""),
             affectedUserId: userId,
-            meta: { requestType: isRenewal ? "renewal" : "onboarding" },
+            meta: {
+              requestType: isRenewal ? "renewal" : "onboarding",
+              ...(isApprove ? null : { reason: rejectReason }),
+            },
           });
         } catch {
           /* ignore */
@@ -1268,9 +1381,16 @@ export function registerAdminRoutes(app: Express): void {
       const search = String(req.query.search ?? "").trim().toLowerCase();
       const minRating = req.query.minRating != null ? Number(req.query.minRating) : undefined;
       const sort = String(req.query.sort ?? "rating_desc");
+      const subcategoryId =
+        req.query.subcategoryId != null && String(req.query.subcategoryId).trim() !== ""
+          ? Number(req.query.subcategoryId)
+          : undefined;
 
       const [services, categories] = await Promise.all([adminListAllServices(), genFebStorage.getCategories()]);
-      const inBrand = (services ?? []).filter((s: any) => serviceBelongsToBrand(s, categoryId, categories ?? []));
+      let inBrand = (services ?? []).filter((s: any) => serviceBelongsToBrand(s, categoryId, categories ?? []));
+      if (subcategoryId != null && Number.isFinite(subcategoryId) && subcategoryId > 0) {
+        inBrand = inBrand.filter((s: any) => Number(s?.subcategoryId) === subcategoryId);
+      }
 
       const byProvider = new Map<number, any[]>();
       for (const s of inBrand) {

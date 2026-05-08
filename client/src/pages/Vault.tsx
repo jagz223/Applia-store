@@ -829,7 +829,7 @@ export default function Vault() {
                   <DialogDescription>
                     {viewCredentialUrl
                       ? isCarGoVault
-                        ? "Archivo que enviaste como licencia de conducir para la verificación Car Go."
+                        ? "Archivo que enviaste como licencia de conducir para la verificación de Taxi."
                         : "Archivo que enviaste para acreditar tu formación o experiencia."
                       : isCarGoVault
                         ? "Aún no tienes una licencia de conducir registrada en verificación."
