@@ -126,7 +126,7 @@ export function SlideToCargoOnline({
         disabled
           ? "border-muted-foreground/25 bg-muted/30 opacity-80"
           : receiving
-            ? "border-amber-500/50 bg-amber-500/10"
+            ? "border-emerald-500/50 bg-emerald-500/10"
             : "border-primary/40 bg-primary/10",
         className
       )}
@@ -136,11 +136,12 @@ export function SlideToCargoOnline({
         <p
           className={cn(
             // Importante UX: el texto va arriba para no quedar debajo del knob.
-            "pointer-events-none absolute inset-x-0 top-1.5 flex items-start justify-center px-6 text-center text-[13px] font-semibold leading-tight",
+            // Centramos el texto y dejamos padding extra para evitar que el knob lo tape.
+            "pointer-events-none absolute inset-0 flex items-center justify-center px-[72px] text-center text-[13px] font-semibold leading-tight",
             disabled
               ? "text-muted-foreground"
               : receiving
-                ? "text-amber-900 dark:text-amber-100/95"
+                ? "text-emerald-950 dark:text-emerald-50/95"
                 : "text-primary/90"
           )}
         >
@@ -167,7 +168,7 @@ export function SlideToCargoOnline({
               disabled
                 ? "cursor-not-allowed border-muted-foreground/30 text-muted-foreground"
                 : "cursor-grab active:cursor-grabbing",
-              !disabled && (receiving ? "border-amber-500 text-amber-700" : "border-primary text-primary")
+              !disabled && (receiving ? "border-emerald-500 text-emerald-700 dark:text-emerald-200" : "border-primary text-primary")
             )}
             style={{
               left: PAD,

@@ -178,6 +178,9 @@ export function Navigation() {
     isAuthenticated && associateOnboardingIncomplete && associateNavPath !== "/become-pro";
   /** Panel / continuar alta: perfil proveedor, rol professional, o onboarding marcado en localStorage. */
   const showAssociatePanelButton = !isVerifiedCarGoDriver && (isProfessional || associateOnboardingIncomplete);
+  /** Acceso al panel de actividad del asociado para drivers (ahora permitido). */
+  const showAssociateActivityForDriver = isVerifiedCarGoDriver;
+  const associateActivityHref = "/professional-dashboard";
 
   const getServiceIcon = (service: any) => {
     const iconName = service?.category?.icon ?? service?.category?.type ?? service?.category?.slug;
@@ -445,6 +448,13 @@ export function Navigation() {
                      <span>Panel Asociado</span>
                    </Link>
                  </Button>
+              ) : showAssociateActivityForDriver ? (
+                <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
+                  <Link href={associateActivityHref}>
+                    <Briefcase className="h-4 w-4" />
+                    <span>Panel Asociado</span>
+                  </Link>
+                </Button>
               ) : showBecomePro && !isProfessional && !associateOnboardingIncomplete ? (
                 <Button variant="outline" className="hidden sm:flex border-primary text-primary hover:bg-primary/10" asChild>
                   <Link href="/become-pro">Convertirse en Asociado</Link>
@@ -477,6 +487,14 @@ export function Navigation() {
                   {showAssociatePanelButton && (
                     <DropdownMenuItem asChild>
                       <Link href={associatePanelHref} className="flex items-center">
+                        <Briefcase className="mr-2 h-4 w-4" />
+                        Panel Asociado
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
+                  {showAssociateActivityForDriver && (
+                    <DropdownMenuItem asChild>
+                      <Link href={associateActivityHref} className="flex items-center">
                         <Briefcase className="mr-2 h-4 w-4" />
                         Panel Asociado
                       </Link>
@@ -672,6 +690,11 @@ export function Navigation() {
                 <Link href="/dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mi Panel
                 </Link>
+                )}
+                {showAssociateActivityForDriver && (
+                  <Link href={associateActivityHref} className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                    Panel Asociado
+                  </Link>
                 )}
                 {SHOW_PAYMENTS && (
                   <Link href="/payments" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>

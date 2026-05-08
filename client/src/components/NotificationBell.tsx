@@ -74,6 +74,11 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       return q.toString() ? `/bookings?${q.toString()}` : "/bookings";
     }
     case "admin":
+      {
+        // Si el servidor ya envía un destino, respetarlo.
+        const u = data.url ?? data.data?.url;
+        if (typeof u === "string" && u.startsWith("/")) return u;
+      }
       if (data.type === "recharge_pending") {
         const transferId = data.data?.transferId ?? data.transferId;
         const q = new URLSearchParams({ tab: "recargas" });
@@ -86,7 +91,8 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       if (data.type === "withdrawal_processed_by_other") {
         return "/admin?tab=payouts";
       }
-      return "/dashboard";
+      // Notificaciones admin antiguas/genéricas: por defecto deben abrir el panel admin.
+      return "/admin?tab=overview";
     case "admin_verification_request": {
       const u = data.url ?? data.data?.url;
       return typeof u === "string" && u.startsWith("/") ? u : "/admin?tab=overview";

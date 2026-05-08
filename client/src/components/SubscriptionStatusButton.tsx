@@ -92,6 +92,15 @@ export function SubscriptionStatusButton(props: { label?: string } & ButtonProps
                       </span>
                     </p>
                   </div>
+                  {!state.pending ? (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Puedes pagar <strong className="text-foreground">varios meses</strong> (hasta 1 año) para extender tu visibilidad.
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Ya tienes un comprobante en revisión. Cuando sea validado podrás volver a registrar un nuevo pago.
+                    </p>
+                  )}
                 </>
               ) : (
                 "Esta sección aparece cuando tu cuenta está registrada como asociado."
@@ -100,15 +109,24 @@ export function SubscriptionStatusButton(props: { label?: string } & ButtonProps
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cerrar</AlertDialogCancel>
-            {state?.needsRenew ? (
-              <AlertDialogAction asChild>
-                <Link href={RENEW_PAYMENT_HREF}>
+            {state ? (
+              state.pending ? (
+                <AlertDialogAction disabled>
                   <span className="inline-flex items-center">
                     <CreditCard className="h-4 w-4 mr-2" />
-                    Renovar Suscripción
+                    En revisión
                   </span>
-                </Link>
-              </AlertDialogAction>
+                </AlertDialogAction>
+              ) : (
+                <AlertDialogAction asChild>
+                  <Link href={RENEW_PAYMENT_HREF}>
+                    <span className="inline-flex items-center">
+                      <CreditCard className="h-4 w-4 mr-2" />
+                      {state.needsRenew ? "Renovar Suscripción" : "Pagar más meses"}
+                    </span>
+                  </Link>
+                </AlertDialogAction>
+              )
             ) : null}
           </AlertDialogFooter>
         </AlertDialogContent>

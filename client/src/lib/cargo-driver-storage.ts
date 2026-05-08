@@ -156,7 +156,9 @@ export function loadTripLog(accountId?: string | null): CargoDriverTripLog[] {
      * Compat: clave única antigua `cargo-driver-trip-log`. La primera carga la mueve al bucket activo
      * (usuario o invitado). En un mismo navegador suele haber un conductor habitual.
      */
-    if (rows.length === 0) {
+    // Importante: si hay `accountId` autenticado, NO migramos el legacy global para evitar mezclar
+    // historiales entre cuentas en un mismo dispositivo.
+    if (rows.length === 0 && normalizeAccountId(accountId ?? null) == null) {
       const legacy = parseTripLogRaw(localStorage.getItem(CARGO_DRIVER_TRIP_LOG_KEY));
       if (legacy.length > 0) {
         try {

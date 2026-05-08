@@ -28,9 +28,9 @@
   ],
   "shortcuts": [
     {
-      "name": "Pedir carro (Car Go)",
-      "short_name": "Car Go",
-      "description": "Pide un carro con Car Go",
+      "name": "Pedir Taxi",
+      "short_name": "Taxi",
+      "description": "Solicita un servicio de Taxi",
       "url": "/go/cargo",
       "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },

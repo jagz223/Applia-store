@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
-import { AlertTriangle, CalendarClock } from "lucide-react";
+import { AlertTriangle, CalendarClock, X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useCurrentProvider } from "@/hooks/use-mango-data";
 import { useToast } from "@/hooks/use-toast";
@@ -22,6 +22,11 @@ import {
 
 const RENEW_PAYMENT_HREF = "/professional/verify/payment";
 
+function safeUserIdForPrefs(userId: unknown): string {
+  const s = String(userId ?? "").trim();
+  return s.length > 0 ? s : "anon";
+}
+
 type ProviderMe = {
   isVerified?: boolean;
   isListingPublished?: boolean;
@@ -34,11 +39,28 @@ type ProviderMe = {
  * Franja / modal para la cuota mensual USD 15: contador, aviso ~10 días, vencido = CTA renovar.
  */
 export function ListingSubscriptionRibbon() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const { data: provider } = useCurrentProvider();
   const { toast } = useToast();
   const [reminderOpen, setReminderOpen] = useState(false);
   const [actionModalOpen, setActionModalOpen] = useState(false);
+  const [softHidden, setSoftHidden] = useState(false);
+
+  const prefsKey = useMemo(() => {
+    const uid = safeUserIdForPrefs((user as any)?.id);
+    return `listing_subs_ribbon_hidden_v1:${uid}`;
+  }, [user]);
+
+  const context = useMemo(() => {
+    if (typeof window === "undefined") return { isDriver: false };
+    const p = window.location.pathname || "";
+    const isDriver =
+      p.startsWith("/go/taxi/driver") ||
+      p.startsWith("/go/delivery/driver") ||
+      p.startsWith("/go/pack/driver") ||
+      p.startsWith("/go/cargo/driver");
+    return { isDriver };
+  }, []);
   const remindedKey = useMemo(() => {
     const p = provider as ProviderMe | null | undefined;
     if (!p?.visibilitySubscriptionEndsAt) return null;
@@ -64,6 +86,16 @@ export function ListingSubscriptionRibbon() {
 
     return { days, expired, critical, urgent, endsAt, endLabel };
   }, [isAuthenticated, provider]);
+
+  useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    try {
+      const v = localStorage.getItem(prefsKey);
+      if (v === "1") setSoftHidden(true);
+    } catch {
+      /* ignore */
+    }
+  }, [prefsKey]);
 
   useEffect(() => {
     if (!state?.urgent || remindedKey == null) return;
@@ -98,8 +130,19 @@ export function ListingSubscriptionRibbon() {
 
   const dismissReminder = useCallback(() => setReminderOpen(false), []);
   const dismissActionModal = useCallback(() => setActionModalOpen(false), []);
+  const dismissSoft = useCallback(() => {
+    setSoftHidden(true);
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(prefsKey, "1");
+    } catch {
+      /* ignore */
+    }
+  }, [prefsKey]);
 
   if (!state) return null;
+  // En vencido/crítico SIEMPRE mostrar (cumplimiento operativo).
+  if (softHidden && !(state.expired || state.critical)) return null;
 
   if (state.expired || state.critical) {
     return (
@@ -182,14 +225,26 @@ export function ListingSubscriptionRibbon() {
                   Te quedan {state.days} día(s) de publicación (hasta {state.endLabel}).
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-                  Renová USD 15 y envía el comprobante. Si pagás antes de que venza el período, al validarlo se suma un
-                  mes completo desde la fecha que tenías pendiente.
+                  {context.isDriver
+                    ? "Para poder trabajar como driver sin interrupciones, mantén tu suscripción al día. El costo se renueva cada mes y se valida por el equipo."
+                    : "Mantén tu servicio visible en el catálogo con la suscripción mensual. Si renovás antes de que venza, al validarlo se suma un mes desde tu vencimiento actual."}
                 </p>
               </div>
             </div>
-            <Button size="sm" variant="secondary" className="shrink-0 border border-amber-600/35" asChild>
-              <Link href={RENEW_PAYMENT_HREF}>Ir a renovar</Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" className="shrink-0 border border-amber-600/35" asChild>
+                <Link href={RENEW_PAYMENT_HREF}>Ir a renovar</Link>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={dismissSoft}
+                title="Ocultar este aviso"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -222,7 +277,17 @@ export function ListingSubscriptionRibbon() {
       <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
         <CalendarClock className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span>
-          Visibilidad en catálogo activa hasta <strong className="text-foreground">{state.endLabel}</strong>
+          {context.isDriver ? (
+            <>
+              Habilitación para trabajar como driver activa hasta{" "}
+              <strong className="text-foreground">{state.endLabel}</strong>
+            </>
+          ) : (
+            <>
+              Visibilidad en catálogo activa hasta{" "}
+              <strong className="text-foreground">{state.endLabel}</strong>
+            </>
+          )}
           {state.days > LISTING_SUBSCRIPTION_WARNING_DAYS ? (
             <>
               {" "}
@@ -236,6 +301,15 @@ export function ListingSubscriptionRibbon() {
         >
           Renovar anticipado
         </Link>
+        <button
+          type="button"
+          onClick={dismissSoft}
+          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+          title="Ocultar este aviso"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden />
+          <span className="text-[11px] sm:text-xs">Ocultar</span>
+        </button>
       </span>
     </div>
   );

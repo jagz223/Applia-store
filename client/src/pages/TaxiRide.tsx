@@ -24,13 +24,12 @@ import { useGoChat } from "@/contexts/GoChatContext";
 import { addHiddenConversationId } from "@/lib/hidden-conversations";
 import { purgeConversationCache } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
-import { useWallet } from "@/hooks/use-mango-data";
+import { usePlatformMobilityFares, usePlatformPackFares } from "@/hooks/use-mango-data";
 import { useSocket, useSocketChat } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
-import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
@@ -81,18 +80,16 @@ function formatDuration(sec: number): string {
   return `${h} h ${rest} min`;
 }
 
-type MobilityFares = {
-  moto: { baseUsd: number; perKmUsd: number };
-  auto: { baseDayUsd: number; baseNightUsd: number; perKmUsd: number; petExtraUsd: number };
-  camioneta: { baseUsd: number; perKmUsd: number; petExtraUsd: number };
-};
+function roundToCents(n: number): number {
+  return Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+}
 
-/** Misma base que `server/mobility-fares.ts` si aún no cargó `/api/platform/mobility-fares`. */
-const FALLBACK_MOBILITY_FARES: MobilityFares = {
-  moto: { baseUsd: 1.75, perKmUsd: 0.5 },
-  auto: { baseDayUsd: 1.5, baseNightUsd: 1.75, perKmUsd: 0.85, petExtraUsd: 1.0 },
-  camioneta: { baseUsd: 20.0, perKmUsd: 1.25, petExtraUsd: 2.0 },
-};
+function formatUsd(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return `$${v.toFixed(2)}`;
+}
+
+// Negociación (contraofertas) desactivada por ahora.
 
 /** Búsqueda máxima si no hay conductor (5 min). */
 const VEHICLE_SEARCH_MAX_MS = 5 * 60 * 1000;
@@ -108,10 +105,6 @@ const VEHICLE_OPTIONS: ReadonlyArray<{
   { type: "pet_car", label: "Pet Car", Icon: PawPrint },
   { type: "camioneta", label: "Camioneta", Icon: Truck },
 ];
-
-function formatUsd(amount: number): string {
-  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(amount);
-}
 
 function vehicleTypeLabel(type: string | undefined): string | null {
   if (!type) return null;
@@ -193,8 +186,6 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const [selectedVehicle, setSelectedVehicle] = useState<TaxiVehicleKind | null>(null);
   const [taxiPaymentMethod, setTaxiPaymentMethod] = useState<TaxiPaymentMethod | null>(null);
   const petEnabled = selectedVehicle === "pet_car";
-  const [mobilityFares, setMobilityFares] = useState<MobilityFares | null>(null);
-  const [packFares, setPackFares] = useState<{ moto: { baseUsd: number; perKmUsd: number }; auto: { baseUsd: number; perKmUsd: number }; camioneta: { baseUsd: number; perKmUsd: number } } | null>(null);
   const vehicleOptions = useMemo(
     () => (goSlug === "pack" ? VEHICLE_OPTIONS.filter((o) => o.type !== "pet_car") : VEHICLE_OPTIONS),
     [goSlug]
@@ -208,6 +199,94 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const [driverEtaLoading, setDriverEtaLoading] = useState(false);
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const activeRideIdRef = useRef<string | null>(null);
+  const [counterOffers, setCounterOffers] = useState<never[]>([]);
+  const { data: mobilityFaresDto } = usePlatformMobilityFares({ enabled: !isPackGoClient });
+  const { data: packFaresDto } = usePlatformPackFares({ enabled: isPackGoClient });
+
+  const suggestedUsdByVehicle = useMemo(() => {
+    if (!routeMeta) return {};
+    const km = Math.max(0, (routeMeta.distanceM ?? 0) / 1000);
+    const hour = new Date().getHours();
+    const isNight = hour >= 19 || hour < 6;
+
+    const out: Record<TaxiVehicleKind, number> = {} as any;
+
+    if (isPackGoClient) {
+      const fares = (packFaresDto as any)?.fares as
+        | { moto?: { baseUsd: number; perKmUsd: number }; auto?: { baseUsd: number; perKmUsd: number }; camioneta?: { baseUsd: number; perKmUsd: number } }
+        | undefined;
+      if (fares?.moto) out.moto = roundToCents(Math.max(0, Number(fares.moto.baseUsd) + km * Number(fares.moto.perKmUsd)));
+      if (fares?.auto) out.auto = roundToCents(Math.max(0, Number(fares.auto.baseUsd) + km * Number(fares.auto.perKmUsd)));
+      // En Pack (Delivery) no hay pet_car, lo dejamos calculado como auto por compatibilidad.
+      if (fares?.auto) out.pet_car = out.auto;
+      if (fares?.camioneta)
+        out.camioneta = roundToCents(Math.max(0, Number(fares.camioneta.baseUsd) + km * Number(fares.camioneta.perKmUsd)));
+      return out;
+    }
+
+    const fares = (mobilityFaresDto as any)?.fares as
+      | {
+          moto?: { baseUsd: number; perKmUsd: number };
+          auto?: { baseDayUsd: number; baseNightUsd: number; perKmUsd: number; petExtraUsd: number };
+          camioneta?: { baseUsd: number; perKmUsd: number; petExtraUsd: number };
+        }
+      | undefined;
+
+    if (fares?.moto) out.moto = roundToCents(Math.max(0, Number(fares.moto.baseUsd) + km * Number(fares.moto.perKmUsd)));
+    if (fares?.auto) {
+      const base = isNight ? Number(fares.auto.baseNightUsd) : Number(fares.auto.baseDayUsd);
+      out.auto = roundToCents(Math.max(0, base + km * Number(fares.auto.perKmUsd)));
+      out.pet_car = roundToCents(Math.max(0, base + km * Number(fares.auto.perKmUsd) + Number(fares.auto.petExtraUsd)));
+    }
+    if (fares?.camioneta) {
+      out.camioneta = roundToCents(
+        Math.max(0, Number(fares.camioneta.baseUsd) + km * Number(fares.camioneta.perKmUsd))
+      );
+    }
+
+    return out;
+  }, [routeMeta, isPackGoClient, packFaresDto, mobilityFaresDto]);
+
+  const suggestedUsd = useMemo(() => {
+    if (!routeMeta || !selectedVehicle) return null;
+    const km = Math.max(0, (routeMeta.distanceM ?? 0) / 1000);
+    if (isPackGoClient) {
+      const fares = (packFaresDto as any)?.fares as
+        | { moto?: { baseUsd: number; perKmUsd: number }; auto?: { baseUsd: number; perKmUsd: number }; camioneta?: { baseUsd: number; perKmUsd: number } }
+        | undefined;
+      const f = selectedVehicle === "camioneta" ? fares?.camioneta : selectedVehicle === "auto" ? fares?.auto : fares?.moto;
+      if (!f) return null;
+      return roundToCents(Math.max(0, Number(f.baseUsd) + km * Number(f.perKmUsd)));
+    }
+    const fares = (mobilityFaresDto as any)?.fares as
+      | {
+          moto?: { baseUsd: number; perKmUsd: number };
+          auto?: { baseDayUsd: number; baseNightUsd: number; perKmUsd: number; petExtraUsd: number };
+          camioneta?: { baseUsd: number; perKmUsd: number; petExtraUsd: number };
+        }
+      | undefined;
+    const hour = new Date().getHours();
+    const isNight = hour >= 19 || hour < 6;
+    if (selectedVehicle === "moto") {
+      const f = fares?.moto;
+      if (!f) return null;
+      return roundToCents(Math.max(0, Number(f.baseUsd) + km * Number(f.perKmUsd)));
+    }
+    if (selectedVehicle === "camioneta") {
+      const f = fares?.camioneta;
+      if (!f) return null;
+      const extra = petEnabled ? Number(f.petExtraUsd) : 0;
+      return roundToCents(Math.max(0, Number(f.baseUsd) + km * Number(f.perKmUsd) + extra));
+    }
+    // auto / pet_car => auto + extra
+    const f = fares?.auto;
+    if (!f) return null;
+    const base = isNight ? Number(f.baseNightUsd) : Number(f.baseDayUsd);
+    const extra = petEnabled ? Number(f.petExtraUsd) : 0;
+    return roundToCents(Math.max(0, base + km * Number(f.perKmUsd) + extra));
+  }, [routeMeta, selectedVehicle, isPackGoClient, packFaresDto, mobilityFaresDto, petEnabled]);
+
+  // Negociación (ajustar oferta +/-) desactivada por ahora: usamos siempre la referencia sugerida.
   const [riderTripInProgress, setRiderTripInProgress] = useState(false);
   const riderTripInProgressRef = useRef(false);
   useEffect(() => {
@@ -263,8 +342,6 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const rideSocketPrefix = goSlug === "pack" ? "pack:ride:" : "cargo:ride:";
 
   const isGoClient = location === goBasePath;
-  const { data: goWallet } = useWallet({ enabled: isGoClient && isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED });
-  const riderWalletBalance = typeof goWallet?.wallet === "number" ? goWallet.wallet : 0;
   const matchedDriverFullName = useMemo(() => {
     if (!matchedDriverInfo) return "";
     const d = matchedDriverInfo.driver as unknown as { name?: string; lastName?: string; last_name?: string };
@@ -356,16 +433,6 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     ]
   );
 
-  const goToRecharge = useCallback(
-    () => {
-      if (!FEATURE_WALLET_RECHARGE_UI_ENABLED) return;
-      saveRiderDraft();
-      const ret = `${goBasePath}${typeof window !== "undefined" ? window.location.search : ""}`;
-      setLocation(`/recharge?return=${encodeURIComponent(ret)}`);
-    },
-    [goBasePath, saveRiderDraft, setLocation]
-  );
-
   useEffect(() => {
     if (!isGoClient) return;
     if (activeRideIdRef.current || matchedDriverInfoRef.current) return;
@@ -388,8 +455,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       if (p.selectedVehicle) setSelectedVehicle(p.selectedVehicle);
       if (p.taxiPaymentMethod) {
         const m = p.taxiPaymentMethod as string;
-        if (m === "genfeb" && !FEATURE_WALLET_RECHARGE_UI_ENABLED) setTaxiPaymentMethod("cash");
-        else if (m === "genfeb" || m === "cash" || m === "bank_transfer") setTaxiPaymentMethod(m);
+        if (m === "cash" || m === "bank_transfer") setTaxiPaymentMethod(m);
       }
       if (p.vehicleModalStep) setVehicleModalStep(p.vehicleModalStep);
       if (typeof p.vehiclePickerOpen === "boolean") setVehiclePickerOpen(p.vehiclePickerOpen);
@@ -440,6 +506,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     if (vehicleModalStep === "searching") setCancelServiceMode("search");
     else if (riderTripInProgress) setCancelServiceMode("progress");
     else setCancelServiceMode("matched");
+    // Evitar overlays apilados: al abrir confirmación, ocultar el modal de búsqueda/vehículo.
+    setVehiclePickerOpen(false);
     setCancelServiceDialogOpen(true);
   }, [vehicleModalStep, riderTripInProgress]);
 
@@ -570,49 +638,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
   const handlePaymentContinue = useCallback(() => {
     if (!taxiPaymentMethod) return;
-    if (!FEATURE_WALLET_RECHARGE_UI_ENABLED && taxiPaymentMethod === "genfeb") {
-      setTaxiPaymentMethod("cash");
-      setVehicleModalStep("ready");
-      return;
-    }
-    if (taxiPaymentMethod === "genfeb") {
-      const need = typeof estimatedUsdRef.current === "number" && Number.isFinite(estimatedUsdRef.current) ? estimatedUsdRef.current : 0;
-      if (need > riderWalletBalance) {
-        toast({
-          title: "Saldo insuficiente",
-          description: "Te llevaremos a recargar para poder pagar con Saldo GenFeb. Al volver, tu ruta y selección quedarán guardadas.",
-          variant: "destructive",
-        });
-        goToRecharge();
-        return;
-      }
-    }
     setVehicleModalStep("ready");
-  }, [taxiPaymentMethod, riderWalletBalance, toast, goToRecharge]);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        if (goSlug === "pack") {
-          const res = await fetch("/api/platform/pack-fares");
-          const data = res.ok ? ((await res.json()) as { fares?: any }) : {};
-          if (!alive) return;
-          if (data?.fares) setPackFares(data.fares);
-        } else {
-          const res = await fetch("/api/platform/mobility-fares");
-          const data = res.ok ? ((await res.json()) as { fares?: MobilityFares }) : {};
-          if (!alive) return;
-          if (data?.fares) setMobilityFares(data.fares);
-        }
-      } catch {
-        // silencioso: UI seguirá con fallback (sin cálculo exacto)
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [goSlug]);
+  }, [taxiPaymentMethod]);
 
   useEffect(() => {
     if (!showMapFullscreen) return;
@@ -631,75 +658,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showMapFullscreen]);
-
-  const isNight = useMemo(() => {
-    const h = new Date().getHours();
-    return h >= 19 || h < 6;
-  }, []);
-
-  const faresEffective = mobilityFares ?? FALLBACK_MOBILITY_FARES;
-  const packFaresEffective =
-    packFares ??
-    ({
-      moto: { baseUsd: FALLBACK_MOBILITY_FARES.moto.baseUsd, perKmUsd: FALLBACK_MOBILITY_FARES.moto.perKmUsd },
-      auto: { baseUsd: FALLBACK_MOBILITY_FARES.auto.baseDayUsd, perKmUsd: FALLBACK_MOBILITY_FARES.auto.perKmUsd },
-      camioneta: { baseUsd: FALLBACK_MOBILITY_FARES.camioneta.baseUsd, perKmUsd: FALLBACK_MOBILITY_FARES.camioneta.perKmUsd },
-    } as const);
-
-  /** Tarifa estimada por tipo (sin mascota) para el paso “elegir vehículo” — antes no había `selectedVehicle` y todo salía $0. */
-  const fareByVehicleKind = useMemo((): Record<TaxiVehicleKind, number> | null => {
-    if (!routeMeta) return null;
-    const km = Math.max(0, routeMeta.distanceM / 1000);
-    if (goSlug === "pack") {
-      const f = packFaresEffective;
-      return {
-        moto: f.moto.baseUsd + f.moto.perKmUsd * km,
-        auto: f.auto.baseUsd + f.auto.perKmUsd * km,
-        pet_car: f.auto.baseUsd + f.auto.perKmUsd * km, // no aplica en Pack; se oculta en UI
-        camioneta: f.camioneta.baseUsd + f.camioneta.perKmUsd * km,
-      };
-    }
-    const f = faresEffective;
-    return {
-      moto: f.moto.baseUsd + f.moto.perKmUsd * km,
-      auto:
-        (isNight ? f.auto.baseNightUsd : f.auto.baseDayUsd) +
-        f.auto.perKmUsd * km,
-      pet_car:
-        (isNight ? f.auto.baseNightUsd : f.auto.baseDayUsd) +
-        f.auto.perKmUsd * km +
-        f.auto.petExtraUsd,
-      camioneta: f.camioneta.baseUsd + f.camioneta.perKmUsd * km,
-    };
-  }, [faresEffective, packFaresEffective, routeMeta, isNight, goSlug]);
-
-  const estimatedUsd = useMemo(() => {
-    if (!selectedVehicle) return null;
-    if (!routeMeta) return null;
-    const km = Math.max(0, routeMeta.distanceM / 1000);
-    if (goSlug === "pack") {
-      const f = packFaresEffective;
-      if (selectedVehicle === "moto") return f.moto.baseUsd + f.moto.perKmUsd * km;
-      if (selectedVehicle === "auto") return f.auto.baseUsd + f.auto.perKmUsd * km;
-      return f.camioneta.baseUsd + f.camioneta.perKmUsd * km;
-    }
-    const f = faresEffective;
-    if (selectedVehicle === "moto") {
-      return f.moto.baseUsd + f.moto.perKmUsd * km;
-    }
-    if (selectedVehicle === "auto") {
-      const base = isNight ? f.auto.baseNightUsd : f.auto.baseDayUsd;
-      return base + f.auto.perKmUsd * km;
-    }
-    if (selectedVehicle === "pet_car") {
-      const base = isNight ? f.auto.baseNightUsd : f.auto.baseDayUsd;
-      return base + f.auto.perKmUsd * km + f.auto.petExtraUsd;
-    }
-    return f.camioneta.baseUsd + f.camioneta.perKmUsd * km;
-  }, [faresEffective, packFaresEffective, selectedVehicle, routeMeta, isNight, goSlug]);
-
+  const estimatedUsd = suggestedUsd ?? 0;
   useEffect(() => {
-    estimatedUsdRef.current = typeof estimatedUsd === "number" && Number.isFinite(estimatedUsd) ? estimatedUsd : 0;
+    estimatedUsdRef.current = estimatedUsd;
   }, [estimatedUsd]);
 
   /**
@@ -709,16 +670,16 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const riderTripSnapshotRef = useRef<{
     amountUsd: number;
     durationSec: number;
-    payment: "genfeb" | "cash" | "bank_transfer";
+    payment: "cash" | "bank_transfer";
   }>({ amountUsd: 0, durationSec: 0, payment: "cash" });
   useEffect(() => {
     const pay = taxiPaymentMethod ?? "cash";
     riderTripSnapshotRef.current = {
-      amountUsd: estimatedUsd ?? 0,
+      amountUsd: estimatedUsdRef.current ?? 0,
       durationSec: routeMeta?.durationSec ?? 0,
-      payment: pay === "genfeb" || pay === "cash" || pay === "bank_transfer" ? pay : "cash",
+      payment: pay === "cash" || pay === "bank_transfer" ? pay : "cash",
     };
-  }, [estimatedUsd, routeMeta, taxiPaymentMethod]);
+  }, [routeMeta, taxiPaymentMethod]);
 
   /** Con conductor asignado: en “viaje en curso” el mapa sigue al driver como en DriverCargoMap (solo destino + ruta GPS→destino). */
   const matchedRideMap = useMemo(() => {
@@ -733,6 +694,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   /** Busca conductor real (Socket + API). */
   const handleConfirmVehicleSearch = useCallback(async () => {
     if (!selectedVehicle || !start || !end || !taxiPaymentMethod || !routeMeta) return;
+    if (suggestedUsd == null) return;
     clearVehicleSearchTimers();
     setNearbyDriverMarkers([]);
     setMatchedDriverInfo(null);
@@ -787,7 +749,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           durationSec: routeMeta.durationSec,
           vehicleType: selectedVehicle,
           paymentMethod: taxiPaymentMethod,
-          estimatedUsd: estimatedUsd ?? 0,
+          suggestedUsd,
+          estimatedUsd: suggestedUsd,
           petEnabled,
         }),
       });
@@ -805,6 +768,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       if (data.rideId) {
         setActiveRideId(data.rideId);
         activeRideIdRef.current = data.rideId;
+        setCounterOffers([]);
         saveGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo", data.rideId);
       }
     } catch {
@@ -819,7 +783,6 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     end,
     routeMeta,
     routeGeometry,
-    estimatedUsd,
     petEnabled,
     clearVehicleSearchTimers,
     toast,
@@ -891,9 +854,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     const onCompleted = async (p: { rideId: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       const snap = riderTripSnapshotRef.current;
-      let amountUsd = snap.amountUsd;
+      let amountUsd = 0;
       let durationSec = snap.durationSec;
-      let payment: "genfeb" | "cash" | "bank_transfer" = snap.payment;
+      let payment: "cash" | "bank_transfer" = snap.payment;
 
       const token = localStorage.getItem("token");
       if (token) {
@@ -903,17 +866,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           });
           if (res.ok) {
             const r = (await res.json()) as {
-              estimatedUsd?: number;
               durationSec?: number;
               paymentMethod?: string;
             };
-            if (typeof r.estimatedUsd === "number" && !Number.isNaN(r.estimatedUsd)) {
-              amountUsd = r.estimatedUsd;
-            }
             if (typeof r.durationSec === "number" && r.durationSec > 0) {
               durationSec = r.durationSec;
             }
-            if (r.paymentMethod === "genfeb" || r.paymentMethod === "cash" || r.paymentMethod === "bank_transfer") {
+            if (r.paymentMethod === "cash" || r.paymentMethod === "bank_transfer") {
               payment = r.paymentMethod;
             }
           }
@@ -934,7 +893,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
             driverName: matchedDriverInfoRef.current.driver?.name ?? "Conductor",
             goSlug: goSlug === "pack" ? "pack" : "cargo",
           },
-          user?.id ?? null
+          ((user as any)?.email ?? (user as any)?.id ?? null) != null
+            ? String(((user as any)?.email ?? (user as any)?.id) as any)
+            : null
         );
         rateTargetRef.current = {
           rideId: p.rideId,
@@ -988,6 +949,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       });
     };
     socket.on(`${rideSocketPrefix}failed`, onFailed);
+    // Contraofertas desactivadas: no nos suscribimos a eventos.
     return () => {
       socket.off(`${rideSocketPrefix}matched`, onMatched);
       socket.off(`${rideSocketPrefix}driver_location`, onDriverLoc);
@@ -1011,6 +973,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     user?.id,
     isPackGoClient,
   ]);
+
+  // Contraofertas desactivadas: no hay limpieza.
 
   const submitRideRating = useCallback(async () => {
     const tgt = rateTargetRef.current;
@@ -1709,8 +1673,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                               <span className="font-medium">Vehículo elegido:</span>{" "}
                               {VEHICLE_OPTIONS.find((o) => o.type === selectedVehicle)?.label}
                               <span className="text-muted-foreground"> · </span>
-                              <span className="font-semibold tabular-nums">
-                                {estimatedUsd != null ? formatUsd(estimatedUsd) : "—"}
+                              <span className="font-medium text-muted-foreground">
+                                Costo: se acuerda por chat
                               </span>
                               {petEnabled ? (
                                 <span className="text-muted-foreground text-xs">
@@ -1723,11 +1687,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                                   {" "}
                                   · Pago:{" "}
                                   <span className="font-medium text-foreground">
-                                    {taxiPaymentMethod === "genfeb"
-                                      ? "Saldo GenFeb"
-                                      : taxiPaymentMethod === "bank_transfer"
-                                        ? "Transferencia bancaria"
-                                        : "Efectivo"}
+                                    {taxiPaymentMethod === "bank_transfer" ? "Transferencia bancaria" : "Efectivo"}
                                   </span>
                                 </span>
                               )}
@@ -2117,11 +2077,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                         <span className="font-medium">Vehículo elegido:</span>{" "}
                         {VEHICLE_OPTIONS.find((o) => o.type === selectedVehicle)?.label}
                         <span className="text-muted-foreground"> · </span>
-                        <span className="font-semibold tabular-nums">
-                          {estimatedUsd != null ? formatUsd(estimatedUsd) : "—"}
-                        </span>
-                        <span className="text-muted-foreground text-xs block sm:inline sm:ml-1">
-                          {estimatedUsd != null ? "(estimado)" : "(configurando tarifa…)"}
+                        <span className="font-medium text-muted-foreground">
+                          Costo: se acuerda por chat
                         </span>
                         {petEnabled ? (
                           <span className="text-muted-foreground text-xs block sm:inline sm:ml-1">
@@ -2132,11 +2089,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                           <span className="text-muted-foreground text-xs block sm:inline sm:ml-1">
                             · Pago:{" "}
                             <span className="font-medium text-foreground">
-                              {taxiPaymentMethod === "genfeb"
-                                ? "Saldo GenFeb"
-                                : taxiPaymentMethod === "bank_transfer"
-                                  ? "Transferencia bancaria"
-                                  : "Efectivo"}
+                              {taxiPaymentMethod === "bank_transfer" ? "Transferencia bancaria" : "Efectivo"}
                             </span>
                           </span>
                         )}
@@ -2278,8 +2231,6 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         onOpenChange={handleVehicleModalOpenChange}
         step={vehicleModalStep}
         vehicleOptions={vehicleOptions}
-        vehicleFareByType={fareByVehicleKind}
-        vehicleUsd={estimatedUsd ?? 0}
         selectedType={selectedVehicle}
         onSelectType={handleSelectVehicleType}
         onConfirmSearch={handleConfirmVehicleSearch}
@@ -2290,8 +2241,12 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         onPaymentContinue={handlePaymentContinue}
         searchRemainingSec={searchRemainingSec}
         searchTotalSec={VEHICLE_SEARCH_TOTAL_SEC}
+        suggestedUsdByVehicle={suggestedUsdByVehicle}
+        suggestedUsd={suggestedUsd}
         onRequestCancelSearch={openCancelServiceDialog}
       />
+
+      {/* Negociación desactivada por ahora: no mostramos contraofertas flotantes */}
 
       {/* Wallet/Recargar ahora viven en `GoBottomNav` (barra inferior). */}
 

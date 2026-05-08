@@ -2,16 +2,15 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
-import { Banknote, Building2, Loader2, Wallet, X } from "lucide-react";
+import { Banknote, Building2, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 
 export type TaxiVehicleKind = "moto" | "auto" | "pet_car" | "camioneta";
 
 export type TaxiVehicleModalStep = "pick" | "payment" | "extras" | "ready" | "searching" | "done";
 
-export type TaxiPaymentMethod = "genfeb" | "cash" | "bank_transfer";
+export type TaxiPaymentMethod = "cash" | "bank_transfer";
 
 type VehicleOption = { type: TaxiVehicleKind; label: string; Icon: LucideIcon };
 
@@ -24,13 +23,16 @@ function formatMmSs(totalSec: number): string {
   return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
+function formatUsd(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return `$${v.toFixed(2)}`;
+}
+
 export function TaxiVehicleSearchModal({
   open,
   onOpenChange,
   step,
   vehicleOptions,
-  vehicleFareByType,
-  vehicleUsd,
   selectedType,
   onSelectType,
   onConfirmSearch,
@@ -41,6 +43,8 @@ export function TaxiVehicleSearchModal({
   onPaymentContinue,
   searchRemainingSec,
   searchTotalSec,
+  suggestedUsdByVehicle,
+  suggestedUsd,
   /** Si existe, “Cancelar búsqueda” abre confirmación en el padre (cancela el viaje en servidor). */
   onRequestCancelSearch,
 }: {
@@ -48,9 +52,6 @@ export function TaxiVehicleSearchModal({
   onOpenChange: (open: boolean) => void;
   step: TaxiVehicleModalStep;
   vehicleOptions: ReadonlyArray<VehicleOption>;
-  /** Tarifa estimada por tipo (ruta + tabla); en “pick” no hay vehículo seleccionado aún. */
-  vehicleFareByType: Record<TaxiVehicleKind, number> | null;
-  vehicleUsd: number;
   selectedType: TaxiVehicleKind | null;
   onSelectType: (t: TaxiVehicleKind) => void;
   onConfirmSearch: () => void;
@@ -61,6 +62,8 @@ export function TaxiVehicleSearchModal({
   onPaymentContinue: () => void;
   searchRemainingSec: number;
   searchTotalSec: number;
+  suggestedUsdByVehicle: Partial<Record<TaxiVehicleKind, number>>;
+  suggestedUsd: number | null;
   onRequestCancelSearch?: () => void;
 }) {
   useEffect(() => {
@@ -84,9 +87,6 @@ export function TaxiVehicleSearchModal({
   const searching = step === "searching";
   const done = step === "done";
   const compactBottom = searching || done;
-
-  const formatUsd = (n: number) =>
-    new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(n);
 
   return createPortal(
     <AnimatePresence>
@@ -178,7 +178,7 @@ export function TaxiVehicleSearchModal({
                     Tipo de vehículo
                   </h2>
                   <p className="text-xs leading-snug text-muted-foreground md:text-sm md:leading-normal">
-                    Elige vehículo, pago y confirmación. La tarifa usa tu ruta actual.
+                    Calculamos una referencia sugerida basada en tarifas de la plataforma.
                   </p>
                 </div>
 
@@ -192,7 +192,7 @@ export function TaxiVehicleSearchModal({
                   }}
                 >
                   {vehicleOptions.map(({ type, label, Icon }) => {
-                    const fare = vehicleFareByType?.[type];
+                    const sug = typeof suggestedUsdByVehicle?.[type] === "number" ? (suggestedUsdByVehicle[type] as number) : null;
                     return (
                     <motion.div
                       key={type}
@@ -212,8 +212,8 @@ export function TaxiVehicleSearchModal({
                       >
                         <Icon className="h-7 w-7 shrink-0 text-primary sm:h-9 sm:w-9" aria-hidden />
                         <span className="text-xs font-semibold text-foreground sm:text-sm">{label}</span>
-                        <span className="text-[11px] font-bold tabular-nums leading-none text-foreground sm:text-base">
-                          {fare != null ? formatUsd(fare) : "—"}
+                        <span className="text-[11px] sm:text-xs text-muted-foreground tabular-nums">
+                          {sug == null ? "—" : `Ref. ${formatUsd(sug)}`}
                         </span>
                       </button>
                     </motion.div>
@@ -239,31 +239,11 @@ export function TaxiVehicleSearchModal({
                     <span className="font-medium text-foreground">
                       {vehicleOptions.find((o) => o.type === selectedType)?.label}
                     </span>{" "}
-                    · Tarifa referencia {formatUsd(vehicleUsd)}
+                    · Pago directo al conductor
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
-                  <button
-                    type="button"
-                    onClick={() => onSelectPayment("genfeb")}
-                    className={cn(
-                      "flex flex-col gap-2 rounded-xl border-2 p-4 text-left transition-colors",
-                      "hover:border-primary/60 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                      selectedPayment === "genfeb" ? "border-primary bg-primary/5" : "border-border bg-card"
-                    )}
-                  >
-                    <span className="flex items-center gap-2 font-semibold text-foreground">
-                      <Wallet className="h-5 w-5 shrink-0 text-primary" aria-hidden />
-                      Saldo GenFeb
-                    </span>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      Se te descontará de tu <strong className="text-foreground">Saldo</strong>.
-                    </p>
-                  </button>
-                  )}
-
                   <button
                     type="button"
                     onClick={() => onSelectPayment("cash")}
@@ -332,26 +312,20 @@ export function TaxiVehicleSearchModal({
                   <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
                     Revisa:{" "}
                     <span className="font-medium">{vehicleOptions.find((o) => o.type === selectedType)?.label}</span> ·{" "}
-                    {formatUsd(vehicleUsd)} ·{" "}
-                    {selectedPayment === "genfeb"
-                      ? "Saldo GenFeb"
-                      : selectedPayment === "cash"
-                        ? "Efectivo al conductor"
-                        : "Transferencia bancaria"}
+                    {selectedPayment === "cash" ? "Efectivo al conductor" : "Transferencia bancaria"}
                   </p>
-                  {selectedPayment === "genfeb" ? (
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      El importe se descontará de tu <strong className="text-foreground">Saldo</strong> al finalizar el viaje.
-                    </p>
-                  ) : selectedPayment === "cash" ? (
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      Pagarás al conductor en efectivo; lleva el monto completo listo.
-                    </p>
-                  ) : (
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      Coordina la transferencia con el Driver por chat (pide sus datos).
-                    </p>
-                  )}
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    El pago es directo con el driver. La plataforma solo muestra una <strong className="text-foreground">referencia sugerida</strong>.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-border bg-card/95 p-3">
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <span className="text-muted-foreground">Referencia sugerida</span>
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {suggestedUsd == null ? "—" : formatUsd(suggestedUsd)}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <div className="flex flex-wrap gap-2">
@@ -362,7 +336,13 @@ export function TaxiVehicleSearchModal({
                       Cambiar pago
                     </Button>
                   </div>
-                  <Button type="button" size="lg" className="w-full sm:w-auto" onClick={onConfirmSearch}>
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="w-full sm:w-auto"
+                    onClick={onConfirmSearch}
+                    disabled={suggestedUsd == null}
+                  >
                     Buscar conductor
                   </Button>
                 </div>

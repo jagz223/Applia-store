@@ -257,6 +257,12 @@ export default function ServiceDetails() {
             <section className="space-y-3">
               <Badge variant="outline" className="border-primary/30 bg-primary/10 font-medium text-primary">
                 {getCategoryDisplayName(service.category)}
+                {service.subcategory?.name ? (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {service.subcategory.name}
+                  </span>
+                ) : null}
               </Badge>
               <h2 className="font-display text-2xl font-bold text-foreground md:text-3xl">{service.title}</h2>
               <p className="text-base leading-relaxed text-muted-foreground">{service.description}</p>
@@ -277,6 +283,7 @@ export default function ServiceDetails() {
                 <li>
                   <span className="font-medium text-foreground">Categoría:</span>{" "}
                   {getCategoryDisplayName(service.category)}
+                  {service.subcategory?.name ? ` · ${service.subcategory.name}` : ""}
                 </li>
                 <li>
                   <span className="font-medium text-foreground">Especialidad:</span>{" "}

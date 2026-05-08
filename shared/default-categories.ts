@@ -25,12 +25,12 @@ export function effectiveHiddenCategorySlugs(apiHidden: string[] | undefined | n
 export const MOBILITY_GO_PROVIDER_SLUGS = ["transport", "marketplace", "delivery"] as const;
 
 export const CATEGORY_DISPLAY_NAMES: Readonly<Record<string, string>> = {
-  technical: "Fix Go",
-  professional: "Pro Go",
-  maintenance: "Man Go",
-  delivery: "Pack Go",
-  marketplace: "Shop Go",
-  transport: "Car Go",
+  technical: "Servicios Técnicos",
+  professional: "Servicios Profesionales",
+  maintenance: "Mantenimiento",
+  delivery: "Delivery",
+  marketplace: "Marketplace",
+  transport: "Servicio de Taxi",
 } as const;
 
 /** Devuelve el nombre de marca para una categoría (por slug) o el nombre original si no hay mapeo. */

@@ -55,7 +55,9 @@ export function loadRiderTripLog(accountId?: string | null): CargoRiderTripLog[]
   try {
     const key = riderTripLogStorageKey(accountId ?? null);
     let rows = parseRiderTripLogRaw(localStorage.getItem(key));
-    if (rows.length === 0) {
+    // Importante: si hay `accountId` autenticado, NO migramos el legacy global para evitar mezclar
+    // historiales entre cuentas en un mismo dispositivo.
+    if (rows.length === 0 && normalizeAccountId(accountId ?? null) == null) {
       const legacy = parseRiderTripLogRaw(localStorage.getItem(CARGO_RIDER_TRIP_LOG_KEY));
       if (legacy.length > 0) {
         try {

@@ -246,8 +246,11 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   }, []);
 
   useEffect(() => {
-    setTrips(loadTripLog(user?.id ?? null));
-  }, [user?.id]);
+    // Preferir email para evitar colisiones si el backend cambia el tipo de id.
+    const accountKey =
+      (user as any)?.email != null ? String((user as any).email) : (user as any)?.id != null ? String((user as any).id) : null;
+    setTrips(loadTripLog(accountKey));
+  }, [user?.id, user?.email]);
 
   useEffect(() => {
     if (!goDriverUi) return;
@@ -408,9 +411,17 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
                   : "cash",
             goSlug: goSlug === "pack" ? "pack" : "cargo",
           },
-          user?.id ?? null
+          (((user as any)?.email ?? (user as any)?.id ?? null) != null
+            ? String(((user as any)?.email ?? (user as any)?.id) as any)
+            : null) as any
         );
-        setTrips(loadTripLog(user?.id ?? null));
+        setTrips(
+          loadTripLog(
+            (((user as any)?.email ?? (user as any)?.id ?? null) != null
+              ? String(((user as any)?.email ?? (user as any)?.id) as any)
+              : null) as any
+          )
+        );
         rateTargetRef.current = { rideId: p.rideId, targetName: snap.rider?.name ?? "Cliente" };
         setRateStars(5);
         setRateDialogOpen(true);
@@ -551,6 +562,12 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 
   const respondToOffer = async (accept: boolean) => {
     if (!incomingOffer) return;
+    const snapOffer = incomingOffer;
+    const snapModule = incomingModule;
+    // UX: cerrar el modal inmediatamente (la respuesta al backend puede tardar).
+    // En aceptar también lo cerramos ya, para evitar que quede "pegado" en pantalla.
+    goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+    if (accept) goDriverUi?.clearOffers?.();
     const token = localStorage.getItem("token");
     if (!token) {
       toast({
@@ -563,8 +580,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     }
     setRespondBusy(true);
     try {
-      const base = incomingModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
-      const res = await fetch(`${base}/${incomingOffer.rideId}/respond`, {
+      const base = snapModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+      const res = await fetch(`${base}/${snapOffer.rideId}/respond`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ accept }),
@@ -572,19 +589,22 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       const data = (await res.json().catch(() => ({}))) as { conversationId?: number; message?: string };
       if (!res.ok) {
         const msg = data.message || "No se pudo responder";
-        // Si la oferta ya expiró o se reasignó, cerrar el modal y seguir con la cola.
+        // Si el driver RECHAZA y el backend falla (tomado/expirado/etc), cerramos igual el modal.
+        if (!accept) goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+        // Si el driver ACEPTA, solo cerramos si realmente expiró o se reasignó.
         if (
-          msg.toLowerCase().includes("expir") ||
-          msg.toLowerCase().includes("reasign") ||
-          msg.toLowerCase().includes("ya no") ||
-          msg.toLowerCase().includes("no está disponible")
+          accept &&
+          (msg.toLowerCase().includes("expir") ||
+            msg.toLowerCase().includes("reasign") ||
+            msg.toLowerCase().includes("ya no") ||
+            msg.toLowerCase().includes("no está disponible"))
         ) {
-          goDriverUi?.resolveOfferAndShowNext(incomingOffer.rideId);
+          goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
         }
         throw new Error(msg);
       }
-      const snapOffer = incomingOffer;
       // Al responder, cerrar el modal y limpiar cola para que no siga sonando.
+      goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
       goDriverUi?.clearOffers?.();
       if (accept) {
         if (data.conversationId != null) setActiveConversationId(data.conversationId);
@@ -594,7 +614,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setSearchingClient(false);
         setPaymentConfirmed(snapOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED);
         // Guardar según módulo para reanudar correctamente.
-        saveGoDriverActiveRideId(incomingModule === "pack" ? "pack" : "cargo", snapOffer.rideId);
+        saveGoDriverActiveRideId(snapModule === "pack" ? "pack" : "cargo", snapOffer.rideId);
         lastServiceRouteFetchRef.current = null;
       }
       if (!accept) {
@@ -605,10 +625,20 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setPaymentConfirmed(false);
       }
     } catch (e) {
+      // Si el conductor aceptó y (por carrera/latencia) ya quedó asignado, evitamos el toast rojo.
+      if (accept && activeRideIdRef.current && incomingOffer?.rideId && activeRideIdRef.current === incomingOffer.rideId) {
+        return;
+      }
+      const msg = e instanceof Error ? e.message : "Intenta de nuevo.";
+      const soft =
+        accept &&
+        (msg.toLowerCase().includes("ya no") ||
+          msg.toLowerCase().includes("no está disponible") ||
+          msg.toLowerCase().includes("otro conductor"));
       toast({
-        title: "No se pudo responder a la oferta",
-        description: e instanceof Error ? e.message : "Intenta de nuevo.",
-        variant: "destructive",
+        title: soft ? "La oferta ya no estaba disponible" : "No se pudo responder a la oferta",
+        description: msg,
+        variant: soft ? undefined : "destructive",
       });
     } finally {
       setRespondBusy(false);

@@ -276,7 +276,7 @@ export interface IStorage
   ): Promise<ProfessionalVerification>;
   upsertProfessionalVerificationPayment(
     userId: string,
-    data: { transferReceiptCode: string; transferDate: string }
+    data: { transferReceiptCode: string; transferDate: string; subscriptionMonths: number; subscriptionMonthlyUsd?: number }
   ): Promise<ProfessionalVerification>;
 
   // ==================== verifying_status (nueva colección) ====================
@@ -2370,7 +2370,7 @@ export class InMemoryStorage implements IStorage {
 
   async upsertProfessionalVerificationPayment(
     userId: string,
-    data: { transferReceiptCode: string; transferDate: string }
+    data: { transferReceiptCode: string; transferDate: string; subscriptionMonths: number; subscriptionMonthlyUsd?: number }
   ): Promise<ProfessionalVerification> {
     const cur = this.professionalVerifications.get(userId);
     const next: ProfessionalVerification = {
@@ -2379,6 +2379,11 @@ export class InMemoryStorage implements IStorage {
       imageVerified: false, // siempre false por ahora
       transferReceiptCode: data.transferReceiptCode.trim(),
       transferDate: data.transferDate.trim(),
+      subscriptionMonths: Math.max(1, Math.min(12, Math.trunc(data.subscriptionMonths))),
+      subscriptionMonthlyUsd:
+        typeof data.subscriptionMonthlyUsd === "number" && Number.isFinite(data.subscriptionMonthlyUsd)
+          ? Math.max(0, data.subscriptionMonthlyUsd)
+          : (cur as any)?.subscriptionMonthlyUsd ?? null,
       createdAt: cur?.createdAt ? new Date(cur.createdAt as any) : new Date(),
       updatedAt: new Date(),
     };
@@ -2438,7 +2443,8 @@ export class InMemoryStorage implements IStorage {
     const cur = this.verifyingStatuses.get(userId);
     const next: VerifyingStatus = {
       user: userId,
-      requestType: cur?.requestType ?? requestType,
+      // Importante: si el pago es de renovación, debe reflejarse siempre.
+      requestType,
       identification_verified: cur?.identification_verified ?? "rejected",
       transacction_date: transactionDate,
       transacction_verified: "pending",
@@ -2458,9 +2464,9 @@ export class InMemoryStorage implements IStorage {
   async setVerifyingStatusIdentification(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus> {
     const cur = this.verifyingStatuses.get(userId);
     if (!cur) throw new Error("Verificación no encontrada");
-    if (cur.identification_verified !== "pending") {
-      throw new Error("La identificación ya no está en pending");
-    }
+    // Permitir que el admin revierta un rechazo anterior (rejected→verified) sin exigir que el usuario re-subiera.
+    // Solo bloqueamos si ya está verificado.
+    if (cur.identification_verified === "verified") throw new Error("La identificación ya fue verificada");
     const next: VerifyingStatus = {
       ...cur,
       identification_verified: status,
@@ -2473,9 +2479,9 @@ export class InMemoryStorage implements IStorage {
   async setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus> {
     const cur = this.verifyingStatuses.get(userId);
     if (!cur) throw new Error("Verificación no encontrada");
-    if (cur.transacction_verified == null || cur.transacction_verified !== "pending") {
-      throw new Error("La transacción ya no está en pending");
-    }
+    // Permitir revertir rechazo anterior (rejected→verified). Solo bloquear si no hay envío (null) o ya está verificado.
+    if (cur.transacction_verified == null) throw new Error("Aún no hay comprobante de pago");
+    if (cur.transacction_verified === "verified") throw new Error("La transacción ya fue verificada");
     const next: VerifyingStatus = {
       ...cur,
       transacction_verified: status,

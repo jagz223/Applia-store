@@ -13,6 +13,10 @@ export const professionalVerificationSchema = z.object({
   transferReceiptCode: z.string().nullable().optional(),
   /** Fecha de la transferencia (yyyy-MM-dd) */
   transferDate: z.string().nullable().optional(),
+  /** Cuántos meses está pagando (1–12). Si falta, asumir 1. */
+  subscriptionMonths: z.number().int().min(1).max(12).nullable().optional(),
+  /** Mensualidad (USD) vigente al momento de registrar el comprobante. */
+  subscriptionMonthlyUsd: z.number().min(0).max(10_000).nullable().optional(),
   createdAt: z.union([z.date(), z.string()]).optional(),
   updatedAt: z.union([z.date(), z.string()]).optional(),
 });
@@ -42,6 +46,8 @@ export const patchProfessionalVerificationCredentialBody = z.object({
 export const patchProfessionalVerificationPaymentBody = z.object({
   transferReceiptCode: z.string().min(1).max(500),
   transferDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  // Obligatorio: el admin debe ver exactamente lo que el asociado eligió.
+  subscriptionMonths: z.number().int().min(1).max(12),
 });
 
 // ============ verifying_status (nueva colección) ============

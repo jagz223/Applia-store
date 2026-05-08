@@ -31,6 +31,7 @@ import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
 import { MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
+import { categorySlugFromProvider, getSubscriptionFeesByCategorySlug, subscriptionMonthlyUsdForCategorySlug } from "./subscription-fees";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -273,9 +274,14 @@ export async function registerRoutes(
       }
 
       const body = patchProfessionalVerificationPaymentBody.parse(req.body);
+      const feesBySlug = await getSubscriptionFeesByCategorySlug();
+      const catSlug = categorySlugFromProvider(provider as any, []);
+      const monthlyUsd = subscriptionMonthlyUsdForCategorySlug(feesBySlug, catSlug);
       const updated = await genFebStorage.upsertProfessionalVerificationPayment(userId, {
         transferReceiptCode: body.transferReceiptCode,
         transferDate: body.transferDate,
+        subscriptionMonths: body.subscriptionMonths,
+        subscriptionMonthlyUsd: monthlyUsd,
       });
 
       // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
@@ -290,13 +296,16 @@ export async function registerRoutes(
           (r: { type?: string; status?: string }) => r.type === "verification_fee" && r.status === "pending",
         );
         if (!hasPendingVerification) {
+          const months =
+            Math.max(1, Math.min(12, Math.trunc(body.subscriptionMonths)));
+          const amountUsd = (monthlyUsd * months).toFixed(2);
           await genFebStorage.createFinancialReport({
             userId,
             type: "verification_fee",
-            amount: "15.00",
+            amount: amountUsd,
             currency: "USD",
             status: "pending",
-            description: `Pago por verificación de cuenta (Comprobante: ${body.transferReceiptCode})`,
+            description: `Pago por suscripción de visibilidad (${months} mes(es)) (Comprobante: ${body.transferReceiptCode})`,
             createdAt: new Date(),
           });
         }
@@ -648,7 +657,7 @@ export async function registerRoutes(
       const isGoDriverCategory = catForSignup?.slug === "transport" || catForSignup?.slug === "delivery";
       let parsedVehicle: ReturnType<typeof insertProviderVehicleSchema.safeParse> | null = null;
       if (vehicleFromBody != null && !isGoDriverCategory) {
-        return res.status(400).json({ message: "Los datos de vehículo solo aplican a Car Go y Pack Go." });
+        return res.status(400).json({ message: "Los datos de vehículo solo aplican a Taxi y Delivery." });
       }
       if (isGoDriverCategory) {
         parsedVehicle = insertProviderVehicleSchema.safeParse(vehicleFromBody);

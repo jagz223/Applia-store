@@ -205,6 +205,44 @@ export function useCategoryVisibility(options?: { enabled?: boolean }) {
   });
 }
 
+export type SubscriptionFeesDto = { feesBySlug: Record<string, number> };
+
+/** Mensualidad por categoría (suscripción de visibilidad) */
+export function usePlatformSubscriptionFees(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["/api/platform/subscription-fees"],
+    queryFn: async () => {
+      const res = await fetch("/api/platform/subscription-fees");
+      if (!res.ok) throw new Error("No se pudieron cargar las mensualidades");
+      return res.json() as Promise<SubscriptionFeesDto>;
+    },
+    staleTime: 30_000,
+    enabled: options?.enabled !== false,
+  });
+}
+
+export function usePatchPlatformSubscriptionFees() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (feesBySlug: SubscriptionFeesDto["feesBySlug"]) => {
+      const token = getToken();
+      const res = await fetch("/api/admin/subscription-fees", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ feesBySlug }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { message?: string };
+      if (!res.ok) throw new Error(data.message || "No se pudo guardar mensualidades");
+      return data as SubscriptionFeesDto;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/platform/subscription-fees"] });
+      toast({ title: "Guardado", description: "Mensualidades actualizadas." });
+    },
+  });
+}
+
 /** Tarifas Pack Go (envíos/delivery) */
 export function usePlatformPackFares(options?: { enabled?: boolean }) {
   return useQuery({
@@ -906,7 +944,13 @@ export function usePendingRatings(options?: { enabled?: boolean }) {
       return data;
     },
     enabled: options?.enabled !== false,
-    refetchInterval: 15_000,
+    // Evita spam de requests cuando no hay nada pendiente:
+    // - si hay pendientes: refrescar rápido para mostrar el modal
+    // - si no hay: refrescar lento
+    refetchInterval: (q) => {
+      const pendingLen = (q.state.data as { pending?: unknown[] } | undefined)?.pending?.length ?? 0;
+      return pendingLen > 0 ? 15_000 : 5 * 60_000;
+    },
   });
 }
 
@@ -1473,7 +1517,7 @@ export function usePatchProfessionalVerificationImage() {
 export function usePatchProfessionalVerificationPayment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { transferReceiptCode: string; transferDate: string }) => {
+    mutationFn: async (body: { transferReceiptCode: string; transferDate: string; subscriptionMonths: number }) => {
       const token = getToken();
       const res = await fetch(`${PROFESSIONAL_VERIFICATION_ME}/payment`, {
         method: "PATCH",

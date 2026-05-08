@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Banknote, Car, History, Package, Store, MessageSquare, Settings, Bell, TrendingUp, Wallet } from "lucide-react";
+import { Car, History, Package, Store, MessageSquare, Settings, Bell, TrendingUp } from "lucide-react";
 import { useGoChat } from "@/contexts/GoChatContext";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
-import { useCategoryVisibility, useWallet, useWalletTransfers } from "@/hooks/use-mango-data";
+import { useCategoryVisibility } from "@/hooks/use-mango-data";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { mobilityHistorySheetTitle, mobilityServiceLabel } from "@shared/mobility-ui-labels";
-import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DriverEarningsPanel } from "@/components/go/DriverEarningsPanel";
@@ -18,7 +17,6 @@ import { loadGoDriverActiveRideId } from "@/lib/cargo-driver-storage";
 import { loadGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { getTransferTypeLabel } from "@/lib/invoice-pdf";
 import { QuickSettingsPanel } from "@/components/settings/QuickSettingsPanel";
 
 type Tab = {
@@ -27,6 +25,11 @@ type Tab = {
   icon: React.ReactNode;
   onClick?: () => void;
 };
+
+function formatUsd(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return `$${v.toFixed(2)}`;
+}
 
 function tabIsActive(location: string, href: string, hasAction?: boolean): boolean {
   if (hasAction) return false;
@@ -43,12 +46,13 @@ export function GoBottomNav() {
   const { notifications } = useSocket();
   const { toast } = useToast();
   const [riderHistoryOpen, setRiderHistoryOpen] = useState(false);
-  const [riderWalletOpen, setRiderWalletOpen] = useState(false);
   const [driverEarningsOpen, setDriverEarningsOpen] = useState(false);
   const [goQuickSettingsOpen, setGoQuickSettingsOpen] = useState(false);
   const unreadNotif = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
 
-  const riderTripAccountId = user?.id ?? null;
+  // Preferir email para evitar colisiones si el backend cambia el tipo de id.
+  const riderTripAccountId =
+    (user as any)?.email != null ? String((user as any).email) : user?.id != null ? String(user.id) : null;
   const riderTripEntries = useMemo(
     () => loadRiderTripLog(riderTripAccountId),
     [riderTripAccountId, riderHistoryOpen, location]
@@ -130,16 +134,6 @@ export function GoBottomNav() {
     return () => window.clearInterval(t);
   }, [isDriverView, isRiderGoView]);
 
-  const { data: walletData } = useWallet({
-    enabled: riderWalletOpen && isRiderGoView && isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED,
-  });
-  const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
-  const { data: walletTransfersData, isLoading: walletTransfersLoading } = useWalletTransfers({
-    page: 1,
-    limit: 12,
-    enabled: riderWalletOpen && isRiderGoView && isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED,
-  });
-
   const tabs: Tab[] = useMemo(
     () =>
       [
@@ -152,20 +146,6 @@ export function GoBottomNav() {
               label: "Historial",
               icon: <History className="h-5 w-5" aria-hidden />,
               onClick: () => setRiderHistoryOpen(true),
-            }
-          : null,
-        !isDriverView && isRiderGoView && FEATURE_WALLET_RECHARGE_UI_ENABLED
-          ? {
-              href: "__go_rider_wallet__",
-              label: "Saldo",
-              icon: <Wallet className="h-5 w-5" aria-hidden />,
-              onClick: () => {
-                if (!isAuthenticated) {
-                  toast({ title: "Inicia sesión", description: "Debes iniciar sesión para ver tu Saldo GenFeb.", variant: "destructive" });
-                  return;
-                }
-                setRiderWalletOpen(true);
-              },
             }
           : null,
         !isDriverView && isRiderGoView
@@ -219,7 +199,6 @@ export function GoBottomNav() {
       isAuthenticated,
       toast,
       setLocation,
-      FEATURE_WALLET_RECHARGE_UI_ENABLED,
     ]
   );
 
@@ -254,6 +233,7 @@ export function GoBottomNav() {
             const isNotifTab = t.href.startsWith("/notifications") || t.href === "__go_notifications__";
             const isGoDriverTab = isDriverView && (t.href === "/go/taxi/driver" || t.href === "/go/delivery/driver");
             const isGoRiderTab = !isDriverView && (t.href === "/go/taxi" || t.href === "/go/delivery");
+            const highlightChat = isChatTab && (!!activeDriverService || !!activeRiderService);
             const blockedByService =
               isGoDriverTab &&
               !!activeDriverService &&
@@ -277,7 +257,9 @@ export function GoBottomNav() {
                     : "h-12 w-full",
                   "active:scale-[0.94] active:bg-muted/95",
                   (blockedByService || blockedByRiderService) && "opacity-55 pointer-events-auto active:scale-100",
-                  active
+                  highlightChat && !active
+                    ? "bg-primary text-primary-foreground shadow-lg ring-1 ring-primary/35 [&_svg]:text-primary-foreground"
+                    : active
                     ? "bg-primary/14 font-semibold text-primary shadow-inner ring-1 ring-primary/25 [&_svg]:text-primary"
                     : "text-foreground/90 [&_svg]:text-foreground/85 hover:bg-muted/80 hover:text-foreground"
                 )}
@@ -354,7 +336,7 @@ export function GoBottomNav() {
           <div className="mt-4 space-y-3 pb-6">
             {riderTripEntries.length === 0 ? (
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Aún no hay servicios registrados. Cuando completes un servicio de taxi o un envío de delivery, aquí verás el monto, duración y el conductor.
+                Aún no hay servicios registrados. Cuando completes un servicio de Taxi o Delivery, aquí verás la fecha, duración y el conductor.
               </p>
             ) : (
               <ul className="space-y-3">
@@ -362,8 +344,8 @@ export function GoBottomNav() {
                   <li key={t.id} className="rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
                     <div className="flex items-start justify-between gap-2">
                       <span className="font-medium text-foreground">{new Date(t.endedAt).toLocaleString("es-EC")}</span>
-                      <span className="tabular-nums font-semibold text-foreground">
-                        {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(t.amountUsd)}
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Oferta enviada: <span className="font-semibold tabular-nums text-foreground">{formatUsd(t.amountUsd ?? 0)}</span>
                       </span>
                     </div>
                     <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground text-xs">
@@ -373,107 +355,11 @@ export function GoBottomNav() {
                       </span>
                       <span>Conductor: <span className="font-medium text-foreground">{t.driverName}</span></span>
                       <span>Duración: {t.durationMin} min</span>
-                      <span>
-                        Pago:{" "}
-                        <span className="font-medium text-foreground">
-                          {t.payment === "genfeb" ? "Saldo GenFeb" : t.payment === "cash" ? "Efectivo" : "Transferencia"}
-                        </span>
-                      </span>
                     </div>
                   </li>
                 ))}
               </ul>
             )}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={FEATURE_WALLET_RECHARGE_UI_ENABLED && riderWalletOpen} onOpenChange={setRiderWalletOpen}>
-        <SheetContent side="bottom" className="max-h-[min(92dvh,720px)] overflow-y-auto rounded-t-2xl">
-          <SheetHeader className="text-left space-y-1.5">
-            <SheetTitle>Saldo GenFeb</SheetTitle>
-            <SheetDescription>Movimientos, comprobantes y saldo GenFeb en un solo lugar.</SheetDescription>
-          </SheetHeader>
-          <div className="mt-4 space-y-3 pb-6 text-sm">
-            <div className="flex items-start justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
-              <div>
-                <p className="text-xs text-muted-foreground">Saldo disponible</p>
-                <p className="mt-0.5 text-lg font-bold tabular-nums text-foreground">
-                  {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(walletBalance)}
-                </p>
-              </div>
-              <Button
-                type="button"
-                className="shrink-0 gap-2"
-                onClick={() => {
-                  setRiderWalletOpen(false);
-                  setLocation(`/recharge?return=${encodeURIComponent(location)}`);
-                }}
-              >
-                <Banknote className="h-4 w-4" aria-hidden />
-                Añadir saldo
-              </Button>
-            </div>
-
-            <div className="rounded-xl border border-border bg-card shadow-sm">
-              <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-                <p className="font-semibold text-foreground">Movimientos</p>
-                <Button asChild variant="ghost" size="sm" className="h-8">
-                  <a
-                    href="/dashboard"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setRiderWalletOpen(false);
-                      setLocation("/dashboard");
-                    }}
-                  >
-                    Ver todo
-                  </a>
-                </Button>
-              </div>
-              <div className="p-4">
-                {walletTransfersLoading ? (
-                  <div className="flex items-center justify-center py-8 text-muted-foreground">
-                    <span className="inline-flex items-center gap-2">
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-                      Cargando…
-                    </span>
-                  </div>
-                ) : (walletTransfersData?.transfers ?? []).length === 0 ? (
-                  <p className="py-8 text-center text-muted-foreground">Aún no hay movimientos.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {(walletTransfersData?.transfers ?? []).slice(0, 12).map((t: any, idx: number) => {
-                      const type = t?.transferType as "service_payment" | "recharge" | "withdrawal" | "payment" | undefined;
-                      const status = t?.status as "pending_approval" | "completed" | "rejected" | undefined;
-                      const label = type ? getTransferTypeLabel(type) : "Movimiento";
-                      const amount = typeof t?.amount === "number" ? t.amount : Number(t?.amount) || 0;
-                      const isPending = status === "pending_approval";
-                      const amountColor =
-                        isPending
-                          ? "text-muted-foreground"
-                          : type === "payment" || type === "withdrawal"
-                            ? "text-red-600"
-                            : "text-emerald-600";
-                      return (
-                        <li key={String(t?.id ?? idx)} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/10 px-3 py-2">
-                          <div className="min-w-0">
-                            <p className="truncate text-[12px] font-medium text-foreground">{label}</p>
-                            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                              {isPending ? "Pendiente" : status === "rejected" ? "Rechazado" : "Completado"}
-                              {t?.description ? ` · ${String(t.description)}` : ""}
-                            </p>
-                          </div>
-                          <p className={cn("shrink-0 font-semibold tabular-nums", amountColor)}>
-                            {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(amount)}
-                          </p>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </div>
           </div>
         </SheetContent>
       </Sheet>

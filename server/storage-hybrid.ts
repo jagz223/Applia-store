@@ -83,7 +83,7 @@ export class HybridStorage {
   }
   upsertProfessionalVerificationPayment(
     userId: string,
-    data: { transferReceiptCode: string; transferDate: string }
+    data: { transferReceiptCode: string; transferDate: string; subscriptionMonths?: number; subscriptionMonthlyUsd?: number }
   ) {
     return this.delegate("upsertProfessionalVerificationPayment", [userId, data]);
   }

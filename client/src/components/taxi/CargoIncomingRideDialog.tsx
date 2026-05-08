@@ -24,6 +24,7 @@ export type CargoRideOfferPayload = {
   vehicleType: string;
   paymentMethod: string;
   estimatedUsd: number;
+  suggestedUsd?: number;
   petEnabled?: boolean;
   expiresAt?: number;
 };
@@ -49,7 +50,14 @@ function formatDur(sec: number): string {
 }
 
 function formatUsd(n: number): string {
-  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(n);
+  const v = Number.isFinite(n) ? n : 0;
+  return `$${v.toFixed(2)}`;
+}
+
+function isStandardOffer(offerUsd: number, suggestedUsd: number): boolean {
+  const a = Number.isFinite(offerUsd) ? offerUsd : 0;
+  const b = Number.isFinite(suggestedUsd) ? suggestedUsd : 0;
+  return Math.abs(a - b) <= 0.01;
 }
 
 function twoWords(label: string): string {
@@ -97,12 +105,12 @@ export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, 
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[2147483000] flex flex-col justify-end bg-black/55 pb-[calc(env(safe-area-inset-bottom,0px)+10.5rem)] backdrop-blur-sm md:justify-center md:p-4 md:pb-4"
+      className="fixed inset-0 z-[2147483000] flex flex-col justify-end bg-black/55 p-2 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] backdrop-blur-sm md:justify-center md:p-4"
       role="dialog"
       aria-modal
       aria-labelledby="cargo-offer-title"
     >
-      <div className="flex max-h-[min(88dvh,740px)] w-full flex-col overflow-hidden rounded-t-2xl border border-border bg-background shadow-2xl md:mx-auto md:max-w-lg md:rounded-2xl">
+      <div className="flex max-h-[min(92dvh,740px)] w-full flex-col overflow-y-auto rounded-2xl border border-border bg-background shadow-2xl md:mx-auto md:max-w-lg">
         <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
           <div className="min-w-0">
             <h2 id="cargo-offer-title" className="font-display text-lg font-bold text-foreground">
@@ -130,11 +138,6 @@ export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, 
           <div className="min-w-0">
             <p className="truncate font-display text-base font-bold text-foreground">{offer.rider.name}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {offer.paymentMethod === "genfeb"
-                ? "Pago: Saldo GenFeb"
-                : offer.paymentMethod === "cash"
-                  ? "Pago: Efectivo"
-                  : "Pago: Transferencia bancaria"}
               {offer.petEnabled ? " · Pet Car" : ""}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
@@ -158,7 +161,6 @@ export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, 
             <span className="text-xs text-muted-foreground">
               {formatKm(offer.distanceM)} · {formatDur(offer.durationSec)}
             </span>
-            <span className="font-display text-lg font-bold tabular-nums text-primary">{formatUsd(offer.estimatedUsd)}</span>
           </div>
         </div>
 
@@ -186,9 +188,34 @@ export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, 
             <span className="text-muted-foreground">
               {formatKm(offer.distanceM)} · {formatDur(offer.durationSec)}
             </span>
-            <span className="font-display text-lg font-bold tabular-nums text-primary">{formatUsd(offer.estimatedUsd)}</span>
           </div>
         </div>
+
+        {(() => {
+          const suggested = typeof offer.suggestedUsd === "number" ? offer.suggestedUsd : offer.estimatedUsd;
+          const standard = isStandardOffer(offer.estimatedUsd, suggested);
+          return (
+            <div className="px-4 pb-1">
+              {standard ? (
+                <div className="rounded-xl border border-border bg-card/95 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Referencia sugerida</p>
+                  <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(suggested)}</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl border border-border bg-card/95 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Referencia sugerida</p>
+                    <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(suggested)}</p>
+                  </div>
+                  <div className="rounded-xl border border-primary/25 bg-primary/5 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Oferta del Cliente</p>
+                    <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(offer.estimatedUsd)}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div
