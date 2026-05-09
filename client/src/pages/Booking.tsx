@@ -22,7 +22,7 @@ import {
   Mail,
   Loader2
 } from "lucide-react";
-import { useCategories, useCategoryVisibility, useServices, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
+import { useCategories, useCategoryVisibility, useServices, useSubcategories, useCreateBooking, useProviderCompletedCount, useWallet } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { useMemo } from "react";
@@ -115,6 +115,8 @@ function ProviderOptionCard({
 export default function Booking() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [selectedService, setSelectedService] = useState<string | null>(null);
+  /** Filtro opcional por subcategoría (null = todas las ofertas de la categoría). */
+  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<number | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   /** Id del servicio a reservar (uno del proveedor elegido en la categoría). */
   const [selectedBookingServiceId, setSelectedBookingServiceId] = useState<number | null>(null);
@@ -177,9 +179,16 @@ export default function Booking() {
     }
   }, [selectedService, categories]);
 
+  useEffect(() => {
+    setSelectedSubcategoryId(null);
+  }, [selectedService]);
+
   const categoryIdNum = selectedService ? Number(selectedService) : undefined;
+  const { data: bookingSubcategories = [], isLoading: bookingSubcategoriesLoading } = useSubcategories(
+    categoryIdNum,
+  );
   const { data: services = [], isLoading: isLoadingServices } = useServices(
-    { providerCategoryId: categoryIdNum },
+    { providerCategoryId: categoryIdNum, subcategoryId: selectedSubcategoryId ?? undefined },
     { enabled: !!selectedService }
   );
 
@@ -597,6 +606,55 @@ export default function Booking() {
                           </div>
                         </div>
 
+                        {selectedService && (bookingSubcategoriesLoading || bookingSubcategories.length > 0) && (
+                          <div className="space-y-3">
+                            <Label>Especialidad (opcional)</Label>
+                            <p className="text-sm text-muted-foreground -mt-1">
+                              Si la categoría tiene variantes, elige una para ver solo asociados de esa especialidad.
+                            </p>
+                            {bookingSubcategoriesLoading ? (
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Cargando especialidades…
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedSubcategoryId(null)}
+                                  className={`
+                                    px-3 py-2 rounded-lg border text-sm font-medium transition-all
+                                    ${selectedSubcategoryId == null
+                                      ? "border-primary bg-primary/10 text-primary"
+                                      : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"}
+                                  `}
+                                >
+                                  Todas
+                                </button>
+                                {bookingSubcategories.map((sub) => {
+                                  const active = selectedSubcategoryId === sub.id;
+                                  return (
+                                    <button
+                                      key={sub.id}
+                                      type="button"
+                                      onClick={() => setSelectedSubcategoryId(sub.id)}
+                                      className={`
+                                        inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all
+                                        ${active
+                                          ? "border-primary bg-primary/10 text-primary"
+                                          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"}
+                                      `}
+                                    >
+                                      <CategoryIcon name={sub.icon ?? "HelpCircle"} className="h-4 w-4 shrink-0" />
+                                      {sub.name}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <Button 
                           className="w-full" 
                           size="lg"
@@ -730,6 +788,14 @@ export default function Booking() {
                                 {getCategoryDisplayName(categories?.find((c) => c.id != null && String(c.id) === selectedService)) || "—"}
                               </span>
                             </div>
+                            {selectedSubcategoryId != null && (
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Especialidad:</span>
+                                <span>
+                                  {bookingSubcategories.find((s) => s.id === selectedSubcategoryId)?.name ?? "—"}
+                                </span>
+                              </div>
+                            )}
                             <div className="flex justify-between items-start gap-3">
                               <span className="text-muted-foreground shrink-0">Asociado:</span>
                               <span className="flex items-center gap-2 text-right min-w-0">
