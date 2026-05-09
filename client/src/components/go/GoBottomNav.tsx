@@ -73,9 +73,6 @@ export function GoBottomNav() {
   const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
   const showShop = !hiddenSlugs.has("marketplace");
   const showPack = !hiddenSlugs.has("delivery");
-  /** En flujo Taxi no mostramos acceso a Pedidos (marketplace); sí en Delivery y /go/shop. */
-  const showPedidosGoNavTab =
-    showShop && !location.startsWith("/go/taxi") && !location.startsWith("/go/cargo");
   const isCargoDriverView =
     location === "/go/taxi/driver" ||
     location.startsWith("/go/taxi/driver/") ||
@@ -142,7 +139,7 @@ export function GoBottomNav() {
       [
         { href: cargoHref, label: "Taxi", icon: <Car className="h-5 w-5" aria-hidden /> },
         showPack ? { href: packHref, label: "Delivery", icon: <Package className="h-5 w-5" aria-hidden /> } : null,
-        showPedidosGoNavTab ? { href: "/go/shop", label: "Pedidos", icon: <Store className="h-5 w-5" aria-hidden /> } : null,
+        showShop ? { href: "/go/shop", label: "Pedidos", icon: <Store className="h-5 w-5" aria-hidden /> } : null,
         !isDriverView && isRiderGoView
           ? {
               href: "__go_rider_history__",
@@ -195,7 +192,7 @@ export function GoBottomNav() {
       isDriverView,
       isCargoDriverView,
       isPackDriverView,
-      showPedidosGoNavTab,
+      showShop,
       showPack,
       goDriverUi,
       isRiderGoView,
