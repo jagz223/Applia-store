@@ -16,6 +16,39 @@ import crypto from "crypto";
 export type PackVehicleKind = "moto" | "auto" | "camioneta";
 export type PackPaymentMethod = "cash" | "bank_transfer";
 
+export type PackNegotiationDriverSnapshot = {
+  userId: string;
+  name: string;
+  lastName?: string;
+  profileImageUrl: string | null;
+  phone: string | null;
+  rating: number;
+  ratingCount: number;
+  completedTrips: number;
+  vehicle: {
+    type: string;
+    brand: string;
+    model: string;
+    licensePlate: string;
+    color: string | null;
+  } | null;
+};
+
+export type PackNegotiationDriverOffer = {
+  driverUserId: string;
+  amountUsd: number;
+  createdAt: number;
+  updatedAt: number;
+  driver: PackNegotiationDriverSnapshot;
+};
+
+export type PackNegotiationOffersArchiveEntry = {
+  archivedAt: number;
+  reason: "accepted";
+  acceptedDriverUserId: string;
+  offersSnapshot: PackNegotiationDriverOffer[];
+};
+
 /** Mapa UI → tipo vehículo proveedor (vehículo registrado). */
 const PACK_TO_PROVIDER_VEHICLE: Record<PackVehicleKind, string> = {
   moto: "motorcycle",
@@ -55,6 +88,10 @@ type RideRecord = {
   driverSearchingClient?: boolean;
   financialsSettled?: boolean;
   declinedAtByDriverId?: Record<string, number>;
+  isNegotiated?: boolean;
+  offers?: PackNegotiationDriverOffer[];
+  offersArchive?: PackNegotiationOffersArchiveEntry[];
+  negotiationExpiresAt?: number;
 };
 
 const rides = new Map<string, RideRecord>();
@@ -130,6 +167,29 @@ function rankDriversByNearest(start: { lat: number; lon: number }, list: DriverP
   return [...list].sort((a, b) => haversineM(start, a) - haversineM(start, b));
 }
 
+function packInsertDriverByDistance(ride: RideRecord, driverId: string): boolean {
+  if (ride.offeredDriverIds.includes(driverId)) return false;
+  const pres = onlineDrivers.get(driverId);
+  if (!pres) return false;
+  const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind];
+  if (wantVehicle !== pres.vehicleType) return false;
+  if (driverIsBusy(driverId)) return false;
+  const myD = haversineM(ride.start, { lat: pres.lat, lon: pres.lon });
+  let idx = ride.offeredDriverIds.length;
+  for (let i = 0; i < ride.offeredDriverIds.length; i++) {
+    const otherId = ride.offeredDriverIds[i]!;
+    const otherPres = onlineDrivers.get(otherId);
+    if (!otherPres) continue;
+    const otherD = haversineM(ride.start, { lat: otherPres.lat, lon: otherPres.lon });
+    if (myD < otherD) {
+      idx = i;
+      break;
+    }
+  }
+  ride.offeredDriverIds.splice(idx, 0, driverId);
+  return true;
+}
+
 function clearRideTimers(rideId: string) {
   const t = rideTimers.get(rideId);
   if (!t) return;
@@ -200,8 +260,83 @@ async function buildDriverPublic(driverUserId: string) {
   };
 }
 
+function emitPackNegotiationOffersUpdated(io: SocketIOServer, ride: RideRecord) {
+  io.to(`user:${ride.riderUserId}`).emit("pack:ride:negotiation:offers_updated", {
+    rideId: ride.id,
+    offers: ride.offers ?? [],
+  });
+}
+
+function packNegotiationInvitePayload(
+  ride: RideRecord,
+  rider: Awaited<ReturnType<typeof buildRiderPublic>>,
+  expiresAt: number
+) {
+  return {
+    rideId: ride.id,
+    rider,
+    start: ride.start,
+    end: ride.end,
+    routeGeometry: ride.routeGeometry,
+    distanceM: ride.distanceM,
+    durationSec: ride.durationSec,
+    vehicleType: ride.vehicleType,
+    paymentMethod: ride.paymentMethod,
+    estimatedUsd: ride.estimatedUsd,
+    suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
+    expiresAt,
+    isNegotiated: true as const,
+  };
+}
+
+async function broadcastPackNegotiationInvites(io: SocketIOServer, ride: RideRecord, rider: Awaited<ReturnType<typeof buildRiderPublic>>) {
+  ride.negotiationExpiresAt = Date.now() + SEARCH_TTL_MS;
+  const exp = ride.negotiationExpiresAt;
+  const payload = packNegotiationInvitePayload(ride, rider, exp);
+  for (const driverId of ride.offeredDriverIds) {
+    if (driverIsBusy(driverId)) continue;
+    io.to(`user:${driverId}`).emit("pack:ride:offer", payload);
+    pendingOfferByDriverId.set(driverId, { rideId: ride.id, expiresAt: exp, module: "pack" });
+    try {
+      const pth = getUserActivePath(String(driverId));
+      if (!pth || (!pth.startsWith("/go/delivery/driver") && !pth.startsWith("/go/pack/driver"))) {
+        void notificationService.sendPushToUser(driverId, {
+          title: "Delivery",
+          body: "Tienes un envío disponible. Abre para aceptar o rechazar.",
+          data: { url: "/go/delivery/driver", type: "pack_ride_offer", rideId: ride.id },
+        });
+      }
+    } catch {}
+  }
+}
+
+async function emitPackNegotiationInviteToDriver(
+  io: SocketIOServer,
+  ride: RideRecord,
+  rider: Awaited<ReturnType<typeof buildRiderPublic>>,
+  driverId: string
+) {
+  if (!ride.negotiationExpiresAt || Date.now() > ride.negotiationExpiresAt) return;
+  if (driverIsBusy(driverId)) return;
+  const exp = ride.negotiationExpiresAt;
+  const payload = packNegotiationInvitePayload(ride, rider, exp);
+  io.to(`user:${driverId}`).emit("pack:ride:offer", payload);
+  pendingOfferByDriverId.set(driverId, { rideId: ride.id, expiresAt: exp, module: "pack" });
+  try {
+    const pth = getUserActivePath(String(driverId));
+    if (!pth || (!pth.startsWith("/go/delivery/driver") && !pth.startsWith("/go/pack/driver"))) {
+      void notificationService.sendPushToUser(driverId, {
+        title: "Delivery",
+        body: "Tienes un envío disponible. Abre para aceptar o rechazar.",
+        data: { url: "/go/delivery/driver", type: "pack_ride_offer", rideId: ride.id },
+      });
+    }
+  } catch {}
+}
+
 async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any) {
-  // Rides "por negociar" no deben entrar al flujo clásico de ofertas por socket.
+  if (ride.isNegotiated) return;
+  // Rides "por negociar" (market legacy) no deben entrar al flujo clásico de ofertas por socket.
   if (typeof (ride as any).marketVisibleUntil === "number") return;
   const ttlMs = nextOfferTtlMs();
   const timers = rideTimers.get(ride.id) ?? { offerTimeoutId: null, expireTimeoutId: null };
@@ -300,6 +435,19 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
             const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind];
             if (wantVehicle !== pres.vehicleType) continue;
 
+            if (ride.isNegotiated) {
+              const inserted = packInsertDriverByDistance(ride, user.id);
+              if (
+                inserted &&
+                ride.negotiationExpiresAt != null &&
+                Date.now() <= ride.negotiationExpiresAt
+              ) {
+                const rider = await buildRiderPublic(ride.riderUserId);
+                await emitPackNegotiationInviteToDriver(io, ride, rider, user.id);
+              }
+              continue;
+            }
+
             // No interrumpir una oferta en curso; cuando no haya oferta activa, re-evaluar candidatos (incluye al nuevo driver).
             if (!ride.currentOfferDriverId) {
               const rider = await buildRiderPublic(ride.riderUserId);
@@ -342,11 +490,21 @@ export function registerPackRideRoutes(app: Express) {
         return res.json({ offer: null });
       }
       const ride = rides.get(p.rideId);
-      if (!ride || ride.status !== "searching" || ride.currentOfferDriverId !== driverUserId) {
+      if (!ride || ride.status !== "searching") {
+        pendingOfferByDriverId.delete(driverUserId);
+        return res.json({ offer: null });
+      }
+      const classic = ride.currentOfferDriverId === driverUserId;
+      const neg =
+        !!ride.isNegotiated &&
+        ride.offeredDriverIds.includes(driverUserId) &&
+        (ride.negotiationExpiresAt == null || Date.now() <= ride.negotiationExpiresAt);
+      if (!classic && !neg) {
         pendingOfferByDriverId.delete(driverUserId);
         return res.json({ offer: null });
       }
       const rider = await buildRiderPublic(ride.riderUserId);
+      const expiresAt = ride.isNegotiated ? ride.negotiationExpiresAt ?? p.expiresAt : ride.offerExpiresAt;
       return res.json({
         offer: {
           rideId: ride.id,
@@ -359,7 +517,9 @@ export function registerPackRideRoutes(app: Express) {
           vehicleType: ride.vehicleType,
           paymentMethod: ride.paymentMethod,
           estimatedUsd: ride.estimatedUsd,
-          expiresAt: ride.offerExpiresAt,
+          suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
+          expiresAt,
+          isNegotiated: !!ride.isNegotiated,
         },
       });
     } catch (e: any) {
@@ -440,6 +600,7 @@ export function registerPackRideRoutes(app: Express) {
     estimatedUsd: z.number().nonnegative(),
     suggestedUsd: z.number().nonnegative().optional(),
     offerEdited: z.boolean().optional(),
+    isNegotiated: z.boolean().optional(),
   });
 
   app.post("/api/pack/rides/request", authenticateJWT, async (req: any, res) => {
@@ -456,8 +617,12 @@ export function registerPackRideRoutes(app: Express) {
       const body = parsed.data;
       const offerUsd = roundToCents(Math.max(0, safeNumber(body.estimatedUsd, 0)));
       const suggestedUsd = roundToCents(Math.max(0, safeNumber(body.suggestedUsd, offerUsd)));
-      // Negociación desactivada por ahora: siempre seguimos el flujo clásico.
-      const standard = true;
+      const negotiated = !!body.isNegotiated;
+
+      let candidates = freshDriversForVehicle(body.vehicleType);
+      candidates = rankDriversByNearest(body.start, candidates);
+      const candidateIds = candidates.map((c) => c.userId);
+
       const ride: RideRecord = {
         id,
         riderUserId,
@@ -468,6 +633,9 @@ export function registerPackRideRoutes(app: Express) {
         paymentConfirmed: true,
         estimatedUsd: offerUsd,
         suggestedUsd,
+        isNegotiated: negotiated,
+        offers: negotiated ? [] : undefined,
+        offersArchive: negotiated ? [] : undefined,
         // El ride debe permanecer visible mientras el usuario sigue buscando.
         // El TTL 60s aplica a contraofertas, no al “market” del ride.
         marketVisibleUntil: undefined,
@@ -479,7 +647,7 @@ export function registerPackRideRoutes(app: Express) {
         routeGeometry: (body.routeGeometry ?? null) as GeoJsonObject | null,
         createdAt: Date.now(),
         conversationId: null,
-        offeredDriverIds: [],
+        offeredDriverIds: negotiated ? candidateIds : [],
         offerIndex: 0,
         currentOfferDriverId: null,
         offerExpiresAt: null,
@@ -493,10 +661,191 @@ export function registerPackRideRoutes(app: Express) {
       // El pasajero debe seguir buscando hasta cancelar manualmente.
 
       const rider = await buildRiderPublic(riderUserId);
-      if (standard) void offerNextDriver(io, ride, rider);
+      io.to(`user:${riderUserId}`).emit("pack:ride:searching", {
+        rideId: id,
+        candidateCount: candidateIds.length,
+        isNegotiated: negotiated,
+      });
+      if (negotiated && candidateIds.length > 0) {
+        await broadcastPackNegotiationInvites(io, ride, rider);
+        emitPackNegotiationOffersUpdated(io, ride);
+      } else if (!negotiated) {
+        void offerNextDriver(io, ride, rider);
+      }
 
       res.json({ ok: true, rideId: id });
     } catch (e: any) {
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  app.post("/api/pack/rides/:rideId/negotiation/driver-offer", authenticateJWT, async (req: any, res) => {
+    try {
+      const driverUserId = req.user?.id as string;
+      if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const rideId = String(req.params.rideId);
+      const ride = rides.get(rideId);
+      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (!ride.isNegotiated || ride.status !== "searching" || ride.driverUserId != null) {
+        return res.status(409).json({ message: "Este envío no acepta ofertas ahora" });
+      }
+      if (!ride.offeredDriverIds.includes(driverUserId)) {
+        return res.status(403).json({ message: "No estás invitado a este servicio" });
+      }
+      if (ride.negotiationExpiresAt != null && Date.now() > ride.negotiationExpiresAt) {
+        return res.status(409).json({ message: "La ventana de ofertas expiró" });
+      }
+      if (driverIsBusy(driverUserId)) {
+        return res.status(409).json({ message: "Estás en servicio. No puedes ofertar ahora." });
+      }
+      const amt = roundToCents(Math.max(0, safeNumber((req.body as any)?.amountUsd, 0)));
+      if (!Number.isFinite(amt)) return res.status(400).json({ message: "Monto inválido" });
+
+      const driverFull = await buildDriverPublic(driverUserId);
+      const driver = driverFull as unknown as PackNegotiationDriverSnapshot;
+      const now = Date.now();
+      ride.offers = ride.offers ?? [];
+      const idx = ride.offers.findIndex((o) => o.driverUserId === driverUserId);
+      const entry: PackNegotiationDriverOffer = {
+        driverUserId,
+        amountUsd: amt,
+        createdAt: idx >= 0 ? ride.offers[idx]!.createdAt : now,
+        updatedAt: now,
+        driver,
+      };
+      if (idx >= 0) ride.offers[idx] = entry;
+      else ride.offers.push(entry);
+
+      const io = getIO();
+      if (io) emitPackNegotiationOffersUpdated(io, ride);
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[pack] negotiation driver-offer", e);
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  app.delete("/api/pack/rides/:rideId/negotiation/offers/:driverId", authenticateJWT, async (req: any, res) => {
+    try {
+      const riderUserId = req.user?.id as string;
+      if (!riderUserId) return res.status(401).json({ message: "Unauthorized" });
+      const rideId = String(req.params.rideId);
+      const driverId = String(req.params.driverId);
+      const ride = rides.get(rideId);
+      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (ride.riderUserId !== riderUserId) return res.status(403).json({ message: "Sin acceso" });
+      if (!ride.isNegotiated || ride.status !== "searching") {
+        return res.status(409).json({ message: "No se puede modificar en este estado" });
+      }
+      ride.offers = (ride.offers ?? []).filter((o) => o.driverUserId !== driverId);
+      const io = getIO();
+      if (io) {
+        emitPackNegotiationOffersUpdated(io, ride);
+        io.to(`user:${driverId}`).emit("pack:ride:negotiation:offer_removed", { rideId });
+      }
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[pack] negotiation remove offer", e);
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  app.post("/api/pack/rides/:rideId/negotiation/accept/:driverId", authenticateJWT, async (req: any, res) => {
+    try {
+      const riderUserId = req.user?.id as string;
+      if (!riderUserId) return res.status(401).json({ message: "Unauthorized" });
+      const rideId = String(req.params.rideId);
+      const driverId = String(req.params.driverId);
+      const ride = rides.get(rideId);
+      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (ride.riderUserId !== riderUserId) return res.status(403).json({ message: "Sin acceso" });
+      if (!ride.isNegotiated || ride.status !== "searching" || ride.driverUserId != null) {
+        return res.status(409).json({ message: "Este envío ya no está disponible" });
+      }
+      const row = (ride.offers ?? []).find((o) => o.driverUserId === driverId);
+      if (!row) return res.status(404).json({ message: "Oferta no encontrada" });
+      if (driverIsBusy(driverId)) return res.status(409).json({ message: "El conductor ya está ocupado" });
+
+      ride.offersArchive = ride.offersArchive ?? [];
+      ride.offersArchive.push({
+        archivedAt: Date.now(),
+        reason: "accepted",
+        acceptedDriverUserId: driverId,
+        offersSnapshot: [...(ride.offers ?? [])],
+      });
+      ride.offers = [];
+      ride.estimatedUsd = roundToCents(row.amountUsd);
+      ride.driverUserId = driverId;
+      ride.status = "matched";
+      ride.isNegotiated = true;
+      clearRideTimers(ride.id);
+
+      const io = getIO();
+      if (!io) return res.status(500).json({ message: "Socket no disponible" });
+
+      const notifyTaken = new Set<string>();
+      for (const o of ride.offersArchive[ride.offersArchive.length - 1]!.offersSnapshot) {
+        notifyTaken.add(o.driverUserId);
+      }
+      for (const oid of ride.offeredDriverIds) notifyTaken.add(oid);
+
+      const driver = await buildDriverPublic(driverId);
+      const pres = onlineDrivers.get(driverId);
+      const driverLat = pres?.lat;
+      const driverLon = pres?.lon;
+      let conversationId: number | null = null;
+      try {
+        const conv = await genFebStorage.createConversation({
+          participant1Id: ride.riderUserId,
+          participant2Id: driverId,
+        });
+        conversationId = Number((conv as { id: number }).id);
+        ride.conversationId = conversationId;
+        await genFebStorage.createMessage({
+          conversationId,
+          senderId: driverId,
+          content:
+            "Chat iniciado. Aquí pueden acordar el precio final del envío. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
+          type: "text",
+          status: "sent",
+        });
+      } catch (ce) {
+        console.error("[pack] negotiation accept conversation", ce);
+      }
+
+      const rider = await buildRiderPublic(ride.riderUserId);
+      io.to(`user:${ride.riderUserId}`).emit("pack:ride:matched", {
+        rideId,
+        driver,
+        driverLat,
+        driverLon,
+        conversationId,
+        estimatedUsd: ride.estimatedUsd,
+        isNegotiated: !!ride.isNegotiated,
+      });
+      io.to(`user:${driverId}`).emit("pack:ride:accepted", { rideId, rider, conversationId });
+
+      for (const uid of notifyTaken) {
+        if (uid === driverId) continue;
+        io.to(`user:${uid}`).emit("pack:ride:taken", { rideId });
+        pendingOfferByDriverId.delete(uid);
+      }
+      pendingOfferByDriverId.delete(driverId);
+
+      try {
+        const pth = getUserActivePath(String(ride.riderUserId));
+        if (!pth || (!pth.startsWith("/go/delivery") && !pth.startsWith("/go/pack"))) {
+          void notificationService.sendPushToUser(ride.riderUserId, {
+            title: "Delivery",
+            body: "Tu envío fue aceptado. Abre para ver a tu driver.",
+            data: { url: "/go/delivery", type: "pack_ride_matched", rideId },
+          });
+        }
+      } catch {}
+
+      res.json({ ok: true, accepted: true, rideId, conversationId });
+    } catch (e: any) {
+      console.error("[pack] negotiation accept", e);
       res.status(500).json({ message: e?.message ?? "Error" });
     }
   });
@@ -508,6 +857,9 @@ export function registerPackRideRoutes(app: Express) {
       const rideId = String(req.params.rideId);
       const ride = rides.get(rideId);
       if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (ride.isNegotiated) {
+        return res.status(409).json({ message: "Este envío es por regateo. Envía tu monto con la opción de regateo." });
+      }
       if (ride.status !== "searching") return res.status(409).json({ message: "Oferta ya no válida" });
       if (ride.currentOfferDriverId !== driverUserId) return res.status(403).json({ message: "No eres el driver ofertado" });
       const accept = !!(req.body as any)?.accept;
@@ -569,6 +921,8 @@ export function registerPackRideRoutes(app: Express) {
         driverLat,
         driverLon,
         conversationId,
+        estimatedUsd: ride.estimatedUsd,
+        isNegotiated: !!ride.isNegotiated,
       });
 
       try {
@@ -726,7 +1080,15 @@ export function registerPackRideRoutes(app: Express) {
       } catch {}
 
       const rider = await buildRiderPublic(ride.riderUserId);
-      io.to(`user:${ride.riderUserId}`).emit("pack:ride:matched", { rideId, driver, driverLat, driverLon, conversationId });
+      io.to(`user:${ride.riderUserId}`).emit("pack:ride:matched", {
+        rideId,
+        driver,
+        driverLat,
+        driverLon,
+        conversationId,
+        estimatedUsd: ride.estimatedUsd,
+        isNegotiated: !!ride.isNegotiated,
+      });
       io.to(`user:${driverId}`).emit("pack:ride:accepted", { rideId, rider, conversationId });
 
       res.json({ ok: true, accepted: true, rideId, conversationId });
@@ -937,10 +1299,16 @@ export function registerPackRideRoutes(app: Express) {
       res.json({
         id: ride.id,
         status: ride.status,
+        riderUserId: ride.riderUserId,
+        driverUserId: ride.driverUserId,
         paymentMethod: ride.paymentMethod,
         paymentConfirmed: ride.paymentConfirmed,
         conversationId: ride.conversationId,
         estimatedUsd: ride.estimatedUsd,
+        suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
+        isNegotiated: !!ride.isNegotiated,
+        offers:
+          uid === ride.riderUserId && ride.status === "searching" && ride.isNegotiated ? ride.offers ?? [] : undefined,
         distanceM: ride.distanceM,
         durationSec: ride.durationSec,
         vehicleType: ride.vehicleType,
@@ -985,10 +1353,24 @@ export function registerPackRideRoutes(app: Express) {
         for (const ride of rides.values()) {
           if (ride.status !== "searching") continue;
           if (ride.driverUserId != null) continue;
-          // Rides "por negociar" (market) no se ofertan automáticamente al activar presencia.
-          if (typeof (ride as any).marketVisibleUntil === "number") continue;
           const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind];
           if (wantVehicle !== pres.vehicleType) continue;
+
+          if (ride.isNegotiated) {
+            const inserted = packInsertDriverByDistance(ride, uid);
+            if (
+              inserted &&
+              ride.negotiationExpiresAt != null &&
+              Date.now() <= ride.negotiationExpiresAt
+            ) {
+              const rider = await buildRiderPublic(ride.riderUserId);
+              await emitPackNegotiationInviteToDriver(io, ride, rider, uid);
+            }
+            continue;
+          }
+
+          // Rides "por negociar" (market) no se ofertan automáticamente al activar presencia.
+          if (typeof (ride as any).marketVisibleUntil === "number") continue;
           if (!ride.currentOfferDriverId) {
             const rider = await buildRiderPublic(ride.riderUserId);
             await offerNextDriver(io, ride, rider);

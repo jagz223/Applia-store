@@ -2,13 +2,21 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
-import { Banknote, Building2, Loader2, X } from "lucide-react";
+import { Banknote, Building2, Loader2, Minus, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export type TaxiVehicleKind = "moto" | "auto" | "pet_car" | "camioneta";
 
-export type TaxiVehicleModalStep = "pick" | "payment" | "extras" | "ready" | "searching" | "done";
+export type TaxiVehicleModalStep =
+  | "pick"
+  | "price_mode"
+  | "haggle"
+  | "payment"
+  | "extras"
+  | "ready"
+  | "searching"
+  | "done";
 
 export type TaxiPaymentMethod = "cash" | "bank_transfer";
 
@@ -47,6 +55,16 @@ export function TaxiVehicleSearchModal({
   suggestedUsd,
   /** Si existe, “Cancelar búsqueda” abre confirmación en el padre (cancela el viaje en servidor). */
   onRequestCancelSearch,
+  isNegotiatedFlow = false,
+  clientOfferUsd = null,
+  onChooseStandardPrice,
+  onChooseHaggle,
+  haggleUsd = 0,
+  onHaggleBump,
+  onHaggleDecide,
+  onBackFromHaggle,
+  onBackFromPriceMode,
+  onBackToHaggleFromPayment,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -65,6 +83,16 @@ export function TaxiVehicleSearchModal({
   suggestedUsdByVehicle: Partial<Record<TaxiVehicleKind, number>>;
   suggestedUsd: number | null;
   onRequestCancelSearch?: () => void;
+  isNegotiatedFlow?: boolean;
+  clientOfferUsd?: number | null;
+  onChooseStandardPrice?: () => void;
+  onChooseHaggle?: () => void;
+  haggleUsd?: number;
+  onHaggleBump?: (delta: number) => void;
+  onHaggleDecide?: () => void;
+  onBackFromHaggle?: () => void;
+  onBackFromPriceMode?: () => void;
+  onBackToHaggleFromPayment?: () => void;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -223,6 +251,112 @@ export function TaxiVehicleSearchModal({
               </>
             )}
 
+            {step === "price_mode" && selectedType && (
+              <motion.div
+                className="flex flex-col gap-4"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div className="space-y-1.5 pr-8 text-left">
+                  <h2 id="taxi-vehicle-modal-title" className="text-lg font-semibold leading-none tracking-tight text-foreground">
+                    Precio del viaje
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Vehículo:{" "}
+                    <span className="font-medium text-foreground">
+                      {vehicleOptions.find((o) => o.type === selectedType)?.label}
+                    </span>
+                    . Referencia:{" "}
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {suggestedUsd == null ? "—" : formatUsd(suggestedUsd)}
+                    </span>
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => onChooseStandardPrice?.()}
+                    className={cn(
+                      "flex flex-col gap-1 rounded-xl border-2 p-4 text-left transition-colors",
+                      "hover:border-primary/60 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                      "border-border bg-card"
+                    )}
+                  >
+                    <span className="font-semibold text-foreground">Ir con el precio indicado</span>
+                    <span className="text-xs text-muted-foreground">Usamos la referencia sugerida y buscamos conductor como siempre.</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChooseHaggle?.()}
+                    className={cn(
+                      "flex flex-col gap-1 rounded-xl border-2 p-4 text-left transition-colors",
+                      "hover:border-primary/60 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                      "border-primary/40 bg-primary/5"
+                    )}
+                  >
+                    <span className="font-semibold text-foreground">Regatear precio</span>
+                    <span className="text-xs text-muted-foreground">Ajusta el monto; los conductores podrán proponerte su oferta.</span>
+                  </button>
+                </div>
+                <Button type="button" variant="ghost" size="sm" className="self-start" onClick={() => onBackFromPriceMode?.()}>
+                  Cambiar tipo de vehículo
+                </Button>
+              </motion.div>
+            )}
+
+            {step === "haggle" && selectedType && (
+              <motion.div
+                className="flex flex-col gap-4"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div className="space-y-1.5 pr-8 text-left">
+                  <h2 id="taxi-vehicle-modal-title" className="text-lg font-semibold leading-none tracking-tight text-foreground">
+                    Regatear precio
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Referencia: {suggestedUsd == null ? "—" : formatUsd(suggestedUsd)}. Ajusta tu oferta con + y −.
+                  </p>
+                </div>
+                <div className="flex items-center justify-center gap-4 rounded-xl border border-border bg-muted/30 py-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-12 w-12 shrink-0 rounded-full"
+                    aria-label="Bajar precio"
+                    onClick={() => onHaggleBump?.(-0.25)}
+                  >
+                    <Minus className="h-5 w-5" />
+                  </Button>
+                  <div className="min-w-[7rem] text-center">
+                    <p className="text-xs text-muted-foreground">Tu oferta</p>
+                    <p className="text-2xl font-bold tabular-nums text-foreground">{formatUsd(haggleUsd)}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-12 w-12 shrink-0 rounded-full"
+                    aria-label="Subir precio"
+                    onClick={() => onHaggleBump?.(0.25)}
+                  >
+                    <Plus className="h-5 w-5" />
+                  </Button>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => onBackFromHaggle?.()}>
+                    Volver
+                  </Button>
+                  <Button type="button" size="lg" className="w-full sm:w-auto" onClick={() => onHaggleDecide?.()}>
+                    Decidir este precio
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+
             {step === "payment" && selectedType && (
               <motion.div
                 className="flex flex-col gap-4"
@@ -281,10 +415,17 @@ export function TaxiVehicleSearchModal({
                   </p>
                 </button>
 
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <Button type="button" variant="ghost" size="sm" className="self-start sm:self-center" onClick={onBackToPick}>
-                    Cambiar tipo de vehículo
-                  </Button>
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="ghost" size="sm" className="self-start sm:self-center" onClick={onBackToPick}>
+                      Cambiar tipo de vehículo
+                    </Button>
+                    {isNegotiatedFlow && onBackToHaggleFromPayment ? (
+                      <Button type="button" variant="ghost" size="sm" onClick={onBackToHaggleFromPayment}>
+                        Ajustar oferta
+                      </Button>
+                    ) : null}
+                  </div>
                   <Button
                     type="button"
                     size="lg"
@@ -319,13 +460,23 @@ export function TaxiVehicleSearchModal({
                   </p>
                 </div>
 
-                <div className="rounded-xl border border-border bg-card/95 p-3">
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span className="text-muted-foreground">Referencia sugerida</span>
-                    <span className="font-semibold tabular-nums text-foreground">
-                      {suggestedUsd == null ? "—" : formatUsd(suggestedUsd)}
-                    </span>
+                <div className="space-y-2">
+                  <div className="rounded-xl border border-border bg-card/95 p-3">
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-muted-foreground">Referencia sugerida</span>
+                      <span className="font-semibold tabular-nums text-foreground">
+                        {suggestedUsd == null ? "—" : formatUsd(suggestedUsd)}
+                      </span>
+                    </div>
                   </div>
+                  {isNegotiatedFlow && clientOfferUsd != null ? (
+                    <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-muted-foreground">Tu oferta (regateo)</span>
+                        <span className="font-semibold tabular-nums text-foreground">{formatUsd(clientOfferUsd)}</span>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <div className="flex flex-wrap gap-2">

@@ -1,0 +1,1 @@
+{"name":"Service Hub","short_name":"ServiceHub","start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#0ea5e9","description":"Explora y reserva servicios profesionales cerca de ti.","icons":[{"src":"/favicon.png","sizes":"64x64","type":"image/png"},{"src":"/logo.png","sizes":"512x512","type":"image/png","purpose":"maskable any"}]}

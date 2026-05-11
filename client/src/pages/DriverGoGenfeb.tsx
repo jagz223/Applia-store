@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED, FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, Phone, Radio, Settings, Star, XCircle } from "lucide-react";
+import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, Phone, Radio, Settings, Star, Tags, XCircle } from "lucide-react";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider, useWallet } from "@/hooks/use-mango-data";
@@ -83,8 +83,10 @@ type MobilityRideHydration = {
   paymentMethod: string;
   paymentConfirmed: boolean;
   vehicleType: string;
-  petEnabled: boolean;
+  petEnabled?: boolean;
   estimatedUsd: number;
+  suggestedUsd?: number;
+  isNegotiated?: boolean;
   distanceM: number;
   durationSec: number;
   start: CargoRideOfferPayload["start"];
@@ -105,7 +107,9 @@ function mapApiRideToOffer(ride: MobilityRideHydration): CargoRideOfferPayload {
     vehicleType: ride.vehicleType,
     paymentMethod: ride.paymentMethod,
     estimatedUsd: ride.estimatedUsd,
+    suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
     petEnabled: ride.petEnabled,
+    isNegotiated: !!ride.isNegotiated,
   };
 }
 
@@ -140,6 +144,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const incomingModule = goDriverUi?.currentOffer?.module ?? null;
   const incomingOpen = incomingOffer != null;
   const [respondBusy, setRespondBusy] = useState(false);
+  const [negotiationBusy, setNegotiationBusy] = useState(false);
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const [activeRideOffer, setActiveRideOffer] = useState<CargoRideOfferPayload | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -317,6 +322,59 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       socket.off("pack:ride:cancelled", onPackCancelled);
     };
   }, [socket, goDriverUi]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onAccepted = async (p: { rideId: string; conversationId?: number | null }) => {
+      if (!p?.rideId) return;
+      if (activeRideIdRef.current === p.rideId) return;
+      const token = localStorage.getItem("token");
+      if (!token || !user?.id) return;
+      try {
+        const res = await fetch(`${rideApiBase}/${encodeURIComponent(p.rideId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const ride = (await res.json()) as MobilityRideHydration;
+        if (ride.driverUserId !== user.id) return;
+        if (ride.status !== "matched" && ride.status !== "in_progress") return;
+        goDriverUi?.clearOffers?.();
+        setActiveConversationId(p.conversationId ?? ride.conversationId ?? null);
+        setActiveRideId(ride.id);
+        setActiveRideOffer(mapApiRideToOffer(ride));
+        setActiveRideStarted(ride.status === "in_progress");
+        setSearchingClient(!!ride.driverSearchingClient);
+        setPaymentConfirmed(
+          (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
+        );
+        saveGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo", ride.id);
+        lastServiceRouteFetchRef.current = null;
+      } catch {
+        /* ignore */
+      }
+    };
+    socket.on(`${rideSocketPrefix}accepted`, onAccepted);
+    return () => {
+      socket.off(`${rideSocketPrefix}accepted`, onAccepted);
+    };
+  }, [socket, rideApiBase, rideSocketPrefix, user?.id, goDriverUi, goSlug]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onNegoRemoved = (ev: { rideId: string }) => {
+      const cur = goDriverUi?.currentOffer?.offer?.rideId ?? null;
+      if (cur && ev?.rideId === cur) {
+        toast({ description: "El cliente descartó tu oferta de regateo." });
+        goDriverUi?.resolveOfferAndShowNext(ev.rideId);
+      }
+    };
+    socket.on("cargo:ride:negotiation:offer_removed", onNegoRemoved);
+    socket.on("pack:ride:negotiation:offer_removed", onNegoRemoved);
+    return () => {
+      socket.off("cargo:ride:negotiation:offer_removed", onNegoRemoved);
+      socket.off("pack:ride:negotiation:offer_removed", onNegoRemoved);
+    };
+  }, [socket, goDriverUi, toast]);
 
   // Recovery: si el driver estaba en otra vista cuando llegó la oferta, al abrir esta vista consultamos el backend.
   useEffect(() => {
@@ -644,6 +702,41 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setRespondBusy(false);
     }
   };
+
+  const submitNegotiationOffer = useCallback(
+    async (amountUsd: number) => {
+      if (!incomingOffer) return;
+      const snap = incomingOffer;
+      const mod = incomingModule;
+      const token = localStorage.getItem("token");
+      if (!token) {
+        toast({ title: "Sesión", description: "Inicia sesión de nuevo.", variant: "destructive" });
+        return;
+      }
+      setNegotiationBusy(true);
+      try {
+        const base = mod === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+        const res = await fetch(`${base}/${encodeURIComponent(snap.rideId)}/negotiation/driver-offer`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ amountUsd }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        if (!res.ok) throw new Error(data.message || "No se pudo enviar la oferta");
+        toast({ title: "Oferta enviada", description: "El cliente verá tu propuesta en su lista." });
+        goDriverUi?.resolveOfferAndShowNext(snap.rideId);
+      } catch (e) {
+        toast({
+          title: "No se pudo enviar",
+          description: e instanceof Error ? e.message : "Intenta de nuevo",
+          variant: "destructive",
+        });
+      } finally {
+        setNegotiationBusy(false);
+      }
+    },
+    [incomingOffer, incomingModule, goDriverUi, toast]
+  );
 
   const startRide = async () => {
     if (!activeRideId) return;
@@ -1019,6 +1112,12 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               </div>
             )}
             <p className="min-w-0 truncate font-medium text-foreground">{riderFullName || "Cliente"}</p>
+            {activeRideOffer.isNegotiated ? (
+              <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-100">
+                <Tags className="h-3 w-3 shrink-0" aria-hidden />
+                Regateo
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -1378,15 +1477,15 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       </Dialog>
 
       <CargoIncomingRideDialog
-        {...({
-          open: incomingOpen,
-          offer: incomingOffer,
-          module: incomingModule ?? undefined,
-          busy: respondBusy,
-          driverPos: geoPos,
-          onAccept: () => void respondToOffer(true),
-          onDecline: () => void respondToOffer(false),
-        } as any)}
+        open={incomingOpen}
+        offer={incomingOffer}
+        module={incomingModule ?? undefined}
+        busy={respondBusy}
+        driverPos={geoPos}
+        onAccept={() => void respondToOffer(true)}
+        onDecline={() => void respondToOffer(false)}
+        onNegotiationPropose={incomingOffer?.isNegotiated ? (amt) => submitNegotiationOffer(amt) : undefined}
+        negotiationBusy={negotiationBusy}
       />
 
       <Dialog open={startConfirmOpen} onOpenChange={setStartConfirmOpen}>

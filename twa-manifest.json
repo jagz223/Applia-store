@@ -1,0 +1,51 @@
+{
+  "packageId": "com.onrender.genfeb_zfr0.twa",
+  "host": "genfeb-zfr0.onrender.com",
+  "name": "Service Hub",
+  "launcherName": "ServiceHub",
+  "display": "standalone",
+  "themeColor": "#0EA5E9",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#FFFFFF",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://genfeb-zfr0.onrender.com/logo.png",
+  "maskableIconUrl": "https://genfeb-zfr0.onrender.com/logo.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "E:\\01 Usuario\\Programación 2\\genfeb\\genfeb\\android.keystore",
+    "alias": "android"
+  },
+  "appVersionName": "1",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://genfeb-zfr0.onrender.com/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://genfeb-zfr0.onrender.com/",
+  "minSdkVersion": 21,
+  "orientation": "default",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
+  "appVersion": "1"
+}
