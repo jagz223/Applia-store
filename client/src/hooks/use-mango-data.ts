@@ -901,7 +901,8 @@ export function useConfirmBookingByClient() {
       if (!res.ok) throw new Error(data.message || "No se pudo registrar la confirmación");
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, bookingId) => {
+      queryClient.invalidateQueries({ queryKey: ["booking", bookingId] });
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });

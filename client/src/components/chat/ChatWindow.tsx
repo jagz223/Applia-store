@@ -98,12 +98,14 @@ export function ChatWindow({
 
   const attachDisabled = isSending || !!conversation.otherParticipant?.isDeleted || chatLocked;
 
-  const showReminderStrip = Boolean(reminderText) || Boolean(reminderActions);
+  /** En móvil con input fijo abajo, los botones de gestión van encima del teclado (no solo arriba del hilo). */
+  const bookingToolsInComposer = Boolean(pinInputToBottom && reminderActions);
+  const showTopReminderStrip = Boolean(reminderText) || (Boolean(reminderActions) && !pinInputToBottom);
 
   return (
     <div className="flex h-full min-h-0 w-full max-w-full flex-1 flex-col overflow-hidden">
       <div className="min-h-0 min-w-0 shrink-0">
-        {showReminderStrip ? (
+        {showTopReminderStrip ? (
           <div
             className={cn(
               "border-b-2 border-primary/45 bg-gradient-to-r from-primary/[0.2] via-primary/[0.11] to-accent/15",
@@ -128,7 +130,7 @@ export function ChatWindow({
                   )}
                 </div>
               </div>
-              {reminderActions ? (
+              {reminderActions && !pinInputToBottom ? (
                 <div className="flex shrink-0 flex-wrap gap-2 sm:max-w-[min(100%,20rem)] sm:justify-end">{reminderActions}</div>
               ) : null}
             </div>
@@ -233,9 +235,11 @@ export function ChatWindow({
           hasMore={hasMoreMessages}
           onLoadMore={onLoadMoreMessages}
           isLoadingMore={isLoadingMoreMessages}
-          className={
+          bottomReserveClassName={
             pinInputToBottom
-              ? "pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))]"
+              ? bookingToolsInComposer
+                ? "h-[calc(13.5rem+env(safe-area-inset-bottom,0px))]"
+                : "h-[calc(6rem+env(safe-area-inset-bottom,0px))]"
               : undefined
           }
         />
@@ -262,9 +266,21 @@ export function ChatWindow({
         <div
           className={cn(
             "fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 shadow-[0_-8px_32px_rgba(0,0,0,0.18)] backdrop-blur-sm supports-[backdrop-filter]:bg-background/90",
-            "pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-1",
+            "pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-0",
           )}
         >
+          {bookingToolsInComposer ? (
+            <div
+              className={cn(
+                "border-b border-primary/25 bg-gradient-to-r from-primary/[0.12] via-muted/50 to-accent/10 px-3 py-2",
+                "flex flex-wrap items-center justify-center gap-2",
+              )}
+              role="region"
+              aria-label="Gestión de reserva o servicio"
+            >
+              {reminderActions}
+            </div>
+          ) : null}
           <MessageInput
             value={messageInput}
             onChange={onMessageInputChange}

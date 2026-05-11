@@ -33,6 +33,7 @@ import { ArrowLeft, MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
+import { CHAT_BOOKING_COORDINATION_HINT } from "@/lib/chat-booking-ui-copy";
 import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSocket } from "@/hooks/use-socket";
@@ -195,19 +196,16 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
         })()
       : null;
 
-  const priceAgreementHint =
-    " Coordinen entre ambos el precio del servicio de forma mutua (por este chat u otro canal); la app no publica ni exige un importe fijo por servicio.";
-
   const bookingOrServiceReminder =
     selectedConversationId != null
       ? bookingContext?.status === "pending" ||
           bookingContext?.status === "confirmed" ||
           bookingContext?.status === "in_progress"
         ? bookingContext?.serviceTitle != null
-          ? `Este chat es sobre la reserva #${bookingContext.id} — ${bookingContext.serviceTitle}. Ambos pueden ver este recordatorio.${priceAgreementHint}`
-          : `Este chat es sobre la reserva #${bookingContext.id}. Ambos pueden ver este recordatorio.${priceAgreementHint}`
+          ? `Este chat es sobre la reserva #${bookingContext.id} — ${bookingContext.serviceTitle}. Ambos pueden ver este recordatorio.${CHAT_BOOKING_COORDINATION_HINT}`
+          : `Este chat es sobre la reserva #${bookingContext.id}. Ambos pueden ver este recordatorio.${CHAT_BOOKING_COORDINATION_HINT}`
         : serviceContext?.title
-          ? `Este chat es sobre el servicio: ${serviceContext.title}. Ambos pueden ver este recordatorio.${priceAgreementHint}`
+          ? `Este chat es sobre el servicio: ${serviceContext.title}. Ambos pueden ver este recordatorio.${CHAT_BOOKING_COORDINATION_HINT}`
           : null
       : null;
 

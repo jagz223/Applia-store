@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { Loader2, ExternalLink, LayoutList, MessageSquare, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2, ExternalLink, LayoutList, MessageSquare, XCircle, ShieldCheck } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useUpdateBookingStatus } from "@/hooks/use-mango-data";
+import { useUpdateBookingStatus, useConfirmBookingByClient } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { toDate } from "@/lib/date-utils";
 import { chatApi } from "@/lib/chat-api";
@@ -33,7 +33,9 @@ type BookingRow = {
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pendiente" },
-  { value: "confirmed", label: "Confirmada" },
+  { value: "confirmed", label: "Confirmada por el asociado" },
+  { value: "in_progress", label: "En proceso" },
+  { value: "completed", label: "Completada" },
   { value: "cancelled", label: "Cancelada" },
 ];
 
@@ -86,7 +88,9 @@ export function ChatClientBookingModal({
   });
 
   const updateStatus = useUpdateBookingStatus();
-  const [pendingStatusChange, setPendingStatusChange] = useState<null | { nextStatus: string }>(null);
+  const confirmPayment = useConfirmBookingByClient();
+  const [pendingCancel, setPendingCancel] = useState(false);
+  const [clientConformityOpen, setClientConformityOpen] = useState(false);
 
   const isMine =
     booking != null &&
@@ -95,7 +99,10 @@ export function ChatClientBookingModal({
   const row = useMemo(() => (isMine ? booking : undefined), [booking, isMine]);
 
   useEffect(() => {
-    if (!open) setPendingStatusChange(null);
+    if (!open) {
+      setPendingCancel(false);
+      setClientConformityOpen(false);
+    }
   }, [open]);
 
   const sendStatusNoticeToChat = async (id: number, newStatus: string) => {
@@ -154,6 +161,7 @@ export function ChatClientBookingModal({
 
     const date = toDate(row.date ?? new Date());
     const needsProChangeAck = row.status === "pending" && row.pendingClientAcknowledgment === true;
+    const needsClientConfirmation = row.status === "confirmed" && row.confirmedByClient !== true;
 
     return (
       <div className="space-y-4 max-h-[min(70vh,520px)] overflow-y-auto pr-1">
@@ -170,7 +178,9 @@ export function ChatClientBookingModal({
                     : "secondary"
               }
             >
-              {STATUS_OPTIONS.find((o) => o.value === row.status)?.label ?? row.status}
+              {needsClientConfirmation
+                ? "Tu conformidad pendiente"
+                : STATUS_OPTIONS.find((o) => o.value === row.status)?.label ?? row.status}
             </Badge>
             <span className="text-xs text-muted-foreground">Reserva #{row.id}</span>
           </div>
@@ -192,12 +202,22 @@ export function ChatClientBookingModal({
 
         {row.notes ? <p className="text-sm text-muted-foreground">Notas: {row.notes}</p> : null}
 
-        {row.status !== "pending" || needsProChangeAck ? null : (
+        {row.status === "pending" && !needsProChangeAck ? (
           <p className="text-xs text-muted-foreground">
-            Si ya acordaste fecha y condiciones con el asociado, puedes confirmar la reserva aquí. El seguimiento del
-            servicio también está en Mis reservas.
+            Primero el asociado debe confirmar la reserva desde su panel. Cuando lo haga, podrás registrar aquí tu
+            conformidad (o desde Mis reservas). El seguimiento completo está en Mis reservas.
           </p>
-        )}
+        ) : null}
+
+        {needsClientConfirmation ? (
+          <div className="rounded-lg border border-primary/25 bg-primary/5 p-3 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">El asociado ya confirmó su parte</p>
+            <p className="mt-1">
+              Revisá que servicio, fecha y lo acordado por chat coincidan. Luego pulsá «Confirmar conformidad» para que el
+              asociado pueda pasar el servicio a en proceso cuando corresponda.
+            </p>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap gap-2">
           {associateUserId ? (
@@ -213,28 +233,43 @@ export function ChatClientBookingModal({
           </Button>
         </div>
 
-        {row.status === "pending" && !needsProChangeAck && (
+        {needsClientConfirmation ? (
           <div className="space-y-3 border-t border-border pt-4">
-            <p className="text-sm font-medium">Acciones</p>
-            <p className="text-sm text-muted-foreground">
-              Revisá que el servicio, la fecha y lo acordado con el asociado sean correctos antes de confirmar.
-            </p>
+            <p className="text-sm font-medium">Tu conformidad</p>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Button
                 type="button"
                 className="gap-2"
-                disabled={updateStatus.isPending}
-                onClick={() => setPendingStatusChange({ nextStatus: "confirmed" })}
+                disabled={confirmPayment.isPending || updateStatus.isPending}
+                onClick={() => setClientConformityOpen(true)}
               >
-                <CheckCircle2 className="h-4 w-4" />
-                Confirmar reserva
+                <ShieldCheck className="h-4 w-4" />
+                Confirmar conformidad
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
+                disabled={confirmPayment.isPending || updateStatus.isPending}
+                onClick={() => setPendingCancel(true)}
+              >
+                <XCircle className="h-4 w-4" />
+                Cancelar reserva
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {row.status === "pending" && !needsProChangeAck && (
+          <div className="space-y-3 border-t border-border pt-4">
+            <p className="text-sm font-medium">Acciones</p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
                 disabled={updateStatus.isPending}
-                onClick={() => setPendingStatusChange({ nextStatus: "cancelled" })}
+                onClick={() => setPendingCancel(true)}
               >
                 <XCircle className="h-4 w-4" />
                 Cancelar reserva
@@ -245,6 +280,13 @@ export function ChatClientBookingModal({
       </div>
     );
   })();
+
+  const dialogBooking =
+    booking != null &&
+    user?.id != null &&
+    (ownershipVerified || (booking.userId != null && String(booking.userId) === String(user.id)))
+      ? booking
+      : null;
 
   return (
     <>
@@ -275,9 +317,68 @@ export function ChatClientBookingModal({
       </Dialog>
 
       <Dialog
-        open={pendingStatusChange != null}
+        open={clientConformityOpen}
         onOpenChange={(o) => {
-          if (!o && !updateStatus.isPending) setPendingStatusChange(null);
+          if (!o && !confirmPayment.isPending) setClientConformityOpen(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg" overlayClassName="bg-black/35 backdrop-blur-[0.5px]">
+          <DialogHeader>
+            <DialogTitle>¿Todo coincide con lo hablado por chat?</DialogTitle>
+            <DialogDescription>
+              Si confirmás, registrás tu conformidad con lo que el asociado ya validó en la app. El asociado podrá seguir
+              el flujo (por ejemplo marcar en proceso) cuando corresponda. Si algo no encaja, pulsá «No» y coordiná un poco
+              más antes de avanzar.
+            </DialogDescription>
+          </DialogHeader>
+          {dialogBooking && bookingId != null ? (
+            <div className="mt-3 space-y-2 text-sm">
+              <p className="font-medium">Servicio: {dialogBooking.serviceTitle ?? "Servicio"}</p>
+              <p className="text-muted-foreground">
+                Fecha en la reserva: {format(toDate(dialogBooking.date ?? new Date()), "PPP p", { locale: es })}
+              </p>
+            </div>
+          ) : null}
+          <DialogFooter className="mt-4 flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setClientConformityOpen(false)}
+              disabled={confirmPayment.isPending}
+            >
+              No, seguir revisando
+            </Button>
+            <Button
+              type="button"
+              className="gap-2"
+              onClick={() => {
+                if (bookingId == null) return;
+                confirmPayment.mutate(bookingId, {
+                  onSuccess: () => setClientConformityOpen(false),
+                } as any);
+              }}
+              disabled={confirmPayment.isPending}
+            >
+              {confirmPayment.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Registrando…
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="h-4 w-4" />
+                  Sí, confirmo
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={pendingCancel}
+        onOpenChange={(o) => {
+          if (!o && !updateStatus.isPending) setPendingCancel(false);
         }}
       >
         <DialogContent
@@ -287,66 +388,32 @@ export function ChatClientBookingModal({
           onInteractOutside={(e) => e.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle>
-              {pendingStatusChange?.nextStatus === "confirmed"
-                ? "¿Confirmar la reserva?"
-                : pendingStatusChange?.nextStatus === "cancelled"
-                  ? "¿Cancelar la reserva?"
-                  : "¿Cambiar estado de la reserva?"}
-            </DialogTitle>
-            <DialogDescription className="space-y-2">
-              {pendingStatusChange?.nextStatus === "confirmed" && bookingId != null ? (
-                <>
-                  <span>
-                    Revisá que el servicio, la fecha y lo acordado con el asociado sean correctos. Si confirmás, la
-                    reserva #{bookingId} pasará a <strong className="text-foreground">Confirmada</strong>, se avisará en
-                    este chat y al asociado. El pago lo coordinas directamente con el profesional.
-                  </span>
-                </>
-              ) : pendingStatusChange?.nextStatus === "cancelled" && bookingId != null ? (
+            <DialogTitle>¿Cancelar la reserva?</DialogTitle>
+            <DialogDescription>
+              {bookingId != null ? (
                 <>
                   La reserva #{bookingId} quedará como <strong className="text-foreground">Cancelada</strong>, se
-                  notificará al asociado y se publicará un aviso en este chat. Si no estás seguro, pulsa «No, volver» y
-                  sigue coordinando por chat.
-                </>
-              ) : pendingStatusChange && bookingId != null ? (
-                <>
-                  Vas a pasar esta reserva (#{bookingId}) a «{statusLabel(pendingStatusChange.nextStatus)}». Se enviará
-                  un mensaje del sistema en este chat con el cambio.
+                  notificará al asociado y se publicará un aviso en este chat.
                 </>
               ) : (
-                "Confirma si deseas aplicar el nuevo estado."
+                "La reserva quedará cancelada."
               )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setPendingStatusChange(null)}
-              disabled={updateStatus.isPending}
-            >
+            <Button type="button" variant="outline" onClick={() => setPendingCancel(false)} disabled={updateStatus.isPending}>
               No, volver
             </Button>
             <Button
               type="button"
-              variant={pendingStatusChange?.nextStatus === "cancelled" ? "destructive" : "default"}
+              variant="destructive"
               onClick={() => {
-                if (!pendingStatusChange || bookingId == null) return;
-                const { nextStatus } = pendingStatusChange;
-                executeStatusUpdate(bookingId, nextStatus, () => setPendingStatusChange(null));
+                if (bookingId == null) return;
+                executeStatusUpdate(bookingId, "cancelled", () => setPendingCancel(false));
               }}
               disabled={updateStatus.isPending}
             >
-              {updateStatus.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : pendingStatusChange?.nextStatus === "confirmed" ? (
-                "Sí, todo correcto"
-              ) : pendingStatusChange?.nextStatus === "cancelled" ? (
-                "Sí, cancelar reserva"
-              ) : (
-                "Sí, aplicar cambio"
-              )}
+              {updateStatus.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sí, cancelar reserva"}
             </Button>
           </DialogFooter>
         </DialogContent>

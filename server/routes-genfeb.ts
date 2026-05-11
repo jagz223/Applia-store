@@ -320,17 +320,14 @@ export async function registerGenFebRoutes(
         return res.status(403).json({ message: "No tienes permiso para cambiar el estado de esta reserva" });
       }
 
-      // Cliente: cancelar en cualquier momento permitido por flujo; o confirmar la reserva (pendiente → confirmada) sin pasar por el panel.
+      // Cliente: solo cancelar por PATCH. La pasión pendiente→confirmada la hace el asociado; el cliente registra su conformidad con POST /confirm-client.
       if (isClient) {
-        const prevClient = String((currentBooking as { status?: string }).status ?? "pending");
         if (data.status === "cancelled") {
           /* ok */
-        } else if (data.status === "confirmed" && prevClient === "pending") {
-          /* ok — acuerdo con el asociado; el pago con wallet sigue en «Confirmar pago» en Mis reservas */
         } else {
           return res.status(403).json({
             message:
-              "Solo podés cancelar la reserva o confirmarla mientras está pendiente. Para pagar con Saldo Genfeb usá «Confirmar pago» en Mis reservas.",
+              "Solo podés cancelar la reserva desde aquí. Primero el asociado debe confirmarla desde su panel; después podrás dar tu conformidad con «Confirmar» en Mis reservas o en el chat.",
           });
         }
       } else {
@@ -474,46 +471,6 @@ export async function registerGenFebRoutes(
             body: "Confirma el pago para retener los fondos.",
             data: { url: "/bookings", type: "booking_confirmed_by_provider", bookingId: String(bookingId) },
           });
-        }
-      }
-
-      // Cliente pasó pendiente → confirmada: avisar al asociado en tiempo real y push
-      if (data.status === "confirmed" && isClient) {
-        const providerId = (currentBooking as { providerId?: number }).providerId;
-        const prov = providerId != null ? await storage.getProvider(providerId) : undefined;
-        const providerUserId = prov ? String((prov as { userId?: string }).userId ?? "") : "";
-        if (providerUserId) {
-          try {
-            await storage.createNotification({
-              userId: providerUserId,
-              type: "booking",
-              data: {
-                type: "booking_update",
-                booking: { ...(booking as Record<string, unknown>), id: bookingId, status: "confirmed" },
-              },
-            });
-          } catch (err) {
-            console.error("[booking] Error persistiendo notificación al asociado (cliente confirmó):", err);
-          }
-          const io = getIO();
-          if (io) {
-            io.to(`user:${providerUserId}`).emit("notification:booking", {
-              type: "booking_update",
-              booking,
-              timestamp: new Date(),
-            });
-          }
-          void notificationService
-            .sendPushToUser(providerUserId, {
-              title: "Cliente confirmó la reserva",
-              body: "El cliente confirmó la solicitud. Revisá fechas y el chat.",
-              data: {
-                url: `/professional-dashboard?tab=bookings&highlight=${bookingId}`,
-                type: "booking",
-                bookingId: String(bookingId),
-              },
-            })
-            .catch((err) => console.error("[push] Error notificando confirmación del cliente:", err));
         }
       }
 
