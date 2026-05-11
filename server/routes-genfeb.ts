@@ -7,14 +7,20 @@ import { getAdminAndSupportUsers, getFullAdminUsers } from "./staff-users";
 import { z } from "zod";
 import { notificationService } from "./services/notification.service";
 import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
-import { applyServiceBookingChatLifecycle, ensureConversationWhenBookingCreated } from "./service-booking-chat";
+import {
+  applyServiceBookingChatLifecycle,
+  ensureConversationWhenBookingCreated,
+  notifyBookingStatusChangedInChat,
+  notifyBookingConfirmClientInChat,
+  notifyBookingCostChangedInChat,
+  notifyBookingScheduleChangedInChat,
+} from "./service-booking-chat";
 import { calcCommission, calcProviderNet, commissionDisplayPercents } from "@shared/platform-commission";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { isFullAdmin } from "@shared/roles";
 import { isWalletAtOrBelowDebtCap, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { isOffPlatformServiceBookingPayment, serviceBookingPaymentLabel } from "@shared/booking-payment";
 import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
-import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
@@ -75,7 +81,7 @@ const uploadDocumentSchema = z.object({
 const sendMessageSchema = z.object({
   conversationId: z.number(),
   content: z.string().min(1),
-  type: z.enum(["text", "image", "file", "location", "system"]).default("text"),
+  type: z.enum(["text", "image", "file", "location"]).default("text"),
 });
 
 // User role schemas
@@ -314,10 +320,18 @@ export async function registerGenFebRoutes(
         return res.status(403).json({ message: "No tienes permiso para cambiar el estado de esta reserva" });
       }
 
-      // Cliente solo puede cancelar (pasar a 'cancelled')
+      // Cliente: cancelar en cualquier momento permitido por flujo; o confirmar la reserva (pendiente → confirmada) sin pasar por el panel.
       if (isClient) {
-        if (data.status !== "cancelled") {
-          return res.status(403).json({ message: "Solo puedes cancelar la reserva. Para confirmar el pago usa el botón Confirmar pago." });
+        const prevClient = String((currentBooking as { status?: string }).status ?? "pending");
+        if (data.status === "cancelled") {
+          /* ok */
+        } else if (data.status === "confirmed" && prevClient === "pending") {
+          /* ok — acuerdo con el asociado; el pago con wallet sigue en «Confirmar pago» en Mis reservas */
+        } else {
+          return res.status(403).json({
+            message:
+              "Solo podés cancelar la reserva o confirmarla mientras está pendiente. Para pagar con Saldo Genfeb usá «Confirmar pago» en Mis reservas.",
+          });
         }
       } else {
         // Es el profesional
@@ -440,9 +454,8 @@ export async function registerGenFebRoutes(
       }
 
       // Notificación al cliente cuando el profesional confirma la reserva (persistida para que sobreviva al refresh)
-      if (data.status === "confirmed") {
-        const clientUserId = (currentBooking ?? booking) as { userId?: string };
-        const uid = clientUserId.userId;
+      if (data.status === "confirmed" && isProvider) {
+        const uid = (currentBooking as { userId?: string }).userId;
         if (uid) {
           await storage.createNotification({
             userId: uid,
@@ -462,6 +475,55 @@ export async function registerGenFebRoutes(
             data: { url: "/bookings", type: "booking_confirmed_by_provider", bookingId: String(bookingId) },
           });
         }
+      }
+
+      // Cliente pasó pendiente → confirmada: avisar al asociado en tiempo real y push
+      if (data.status === "confirmed" && isClient) {
+        const providerId = (currentBooking as { providerId?: number }).providerId;
+        const prov = providerId != null ? await storage.getProvider(providerId) : undefined;
+        const providerUserId = prov ? String((prov as { userId?: string }).userId ?? "") : "";
+        if (providerUserId) {
+          try {
+            await storage.createNotification({
+              userId: providerUserId,
+              type: "booking",
+              data: {
+                type: "booking_update",
+                booking: { ...(booking as Record<string, unknown>), id: bookingId, status: "confirmed" },
+              },
+            });
+          } catch (err) {
+            console.error("[booking] Error persistiendo notificación al asociado (cliente confirmó):", err);
+          }
+          const io = getIO();
+          if (io) {
+            io.to(`user:${providerUserId}`).emit("notification:booking", {
+              type: "booking_update",
+              booking,
+              timestamp: new Date(),
+            });
+          }
+          void notificationService
+            .sendPushToUser(providerUserId, {
+              title: "Cliente confirmó la reserva",
+              body: "El cliente confirmó la solicitud. Revisá fechas y el chat.",
+              data: {
+                url: `/professional-dashboard?tab=bookings&highlight=${bookingId}`,
+                type: "booking",
+                bookingId: String(bookingId),
+              },
+            })
+            .catch((err) => console.error("[push] Error notificando confirmación del cliente:", err));
+        }
+      }
+
+      try {
+        const prevStatus = String((currentBooking as { status?: string }).status ?? "pending");
+        if (prevStatus !== data.status) {
+          await notifyBookingStatusChangedInChat(getIO(), storage, booking, prevStatus, data.status);
+        }
+      } catch (e) {
+        console.error("[service-booking-chat] aviso de estado en chat:", e);
       }
 
       await applyServiceBookingChatLifecycle(getIO(), storage, booking);
@@ -559,9 +621,7 @@ export async function registerGenFebRoutes(
               providerNetFormatted,
               platformPercent,
               providerPercent,
-              message: amountFormatted
-                ? `El cliente confirmó el acuerdo (${serviceBookingPaymentLabel(paymentMethod)}). Monto: $${amountFormatted} USD. Al marcar completado se descontará la comisión (${platformPercent}%) de tu Saldo Genfeb.`
-                : `El cliente confirmó el acuerdo (${serviceBookingPaymentLabel(paymentMethod)}).`,
+              message: "El cliente confirmó la reserva. Revisá el detalle en tu panel de reservas.",
             }
           : {
               bookingId,
@@ -573,9 +633,7 @@ export async function registerGenFebRoutes(
               providerNetFormatted,
               platformPercent,
               providerPercent,
-              message: amountFormatted
-                ? `Se te han retenido $${amountFormatted} USD (retenidos). El cliente confirmó el pago. Recibirás $${providerNetFormatted} USD (${providerPercent}%) y la plataforma tomará $${commissionFormatted} USD (${platformPercent}%). Ya puedes completar el servicio.`
-                : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+              message: "El cliente confirmó la reserva. Revisá el detalle en tu panel de reservas.",
             };
         try {
           await storage.createNotification({
@@ -594,18 +652,19 @@ export async function registerGenFebRoutes(
           });
         }
         void notificationService.sendPushToUser(providerUserId, {
-          title: offPlatformBooking ? "Cliente confirmó el acuerdo" : "Fondos agregados",
-          body: offPlatformBooking
-            ? amountFormatted
-              ? `Monto acordado $${amountFormatted} USD (${serviceBookingPaymentLabel(paymentMethod)}). Completa el servicio; la comisión se aplicará a tu Saldo Genfeb.`
-              : `El cliente confirmó (${serviceBookingPaymentLabel(paymentMethod)}).`
-            : amountFormatted && providerNetFormatted && commissionFormatted
-              ? `Se te han retenido $${amountFormatted} USD. Recibirás $${providerNetFormatted} USD (${providerPercent}%) y la plataforma tomará $${commissionFormatted} USD (${platformPercent}%). Completa el servicio para liberar los fondos.`
-              : amountFormatted
-                ? `Se te han retenido $${amountFormatted} USD. Completa el servicio para liberar los fondos.`
-                : "El cliente confirmó el pago.",
+          title: "Cliente confirmó la reserva",
+          body: "Podés seguir con el servicio desde tu panel de reservas.",
           data: { url: "/professional-dashboard?tab=bookings", type: "booking_confirmed_by_client", bookingId: String(bookingId) },
         });
+      }
+
+      try {
+        await notifyBookingConfirmClientInChat(getIO(), storage, existing, updated, {
+          amountFormatted,
+          offPlatform: offPlatformBooking,
+        });
+      } catch (e) {
+        console.error("[service-booking-chat] confirm-client en chat:", e);
       }
 
       res.json(updated);
@@ -722,6 +781,11 @@ export async function registerGenFebRoutes(
       } catch (e) {
         console.error("Error creando recordatorio de comisión:", e);
       }
+      try {
+        await notifyBookingCostChangedInChat(getIO(), storage, booking, updated, amountFormatted);
+      } catch (e) {
+        console.error("[service-booking-chat] cambio de monto en chat:", e);
+      }
       res.json(updated);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -774,6 +838,18 @@ export async function registerGenFebRoutes(
         } catch (e) {
           console.error("Error creando notificación de cambio de fecha:", e);
         }
+      }
+      try {
+        await notifyBookingScheduleChangedInChat(
+          getIO(),
+          storage,
+          booking,
+          updated,
+          dateFormatted,
+          date.toISOString(),
+        );
+      } catch (e) {
+        console.error("[service-booking-chat] cambio de fecha en chat:", e);
       }
       res.json(updated);
     } catch (error) {
@@ -1567,6 +1643,7 @@ export async function registerGenFebRoutes(
             ...c,
             serviceEndedAt: conversationTimestampToIso((c as any).serviceEndedAt),
             serviceChatHideFromUsersAt: conversationTimestampToIso((c as any).serviceChatHideFromUsersAt),
+            messagesLocked: !!(c as any).messagesLocked,
             bookingId: (c as any).bookingId ?? null,
             kind: (c as any).kind ?? null,
             otherParticipant: { 
@@ -1595,11 +1672,17 @@ export async function registerGenFebRoutes(
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const participantId = req.body.participantId as string;
       const serviceId = req.body.serviceId as number | undefined;
+      const bookingIdRaw = req.body.bookingId as number | undefined;
+      const bookingId =
+        bookingIdRaw != null && Number.isFinite(Number(bookingIdRaw)) ? Number(bookingIdRaw) : undefined;
 
       const conversation = await storage.createConversation({
         participant1Id: userId,
         participant2Id: participantId,
         serviceId,
+        ...(bookingId != null
+          ? { bookingId, kind: "service_booking" as const }
+          : {}),
       });
       res.status(201).json(conversation);
     } catch (error) {
@@ -1653,12 +1736,19 @@ export async function registerGenFebRoutes(
       const convs = await storage.getConversationsByUser(userId);
       const conv = convs.find((c: any) => Number(c.id) === data.conversationId);
       if (!conv) return res.status(403).json({ message: "No tienes acceso a esta conversación" });
-      const isSystemMessage = data.type === "system";
+      const convLocked = (conv as { messagesLocked?: boolean }).messagesLocked === true;
+      const convEnded = (conv as { serviceEndedAt?: unknown }).serviceEndedAt != null;
+      if (convLocked || convEnded) {
+        return res.status(403).json({
+          message:
+            "Este chat está cerrado porque el servicio finalizó. No se pueden enviar más mensajes.",
+        });
+      }
       const message = await storage.createMessage({
         conversationId: data.conversationId,
         content: data.content,
         type: data.type,
-        senderId: isSystemMessage ? CHAT_SYSTEM_SENDER_ID : userId,
+        senderId: userId,
         status: "sent",
       });
       const recipientId =
@@ -1667,32 +1757,28 @@ export async function registerGenFebRoutes(
 
       const msgType = String((message as { type?: string }).type ?? data.type ?? "text");
       const messagePreview =
-        msgType === "system"
-          ? "Mensaje del sistema"
-          : msgType === "image"
-            ? "📷 Comprobante de pago"
-            : msgType === "location"
-              ? "📍 Ubicación compartida"
-              : String(message.content ?? "").slice(0, 120);
+        msgType === "image"
+          ? "📷 Comprobante de pago"
+          : msgType === "location"
+            ? "📍 Ubicación compartida"
+            : String(message.content ?? "").slice(0, 120);
 
-      if (!isSystemMessage) {
-        await storage.createNotification({
-          userId: recipientIdStr,
-          type: "message",
-          data: {
-            conversationId: message.conversationId,
-            preview: messagePreview,
-            messageId: message.id,
-          },
-        });
-
-        void notificationService.sendNewMessageNotification({
-          recipientId,
+      await storage.createNotification({
+        userId: recipientIdStr,
+        type: "message",
+        data: {
           conversationId: message.conversationId,
           preview: messagePreview,
-          senderId: userId,
-        });
-      }
+          messageId: message.id,
+        },
+      });
+
+      void notificationService.sendNewMessageNotification({
+        recipientId,
+        conversationId: message.conversationId,
+        preview: messagePreview,
+        senderId: userId,
+      });
 
       const io = getIO();
       if (io) {

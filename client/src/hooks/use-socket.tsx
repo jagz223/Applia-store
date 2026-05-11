@@ -11,6 +11,7 @@ import {
   isHiddenWalletRelatedNotification,
 } from "@/lib/notification-filters";
 import { debouncedRefetch } from "@/lib/refetch-utils";
+import { RATINGS_PENDING_QUERY_KEY } from "@/hooks/use-mango-data";
 
 const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
 const ADMIN_WITHDRAWALS_KEY = "/api/admin/withdrawals";
@@ -207,7 +208,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         debouncedRefetch(queryClient, ["/api/bookings"]);
         toast({
           title: "Reserva confirmada por el asociado",
-          description: "Confirma el pago en Mis Reservas para retener los fondos.",
+          description: "Revisá el detalle en Mis reservas y seguí coordinando por chat si hace falta.",
         });
       }
       if (type === "booking_confirmed_by_client") {
@@ -216,34 +217,38 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         debouncedRefetch(queryClient, ["/api/bookings/provider"]);
         debouncedRefetch(queryClient, ["/api/bookings"]);
         debouncedRefetch(queryClient, ["/api/wallet/me"]);
-        const amount = notification?.data?.amountFormatted ?? notification?.data?.amount;
-        const providerNet = notification?.data?.providerNetFormatted ?? notification?.data?.providerNet;
-        const commission = notification?.data?.commissionFormatted ?? notification?.data?.commission;
-        const provPct = (notification?.data as any)?.providerPercent ?? 90;
-        const platPct = (notification?.data as any)?.platformPercent ?? 10;
-        toast({
-          title: "Fondos agregados",
-          description:
-            amount && providerNet && commission
-              ? `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (${provPct}%) y la plataforma tomará $${commission} USD (${platPct}%). Ya puedes completar el servicio.`
-              : amount
-                ? `Se te han agregado $${amount} USD (retenidos). Ya puedes completar el servicio.`
-                : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
-        });
+        if (!hideWalletUi) {
+          const amount = notification?.data?.amountFormatted ?? notification?.data?.amount;
+          const providerNet = notification?.data?.providerNetFormatted ?? notification?.data?.providerNet;
+          const commission = notification?.data?.commissionFormatted ?? notification?.data?.commission;
+          const provPct = (notification?.data as any)?.providerPercent ?? 90;
+          const platPct = (notification?.data as any)?.platformPercent ?? 10;
+          toast({
+            title: "Fondos agregados",
+            description:
+              amount && providerNet && commission
+                ? `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (${provPct}%) y la plataforma tomará $${commission} USD (${platPct}%). Ya puedes completar el servicio.`
+                : amount
+                  ? `Se te han agregado $${amount} USD (retenidos). Ya puedes completar el servicio.`
+                  : "El cliente confirmó el pago. Ya puedes iniciar o completar el trabajo.",
+          });
+        }
       }
       if (type === "booking_cost_commission_reminder") {
-        const amountFormatted = notification?.data?.amountFormatted ?? notification?.data?.amount;
-        const providerNetFormatted = notification?.data?.providerNetFormatted ?? notification?.data?.providerNet;
-        const commissionFormatted = notification?.data?.commissionFormatted ?? notification?.data?.commission;
-        const provPct = (notification?.data as any)?.providerPercent ?? 90;
-        const platPct = (notification?.data as any)?.platformPercent ?? 10;
-        toast({
-          title: "Recordatorio de comisión",
-          description:
-            amountFormatted && providerNetFormatted && commissionFormatted
-              ? `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (${provPct}%). Comisión: $${commissionFormatted} USD (${platPct}%).`
-              : `Recuerda que el asociado recibe el ${provPct}% del monto acordado.`,
-        });
+        if (!hideWalletUi) {
+          const amountFormatted = notification?.data?.amountFormatted ?? notification?.data?.amount;
+          const providerNetFormatted = notification?.data?.providerNetFormatted ?? notification?.data?.providerNet;
+          const commissionFormatted = notification?.data?.commissionFormatted ?? notification?.data?.commission;
+          const provPct = (notification?.data as any)?.providerPercent ?? 90;
+          const platPct = (notification?.data as any)?.platformPercent ?? 10;
+          toast({
+            title: "Recordatorio de comisión",
+            description:
+              amountFormatted && providerNetFormatted && commissionFormatted
+                ? `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (${provPct}%). Comisión: $${commissionFormatted} USD (${platPct}%).`
+                : `Recuerda que el asociado recibe el ${provPct}% del monto acordado.`,
+          });
+        }
       }
       if (type === "booking_cancelled") {
         queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
@@ -329,10 +334,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         const step = notification?.data?.step ?? notification?.data?.data?.step;
         const st = notification?.data?.status ?? notification?.data?.data?.status;
         if (step === "transaction" && st === "verified") {
-          toast({
-            title: "Pago de verificación confirmado",
-            description: "Tu factura de activación (USD 15) ya está en Facturas — Mi actividad.",
-          });
+          /* Sin toast de “pago / USD”: el listado de facturas se actualiza igual por invalidación. */
         }
       }
     });
@@ -387,9 +389,20 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
             description: "El asociado marcó tu reserva como en proceso. Revisa tu lista de reservas.",
           });
         } else if (status === "completed") {
+          queryClient.invalidateQueries({ queryKey: RATINGS_PENDING_QUERY_KEY });
+          void queryClient.refetchQueries({ queryKey: RATINGS_PENDING_QUERY_KEY });
           toast({
             title: "Servicio completado",
-            description: "El servicio fue completado. Puedes revisar la reserva y dejar tu calificación cuando corresponda.",
+            description: "El servicio fue completado. Ya puedes dejar tu calificación.",
+          });
+        } else if (status === "confirmed") {
+          const bid = notification?.booking?.id;
+          toast({
+            title: "Reserva confirmada",
+            description:
+              bid != null
+                ? `La reserva #${bid} quedó confirmada. Revisá el chat o tu panel.`
+                : "La reserva quedó confirmada. Revisá el chat o tu panel.",
           });
         }
       }

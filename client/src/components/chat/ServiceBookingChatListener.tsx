@@ -27,12 +27,12 @@ export function ServiceBookingChatListener() {
       if (payload?.serviceChatHideFromUsersAt) {
         const until = new Date(payload.serviceChatHideFromUsersAt);
         if (!Number.isNaN(until.getTime())) {
-          cierre = ` Quedará en tu bandeja hasta aprox. ${until.toLocaleString("es-EC", { dateStyle: "medium", timeStyle: "short" })}.`;
+          cierre = ` Seguirá en tu bandeja hasta aproximadamente ${until.toLocaleString("es-EC", { dateStyle: "medium", timeStyle: "short" })}.`;
         }
       }
       toast({
         title: "Servicio finalizado",
-        description: `Podés seguir escribiendo un rato para coordinar cierres o guardar comprobantes; luego el chat dejará de mostrarse en tu lista (el registro se conserva para el equipo de soporte).${cierre}`,
+        description: `Si necesitas revisar algo del chat, hazlo pronto; después dejará de mostrarse en tu lista.${cierre}`,
         duration: 12_000,
       });
     };

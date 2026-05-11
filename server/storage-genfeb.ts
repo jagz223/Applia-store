@@ -24,6 +24,7 @@ import type { IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage } fro
 import type { ProfessionalVerification, VerifyingStatus, ProfessionalVerificationState } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
 import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
+import { countVerificationsAwaitingAdminReview } from "./associate-verification-admin";
 import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
@@ -1136,7 +1137,14 @@ export class InMemoryStorage implements IStorage {
 
   async markConversationAsRead(conversationId: number, userId: string): Promise<void> {
     this.messages
-      .filter(m => m.conversationId === conversationId && m.senderId !== userId && m.status !== 'read')
+      .filter(
+        (m) =>
+          m.conversationId === conversationId &&
+          m.senderId !== userId &&
+          m.status !== "read" &&
+          m.type !== "system" &&
+          m.senderId !== CHAT_SYSTEM_SENDER_ID
+      )
       .forEach(m => {
         m.status = 'read';
         (m as any).readAt = new Date();
@@ -1525,6 +1533,7 @@ export class InMemoryStorage implements IStorage {
     model?: string | null;
     license_plate?: string | null;
     model_year?: number | null;
+    is_pet_friendly?: boolean;
   } | null> {
     const row = this.vehicles.find(
       (v: { providerId?: number; vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle }) =>
@@ -1539,6 +1548,30 @@ export class InMemoryStorage implements IStorage {
       model: veh.model ?? null,
       license_plate: veh.license_plate ?? null,
       model_year: veh.model_year ?? null,
+      is_pet_friendly: !!veh.is_pet_friendly,
+    };
+  }
+
+  async getPrimaryVehicleByUserId(userId: string): Promise<{
+    vehicle_type: string;
+    brand?: string | null;
+    model?: string | null;
+    license_plate?: string | null;
+    model_year?: number | null;
+    is_pet_friendly?: boolean;
+  } | null> {
+    const row = this.vehicles.find((v: { userId?: string }) => v.userId === userId);
+    const veh = row?.vehicle as import("@shared/vehicle-schema").InsertProviderVehicle | undefined;
+    if (!veh) return null;
+    const vt = veh.vehicle_type;
+    if (typeof vt !== "string") return null;
+    return {
+      vehicle_type: vt,
+      brand: veh.brand ?? null,
+      model: veh.model ?? null,
+      license_plate: veh.license_plate ?? null,
+      model_year: veh.model_year ?? null,
+      is_pet_friendly: !!veh.is_pet_friendly,
     };
   }
 
@@ -2035,7 +2068,7 @@ export class InMemoryStorage implements IStorage {
 
   async getAdminDashboardStats(params: { from: Date; to: Date }): Promise<AdminDashboardStatsResult> {
     const { transfers } = await this.getAllTransfers();
-    const pendingVerificationCount = (await this.getPendingVerifyingStatuses()).length;
+    const pendingVerificationCount = await countVerificationsAwaitingAdminReview(this);
     const pendingWithdrawalRequestsCount = (await this.getUsersWithPendingWithdrawals()).length;
     return aggregateAdminDashboardStats(
       {

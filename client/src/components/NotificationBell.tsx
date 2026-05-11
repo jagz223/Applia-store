@@ -315,7 +315,8 @@ export function NotificationBell() {
     if (type === "booking" && data?.type === "booking_update") {
       const status = (data as any)?.booking?.status as string | undefined;
       if (status === "in_progress") return "El asociado marco tu reserva como en proceso. Revisa tu lista de reservas.";
-      if (status === "completed") return "El servicio fue completado. Puedes revisar la reserva y dejar tu calificacion cuando corresponda.";
+      if (status === "completed")
+        return "El servicio fue completado. Ya puedes dejar tu calificación en la ventana que aparece o desde tu lista de reservas.";
       return "La reserva fue actualizada.";
     }
     if (type === "balance_credited") {
@@ -435,7 +436,7 @@ export function NotificationBell() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="relative">
-          <Bell className={`h-5 w-5 ${unreadCount > 0 ? "text-amber-300" : "text-foreground"}`} />
+          <Bell className={`h-5 w-5 ${unreadCount > 0 ? "text-primary" : "text-foreground"}`} />
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
               {unreadCount > 9 ? "9+" : unreadCount}

@@ -28,9 +28,13 @@ import {
   useCurrentProvider,
   useCategories,
   usePlatformSubscriptionFees,
+  useProfessionalVerification,
   VERIFICATION_STATUS_ME,
+  PROFESSIONAL_VERIFICATION_ME,
   type VerifyingStatusMeDto,
+  type ProfessionalVerificationDto,
 } from "@/hooks/use-mango-data";
+import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
 import { consumeVerifyReturnPath, ensureDefaultVerifyReturnPath } from "@/lib/verify-return-path";
 import { useToast } from "@/hooks/use-toast";
 import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
@@ -45,6 +49,10 @@ export default function VerifyProfessionalPayment() {
   const { data: subscriptionFees } = usePlatformSubscriptionFees();
   const provider = currentProvider ?? user?.provider;
   const isCarGo = useMemo(() => isCarGoProvider(provider ?? undefined, categories), [provider, categories]);
+  const isRenewalSimple = Boolean((provider as { isVerified?: boolean } | undefined)?.isVerified);
+  const verificationEnabled = Boolean(isAuthenticated && user?.provider);
+  const { data: verificationForGate, isLoading: verificationGateLoading } =
+    useProfessionalVerification(verificationEnabled);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -104,19 +112,37 @@ export default function VerifyProfessionalPayment() {
           });
           await queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
           await queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+          await queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
           try {
-            const status = await queryClient.fetchQuery<VerifyingStatusMeDto>({
-              queryKey: [VERIFICATION_STATUS_ME],
-              queryFn: async () => {
-                const token = localStorage.getItem("token");
-                const res = await fetch(VERIFICATION_STATUS_ME, {
-                  headers: token ? { Authorization: `Bearer ${token}` } : {},
-                });
-                if (!res.ok) throw new Error("No se pudo cargar el estado de verificación");
-                return res.json();
-              },
-            });
-            if (status.identification_verified === "pending" && status.transacction_verified === "pending") {
+            const token = localStorage.getItem("token");
+            const authInit: RequestInit | undefined = token
+              ? { headers: { Authorization: `Bearer ${token}` } }
+              : undefined;
+            const [status, prof] = await Promise.all([
+              queryClient.fetchQuery<VerifyingStatusMeDto>({
+                queryKey: [VERIFICATION_STATUS_ME],
+                queryFn: async () => {
+                  const res = await fetch(VERIFICATION_STATUS_ME, authInit);
+                  if (!res.ok) throw new Error("No se pudo cargar el estado de verificación");
+                  return res.json();
+                },
+              }),
+              queryClient.fetchQuery<ProfessionalVerificationDto | null>({
+                queryKey: [PROFESSIONAL_VERIFICATION_ME],
+                queryFn: async () => {
+                  const res = await fetch(PROFESSIONAL_VERIFICATION_ME, authInit);
+                  if (res.status === 403) return null;
+                  if (!res.ok) throw new Error("No se pudo cargar la verificación");
+                  return res.json();
+                },
+              }),
+            ]);
+            const dossierOk = isRenewalSimple || isAssociateOnboardingDossierComplete(prof);
+            if (
+              dossierOk &&
+              status.transacction_verified === "pending" &&
+              (isRenewalSimple || status.identification_verified === "pending")
+            ) {
               setLocation(consumeVerifyReturnPath());
               return;
             }
@@ -144,6 +170,40 @@ export default function VerifyProfessionalPayment() {
             <p className="text-muted-foreground text-center mb-4">Debes ser profesional e iniciar sesión.</p>
             <Button asChild className="w-full sm:w-auto">
               <Link href="/login">Iniciar sesión</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const hasIdAndCredentialForPayment =
+    Boolean(String(verificationForGate?.imageUrl ?? "").trim()) &&
+    Boolean(String(verificationForGate?.professionalCredentialUrl ?? "").trim());
+  const canAccessPayment = isRenewalSimple || hasIdAndCredentialForPayment;
+
+  if (verificationGateLoading) {
+    return (
+      <div className="container max-w-4xl py-16 flex justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!canAccessPayment) {
+    return (
+      <div className="container max-w-xl py-12 px-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Falta completar documentos</CardTitle>
+            <CardDescription>
+              Antes del pago necesitamos tu identificación y tu documento profesional
+              {isCarGo ? " (licencia de conducir)" : ""}. Vuelve a los pasos y sube ambos archivos.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link href="/professional/verify">Ir a verificación</Link>
             </Button>
           </CardContent>
         </Card>
@@ -312,7 +372,7 @@ export default function VerifyProfessionalPayment() {
           <DialogHeader>
             <DialogTitle>¿Confirmas el pago?</DialogTitle>
             <DialogDescription>
-              Solo confirmá si ya transferiste {totalUsd} USD con los datos indicados. El equipo validará el comprobante
+              Solo confirma si ya transferiste {totalUsd} USD con los datos indicados. El equipo validará el comprobante
               y extenderá tu visibilidad por {subscriptionMonths} mes(es) desde tu vencimiento actual si renovás anticipado.
             </DialogDescription>
           </DialogHeader>

@@ -109,6 +109,18 @@ export interface ICatalogStorage {
     model?: string | null;
     license_plate?: string | null;
     model_year?: number | null;
+    is_pet_friendly?: boolean;
+  } | null>;
+  /** Primer vehículo ligado al userId (misma colección que createProviderVehicle). */
+  getPrimaryVehicleByUserId(
+    userId: string
+  ): Promise<{
+    vehicle_type: string;
+    brand?: string | null;
+    model?: string | null;
+    license_plate?: string | null;
+    model_year?: number | null;
+    is_pet_friendly?: boolean;
   } | null>;
   updateProvider(id: number, data: ProviderUpdate): Promise<Provider | undefined>;
   deleteProvider(id: number): Promise<boolean>;

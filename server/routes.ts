@@ -161,42 +161,8 @@ export async function registerRoutes(
       // Cambiar estado en verifying_status → identification_verified = pending
       await genFebStorage.upsertVerifyingStatusIdentificationPending(userId, "onboarding" as any);
 
-      // --- Notificar a administradores ---
-      try {
-        const admins = await getFullAdminUsers(genFebStorage);
-        const user = (await genFebStorage.getUserById(userId)) as any;
-        const name = user ? ([user.firstName, user.lastName].filter(Boolean).join(" ").trim() || (user as any).name || (user as any).email || userId) : userId;
-        const msg = `El usuario ${name} ha enviado su identificación para ser Asociado.`;
-        const urlAdim = "/admin?tab=overview";
-
-        for (const admin of admins) {
-          const adminId = String(admin.id);
-          // 1. Notificación persistente
-          await genFebStorage.createNotification({
-            userId: adminId,
-            type: "admin_verification_request",
-            data: { userId, name, message: msg, url: urlAdim, step: "identification" }
-          });
-          // 2. Notificación Push
-          void notificationService.sendPushToUser(adminId, {
-            title: "Nueva solicitud de Asociado",
-            body: msg,
-            data: { url: urlAdim, type: "admin_verification_request", userId }
-          }).catch(err => console.error("[push-admin] Error:", err));
-        }
-
-        // 3. Notificación Real-time (Socket)
-        const io = getIO();
-        if (io) {
-          sendNotificationToAdmins(io, {
-            type: "admin_verification_request",
-            data: { userId, name, message: msg, url: urlAdim, step: "identification" }
-          });
-        }
-      } catch (err) {
-        console.error("Error notificando a admins (id):", err);
-      }
-      // ------------------------------------
+      // Notificación a admins solo cuando el onboarding está completo (identificación + documento + pago),
+      // ver `PATCH .../payment` y listado `/api/admin/verifying-status/pending`.
 
       const doc = await genFebStorage.getProfessionalVerificationByUserId(userId);
       res.json({
@@ -273,6 +239,21 @@ export async function registerRoutes(
         return res.status(409).json({ message: "Ya hay un comprobante de pago en revisión. Espera la validación del equipo." });
       }
 
+      const profBeforePayment = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      if (!(provider as { isVerified?: boolean }).isVerified) {
+        const img = typeof profBeforePayment?.imageUrl === "string" ? profBeforePayment.imageUrl.trim() : "";
+        const cred =
+          typeof profBeforePayment?.professionalCredentialUrl === "string"
+            ? profBeforePayment.professionalCredentialUrl.trim()
+            : "";
+        if (!img || !cred) {
+          return res.status(400).json({
+            message:
+              "Debés subir tu identificación y tu documento profesional (o licencia de conducir) antes de registrar el pago.",
+          });
+        }
+      }
+
       const body = patchProfessionalVerificationPaymentBody.parse(req.body);
       const feesBySlug = await getSubscriptionFeesByCategorySlug();
       const catSlug = categorySlugFromProvider(provider as any, []);
@@ -318,7 +299,7 @@ export async function registerRoutes(
         const admins = await getFullAdminUsers(genFebStorage);
         const user = (await genFebStorage.getUserById(userId)) as any;
         const name = user ? ([user.firstName, user.lastName].filter(Boolean).join(" ").trim() || (user as any).name || (user as any).email || userId) : userId;
-        const msg = `El usuario ${name} ha enviado el comprobante de pago para ser Asociado.`;
+        const msg = `El usuario ${name} completó documentación y comprobante de pago (alta como asociado). Revisá la solicitud en el panel.`;
         const urlAdmin = "/admin?tab=overview";
 
         for (const admin of admins) {

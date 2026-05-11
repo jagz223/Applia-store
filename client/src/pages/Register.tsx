@@ -133,7 +133,7 @@ export default function Register() {
       if (data.role === "professional") {
         setLocation("/become-pro");
       } else {
-        setLocation("/dashboard");
+        setLocation("/");
       }
     } catch (error: any) {
       toast({

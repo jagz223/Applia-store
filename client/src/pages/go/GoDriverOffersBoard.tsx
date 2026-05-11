@@ -1,3 +1,7 @@
+/**
+ * Vista legacy: ofertas por negociar visibles en el mercado interno (TTL).
+ * El regateo con monto fijado por el cliente se gestiona en el panel de regateo del conductor.
+ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Loader2, Minus, Plus, ArrowLeft, Clock } from "lucide-react";

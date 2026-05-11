@@ -52,7 +52,7 @@ export default function Login() {
           setLocation(redirect);
           return;
         }
-        setLocation("/dashboard");
+        setLocation("/");
       },
       onError: (error: any) => {
         toast({

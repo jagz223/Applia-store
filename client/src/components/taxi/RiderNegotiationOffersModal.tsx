@@ -35,6 +35,8 @@ type Props = {
   open: boolean;
   rideId: string | null;
   offers: RiderNegotiationOfferRow[];
+  /** Monto que ofreciste al publicar la búsqueda (referencia vs. cada conductor). */
+  riderReferenceUsd?: number | null;
   busyDriverId: string | null;
   onDismissOffer: (driverUserId: string) => void;
   onAcceptOffer: (driverUserId: string) => void;
@@ -44,10 +46,18 @@ type Props = {
   cancelSearchLabel?: string;
 };
 
+function offerDeltaLabel(driverUsd: number, riderUsd: number): string {
+  const d = Math.round((driverUsd - riderUsd) * 100) / 100;
+  if (Math.abs(d) < 0.01) return "Igual a tu oferta original.";
+  if (d > 0) return `${formatUsd(d)} por encima de tu oferta.`;
+  return `${formatUsd(-d)} por debajo de tu oferta.`;
+}
+
 export function RiderNegotiationOffersModal({
   open,
   rideId,
   offers,
+  riderReferenceUsd = null,
   busyDriverId,
   onDismissOffer,
   onAcceptOffer,
@@ -119,7 +129,23 @@ export function RiderNegotiationOffersModal({
                           </span>
                         ) : null}
                       </div>
-                      <p className="mt-2 text-lg font-semibold tabular-nums text-primary">{formatUsd(o.amountUsd)}</p>
+                      {typeof riderReferenceUsd === "number" && Number.isFinite(riderReferenceUsd) ? (
+                        <div className="mt-2 space-y-1">
+                          <div className="grid grid-cols-2 gap-2 rounded-lg border border-border/80 bg-muted/30 px-2 py-1.5 text-[11px]">
+                            <div>
+                              <p className="text-muted-foreground">Tu oferta</p>
+                              <p className="font-semibold tabular-nums text-foreground">{formatUsd(riderReferenceUsd)}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Propone</p>
+                              <p className="font-semibold tabular-nums text-primary">{formatUsd(o.amountUsd)}</p>
+                            </div>
+                          </div>
+                          <p className="text-[11px] leading-snug text-muted-foreground">{offerDeltaLabel(o.amountUsd, riderReferenceUsd)}</p>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-lg font-semibold tabular-nums text-primary">{formatUsd(o.amountUsd)}</p>
+                      )}
                     </div>
                     <div className="flex shrink-0 flex-col justify-center gap-2">
                       <Button

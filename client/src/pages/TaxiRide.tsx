@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
 import { MOBILITY_UI } from "@shared/mobility-ui-labels";
+import { RIDER_DRIVER_NOT_AVAILABLE_MESSAGE } from "@shared/mobility-negotiation";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
 
@@ -221,7 +222,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     () => (goSlug === "pack" ? VEHICLE_OPTIONS.filter((o) => o.type !== "pet_car") : VEHICLE_OPTIONS),
     [goSlug]
   );
-  const [nearbyDriverMarkers, setNearbyDriverMarkers] = useState<{ id: string; lat: number; lon: number }[]>([]);
+  const [nearbyDriverMarkers, setNearbyDriverMarkers] = useState<
+    { id: string; lat: number; lon: number; vehicleType?: string }[]
+  >([]);
   const [assignedDriverPos, setAssignedDriverPos] = useState<{ lat: number; lon: number } | null>(null);
   const assignedDriverPosRef = useRef<{ lat: number; lon: number } | null>(null);
   const endPlaceRef = useRef<Place | null>(null);
@@ -857,6 +860,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           suggestedUsd,
           estimatedUsd: rideIsNegotiated ? clientHaggleUsd : suggestedUsd,
           isNegotiated: rideIsNegotiated,
+          /** Permite al servidor tratar regateo aunque el flag venga desincronizado si el monto difiere de la referencia. */
+          offerEdited: rideIsNegotiated,
           petEnabled,
         }),
       });
@@ -949,9 +954,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         setNegotiationOffersOpen(false);
         setNegotiationOffers([]);
       } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        const unavailable =
+          msg === RIDER_DRIVER_NOT_AVAILABLE_MESSAGE ||
+          msg.includes("no está disponible") ||
+          msg.includes("ocupado");
         toast({
-          title: "No se pudo aceptar",
-          description: e instanceof Error ? e.message : "Intenta de nuevo",
+          title: unavailable ? "Conductor no disponible" : "No se pudo aceptar",
+          description: msg || "Intenta de nuevo",
           variant: "destructive",
         });
       } finally {
@@ -998,7 +1008,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       if (p.driverLat != null && p.driverLon != null) {
         const pos = { lat: p.driverLat, lon: p.driverLon };
         setAssignedDriverPos(pos);
-        setNearbyDriverMarkers([{ id: "assigned", lat: p.driverLat, lon: p.driverLon }]);
+        const vt = p.driver?.vehicle?.type;
+        setNearbyDriverMarkers([
+          {
+            id: "assigned",
+            lat: p.driverLat,
+            lon: p.driverLon,
+            ...(vt ? { vehicleType: vt } : {}),
+          },
+        ]);
         if (start) void loadDriverEtaRoute(pos, start);
       }
       setVehicleModalStep("done");
@@ -1009,7 +1027,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       if (p.rideId !== activeRideIdRef.current) return;
       const pos = { lat: p.lat, lon: p.lon };
       setAssignedDriverPos(pos);
-      setNearbyDriverMarkers([{ id: "assigned", lat: p.lat, lon: p.lon }]);
+      const vt = matchedDriverInfoRef.current?.driver?.vehicle?.type;
+      setNearbyDriverMarkers([
+        {
+          id: "assigned",
+          lat: p.lat,
+          lon: p.lon,
+          ...(vt ? { vehicleType: vt } : {}),
+        },
+      ]);
       const target =
         riderTripInProgressRef.current && end ? end : start;
       if (target) void loadDriverEtaRoute(pos, target);
@@ -1134,12 +1160,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       });
     };
     socket.on(`${rideSocketPrefix}failed`, onFailed);
-    const onNegoOffers = (p: { rideId: string; offers?: unknown[] }) => {
+    const onNegoOffers = (p: { rideId: string; offers?: unknown[]; riderOfferUsd?: number }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       const rows = (Array.isArray(p.offers) ? p.offers : [])
         .map(mapServerNegotiationOffer)
         .filter((x): x is RiderNegotiationOfferRow => x != null);
       setNegotiationOffers(rows);
+      if (typeof p.riderOfferUsd === "number" && Number.isFinite(p.riderOfferUsd)) {
+        setClientHaggleUsd(p.riderOfferUsd);
+      }
     };
     socket.on(`${rideSocketPrefix}negotiation:offers_updated`, onNegoOffers);
     return () => {
@@ -1569,6 +1598,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
                 onMapPick={onMapPick}
                 nearbyDemoVehicles={nearbyDriverMarkers}
+                markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                 suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
                 onRecenter={
                   matchedDriverInfo
@@ -2105,6 +2135,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                     routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
                     onMapPick={onMapPick}
                     nearbyDemoVehicles={nearbyDriverMarkers}
+                    markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                     suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
                   />
                   {(reverseLoading || routeLoading) && (
@@ -2336,6 +2367,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
                   onMapPick={onMapPick}
                   nearbyDemoVehicles={nearbyDriverMarkers}
+                  markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                   suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
                   wrapperClassName="!rounded-none !border-0 !shadow-none h-full min-h-0 w-full flex-1"
                 />
@@ -2412,6 +2444,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
                   onMapPick={onMapPick}
                   nearbyDemoVehicles={nearbyDriverMarkers}
+                  markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                   suppressMapPick={vehicleModalStep === "searching"}
                 />
                 {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
@@ -2465,6 +2498,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         open={vehicleModalStep === "searching" && negotiationOffers.length > 0}
         rideId={activeRideId}
         offers={negotiationOffers}
+        riderReferenceUsd={rideIsNegotiated ? clientHaggleUsd : null}
         busyDriverId={negotiationOfferBusyId}
         onDismissOffer={(id) => void dismissNegotiationOffer(id)}
         onAcceptOffer={(id) => void acceptNegotiationOffer(id)}

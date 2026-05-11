@@ -199,7 +199,17 @@ export function CargoIncomingRideDialog({
             end={{ lat: offer.end.lat, lon: offer.end.lon, label: offer.end.label }}
             routeGeometry={offer.routeGeometry}
             extraMarkers={
-              driverPos ? [{ id: "driver", lat: driverPos.lat, lon: driverPos.lon, kind: "driver" }] : []
+              driverPos
+                ? [
+                    {
+                      id: "driver",
+                      lat: driverPos.lat,
+                      lon: driverPos.lon,
+                      kind: "driver" as const,
+                      vehicleType: offer.vehicleType,
+                    },
+                  ]
+                : []
             }
             onMapPick={() => {}}
             suppressMapPick

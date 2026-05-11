@@ -1,14 +1,49 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useReducer, useRef, type ReactNode } from "react";
 import type { CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
+
+export type GoDriverQueuedOffer = { module: "cargo" | "pack"; offer: CargoRideOfferPayload };
+
+type ModalState = {
+  currentOffer: GoDriverQueuedOffer | null;
+  offerQueue: GoDriverQueuedOffer[];
+};
+
+type ModalAction =
+  | { type: "PUSH_OFFER"; module: "cargo" | "pack"; offer: CargoRideOfferPayload }
+  | { type: "RESOLVE_CURRENT"; rideId: string }
+  | { type: "CLEAR_ALL" };
+
+function offerModalReducer(state: ModalState, action: ModalAction): ModalState {
+  switch (action.type) {
+    case "CLEAR_ALL":
+      return { currentOffer: null, offerQueue: [] };
+    case "PUSH_OFFER": {
+      const entry: GoDriverQueuedOffer = { module: action.module, offer: action.offer };
+      if (!state.currentOffer) return { ...state, currentOffer: entry };
+      return { ...state, offerQueue: [...state.offerQueue, entry] };
+    }
+    case "RESOLVE_CURRENT": {
+      const cur = state.currentOffer;
+      if (!cur || cur.offer.rideId !== action.rideId) return state;
+      const [next, ...rest] = state.offerQueue;
+      return { currentOffer: next ?? null, offerQueue: rest };
+    }
+    default:
+      return state;
+  }
+}
 
 type GoDriverUiState = {
   /** Registra el callback que abre el historial (solo vista conductor). */
   registerOpenHistory: (fn: (() => void) | null) => void;
   openHistory: () => void;
+  /** Tablero de regateo (sheet), independiente de “recibir pedidos”. */
+  registerOpenNegotiationBoard: (fn: (() => void) | null) => void;
+  openNegotiationBoard: () => void;
   /** Oferta activa (modal). */
-  currentOffer: { module: "cargo" | "pack"; offer: CargoRideOfferPayload } | null;
+  currentOffer: GoDriverQueuedOffer | null;
   /** Cola FIFO de ofertas (evita sobrecargar la pantalla). */
-  offerQueue: Array<{ module: "cargo" | "pack"; offer: CargoRideOfferPayload }>;
+  offerQueue: GoDriverQueuedOffer[];
   /** Entra una oferta: si ya hay una visible, se encola; si no, se muestra. */
   pushOffer: (module: "cargo" | "pack", offer: CargoRideOfferPayload) => void;
   /** Cierra la oferta actual (si coincide rideId) y muestra la siguiente en cola. */
@@ -21,8 +56,11 @@ const Ctx = createContext<GoDriverUiState | null>(null);
 
 export function GoDriverUiProvider({ children }: { children: ReactNode }) {
   const openHistoryRef = useRef<(() => void) | null>(null);
-  const [currentOffer, setCurrentOffer] = useState<GoDriverUiState["currentOffer"]>(null);
-  const [offerQueue, setOfferQueue] = useState<GoDriverUiState["offerQueue"]>([]);
+  const openNegotiationBoardRef = useRef<(() => void) | null>(null);
+  const [{ currentOffer, offerQueue }, dispatch] = useReducer(offerModalReducer, {
+    currentOffer: null,
+    offerQueue: [],
+  });
 
   const registerOpenHistory = useCallback((fn: (() => void) | null) => {
     openHistoryRef.current = fn;
@@ -32,37 +70,49 @@ export function GoDriverUiProvider({ children }: { children: ReactNode }) {
     openHistoryRef.current?.();
   }, []);
 
+  const registerOpenNegotiationBoard = useCallback((fn: (() => void) | null) => {
+    openNegotiationBoardRef.current = fn;
+  }, []);
+
+  const openNegotiationBoard = useCallback(() => {
+    openNegotiationBoardRef.current?.();
+  }, []);
+
   const pushOffer = useCallback((module: "cargo" | "pack", offer: CargoRideOfferPayload) => {
-    setCurrentOffer((cur) => {
-      if (!cur) return { module, offer };
-      setOfferQueue((q) => [...q, { module, offer }]);
-      return cur;
-    });
+    dispatch({ type: "PUSH_OFFER", module, offer });
   }, []);
 
   const resolveOfferAndShowNext = useCallback((rideId: string) => {
-    setCurrentOffer((cur) => {
-      if (!cur) return null;
-      if (cur.offer?.rideId !== rideId) return cur;
-      return null;
-    });
-    setOfferQueue((q) => {
-      if (q.length === 0) return q;
-      const [next, ...rest] = q;
-      // Mostrar la siguiente oferta.
-      setCurrentOffer(next);
-      return rest;
-    });
+    dispatch({ type: "RESOLVE_CURRENT", rideId });
   }, []);
 
   const clearOffers = useCallback(() => {
-    setCurrentOffer(null);
-    setOfferQueue([]);
+    dispatch({ type: "CLEAR_ALL" });
   }, []);
 
   const value = useMemo(
-    () => ({ registerOpenHistory, openHistory, currentOffer, offerQueue, pushOffer, resolveOfferAndShowNext, clearOffers }),
-    [registerOpenHistory, openHistory, currentOffer, offerQueue, pushOffer, resolveOfferAndShowNext, clearOffers]
+    () => ({
+      registerOpenHistory,
+      openHistory,
+      registerOpenNegotiationBoard,
+      openNegotiationBoard,
+      currentOffer,
+      offerQueue,
+      pushOffer,
+      resolveOfferAndShowNext,
+      clearOffers,
+    }),
+    [
+      registerOpenHistory,
+      openHistory,
+      registerOpenNegotiationBoard,
+      openNegotiationBoard,
+      currentOffer,
+      offerQueue,
+      pushOffer,
+      resolveOfferAndShowNext,
+      clearOffers,
+    ]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

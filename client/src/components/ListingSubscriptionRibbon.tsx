@@ -19,6 +19,18 @@ import {
   LISTING_SUBSCRIPTION_WARNING_DAYS,
   listingSubscriptionDaysRemaining,
 } from "@shared/professional-listing-subscription";
+import {
+  criticalListingBannerCopy,
+  expiredListingBannerCopy,
+  urgentListingBannerHeadline,
+  urgentListingDefaultDetail,
+  urgentListingDefaultDetailShort,
+  urgentListingDriverDetail,
+  urgentListingDriverDetailShort,
+} from "@/components/listing-subscription-ribbon-copy";
+
+const ribbonPad = "px-2.5 py-1.5 sm:px-4 sm:py-2.5";
+const ribbonText = "text-xs font-semibold leading-snug sm:text-sm";
 
 const RENEW_PAYMENT_HREF = "/professional/verify/payment";
 
@@ -145,34 +157,49 @@ export function ListingSubscriptionRibbon() {
   if (softHidden && !(state.expired || state.critical)) return null;
 
   if (state.expired || state.critical) {
+    const expiredCopy = expiredListingBannerCopy();
+    const criticalCopy = criticalListingBannerCopy(state.days, state.endLabel);
     return (
       <>
         {state.expired ? (
-          <div className="border-b border-destructive/35 bg-destructive/15 px-3 py-2.5 sm:px-4">
-            <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-3 sm:flex-row sm:justify-between">
-              <div className="flex items-start gap-2 text-center text-sm font-semibold text-destructive sm:text-left">
-                <AlertTriangle className="mx-auto mt-0.5 h-4 w-4 shrink-0 sm:mx-0" aria-hidden />
-                <span>
-                  Tu servicio ya no aparece en el explorador público: venció la cuota mensual de visibilidad (USD 15).
-                  Subí el comprobante para que un administrador la valide y recuperes la publicación.
+          <div className={`border-b border-destructive/35 bg-destructive/15 ${ribbonPad}`}>
+            <div className="mx-auto flex max-w-5xl flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <div className={`flex min-w-0 items-start gap-2 text-destructive sm:items-center ${ribbonText}`}>
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 sm:mt-0 sm:h-4 sm:w-4" aria-hidden />
+                <span className="min-w-0 text-left">
+                  <span className="md:hidden">{expiredCopy.short}</span>
+                  <span className="hidden md:inline">{expiredCopy.long}</span>
                 </span>
               </div>
-              <Button size="sm" variant="destructive" asChild className="shrink-0">
+              <Button
+                size="sm"
+                variant="destructive"
+                asChild
+                className="h-8 shrink-0 touch-manipulation self-stretch text-xs sm:h-9 sm:self-center sm:text-sm"
+              >
                 <Link href={RENEW_PAYMENT_HREF}>Renovar pago</Link>
               </Button>
             </div>
           </div>
         ) : (
-          <div className="border-b border-amber-500/45 bg-amber-500/18 px-3 py-2.5 sm:px-4">
-            <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-3 sm:flex-row sm:justify-between">
-              <div className="flex items-start gap-2 text-center text-sm font-semibold text-foreground sm:text-left">
-                <CalendarClock className="mx-auto mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300 sm:mx-0" aria-hidden />
-                <span>
-                  Quedan <strong>{state.days}</strong> día(s) para que expire tu visibilidad (hasta {state.endLabel}).
-                  Renová ahora para evitar quedar fuera del catálogo.
+          <div className={`border-b border-amber-500/45 bg-amber-500/18 ${ribbonPad}`}>
+            <div className="mx-auto flex max-w-5xl flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <div className={`flex min-w-0 items-start gap-2 text-foreground sm:items-center ${ribbonText}`}>
+                <CalendarClock
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300 sm:mt-0 sm:h-4 sm:w-4"
+                  aria-hidden
+                />
+                <span className="min-w-0 text-left">
+                  <span className="md:hidden">{criticalCopy.short}</span>
+                  <span className="hidden md:inline">{criticalCopy.long}</span>
                 </span>
               </div>
-              <Button size="sm" variant="secondary" asChild className="shrink-0 border border-amber-600/35">
+              <Button
+                size="sm"
+                variant="secondary"
+                asChild
+                className="h-8 shrink-0 touch-manipulation self-stretch border border-amber-600/35 text-xs sm:h-9 sm:self-center sm:text-sm"
+              >
                 <Link href={RENEW_PAYMENT_HREF}>Renovar ahora</Link>
               </Button>
             </div>
@@ -214,31 +241,39 @@ export function ListingSubscriptionRibbon() {
   }
 
   if (state.urgent) {
+    const urgentHeadline = urgentListingBannerHeadline(state.days, state.endLabel);
+    const detailLong = context.isDriver ? urgentListingDriverDetail : urgentListingDefaultDetail;
+    const detailShort = context.isDriver ? urgentListingDriverDetailShort : urgentListingDefaultDetailShort;
     return (
       <>
-        <div className="border-b border-amber-500/40 bg-amber-500/14 px-3 py-2.5 sm:px-4">
-          <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-3 sm:flex-row sm:justify-between">
-            <div className="flex flex-col items-center gap-1 text-center sm:flex-row sm:items-start sm:gap-3 sm:text-left">
-              <CalendarClock className="h-5 w-5 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden />
-              <div>
-                <p className="text-sm font-semibold text-foreground">
-                  Te quedan {state.days} día(s) de publicación (hasta {state.endLabel}).
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-                  {context.isDriver
-                    ? "Para poder trabajar como driver sin interrupciones, mantén tu suscripción al día. El costo se renueva cada mes y se valida por el equipo."
-                    : "Mantén tu servicio visible en el catálogo con la suscripción mensual. Si renovás antes de que venza, al validarlo se suma un mes desde tu vencimiento actual."}
+        <div className={`border-b border-amber-500/40 bg-amber-500/14 ${ribbonPad}`}>
+          <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="flex min-w-0 flex-1 items-start gap-2 sm:gap-3">
+              <CalendarClock
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300 sm:h-5 sm:w-5"
+                aria-hidden
+              />
+              <div className="min-w-0 flex-1 text-left">
+                <p className={`${ribbonText} text-foreground`}>{urgentHeadline}</p>
+                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground sm:mt-1 sm:text-xs md:text-sm">
+                  <span className="md:hidden">{detailShort}</span>
+                  <span className="hidden md:inline">{detailLong}</span>
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="secondary" className="shrink-0 border border-amber-600/35" asChild>
+            <div className="flex shrink-0 items-center justify-end gap-1.5 sm:gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8 touch-manipulation border border-amber-600/35 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
+                asChild
+              >
                 <Link href={RENEW_PAYMENT_HREF}>Ir a renovar</Link>
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
-                className="shrink-0 text-muted-foreground hover:text-foreground"
+                className="h-8 w-8 shrink-0 touch-manipulation p-0 text-muted-foreground hover:text-foreground sm:h-9 sm:w-9"
                 onClick={dismissSoft}
                 title="Ocultar este aviso"
               >
@@ -273,7 +308,7 @@ export function ListingSubscriptionRibbon() {
   }
 
   return (
-    <div className="border-b border-border/60 bg-muted/35 px-3 py-2 text-center text-xs text-muted-foreground sm:px-4 sm:text-sm">
+    <div className="border-b border-border/60 bg-muted/35 px-2.5 py-1.5 text-center text-[11px] text-muted-foreground sm:px-4 sm:py-2 sm:text-xs md:text-sm">
       <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
         <CalendarClock className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span>

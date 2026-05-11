@@ -53,8 +53,10 @@ import {
   useWalletTransfers,
   useCurrentProvider,
   useVerifyingStatusMe,
+  useProfessionalVerification,
 } from "@/hooks/use-mango-data";
 import { listingSubscriptionDaysRemaining } from "@shared/professional-listing-subscription";
+import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
 import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Link, useLocation } from "wouter";
@@ -1020,11 +1022,21 @@ function ProfessionalDashboardInner() {
   const { user } = useAuth();
   const { data: providerProfile, isLoading: providerProfileLoading } = useCurrentProvider();
   const { data: verifyingStatus } = useVerifyingStatusMe(Boolean(providerProfile));
+  const { data: professionalVerification } = useProfessionalVerification(Boolean(providerProfile));
   const { data: categories = [] } = useCategories();
   const queryClient = useQueryClient();
   const [location, setLocation] = useLocation();
   const isProfessionalRole = (user as { role?: string } | null)?.role === "professional";
   const showBecomeProBanner = isProfessionalRole && !providerProfileLoading && !providerProfile;
+  const onboardingDossierComplete = useMemo(
+    () => isAssociateOnboardingDossierComplete(professionalVerification),
+    [professionalVerification],
+  );
+  const showReturnToVerificationBanner =
+    isProfessionalRole &&
+    Boolean(providerProfile) &&
+    providerProfile?.isVerified !== true &&
+    !onboardingDossierComplete;
   const isTaxiDriver = useMemo(
     () => !!(providerProfile?.isVerified && isCarGoProvider(providerProfile, categories)),
     [providerProfile, categories],
@@ -1249,6 +1261,26 @@ function ProfessionalDashboardInner() {
                 <Link href="/become-pro">
                   <UserPlus className="h-4 w-4 mr-2" />
                   Configurar como asociado
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {showReturnToVerificationBanner && (
+          <Card className="mb-6 border-2 border-primary/35 bg-primary/5">
+            <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
+              <div className="text-center sm:text-left">
+                <h2 className="text-lg font-semibold text-foreground mb-1">Completá tu verificación de asociado</h2>
+                <p className="text-sm text-muted-foreground">
+                  Falta subir identificación, documento profesional (o licencia) o registrar el pago de la cuota. El equipo
+                  administrador solo verá tu solicitud cuando estén los tres listos.
+                </p>
+              </div>
+              <Button asChild className="shrink-0">
+                <Link href="/professional/verify">
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                  Ir a verificación
                 </Link>
               </Button>
             </CardContent>

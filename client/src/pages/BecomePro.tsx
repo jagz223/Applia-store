@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 import { ProviderSkillsField } from "@/components/ProviderSkillsField";
 import {
   BiographyOnboardingInfoButton,
@@ -170,6 +171,7 @@ function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
 type BecomeProForm = z.infer<ReturnType<typeof buildBecomeProSchema>> & { vehicle: VehicleFormValues };
 
 export default function BecomePro() {
+  const { toast } = useToast();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(
@@ -527,7 +529,17 @@ export default function BecomePro() {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <form
+              onSubmit={form.handleSubmit(onSubmit, () => {
+                toast({
+                  variant: "destructive",
+                  title: "Formulario incompleto",
+                  description:
+                    "Revisa los campos marcados en rojo. No puedes pasar a verificación hasta completar todos los obligatorios (categoría, datos del vehículo o perfil según tu caso).",
+                });
+              })}
+              className="space-y-6"
+            >
               {form.formState.errors.root?.message && (
                 <p className="text-sm text-destructive">{form.formState.errors.root.message}</p>
               )}

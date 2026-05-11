@@ -5,8 +5,13 @@ import { hasAdminRole } from "@/lib/auth-utils";
 import { storeVerifyReturnPath } from "@/lib/verify-return-path";
 import { AlertCircle } from "lucide-react";
 import { useCategories, useCurrentProvider, useVerifyingStatusMe } from "@/hooks/use-mango-data";
-import { isCarGoProvider } from "@shared/provider-car-go";
 import { useMemo } from "react";
+import {
+  getVerificationBannerKind,
+  VERIFICATION_IN_REVIEW_BY_KIND,
+  VERIFICATION_PENDING_BY_KIND,
+} from "@/components/professional-verification-banner-messages";
+import { cn } from "@/lib/utils";
 
 /**
  * Aviso global para profesionales cuyo proveedor aún no está verificado por la plataforma.
@@ -20,7 +25,7 @@ export function ProfessionalVerificationBanner() {
 
   const provider = currentProvider || user?.provider;
   const { data: categories = [] } = useCategories();
-  const isCarGo = useMemo(() => isCarGoProvider(provider ?? undefined, categories), [provider, categories]);
+  const bannerKind = useMemo(() => getVerificationBannerKind(provider ?? undefined, categories), [provider, categories]);
   const isPro = user != null && (user.role === "professional" || provider != null);
   const unverified = provider != null && provider.isVerified !== true;
 
@@ -50,18 +55,28 @@ export function ProfessionalVerificationBanner() {
 
   if (verifyingStatusLoading) return null;
 
+  const inReviewCopy = VERIFICATION_IN_REVIEW_BY_KIND[bannerKind];
+  const pendingCopy = VERIFICATION_PENDING_BY_KIND[bannerKind];
+
   if (inReview) {
     return (
       <div
         role="status"
-        className="w-full border-b border-sky-500/35 bg-sky-500/10 px-4 py-2.5 text-sm text-foreground"
+        className={cn(
+          "w-full border-b text-xs sm:text-sm",
+          "border-sky-200 bg-sky-50 text-sky-950",
+          "dark:border-sky-500/35 dark:bg-sky-950/55 dark:text-sky-50",
+          "max-md:py-1.5 max-md:px-3 sm:py-2.5 sm:px-4"
+        )}
       >
-        <div className="container max-w-6xl mx-auto flex items-start gap-2 min-w-0">
-          <AlertCircle className="h-5 w-5 shrink-0 text-sky-800 dark:text-sky-200 mt-0.5" aria-hidden />
-          <p className="leading-snug text-sky-950 dark:text-sky-50 font-medium">
-            {isCarGo
-              ? "Tu solicitud de verificación está en revisión. Cuando sea aprobada, los clientes podrán usar tus servicios de movilidad con normalidad."
-              : "Tu solicitud de verificación está en revisión. Cuando sea aprobada, tu servicio podrá mostrarse con normalidad en el sitio."}
+        <div className="container mx-auto flex max-w-6xl min-w-0 items-start gap-2 sm:gap-2.5">
+          <AlertCircle
+            className="mt-0.5 h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300 sm:h-5 sm:w-5"
+            aria-hidden
+          />
+          <p className="min-w-0 font-medium leading-snug">
+            <span className="md:hidden">{inReviewCopy.compact}</span>
+            <span className="hidden md:inline">{inReviewCopy.full}</span>
           </p>
         </div>
       </div>
@@ -71,18 +86,30 @@ export function ProfessionalVerificationBanner() {
   return (
     <div
       role="status"
-      className="w-full border-b border-amber-500/40 bg-amber-500/15 px-4 py-2.5 text-sm text-foreground"
+      className={cn(
+        "w-full border-b text-xs sm:text-sm",
+        "border-amber-200 bg-amber-50 text-amber-950",
+        "dark:border-amber-500/40 dark:bg-amber-950/50 dark:text-amber-50",
+        "max-md:py-1.5 max-md:px-3 sm:py-2.5 sm:px-4"
+      )}
     >
-      <div className="container max-w-6xl mx-auto flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <div className="flex items-start gap-2 min-w-0">
-          <AlertCircle className="h-5 w-5 shrink-0 text-amber-700 mt-0.5" aria-hidden />
-          <p className="leading-snug text-amber-950 dark:text-amber-100 font-medium">
-            {isCarGo
-              ? "Aún no estás verificado; los clientes no podrán usar tus servicios de movilidad hasta completar la verificación."
-              : "Aún no estás verificado; tu servicio no será visible para los clientes hasta completar la verificación."}
+      <div className="container mx-auto flex max-w-6xl min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex min-w-0 items-start gap-2 sm:gap-2.5">
+          <AlertCircle
+            className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300 sm:h-5 sm:w-5"
+            aria-hidden
+          />
+          <p className="min-w-0 font-medium leading-snug">
+            <span className="md:hidden">{pendingCopy.compact}</span>
+            <span className="hidden md:inline">{pendingCopy.full}</span>
           </p>
         </div>
-        <Button size="sm" variant="default" className="shrink-0 w-fit sm:w-auto" asChild>
+        <Button
+          size="sm"
+          variant="default"
+          className="h-8 shrink-0 touch-manipulation self-start bg-teal-600 px-3 text-xs text-white hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600 sm:h-9 sm:self-center sm:text-sm"
+          asChild
+        >
           <Link href="/professional/verify" onClick={() => storeVerifyReturnPath()}>
             Verificar
           </Link>
