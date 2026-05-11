@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TaxiRouteMap, type MapPoint } from "@/components/taxi/TaxiRouteMap";
+import { RiderNegotiationOffersModal, type RiderNegotiationOfferRow } from "@/components/taxi/RiderNegotiationOffersModal";
 import { TaxiVehicleSearchModal } from "@/components/taxi/TaxiVehicleSearchModal";
 import type { TaxiPaymentMethod, TaxiVehicleKind, TaxiVehicleModalStep } from "@/components/taxi/TaxiVehicleSearchModal";
 import type { GeoJsonObject } from "geojson";
@@ -121,6 +122,10 @@ type MobilityRideHydration = {
   paymentMethod: string;
   paymentConfirmed: boolean;
   conversationId: number | null;
+  estimatedUsd?: number;
+  suggestedUsd?: number;
+  isNegotiated?: boolean;
+  offers?: unknown[];
   start: Place;
   end: Place;
   driver: {
@@ -141,6 +146,32 @@ type MobilityRideHydration = {
     } | null;
   } | null;
 };
+
+function mapServerNegotiationOffer(raw: unknown): RiderNegotiationOfferRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const d = o.driver as Record<string, unknown> | undefined;
+  const v = d?.vehicle as Record<string, unknown> | undefined;
+  if (typeof o.driverUserId !== "string" || typeof o.amountUsd !== "number" || !d) return null;
+  return {
+    driverUserId: o.driverUserId,
+    amountUsd: o.amountUsd,
+    driver: {
+      name: String(d.name ?? "Conductor"),
+      profileImageUrl: (d.profileImageUrl as string) ?? null,
+      rating: typeof d.rating === "number" ? d.rating : undefined,
+      completedTrips: typeof d.completedTrips === "number" ? d.completedTrips : undefined,
+      vehicle: v
+        ? {
+            type: String(v.type ?? ""),
+            brand: String(v.brand ?? ""),
+            model: String(v.model ?? ""),
+            licensePlate: String(v.licensePlate ?? ""),
+          }
+        : null,
+    },
+  };
+}
 
 export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pack" } = {}) {
   const queryClient = useQueryClient();
@@ -199,7 +230,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const [driverEtaLoading, setDriverEtaLoading] = useState(false);
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const activeRideIdRef = useRef<string | null>(null);
-  const [counterOffers, setCounterOffers] = useState<never[]>([]);
+  const [rideIsNegotiated, setRideIsNegotiated] = useState(false);
+  const [clientHaggleUsd, setClientHaggleUsd] = useState(0);
+  const [negotiationOffersOpen, setNegotiationOffersOpen] = useState(false);
+  const [negotiationOffers, setNegotiationOffers] = useState<RiderNegotiationOfferRow[]>([]);
+  const [negotiationOfferBusyId, setNegotiationOfferBusyId] = useState<string | null>(null);
+  /** Monto acordado al hacer match (incluye regateo aceptado). */
+  const [matchedFareUsd, setMatchedFareUsd] = useState<number | null>(null);
   const { data: mobilityFaresDto } = usePlatformMobilityFares({ enabled: !isPackGoClient });
   const { data: packFaresDto } = usePlatformPackFares({ enabled: isPackGoClient });
 
@@ -410,6 +447,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           vehicleModalStep,
           vehiclePickerOpen,
           mapTarget,
+          rideIsNegotiated,
+          clientHaggleUsd,
         };
         sessionStorage.setItem(riderDraftKey, JSON.stringify(payload));
       } catch {
@@ -430,6 +469,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       vehicleModalStep,
       vehiclePickerOpen,
       mapTarget,
+      rideIsNegotiated,
+      clientHaggleUsd,
     ]
   );
 
@@ -459,6 +500,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       }
       if (p.vehicleModalStep) setVehicleModalStep(p.vehicleModalStep);
       if (typeof p.vehiclePickerOpen === "boolean") setVehiclePickerOpen(p.vehiclePickerOpen);
+      if (typeof p.rideIsNegotiated === "boolean") setRideIsNegotiated(p.rideIsNegotiated);
+      if (typeof p.clientHaggleUsd === "number") setClientHaggleUsd(p.clientHaggleUsd);
     } catch {
       /* ignore */
     }
@@ -467,7 +510,6 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   useEffect(() => {
     activeRideIdRef.current = activeRideId;
   }, [activeRideId]);
-
   useSocketChat(
     isGoClient && matchedDriverInfo?.conversationId != null
       ? String(matchedDriverInfo.conversationId)
@@ -498,6 +540,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     setActiveRideId(null);
     activeRideIdRef.current = null;
     setRiderTripInProgress(false);
+    setMatchedFareUsd(null);
+    setNegotiationOffersOpen(false);
+    setNegotiationOffers([]);
     clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
     resetChat();
   }, [clearVehicleSearchTimers, resetChat, queryClient]);
@@ -595,6 +640,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     activeRideIdRef.current = null;
     setMatchedDriverInfo(null);
     setRiderTripInProgress(false);
+    setRideIsNegotiated(false);
+    setClientHaggleUsd(0);
+    setNegotiationOffersOpen(false);
+    setNegotiationOffers([]);
+    setMatchedFareUsd(null);
     clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
   }, [clearVehicleSearchTimers]);
 
@@ -613,6 +663,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         activeRideIdRef.current = null;
         setMatchedDriverInfo(null);
         setRiderTripInProgress(false);
+        setRideIsNegotiated(false);
+        setNegotiationOffersOpen(false);
+        setNegotiationOffers([]);
         clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       }
       setVehiclePickerOpen(open);
@@ -623,7 +676,40 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const handleSelectVehicleType = useCallback((t: TaxiVehicleKind) => {
     setSelectedVehicle(t);
     setTaxiPaymentMethod(null);
+    setRideIsNegotiated(false);
+    setVehicleModalStep("price_mode");
+  }, []);
+
+  const handleChooseStandardPrice = useCallback(() => {
+    setRideIsNegotiated(false);
     setVehicleModalStep("payment");
+  }, []);
+
+  const handleChooseHaggle = useCallback(() => {
+    setRideIsNegotiated(true);
+    if (suggestedUsd != null) setClientHaggleUsd(Math.round(suggestedUsd * 100) / 100);
+    setVehicleModalStep("haggle");
+  }, [suggestedUsd]);
+
+  const handleHaggleBump = useCallback((delta: number) => {
+    setClientHaggleUsd((prev) => Math.round(Math.max(0.01, prev + delta) * 100) / 100);
+  }, []);
+
+  const handleHaggleDecide = useCallback(() => {
+    setVehicleModalStep("payment");
+  }, []);
+
+  const handleBackFromHaggle = useCallback(() => {
+    setVehicleModalStep("price_mode");
+  }, []);
+
+  const handleBackFromPriceMode = useCallback(() => {
+    setSelectedVehicle(null);
+    setVehicleModalStep("pick");
+  }, []);
+
+  const handleBackToHaggleFromPayment = useCallback(() => {
+    setVehicleModalStep("haggle");
   }, []);
 
   const handleBackToVehiclePick = useCallback(() => {
@@ -658,7 +744,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showMapFullscreen]);
-  const estimatedUsd = suggestedUsd ?? 0;
+  const estimatedUsd = matchedFareUsd ?? (rideIsNegotiated ? clientHaggleUsd : suggestedUsd ?? 0);
   useEffect(() => {
     estimatedUsdRef.current = estimatedUsd;
   }, [estimatedUsd]);
@@ -674,12 +760,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   }>({ amountUsd: 0, durationSec: 0, payment: "cash" });
   useEffect(() => {
     const pay = taxiPaymentMethod ?? "cash";
+    const usd = matchedFareUsd ?? (rideIsNegotiated ? clientHaggleUsd : suggestedUsd ?? 0);
     riderTripSnapshotRef.current = {
-      amountUsd: estimatedUsdRef.current ?? 0,
+      amountUsd: usd,
       durationSec: routeMeta?.durationSec ?? 0,
       payment: pay === "cash" || pay === "bank_transfer" ? pay : "cash",
     };
-  }, [routeMeta, taxiPaymentMethod]);
+  }, [routeMeta, taxiPaymentMethod, matchedFareUsd, rideIsNegotiated, clientHaggleUsd, suggestedUsd]);
 
   /** Con conductor asignado: en “viaje en curso” el mapa sigue al driver como en DriverCargoMap (solo destino + ruta GPS→destino). */
   const matchedRideMap = useMemo(() => {
@@ -721,6 +808,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         });
         setActiveRideId(null);
         activeRideIdRef.current = null;
+        setNegotiationOffersOpen(false);
+        setNegotiationOffers([]);
         clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
         return "ready";
       });
@@ -750,7 +839,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           vehicleType: selectedVehicle,
           paymentMethod: taxiPaymentMethod,
           suggestedUsd,
-          estimatedUsd: suggestedUsd,
+          estimatedUsd: rideIsNegotiated ? clientHaggleUsd : suggestedUsd,
+          isNegotiated: rideIsNegotiated,
           petEnabled,
         }),
       });
@@ -768,8 +858,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       if (data.rideId) {
         setActiveRideId(data.rideId);
         activeRideIdRef.current = data.rideId;
-        setCounterOffers([]);
         saveGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo", data.rideId);
+        if (rideIsNegotiated) {
+          setNegotiationOffers([]);
+          setNegotiationOffersOpen(true);
+        } else {
+          setNegotiationOffersOpen(false);
+          setNegotiationOffers([]);
+        }
       }
     } catch {
       toast({ title: "Error de red", variant: "destructive" });
@@ -786,7 +882,68 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     petEnabled,
     clearVehicleSearchTimers,
     toast,
+    rideIsNegotiated,
+    clientHaggleUsd,
+    goSlug,
+    rideApiRequestPath,
   ]);
+
+  const dismissNegotiationOffer = useCallback(
+    async (driverUserId: string) => {
+      const rid = activeRideIdRef.current;
+      if (!rid) return;
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      setNegotiationOfferBusyId(driverUserId);
+      try {
+        const res = await fetch(
+          `${rideApiBase}/${encodeURIComponent(rid)}/negotiation/offers/${encodeURIComponent(driverUserId)}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        if (!res.ok) throw new Error(data.message || "No se pudo descartar");
+        setNegotiationOffers((prev) => prev.filter((o) => o.driverUserId !== driverUserId));
+      } catch (e) {
+        toast({
+          title: "No se pudo descartar",
+          description: e instanceof Error ? e.message : "Intenta de nuevo",
+          variant: "destructive",
+        });
+      } finally {
+        setNegotiationOfferBusyId(null);
+      }
+    },
+    [rideApiBase, toast]
+  );
+
+  const acceptNegotiationOffer = useCallback(
+    async (driverUserId: string) => {
+      const rid = activeRideIdRef.current;
+      if (!rid) return;
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      setNegotiationOfferBusyId(driverUserId);
+      try {
+        const res = await fetch(
+          `${rideApiBase}/${encodeURIComponent(rid)}/negotiation/accept/${encodeURIComponent(driverUserId)}`,
+          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        if (!res.ok) throw new Error(data.message || "No se pudo aceptar");
+        setNegotiationOffersOpen(false);
+        setNegotiationOffers([]);
+      } catch (e) {
+        toast({
+          title: "No se pudo aceptar",
+          description: e instanceof Error ? e.message : "Intenta de nuevo",
+          variant: "destructive",
+        });
+      } finally {
+        setNegotiationOfferBusyId(null);
+      }
+    },
+    [rideApiBase, toast]
+  );
 
   useEffect(() => {
     if (!socket) return;
@@ -811,9 +968,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       driverLat?: number;
       driverLon?: number;
       conversationId?: number | null;
+      estimatedUsd?: number;
     }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       clearVehicleSearchTimers();
+      setNegotiationOffersOpen(false);
+      setNegotiationOffers([]);
+      if (typeof p.estimatedUsd === "number") setMatchedFareUsd(p.estimatedUsd);
       setMatchedDriverInfo({
         driver: p.driver,
         conversationId: p.conversationId ?? null,
@@ -854,7 +1015,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     const onCompleted = async (p: { rideId: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       const snap = riderTripSnapshotRef.current;
-      let amountUsd = 0;
+      let amountUsd = snap.amountUsd;
       let durationSec = snap.durationSec;
       let payment: "cash" | "bank_transfer" = snap.payment;
 
@@ -868,12 +1029,16 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
             const r = (await res.json()) as {
               durationSec?: number;
               paymentMethod?: string;
+              estimatedUsd?: number;
             };
             if (typeof r.durationSec === "number" && r.durationSec > 0) {
               durationSec = r.durationSec;
             }
             if (r.paymentMethod === "cash" || r.paymentMethod === "bank_transfer") {
               payment = r.paymentMethod;
+            }
+            if (typeof r.estimatedUsd === "number" && Number.isFinite(r.estimatedUsd)) {
+              amountUsd = r.estimatedUsd;
             }
           }
         } catch {
@@ -913,6 +1078,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     };
     const onCancelled = (p: { rideId: string; cancelledBy: "rider" | "driver" }) => {
       if (p.rideId !== activeRideIdRef.current) return;
+      setNegotiationOffersOpen(false);
+      setNegotiationOffers([]);
       applyCarGoRideEnded();
       if (p.cancelledBy === "driver") {
         toast({
@@ -936,6 +1103,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     const onFailed = (p: { rideId: string; reason: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       clearVehicleSearchTimers();
+      setNegotiationOffersOpen(false);
+      setNegotiationOffers([]);
       setVehicleModalStep("ready");
       setActiveRideId(null);
       activeRideIdRef.current = null;
@@ -949,7 +1118,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       });
     };
     socket.on(`${rideSocketPrefix}failed`, onFailed);
-    // Contraofertas desactivadas: no nos suscribimos a eventos.
+    const onNegoOffers = (p: { rideId: string; offers?: unknown[] }) => {
+      if (p.rideId !== activeRideIdRef.current) return;
+      const rows = (Array.isArray(p.offers) ? p.offers : [])
+        .map(mapServerNegotiationOffer)
+        .filter((x): x is RiderNegotiationOfferRow => x != null);
+      setNegotiationOffers(rows);
+    };
+    socket.on(`${rideSocketPrefix}negotiation:offers_updated`, onNegoOffers);
     return () => {
       socket.off(`${rideSocketPrefix}matched`, onMatched);
       socket.off(`${rideSocketPrefix}driver_location`, onDriverLoc);
@@ -958,6 +1134,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       socket.off(`${rideSocketPrefix}completed`, onCompleted);
       socket.off(`${rideSocketPrefix}cancelled`, onCancelled);
       socket.off(`${rideSocketPrefix}failed`, onFailed);
+      socket.off(`${rideSocketPrefix}negotiation:offers_updated`, onNegoOffers);
     };
   }, [
     socket,
@@ -1041,6 +1218,18 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           setRiderTripInProgress(false);
           setVehiclePickerOpen(true);
           setVehicleModalStep("searching");
+          if (ride.isNegotiated) {
+            setRideIsNegotiated(true);
+            if (typeof ride.estimatedUsd === "number") setClientHaggleUsd(ride.estimatedUsd);
+            const rows = (Array.isArray(ride.offers) ? ride.offers : [])
+              .map(mapServerNegotiationOffer)
+              .filter((x): x is RiderNegotiationOfferRow => x != null);
+            setNegotiationOffers(rows);
+            setNegotiationOffersOpen(true);
+          } else {
+            setNegotiationOffersOpen(false);
+            setNegotiationOffers([]);
+          }
           // Reiniciamos timers de búsqueda local (5 min) al rehidratar.
           clearVehicleSearchTimers();
           setSearchRemainingSec(VEHICLE_SEARCH_TOTAL_SEC);
@@ -2244,9 +2433,26 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         suggestedUsdByVehicle={suggestedUsdByVehicle}
         suggestedUsd={suggestedUsd}
         onRequestCancelSearch={openCancelServiceDialog}
+        isNegotiatedFlow={rideIsNegotiated}
+        clientOfferUsd={clientHaggleUsd}
+        onChooseStandardPrice={handleChooseStandardPrice}
+        onChooseHaggle={handleChooseHaggle}
+        haggleUsd={clientHaggleUsd}
+        onHaggleBump={handleHaggleBump}
+        onHaggleDecide={handleHaggleDecide}
+        onBackFromHaggle={handleBackFromHaggle}
+        onBackFromPriceMode={handleBackFromPriceMode}
+        onBackToHaggleFromPayment={handleBackToHaggleFromPayment}
       />
 
-      {/* Negociación desactivada por ahora: no mostramos contraofertas flotantes */}
+      <RiderNegotiationOffersModal
+        open={negotiationOffersOpen && vehicleModalStep === "searching"}
+        rideId={activeRideId}
+        offers={negotiationOffers}
+        busyDriverId={negotiationOfferBusyId}
+        onDismissOffer={(id) => void dismissNegotiationOffer(id)}
+        onAcceptOffer={(id) => void acceptNegotiationOffer(id)}
+      />
 
       {/* Wallet/Recargar ahora viven en `GoBottomNav` (barra inferior). */}
 

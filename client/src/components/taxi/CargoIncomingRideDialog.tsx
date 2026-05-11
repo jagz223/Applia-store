@@ -1,7 +1,7 @@
 import type { GeoJsonObject } from "geojson";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ban, CheckCircle2, Loader2, Star, X } from "lucide-react";
+import { Ban, CheckCircle2, Loader2, Star, Tags, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TaxiRouteMap } from "@/components/taxi/TaxiRouteMap";
 import { mobilityServiceLabel } from "@shared/mobility-ui-labels";
@@ -27,6 +27,7 @@ export type CargoRideOfferPayload = {
   suggestedUsd?: number;
   petEnabled?: boolean;
   expiresAt?: number;
+  isNegotiated?: boolean;
 };
 
 type Props = {
@@ -37,6 +38,9 @@ type Props = {
   driverPos?: { lat: number; lon: number } | null;
   onAccept: () => void;
   onDecline: () => void;
+  /** Regateo: enviar monto (precio del cliente o propuesto). */
+  onNegotiationPropose?: (amountUsd: number) => Promise<void>;
+  negotiationBusy?: boolean;
 };
 
 function formatKm(m: number): string {
@@ -68,12 +72,30 @@ function twoWords(label: string): string {
   return parts.slice(0, 2).join(" ") || "Punto";
 }
 
-export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, onAccept, onDecline }: Props) {
+export function CargoIncomingRideDialog({
+  open,
+  offer,
+  module,
+  busy,
+  driverPos,
+  onAccept,
+  onDecline,
+  onNegotiationPropose,
+  negotiationBusy = false,
+}: Props) {
   if (!open || !offer) return null;
   if (typeof document === "undefined") return null;
   const riderStars = typeof offer.rider.rating === "number" ? offer.rider.rating : null;
   const riderTrips = typeof offer.rider.completedTrips === "number" ? offer.rider.completedTrips : null;
   const title = mobilityServiceLabel(module === "pack" ? "pack" : "cargo");
+  const isNego = !!offer.isNegotiated && !!onNegotiationPropose;
+  const [amountDraft, setAmountDraft] = useState(() => String(offer.estimatedUsd));
+  const [showAmountEditor, setShowAmountEditor] = useState(false);
+
+  useEffect(() => {
+    setAmountDraft(String(offer.estimatedUsd));
+    setShowAmountEditor(false);
+  }, [offer.rideId, offer.estimatedUsd]);
 
   const ttlMsRef = useRef<number>(18_000);
   const [remainingMs, setRemainingMs] = useState<number>(() => {
@@ -117,6 +139,12 @@ export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, 
               Nueva solicitud · {title}
             </h2>
             <p className="text-sm text-muted-foreground">Solo lo esencial para decidir</p>
+            {isNego ? (
+              <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-900 dark:text-amber-100">
+                <Tags className="h-3 w-3" aria-hidden />
+                Regateo
+              </span>
+            ) : null}
           </div>
           <Button type="button" variant="ghost" size="icon" className="shrink-0" onClick={onDecline} aria-label="Cerrar">
             <X className="h-5 w-5" />
@@ -232,27 +260,111 @@ export function CargoIncomingRideDialog({ open, offer, module, busy, driverPos, 
               style={{ width: `${Math.round(progress * 100)}%` }}
             />
           </div>
-          <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="destructive"
-            className="flex-1 gap-2"
-            disabled={busy}
-            onClick={onDecline}
-          >
-            <Ban className="h-4 w-4" aria-hidden />
-            Rechazar
-          </Button>
-          <Button
-            type="button"
-            className="flex-1 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-            disabled={busy}
-            onClick={onAccept}
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {!busy ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : null}
-            Aceptar
-          </Button>
+          {isNego && showAmountEditor ? (
+            <div className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 p-3">
+              <p className="text-xs font-medium text-foreground">Tu monto (USD)</p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  disabled={negotiationBusy}
+                  onClick={() => {
+                    const n = Math.max(0.01, Number(amountDraft) - 0.25);
+                    setAmountDraft(n.toFixed(2));
+                  }}
+                >
+                  −
+                </Button>
+                <input
+                  className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-2 text-center font-mono text-sm"
+                  inputMode="decimal"
+                  value={amountDraft}
+                  onChange={(e) => setAmountDraft(e.target.value)}
+                  aria-label="Monto en USD"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  disabled={negotiationBusy}
+                  onClick={() => {
+                    const n = Math.max(0.01, Number(amountDraft) + 0.25);
+                    setAmountDraft(n.toFixed(2));
+                  }}
+                >
+                  +
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="ghost" className="flex-1" disabled={negotiationBusy} onClick={() => setShowAmountEditor(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1 bg-primary text-primary-foreground"
+                  disabled={negotiationBusy}
+                  onClick={async () => {
+                    const n = Number(amountDraft);
+                    if (!Number.isFinite(n) || n < 0.01) return;
+                    await onNegotiationPropose(Math.round(n * 100) / 100);
+                    setShowAmountEditor(false);
+                  }}
+                >
+                  {negotiationBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enviar oferta"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              variant="destructive"
+              className="flex-1 gap-2 sm:flex-initial sm:min-w-[120px]"
+              disabled={busy || negotiationBusy}
+              onClick={onDecline}
+            >
+              <Ban className="h-4 w-4" aria-hidden />
+              Rechazar
+            </Button>
+            {isNego ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 gap-2"
+                  disabled={negotiationBusy}
+                  onClick={() => setShowAmountEditor(true)}
+                >
+                  Cambiar monto
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
+                  disabled={negotiationBusy}
+                  onClick={async () => {
+                    await onNegotiationPropose(offer.estimatedUsd);
+                  }}
+                >
+                  {negotiationBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {!negotiationBusy ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : null}
+                  Al precio del cliente
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="button"
+                className="flex-1 gap-2 bg-emerald-600 text-white hover:bg-emerald-700 sm:flex-initial sm:min-w-[140px]"
+                disabled={busy}
+                onClick={onAccept}
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {!busy ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : null}
+                Aceptar
+              </Button>
+            )}
           </div>
         </div>
       </div>
