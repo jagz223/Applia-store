@@ -2462,7 +2462,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       />
 
       <RiderNegotiationOffersModal
-        open={negotiationOffersOpen && vehicleModalStep === "searching"}
+        open={vehicleModalStep === "searching" && negotiationOffers.length > 0}
         rideId={activeRideId}
         offers={negotiationOffers}
         busyDriverId={negotiationOfferBusyId}
