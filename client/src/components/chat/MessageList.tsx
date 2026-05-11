@@ -26,6 +26,11 @@ interface MessageListProps {
   isLoadingMore?: boolean;
   /** Clases extra en el contenedor scroll (p. ej. padding inferior si la barra de envío está fija). */
   className?: string;
+  /**
+   * Bloque vacío al final del hilo para que el scroll deje hueco bajo la UI fija inferior
+   * (barra de herramientas + input en móvil). Mejor que solo padding cuando las alturas cambian.
+   */
+  bottomReserveClassName?: string;
 }
 
 export function MessageList({
@@ -36,6 +41,7 @@ export function MessageList({
   onLoadMore,
   isLoadingMore,
   className,
+  bottomReserveClassName,
 }: MessageListProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
@@ -135,6 +141,9 @@ export function MessageList({
             />
           ))
         )}
+        {bottomReserveClassName ? (
+          <div className={cn("shrink-0 w-full", bottomReserveClassName)} aria-hidden />
+        ) : null}
       </div>
     </div>
   );

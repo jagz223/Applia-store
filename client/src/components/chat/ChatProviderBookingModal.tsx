@@ -27,6 +27,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { toDate } from "@/lib/date-utils";
 import { chatApi } from "@/lib/chat-api";
+import { PROVIDER_BOOKING_MODAL_DESCRIPTION } from "@/lib/chat-booking-ui-copy";
 
 type BookingItem = {
   id: number;
@@ -313,10 +314,7 @@ export function ChatProviderBookingModal({ open, onOpenChange, bookingId, conver
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg" overlayClassName="bg-black/35 backdrop-blur-[0.5px]">
           <DialogHeader>
             <DialogTitle>Gestión de reserva</DialogTitle>
-            <DialogDescription>
-              Estado de la reserva, fecha (si está pendiente) y enlaces al servicio. El costo se gestiona desde el panel
-              de reservas.
-            </DialogDescription>
+            <DialogDescription>{PROVIDER_BOOKING_MODAL_DESCRIPTION}</DialogDescription>
           </DialogHeader>
           {body}
           <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
