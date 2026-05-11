@@ -1,7 +1,7 @@
 {
-  "name": "GenFeb",
-  "short_name": "GenFeb",
-  "description": "Plataforma de servicios que conecta clientes con asociados verificados: técnicos, legales, financieros y mantenimiento. Reservas, pagos seguros y garantía GenFeb.",
+  "name": "Genfeb",
+  "short_name": "Genfeb",
+  "description": "Genfeb conecta clientes con asociados verificados: servicios profesionales, taxi, envíos, reservas y chat.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -28,37 +28,37 @@
   ],
   "shortcuts": [
     {
-      "name": "Pedir Taxi",
+      "name": "Categorías y reservas",
+      "short_name": "Categorías",
+      "description": "Explora categorías; taxi, envíos y servicios profesionales.",
+      "url": "/categories",
+      "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Pedir taxi",
       "short_name": "Taxi",
-      "description": "Solicita un servicio de Taxi",
-      "url": "/go/cargo",
+      "description": "Mapa para solicitar un viaje en taxi.",
+      "url": "/go/taxi",
       "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Reservar servicio",
-      "short_name": "Reservar",
-      "description": "Reserva un nuevo servicio",
-      "url": "/booking",
-      "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Mis reservas",
-      "short_name": "Reservas",
-      "description": "Ver mis reservas",
-      "url": "/dashboard",
+      "name": "Notificaciones",
+      "short_name": "Notificaciones",
+      "description": "Alertas y avisos de tu cuenta.",
+      "url": "/notifications",
       "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Mensajes",
       "short_name": "Chat",
-      "description": "Ver mensajes",
+      "description": "Chats con asociados y soporte.",
       "url": "/chat",
       "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Configuración",
-      "short_name": "Configuracion",
-      "description": "Gestiona tu perfil y cuenta",
+      "short_name": "Ajustes",
+      "description": "Perfil, cuenta y preferencias.",
       "url": "/settings",
       "icons": [{ "src": "/genfeb-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     }
