@@ -739,6 +739,10 @@ export function registerPackRideRoutes(app: Express) {
       if (idx >= 0) ride.offers[idx] = entry;
       else ride.offers.push(entry);
 
+      // El conductor ya "atendió" esta invitación: evitar que vuelva a aparecer como pendiente.
+      const p = pendingOfferByDriverId.get(driverUserId);
+      if (p?.rideId === ride.id) pendingOfferByDriverId.delete(driverUserId);
+
       const io = getIO();
       if (io) emitPackNegotiationOffersUpdated(io, ride);
       res.json({ ok: true });

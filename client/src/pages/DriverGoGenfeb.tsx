@@ -145,6 +145,11 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const incomingOpen = incomingOffer != null;
   const [respondBusy, setRespondBusy] = useState(false);
   const [negotiationBusy, setNegotiationBusy] = useState(false);
+  const [negotiationEditor, setNegotiationEditor] = useState<{
+    rideId: string;
+    module: "cargo" | "pack";
+    amountDraft: string;
+  } | null>(null);
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const [activeRideOffer, setActiveRideOffer] = useState<CargoRideOfferPayload | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -666,6 +671,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     }
 
     if (snapOffer.isNegotiated && !accept) {
+      // UX: cerrar al instante (aunque el backend tarde). Así el driver no queda "bloqueado" y puede ver nuevas ofertas.
+      goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+      goDriverUi?.clearOffers?.();
       setRespondBusy(true);
       try {
         const base = snapModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
@@ -687,8 +695,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       } finally {
         setRespondBusy(false);
       }
-      goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
-      goDriverUi?.clearOffers?.();
       return;
     }
 
@@ -763,19 +769,19 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   };
 
   const submitNegotiationOffer = useCallback(
-    async (amountUsd: number) => {
-      if (!incomingOffer) return;
-      const snap = incomingOffer;
-      const mod = incomingModule;
+    async (rideId: string, mod: "cargo" | "pack", amountUsd: number) => {
       const token = localStorage.getItem("token");
       if (!token) {
         toast({ title: "Sesión", description: "Inicia sesión de nuevo.", variant: "destructive" });
         return;
       }
+      // UX: cerrar al instante para no bloquear nuevas notificaciones.
+      goDriverUi?.resolveOfferAndShowNext(rideId);
+      goDriverUi?.clearOffers?.();
       setNegotiationBusy(true);
       try {
         const base = mod === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
-        const res = await fetch(`${base}/${encodeURIComponent(snap.rideId)}/negotiation/driver-offer`, {
+        const res = await fetch(`${base}/${encodeURIComponent(rideId)}/negotiation/driver-offer`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ amountUsd }),
@@ -783,8 +789,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         const data = (await res.json().catch(() => ({}))) as { message?: string };
         if (!res.ok) throw new Error(data.message || "No se pudo enviar la oferta");
         toast({ title: "Oferta enviada", description: "El cliente verá tu propuesta en su lista." });
-        goDriverUi?.resolveOfferAndShowNext(snap.rideId);
-        goDriverUi?.clearOffers?.();
       } catch (e) {
         toast({
           title: "No se pudo enviar",
@@ -795,7 +799,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setNegotiationBusy(false);
       }
     },
-    [incomingOffer, incomingModule, goDriverUi, toast]
+    [goDriverUi, toast]
   );
 
   const startRide = async () => {
@@ -1551,9 +1555,100 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         driverPos={geoPos}
         onAccept={() => void respondToOffer(true)}
         onDecline={() => void respondToOffer(false)}
-        onNegotiationPropose={incomingOffer?.isNegotiated ? (amt) => submitNegotiationOffer(amt) : undefined}
+        onNegotiationPropose={
+          incomingOffer?.isNegotiated && incomingModule
+            ? (amt) => submitNegotiationOffer(incomingOffer.rideId, incomingModule, amt)
+            : undefined
+        }
+        onNegotiationChangeAmount={
+          incomingOffer?.isNegotiated && incomingModule
+            ? (initialAmountUsd) => {
+                // Debe cerrar este modal aunque la oferta siga activa.
+                goDriverUi?.resolveOfferAndShowNext(incomingOffer.rideId);
+                goDriverUi?.clearOffers?.();
+                setNegotiationEditor({
+                  rideId: incomingOffer.rideId,
+                  module: incomingModule,
+                  amountDraft: String(Number.isFinite(initialAmountUsd) ? initialAmountUsd : incomingOffer.estimatedUsd),
+                });
+              }
+            : undefined
+        }
         negotiationBusy={negotiationBusy}
       />
+
+      <Dialog open={negotiationEditor != null} onOpenChange={(open) => (!open ? setNegotiationEditor(null) : null)}>
+        <DialogContent className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Cambiar monto</DialogTitle>
+            <DialogDescription>Envía tu oferta. El cliente la verá en su lista de regateo.</DialogDescription>
+          </DialogHeader>
+          {negotiationEditor ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  disabled={negotiationBusy}
+                  onClick={() => {
+                    const n = Math.max(0.01, Number(negotiationEditor.amountDraft) - 0.25);
+                    setNegotiationEditor((s) => (s ? { ...s, amountDraft: n.toFixed(2) } : s));
+                  }}
+                >
+                  −
+                </Button>
+                <input
+                  className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-center font-mono text-sm"
+                  inputMode="decimal"
+                  value={negotiationEditor.amountDraft}
+                  onChange={(e) => setNegotiationEditor((s) => (s ? { ...s, amountDraft: e.target.value } : s))}
+                  aria-label="Monto en USD"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  disabled={negotiationBusy}
+                  onClick={() => {
+                    const n = Math.max(0.01, Number(negotiationEditor.amountDraft) + 0.25);
+                    setNegotiationEditor((s) => (s ? { ...s, amountDraft: n.toFixed(2) } : s));
+                  }}
+                >
+                  +
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button type="button" variant="outline" disabled={negotiationBusy} onClick={() => setNegotiationEditor(null)}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={negotiationBusy || !negotiationEditor}
+              onClick={() => {
+                if (!negotiationEditor) return;
+                const n = Number(negotiationEditor.amountDraft);
+                if (!Number.isFinite(n) || n < 0.01) return;
+                const rideId = negotiationEditor.rideId;
+                const mod = negotiationEditor.module;
+                setNegotiationEditor(null);
+                void submitNegotiationOffer(rideId, mod, Math.round(n * 100) / 100);
+              }}
+            >
+              {negotiationBusy ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  Enviando…
+                </>
+              ) : (
+                "Enviar oferta"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={startConfirmOpen} onOpenChange={setStartConfirmOpen}>
         <DialogContent className="max-w-[420px]">

@@ -40,6 +40,8 @@ type Props = {
   onDecline: () => void;
   /** Regateo: enviar monto (precio del cliente o propuesto). */
   onNegotiationPropose?: (amountUsd: number) => Promise<void>;
+  /** Regateo: abrir editor de monto fuera del modal (debe cerrar este modal). */
+  onNegotiationChangeAmount?: (initialAmountUsd: number) => void;
   negotiationBusy?: boolean;
 };
 
@@ -81,6 +83,7 @@ export function CargoIncomingRideDialog({
   onAccept,
   onDecline,
   onNegotiationPropose,
+  onNegotiationChangeAmount,
   negotiationBusy = false,
 }: Props) {
   if (!open || !offer) return null;
@@ -89,13 +92,6 @@ export function CargoIncomingRideDialog({
   const riderTrips = typeof offer.rider.completedTrips === "number" ? offer.rider.completedTrips : null;
   const title = mobilityServiceLabel(module === "pack" ? "pack" : "cargo");
   const isNego = !!offer.isNegotiated && !!onNegotiationPropose;
-  const [amountDraft, setAmountDraft] = useState(() => String(offer.estimatedUsd));
-  const [showAmountEditor, setShowAmountEditor] = useState(false);
-
-  useEffect(() => {
-    setAmountDraft(String(offer.estimatedUsd));
-    setShowAmountEditor(false);
-  }, [offer.rideId, offer.estimatedUsd]);
 
   const ttlMsRef = useRef<number>(18_000);
   const [remainingMs, setRemainingMs] = useState<number>(() => {
@@ -260,64 +256,6 @@ export function CargoIncomingRideDialog({
               style={{ width: `${Math.round(progress * 100)}%` }}
             />
           </div>
-          {isNego && showAmountEditor ? (
-            <div className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 p-3">
-              <p className="text-xs font-medium text-foreground">Tu monto (USD)</p>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="shrink-0"
-                  disabled={negotiationBusy}
-                  onClick={() => {
-                    const n = Math.max(0.01, Number(amountDraft) - 0.25);
-                    setAmountDraft(n.toFixed(2));
-                  }}
-                >
-                  −
-                </Button>
-                <input
-                  className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-2 text-center font-mono text-sm"
-                  inputMode="decimal"
-                  value={amountDraft}
-                  onChange={(e) => setAmountDraft(e.target.value)}
-                  aria-label="Monto en USD"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="shrink-0"
-                  disabled={negotiationBusy}
-                  onClick={() => {
-                    const n = Math.max(0.01, Number(amountDraft) + 0.25);
-                    setAmountDraft(n.toFixed(2));
-                  }}
-                >
-                  +
-                </Button>
-              </div>
-              <div className="flex gap-2">
-                <Button type="button" variant="ghost" className="flex-1" disabled={negotiationBusy} onClick={() => setShowAmountEditor(false)}>
-                  Cancelar
-                </Button>
-                <Button
-                  type="button"
-                  className="flex-1 bg-primary text-primary-foreground"
-                  disabled={negotiationBusy}
-                  onClick={async () => {
-                    const n = Number(amountDraft);
-                    if (!Number.isFinite(n) || n < 0.01) return;
-                    await onNegotiationPropose(Math.round(n * 100) / 100);
-                    setShowAmountEditor(false);
-                  }}
-                >
-                  {negotiationBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enviar oferta"}
-                </Button>
-              </div>
-            </div>
-          ) : null}
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button
               type="button"
@@ -336,7 +274,7 @@ export function CargoIncomingRideDialog({
                   variant="outline"
                   className="flex-1 gap-2"
                   disabled={negotiationBusy}
-                  onClick={() => setShowAmountEditor(true)}
+                  onClick={() => onNegotiationChangeAmount?.(offer.estimatedUsd)}
                 >
                   Cambiar monto
                 </Button>

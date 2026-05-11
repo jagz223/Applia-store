@@ -59,10 +59,11 @@ export function RiderNegotiationOffersModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[48000] flex flex-col justify-end bg-black/50 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur-sm md:items-center md:justify-center md:p-4"
+      className="fixed inset-0 flex flex-col justify-end bg-black/50 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur-sm md:items-center md:justify-center md:p-4"
       role="dialog"
       aria-modal
       aria-labelledby="nego-offers-title"
+      style={{ zIndex: 2_147_483_000 }}
     >
       <div className="flex max-h-[min(88dvh,640px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
         <div className="border-b border-border px-4 py-3">
