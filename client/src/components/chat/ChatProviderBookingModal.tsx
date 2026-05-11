@@ -22,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useUpdateBookingStatus, useUpdateBookingSchedule } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
@@ -86,7 +85,7 @@ export function ChatProviderBookingModal({ open, onOpenChange, bookingId, conver
       return res.json();
     },
     enabled: loadProviderBookings,
-    staleTime: 30_000,
+    staleTime: 0,
   });
   const updateStatus = useUpdateBookingStatus();
   const updateSchedule = useUpdateBookingSchedule();
@@ -271,42 +270,37 @@ export function ChatProviderBookingModal({ open, onOpenChange, bookingId, conver
         {(booking.status === "pending" || booking.status === "confirmed" || booking.status === "in_progress") && (
           <div className="space-y-2 border-t border-border pt-4">
             <p className="text-sm font-medium">Estado de la reserva</p>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="w-full max-w-xs">
-                    <Select
-                      value={booking.status}
-                      onValueChange={(value) => {
-                        if (value === booking.status) return;
-                        setPendingStatusChange({ nextStatus: value });
-                      }}
-                      disabled={updateStatus.isPending}
+            {!canComplete && (booking.status === "confirmed" || booking.status === "in_progress") ? (
+              <p className="text-xs text-muted-foreground max-w-xs">
+                Podrás marcar En proceso o Completada cuando el cliente haya confirmado desde su cuenta (Mis
+                reservas).
+              </p>
+            ) : null}
+            <div className="w-full max-w-xs">
+              <Select
+                value={booking.status}
+                onValueChange={(value) => {
+                  if (value === booking.status) return;
+                  setPendingStatusChange({ nextStatus: value });
+                }}
+                disabled={updateStatus.isPending}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.filter((opt) => allowedStatusValues.has(opt.value)).map((opt) => (
+                    <SelectItem
+                      key={opt.value}
+                      value={opt.value}
+                      disabled={(opt.value === "completed" || opt.value === "in_progress") && !canComplete}
                     >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STATUS_OPTIONS.filter((opt) => allowedStatusValues.has(opt.value)).map((opt) => (
-                          <SelectItem
-                            key={opt.value}
-                            value={opt.value}
-                            disabled={(opt.value === "completed" || opt.value === "in_progress") && !canComplete}
-                          >
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs">
-                  {!canComplete && (booking.status === "confirmed" || booking.status === "in_progress")
-                    ? "Espera a que el cliente confirme el pago antes de marcar En proceso o Completada."
-                    : "Misma gestión que en el panel de asociado."}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
       </div>

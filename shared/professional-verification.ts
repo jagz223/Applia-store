@@ -31,6 +31,17 @@ export function isProfessionalVerificationLocked(v: Partial<ProfessionalVerifica
   return Boolean(img) && Boolean(code) && Boolean(date);
 }
 
+/** Alta inicial: el admin solo debe ver la solicitud cuando hay identificación, documento profesional y pago registrados. */
+export function isAssociateOnboardingDossierComplete(
+  v: Pick<ProfessionalVerification, "imageUrl" | "professionalCredentialUrl" | "transferReceiptCode" | "transferDate"> | null | undefined,
+): boolean {
+  const img = typeof v?.imageUrl === "string" && v.imageUrl.trim().length > 0;
+  const cred = typeof v?.professionalCredentialUrl === "string" && v.professionalCredentialUrl.trim().length > 0;
+  const code = typeof v?.transferReceiptCode === "string" && v.transferReceiptCode.trim().length > 0;
+  const date = typeof v?.transferDate === "string" && v.transferDate.trim().length > 0;
+  return img && cred && code && date;
+}
+
 export const patchProfessionalVerificationImageBody = z.object({
   imageUrl: z.string().url().min(1),
 });

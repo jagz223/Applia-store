@@ -21,6 +21,7 @@ import {
   Banknote,
   Settings,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
@@ -36,6 +37,7 @@ import {
   hasFullAdminRole,
 } from "@/lib/auth-utils";
 import { normalizeRoleCode } from "@shared/roles";
+import { cn } from "@/lib/utils";
 
 const SHOW_DASHBOARD_KPI_CARDS = false;
 const SHOW_DASHBOARD_HEADER_ACTIONS = false;
@@ -188,6 +190,35 @@ export default function Dashboard() {
     });
   }, [walletTransfersData?.transfers]);
 
+  /** Misma fuente que el panel de asociados: facturas de suscripción / verificación (mensualidad). */
+  const { data: invoiceList, isLoading: invoicesLoading } = useQuery({
+    queryKey: ["/api/invoices", "list"],
+    queryFn: async () => {
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/invoices", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("No se pudieron cargar las facturas");
+      return res.json() as Promise<
+        Array<{
+          id?: number;
+          reportId?: number;
+          type: string;
+          service?: string;
+          amount?: number | string;
+          status?: string;
+          date?: string | null;
+        }>
+      >;
+    },
+    enabled: isAuthenticated && allowed,
+  });
+
+  const verificationInvoiceRows = useMemo(
+    () => (Array.isArray(invoiceList) ? invoiceList : []).filter((inv) => inv.type === "verification"),
+    [invoiceList],
+  );
+
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
@@ -316,13 +347,22 @@ export default function Dashboard() {
   };
 
   function InvoicesTabContent() {
-    if (transfersLoading) {
+    const userForInvoice = user
+      ? {
+          firstName: user.firstName,
+          lastName: user.lastName,
+          name: (user as { name?: string }).name,
+          email: user.email,
+        }
+      : null;
+
+    if (invoicesLoading || transfersLoading) {
       return (
         <Card className="card-industrial">
           <CardHeader className="p-4 sm:p-6">
             <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
             <CardDescription className="text-xs sm:text-sm">
-              Comprobante del abono de activación (USD {ACTIVATION_VISIBILITY_USD})
+              Suscripción mensual y comprobantes de visibilidad (USD {ACTIVATION_VISIBILITY_USD})
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
@@ -333,20 +373,23 @@ export default function Dashboard() {
       );
     }
 
-    if (activationTransfers.length === 0) {
+    const hasVerificationInvoices = verificationInvoiceRows.length > 0;
+    const hasWalletActivationOnly = !hasVerificationInvoices && activationTransfers.length > 0;
+
+    if (!hasVerificationInvoices && activationTransfers.length === 0) {
       return (
         <Card className="card-industrial">
           <CardHeader className="p-4 sm:p-6">
             <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
             <CardDescription className="text-xs sm:text-sm">
-              Comprobante del abono de activación (USD {ACTIVATION_VISIBILITY_USD})
+              Suscripción mensual y comprobantes de visibilidad (USD {ACTIVATION_VISIBILITY_USD})
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
             <FileText className="h-8 w-8 opacity-60" />
             <p className="text-sm text-center max-w-sm">
-              Cuando completes el pago de activación para que tus servicios sean visibles, aquí podrás descargar la
-              factura en PDF.
+              Aún no hay facturas de suscripción registradas. Cuando haya un pago pendiente o completado, aparecerá
+              aquí igual que en el panel de asociados.
             </p>
           </CardContent>
         </Card>
@@ -358,83 +401,157 @@ export default function Dashboard() {
         <CardHeader className="p-4 sm:p-6">
           <CardTitle className="text-base sm:text-2xl">Facturas</CardTitle>
           <CardDescription className="text-xs sm:text-sm">
-            Descarga el comprobante del abono por activar la visibilidad de tus servicios
+            {hasVerificationInvoices
+              ? "Misma información que en el panel de asociados: mensualidad y descarga en PDF cuando esté pagada."
+              : "Comprobante del abono por activar la visibilidad de tus servicios (movimiento en cuenta)."}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4 px-3 pb-4 sm:px-6 sm:pb-6">
-          {activationTransfers.map((t) => {
-            const label = movementDisplayLabel(t);
-            const parsedDate = parseTransferDate(t.createdAt);
-            const dateStr = parsedDate ? format(parsedDate, "dd MMM yyyy HH:mm", { locale: es }) : "—";
-            const status = t.status;
-            return (
-              <div
-                key={t.id}
-                className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-3 min-[380px]:p-4"
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                    <Receipt className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <p className="break-words text-sm font-medium">{label}</p>
-                    <p className="break-words text-xs text-muted-foreground">
-                      {t.description || "Pago único para publicar y hacer visibles tus servicios en GenFeb."}
-                    </p>
-                    <p className="break-all text-xs text-muted-foreground">{dateStr}</p>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2 border-t border-border/60 pt-3 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:items-center min-[400px]:justify-between">
-                  <p className="text-sm font-semibold tabular-nums">{formatAmount(t.amount)}</p>
-                  <Badge
-                    variant={
-                      status === "completed"
-                        ? "default"
-                        : status === "rejected"
-                          ? "destructive"
-                          : "secondary"
-                    }
-                    className="w-fit"
+        <CardContent className="space-y-6 px-3 pb-4 sm:px-6 sm:pb-6">
+          {hasVerificationInvoices ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">Suscripción / visibilidad</p>
+              {verificationInvoiceRows.map((inv) => {
+                const reportKey = inv.reportId ?? inv.id;
+                if (reportKey == null) return null;
+                const amt =
+                  typeof inv.amount === "number" ? inv.amount : parseFloat(String(inv.amount ?? String(ACTIVATION_VISIBILITY_USD)));
+                const parsedInvDate = parseTransferDate(inv.date);
+                const dateStr = parsedInvDate ? format(parsedInvDate, "dd MMM yyyy HH:mm", { locale: es }) : "—";
+                const st = inv.status ?? "";
+                const isCompleted = st === "completed";
+                const isRejected = st === "rejected";
+                return (
+                  <div
+                    key={`ver-${reportKey}`}
+                    className={cn(
+                      "flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-3 min-[380px]:flex-row min-[380px]:items-center min-[380px]:justify-between min-[380px]:p-4",
+                    )}
                   >
-                    {status === "pending_approval"
-                      ? "Pendiente"
-                      : status === "completed"
-                        ? "Completado"
-                        : "Rechazado"}
-                  </Badge>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full min-[400px]:w-auto shrink-0"
-                    onClick={() =>
-                      user &&
-                      downloadInvoicePdf(
-                        {
-                          id: t.id,
-                          amount: t.amount,
-                          transferType: t.transferType,
-                          description: t.description,
-                          createdAt: t.createdAt ?? null,
-                          status: t.status,
-                          reportId: (t as { reportId?: number }).reportId,
-                        },
-                        {
-                          firstName: user.firstName,
-                          lastName: user.lastName,
-                          name: (user as { name?: string }).name,
-                          email: user.email,
-                        },
-                      )
-                    }
-                    disabled={!user}
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <ShieldCheck className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="break-words text-sm font-medium">{getTransferTypeLabel("verification_fee")}</p>
+                        <p className="break-words text-xs text-muted-foreground">
+                          {inv.service ?? "Cargo de visibilidad / suscripción profesional"}
+                        </p>
+                        <p className="break-all text-xs text-muted-foreground">{dateStr}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 border-t border-border/60 pt-3 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:items-center min-[400px]:justify-between min-[400px]:border-0 min-[400px]:pt-0">
+                      <p className="text-sm font-semibold tabular-nums">{formatAmount(Number.isFinite(amt) ? amt : ACTIVATION_VISIBILITY_USD)}</p>
+                      <Badge variant={isCompleted ? "default" : isRejected ? "destructive" : "secondary"} className="w-fit">
+                        {isCompleted ? "Completado" : isRejected ? "Rechazado" : "Pendiente"}
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full min-[400px]:w-auto shrink-0"
+                        onClick={() =>
+                          userForInvoice &&
+                          downloadInvoicePdf(
+                            {
+                              id: reportKey,
+                              reportId: reportKey,
+                              transferType: "verification_fee",
+                              amount: Number.isFinite(amt) ? amt : ACTIVATION_VISIBILITY_USD,
+                              description: inv.service ?? "Cargo de verificación profesional",
+                              createdAt: inv.date ?? null,
+                              status: inv.status,
+                            },
+                            userForInvoice,
+                          )
+                        }
+                        disabled={!userForInvoice || !isCompleted}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Generar factura
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {hasWalletActivationOnly ? (
+            <div className="space-y-4">
+              {activationTransfers.map((t) => {
+                const label = movementDisplayLabel(t);
+                const parsedDate = parseTransferDate(t.createdAt);
+                const dateStr = parsedDate ? format(parsedDate, "dd MMM yyyy HH:mm", { locale: es }) : "—";
+                const status = t.status;
+                return (
+                  <div
+                    key={t.id}
+                    className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-3 min-[380px]:p-4"
                   >
-                    <Download className="mr-2 h-4 w-4" />
-                    Generar factura
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Receipt className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="break-words text-sm font-medium">{label}</p>
+                        <p className="break-words text-xs text-muted-foreground">
+                          {t.description || "Pago único para publicar y hacer visibles tus servicios en GenFeb."}
+                        </p>
+                        <p className="break-all text-xs text-muted-foreground">{dateStr}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 border-t border-border/60 pt-3 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:items-center min-[400px]:justify-between">
+                      <p className="text-sm font-semibold tabular-nums">{formatAmount(t.amount)}</p>
+                      <Badge
+                        variant={
+                          status === "completed"
+                            ? "default"
+                            : status === "rejected"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                        className="w-fit"
+                      >
+                        {status === "pending_approval"
+                          ? "Pendiente"
+                          : status === "completed"
+                            ? "Completado"
+                            : "Rechazado"}
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full min-[400px]:w-auto shrink-0"
+                        onClick={() =>
+                          user &&
+                          downloadInvoicePdf(
+                            {
+                              id: t.id,
+                              amount: t.amount,
+                              transferType: t.transferType,
+                              description: t.description,
+                              createdAt: t.createdAt ?? null,
+                              status: t.status,
+                              reportId: (t as { reportId?: number }).reportId,
+                            },
+                            {
+                              firstName: user.firstName,
+                              lastName: user.lastName,
+                              name: (user as { name?: string }).name,
+                              email: user.email,
+                            },
+                          )
+                        }
+                        disabled={!user}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Generar factura
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     );
@@ -646,17 +763,25 @@ export default function Dashboard() {
                       </div>
                     </CardHeader>
                     <CardContent className="px-3 pb-4 pt-0 sm:px-6 sm:pb-6">
-                      {transfersLoading ? (
+                      {transfersLoading || invoicesLoading ? (
                         <div className="flex flex-col items-center justify-center gap-3 py-10">
                           <Receipt className="h-8 w-8 animate-pulse text-muted-foreground" />
                           <p className="text-sm text-muted-foreground">Cargando…</p>
                         </div>
-                      ) : activationTransfers.length === 0 ? (
+                      ) : activationTransfers.length === 0 && verificationInvoiceRows.length === 0 ? (
                         <div className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
                           <Receipt className="h-8 w-8 opacity-60" />
                           <p className="max-w-md text-center text-sm">
                             Aún no hay un pago registrado. Cuando completes el abono de activación, verás aquí el
                             movimiento y podrás descargar la factura en la pestaña Facturas.
+                          </p>
+                        </div>
+                      ) : activationTransfers.length === 0 && verificationInvoiceRows.length > 0 ? (
+                        <div className="flex flex-col items-center justify-center gap-3 py-8 text-muted-foreground">
+                          <ShieldCheck className="h-8 w-8 text-primary opacity-80" />
+                          <p className="max-w-md text-center text-sm text-foreground">
+                            Hay factura de suscripción o visibilidad registrada. Revisa el estado y el PDF en la
+                            pestaña <span className="font-semibold">Facturas</span>.
                           </p>
                         </div>
                       ) : (

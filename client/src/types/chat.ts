@@ -24,6 +24,8 @@ export interface ConversationEnriched {
   serviceEndedAt?: string | null;
   /** Tras esta fecha/hora la conversación ya no aparece para usuarios normales (ISO). Los admins siguen viendo el historial en auditoría. */
   serviceChatHideFromUsersAt?: string | null;
+  /** Servicio finalizado: no se permiten nuevos mensajes (API + UI). */
+  messagesLocked?: boolean;
   lastMessageAt: string | Date | null;
   createdAt: string | Date | null;
   otherParticipant: ChatParticipant;

@@ -737,9 +737,26 @@ export function useUpdateBookingStatus() {
       const parsed = api.bookings.updateStatus.responses[200].safeParse(json);
       return parsed.success ? parsed.data : json;
     },
-    onSuccess: (_data, { id, status }) => {
+    onSuccess: (data, { id, status }) => {
+      const mergeBookingRow = (row: Record<string, unknown>) => {
+        if (Number(row?.id) !== Number(id)) return row;
+        const server = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+        return { ...row, ...server, status: (server.status as string) ?? status };
+      };
+      queryClient.setQueryData([api.bookings.list.path], (old: unknown) =>
+        Array.isArray(old) ? old.map((b) => mergeBookingRow(b as Record<string, unknown>)) : old,
+      );
+      queryClient.setQueriesData({ queryKey: ["/api/bookings/provider"] }, (old: unknown) =>
+        Array.isArray(old) ? old.map((b) => mergeBookingRow(b as Record<string, unknown>)) : old,
+      );
+      queryClient.setQueryData(["booking", id], (old: unknown) =>
+        old && typeof old === "object" && !Array.isArray(old)
+          ? mergeBookingRow(old as Record<string, unknown>)
+          : mergeBookingRow({ id } as Record<string, unknown>),
+      );
+
       queryClient.invalidateQueries({ queryKey: ["booking", id] });
-      // Refrescar inmediatamente la lista de reservas para que la UI se actualice al instante.
+      // Refrescar listas para alinear con servidor (caché ya optimista arriba).
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
@@ -747,8 +764,10 @@ export function useUpdateBookingStatus() {
       if (status === "completed") {
         queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
         queryClient.invalidateQueries({ queryKey: ["/api/professional/stats"] });
+        queryClient.invalidateQueries({ queryKey: RATINGS_PENDING_QUERY_KEY });
         debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
         debouncedRefetch(queryClient, ["/api/professional/stats"]);
+        void queryClient.refetchQueries({ queryKey: RATINGS_PENDING_QUERY_KEY });
       }
       toast({ title: "Estado actualizado", description: "El estado de la reserva se ha actualizado." });
     },
@@ -866,7 +885,7 @@ export function useAcknowledgeBookingProChanges() {
   });
 }
 
-/** Confirmación del cliente (pago seguro): debita wallet y retiene en pendingBalance del profesional. */
+/** Confirmación del cliente respecto a la reserva (endpoint puede incluir lógica de retención según backend). */
 export function useConfirmBookingByClient() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -879,18 +898,20 @@ export function useConfirmBookingByClient() {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "No se pudo confirmar el pago");
+      if (!res.ok) throw new Error(data.message || "No se pudo registrar la confirmación");
       return data;
     },
     onSuccess: () => {
-      // Refrescar inmediatamente la lista de reservas y wallet para que el cambio se vea al instante.
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
       queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
       queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
       queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
       queryClient.refetchQueries({ queryKey: [api.genfeb.wallet.me.path] });
-      toast({ title: "Pago confirmado", description: "Los fondos se han retenido. El asociado podrá completar el trabajo." });
+      toast({
+        title: "Confirmación registrada",
+        description: "Tu conformidad quedó guardada. El asociado puede seguir con la reserva.",
+      });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -931,9 +952,12 @@ export type PendingRating = {
   completedAt?: string | Date;
 };
 
+/** Clave React Query para calificaciones pendientes (invalidar tras completar reserva, etc.). */
+export const RATINGS_PENDING_QUERY_KEY = ["/api/ratings/pending"] as const;
+
 export function usePendingRatings(options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: ["/api/ratings/pending"],
+    queryKey: RATINGS_PENDING_QUERY_KEY,
     queryFn: async () => {
       const token = getToken();
       const res = await fetch("/api/ratings/pending", {
@@ -944,12 +968,11 @@ export function usePendingRatings(options?: { enabled?: boolean }) {
       return data;
     },
     enabled: options?.enabled !== false,
-    // Evita spam de requests cuando no hay nada pendiente:
-    // - si hay pendientes: refrescar rápido para mostrar el modal
-    // - si no hay: refrescar lento
+    staleTime: 0,
+    // Tras completar un servicio invalidamos esta query; el intervalo cubre al otro usuario (socket) y casos sin invalidación.
     refetchInterval: (q) => {
       const pendingLen = (q.state.data as { pending?: unknown[] } | undefined)?.pending?.length ?? 0;
-      return pendingLen > 0 ? 15_000 : 5 * 60_000;
+      return pendingLen > 0 ? 4_000 : 30_000;
     },
   });
 }
@@ -979,9 +1002,9 @@ export function useSubmitRating() {
       return res.json() as Promise<{ ok: true }>;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/ratings/pending"] });
+      queryClient.invalidateQueries({ queryKey: RATINGS_PENDING_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
-      debouncedRefetch(queryClient, ["/api/ratings/pending"]);
+      debouncedRefetch(queryClient, [...RATINGS_PENDING_QUERY_KEY]);
       debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
     },
   });
@@ -1424,7 +1447,8 @@ export function useAdminWithdrawalHistory(params: {
 
 // ========== Verificación de profesional ==========
 
-const PROFESSIONAL_VERIFICATION_ME = "/api/me/professional-verification";
+/** Misma clave de caché que `useProfessionalVerification`. */
+export const PROFESSIONAL_VERIFICATION_ME = "/api/me/professional-verification";
 /** Exportado para fetch tras mutación (pago) y misma clave de caché que `useVerifyingStatusMe`. */
 export const VERIFICATION_STATUS_ME = "/api/me/verifying-status";
 

@@ -29,7 +29,11 @@ import {
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toDate } from "@/lib/date-utils";
-import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
+/** Número formateado para la UI (sin moneda). */
+function formatPriceAmount(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 const listItemMotion = {
   initial: { opacity: 0, y: 10 },
@@ -96,7 +100,6 @@ export default function Bookings() {
     const needsClientConfirmation = booking.status === "confirmed" && !booking.confirmedByClient;
     const needsProChangeAck =
       booking.status === "pending" && booking.pendingClientAcknowledgment === true;
-    const offPlatformPay = isOffPlatformServiceBookingPayment(booking.paymentMethod);
     const cost = typeof booking.cost === "number" ? booking.cost : (booking.service?.price != null ? Number(booking.service.price) : 0);
     const isHighlighted = highlightedBookingId != null && booking.id === highlightedBookingId;
 
@@ -133,7 +136,8 @@ export default function Bookings() {
             </p>
             {(cost > 0 || (booking.service?.price != null && Number(booking.service.price) > 0)) && (
               <p className="text-sm font-medium text-foreground mt-1">
-                Precio: {cost > 0 ? `${Number(cost).toFixed(2)}` : Number(booking.service?.price ?? 0).toFixed(2)} USD
+                Referencia en ficha:{" "}
+                {formatPriceAmount(cost > 0 ? cost : Number(booking.service?.price ?? 0))}
               </p>
             )}
           </CardHeader>
@@ -145,8 +149,8 @@ export default function Bookings() {
                   Revisar cambios del asociado
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  El profesional indicó un monto o una fecha distintos. Debes aceptar esos datos para que pueda
-                  confirmar la reserva; si no estás de acuerdo, podés cancelar la reserva.
+                  El asociado actualizó la fecha u otros datos en la ficha. Revisalos y aceptalos si coinciden con lo
+                  que hablaron por chat; si no encajan, puedes cancelar la reserva.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -177,18 +181,12 @@ export default function Bookings() {
               <div className="rounded-lg bg-primary/10 border border-primary/20 p-4 space-y-3">
                 <p className="font-medium flex items-center gap-2 text-primary">
                   <ShieldCheck className="h-5 w-5" />
-                  {offPlatformPay
-                    ? booking.paymentMethod === "bank_transfer"
-                      ? "Confirmar acuerdo (Transferencia)"
-                      : "Confirmar acuerdo (Efectivo)"
-                    : "Confirmar pago y retener fondos"}
+                  Confirmar lo acordado por chat
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {offPlatformPay
-                    ? booking.paymentMethod === "bank_transfer"
-                      ? `El asociado confirmó la reserva. Al confirmar, aceptas pagar $${Number(cost).toFixed(2)} USD por transferencia bancaria según lo acordes con el profesional.`
-                      : `El asociado ha confirmado esta reserva. Al confirmar, aceptas que el servicio se pagará en efectivo ($${Number(cost).toFixed(2)} USD) directamente al profesional.`
-                    : `El asociado ha confirmado esta reserva. Con los pagos seguros, el monto queda retenido hasta que el trabajo avance correctamente; confirma el pago para proceder. Se descontará $${Number(cost).toFixed(2)} USD de tu Saldo Genfeb.`}
+                  El asociado marcó la reserva como lista para tu visto bueno. Confirma solo si por el chat ya
+                  alinearon servicio, fecha y alcance (y, si anotaron cifras en la ficha, que coincidan con lo
+                  hablado). Si algo no cierra, sigue la conversación antes de pulsar «Confirmar».
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -350,19 +348,11 @@ export default function Bookings() {
       <Dialog open={bookingToConfirm != null} onOpenChange={(open) => !open && setBookingToConfirm(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>
-              {bookingToConfirm && isOffPlatformServiceBookingPayment(bookingToConfirm.paymentMethod)
-                ? bookingToConfirm.paymentMethod === "bank_transfer"
-                  ? "¿Confirmar pago por transferencia?"
-                  : "¿Confirmar servicio en efectivo?"
-                : "¿El monto es el correcto?"}
-            </DialogTitle>
+            <DialogTitle>¿Todo coincide con lo hablado por chat?</DialogTitle>
             <DialogDescription>
-              {bookingToConfirm && isOffPlatformServiceBookingPayment(bookingToConfirm.paymentMethod)
-                ? bookingToConfirm.paymentMethod === "bank_transfer"
-                  ? "Confirma si estás de acuerdo con el monto y con pagar por transferencia según coordines con el profesional. No se descontará saldo de la app por esta confirmación."
-                  : "Confirma si estás de acuerdo con iniciar este servicio. El pago se realizará en efectivo directamente al profesional al finalizar el trabajo."
-                : "Confirma solo si estás de acuerdo con que este sea el monto decidido para el trabajo acordado. Al confirmar, se descontará el monto de tu Saldo Genfeb y se retendrán los fondos para este servicio."}
+              Si confirmas, registras que servicio, fecha y condiciones están alineados con lo que acordaron con el
+              asociado por mensajes. Si algo no encaja, pulsa «No, seguir revisando» y coordinen un poco más antes de
+              avanzar.
             </DialogDescription>
           </DialogHeader>
           {bookingToConfirm && (
@@ -371,22 +361,8 @@ export default function Bookings() {
                 Servicio: {(bookingToConfirm as any).service?.title ?? "Servicio"}
               </p>
               <p className="text-muted-foreground">
-                Fecha programada:{" "}
+                Fecha en la reserva:{" "}
                 {format(toDate(bookingToConfirm.date), "PPP p", { locale: es })}
-              </p>
-              <p className="text-muted-foreground">
-                Monto a confirmar:{" "}
-                <span className="font-semibold">
-                  $
-                  {Number(
-                    typeof bookingToConfirm.cost === "number"
-                      ? bookingToConfirm.cost
-                      : (bookingToConfirm.service?.price != null
-                          ? Number(bookingToConfirm.service.price)
-                          : 0)
-                  ).toFixed(2)}{" "}
-                  USD
-                </span>
               </p>
             </div>
           )}
@@ -397,7 +373,7 @@ export default function Bookings() {
               onClick={() => setBookingToConfirm(null)}
               disabled={confirmPayment.isPending}
             >
-              En desacuerdo
+              No, seguir revisando
             </Button>
             <Button
               type="button"
@@ -416,12 +392,12 @@ export default function Bookings() {
               {confirmPayment.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Confirmando...
+                  Registrando…
                 </>
               ) : (
                 <>
                   <ShieldCheck className="h-4 w-4" />
-                  Estoy de acuerdo
+                  Sí, confirmo
                 </>
               )}
             </Button>
@@ -432,11 +408,11 @@ export default function Bookings() {
       <Dialog open={bookingToAckPro != null} onOpenChange={(open) => !open && setBookingToAckPro(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Aceptar monto y fecha</DialogTitle>
+            <DialogTitle>Aceptar cambios en la ficha</DialogTitle>
             <DialogDescription>
-              El asociado definió o actualizó el costo y/o la fecha de este servicio. Al aceptar, confirmás que
-              estás de acuerdo con esos datos; el asociado podrá pasar la reserva a confirmada. Si no estás de
-              acuerdo, podés cancelar la reserva desde la tarjeta.
+              El asociado actualizó la fecha u otros datos registrados en la app. Al aceptar, confirmas que coinciden
+              con lo que hablaron por chat; así podrá seguir con la reserva. Si no es así, cancela la reserva desde la
+              tarjeta.
             </DialogDescription>
           </DialogHeader>
           {bookingToAckPro && (
@@ -446,17 +422,17 @@ export default function Bookings() {
                 Fecha y hora: {format(toDate(bookingToAckPro.date), "PPP p", { locale: es })}
               </p>
               <p className="text-muted-foreground">
-                Monto acordado:{" "}
+                Cifra en ficha (revisa que sea la misma que en el chat):{" "}
                 <span className="font-semibold text-foreground">
-                  $
-                  {Number(
-                    typeof bookingToAckPro.cost === "number"
-                      ? bookingToAckPro.cost
-                      : bookingToAckPro.service?.price != null
-                        ? Number(bookingToAckPro.service.price)
-                        : 0
-                  ).toFixed(2)}{" "}
-                  USD
+                  {formatPriceAmount(
+                    Number(
+                      typeof bookingToAckPro.cost === "number"
+                        ? bookingToAckPro.cost
+                        : bookingToAckPro.service?.price != null
+                          ? Number(bookingToAckPro.service.price)
+                          : 0,
+                    ),
+                  )}
                 </span>
               </p>
             </div>

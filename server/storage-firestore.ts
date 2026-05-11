@@ -44,6 +44,7 @@ import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
 import { applyPublicServicePrice, applyPublicServicePriceList } from "@shared/public-service-price";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
+import { countVerificationsAwaitingAdminReview } from "./associate-verification-admin";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 
 /** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed); payment = client paid for a service (outflow from pending to provider). */
@@ -756,6 +757,7 @@ class FirestoreStorageImpl implements IStorage {
     model?: string | null;
     license_plate?: string | null;
     model_year?: number | null;
+    is_pet_friendly?: boolean;
   } | null> {
     if (!this.db) return null;
     const snap = await this.db
@@ -770,6 +772,7 @@ class FirestoreStorageImpl implements IStorage {
       model?: string;
       license_plate?: string;
       model_year?: number;
+      is_pet_friendly?: boolean;
     };
     const vt = d.vehicle_type;
     if (typeof vt !== "string") return null;
@@ -779,6 +782,42 @@ class FirestoreStorageImpl implements IStorage {
       model: d.model ?? null,
       license_plate: d.license_plate ?? null,
       model_year: typeof d.model_year === "number" ? d.model_year : null,
+      is_pet_friendly: !!d.is_pet_friendly,
+    };
+  }
+
+  async getPrimaryVehicleByUserId(userId: string): Promise<{
+    vehicle_type: string;
+    brand?: string | null;
+    model?: string | null;
+    license_plate?: string | null;
+    model_year?: number | null;
+    is_pet_friendly?: boolean;
+  } | null> {
+    if (!this.db) return null;
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.VEHICLES)
+      .where("userId", "==", userId)
+      .limit(1)
+      .get();
+    if (snap.empty) return null;
+    const d = snap.docs[0].data() as {
+      vehicle_type?: string;
+      brand?: string;
+      model?: string;
+      license_plate?: string;
+      model_year?: number;
+      is_pet_friendly?: boolean;
+    };
+    const vt = d.vehicle_type;
+    if (typeof vt !== "string") return null;
+    return {
+      vehicle_type: vt,
+      brand: d.brand ?? null,
+      model: d.model ?? null,
+      license_plate: d.license_plate ?? null,
+      model_year: typeof d.model_year === "number" ? d.model_year : null,
+      is_pet_friendly: !!d.is_pet_friendly,
     };
   }
 
@@ -2589,7 +2628,8 @@ class FirestoreStorageImpl implements IStorage {
     const now = new Date();
     let hasWrites = false;
     snap.docs.forEach(doc => {
-      const d = doc.data() as { senderId?: string; status?: string };
+      const d = doc.data() as { senderId?: string; status?: string; type?: string };
+      if (d.type === "system" || d.senderId === CHAT_SYSTEM_SENDER_ID) return;
       if (d.senderId !== userId && d.status !== "read") {
         batch.update(doc.ref, { status: "read", readAt: now });
         hasWrites = true;
@@ -3436,7 +3476,7 @@ class FirestoreStorageImpl implements IStorage {
       this.db.collection(FIRESTORE_COLLECTIONS.BOOKINGS).get(),
       this.db.collection(FIRESTORE_COLLECTIONS.SERVICES).get(),
       this.getAllTransfers(),
-      this.getPendingVerifyingStatuses(),
+      countVerificationsAwaitingAdminReview(this),
       this.getUsersWithPendingWithdrawals(),
     ]);
     const users = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -3454,7 +3494,7 @@ class FirestoreStorageImpl implements IStorage {
         bookings,
         services,
         transfers: transfersResult.transfers,
-        pendingVerificationCount: pendingVer.length,
+        pendingVerificationCount: pendingVer,
         pendingWithdrawalRequestsCount: pendingWd.length,
       },
       params

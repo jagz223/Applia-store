@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ChatProviderBookingModal } from "@/components/chat/ChatProviderBookingModal";
+import { ChatClientBookingModal } from "@/components/chat/ChatClientBookingModal";
 import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
@@ -163,7 +164,13 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     queryFn: async () => {
       const res = await fetch(`/api/bookings/${bookingIdForContext}`);
       if (!res.ok) throw new Error("Reserva no encontrada");
-      return res.json() as Promise<{ id: number; serviceTitle?: string; status?: string; providerId?: number }>;
+      return res.json() as Promise<{
+        id: number;
+        serviceTitle?: string;
+        status?: string;
+        providerId?: number;
+        userId?: string;
+      }>;
     },
     enabled: !!bookingIdForContext,
   });
@@ -184,7 +191,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
           const until = new Date(selectedConversation.serviceChatHideFromUsersAt as string);
           if (Number.isNaN(until.getTime())) return null;
           const rel = formatDistanceToNow(until, { locale: es, addSuffix: true });
-          return `El servicio ya no está activo. Esta conversación se archivará de tu vista ${rel}; guardá lo que necesites antes. El historial permanece disponible para el equipo de soporte.`;
+          return `El servicio ya no está activo. Esta conversación se archivará de tu vista ${rel}; guarda lo que necesites antes.`;
         })()
       : null;
 
@@ -206,9 +213,15 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
 
   const chatReminderText = graceBannerText ?? bookingOrServiceReminder;
 
-  const [providerBookingModalOpen, setProviderBookingModalOpen] = useState(false);
+  const serviceChatLocked =
+    selectedConversation?.messagesLocked === true ||
+    (selectedConversation?.serviceEndedAt != null &&
+      String(selectedConversation.serviceEndedAt).trim() !== "");
 
-  const bookingPayload = bookingContext as { providerId?: number } | undefined;
+  const [providerBookingModalOpen, setProviderBookingModalOpen] = useState(false);
+  const [clientBookingModalOpen, setClientBookingModalOpen] = useState(false);
+
+  const bookingPayload = bookingContext as { providerId?: number; userId?: string } | undefined;
   const servicePayload = serviceContext as { providerId?: number } | undefined;
   const myProviderId = user?.provider?.id;
 
@@ -217,6 +230,12 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     bookingIdForContext != null &&
     bookingPayload?.providerId === myProviderId;
 
+  const showClientBookingTools =
+    user?.id != null &&
+    bookingIdForContext != null &&
+    String(bookingPayload?.userId ?? "") === String(user.id) &&
+    !showProviderBookingTools;
+
   const showProviderServiceTools =
     myProviderId != null &&
     serviceIdForContext != null &&
@@ -224,7 +243,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
     servicePayload?.providerId === myProviderId;
 
   const reminderActions =
-    showProviderBookingTools || showProviderServiceTools ? (
+    showProviderBookingTools || showProviderServiceTools || showClientBookingTools ? (
       <>
         {showProviderBookingTools ? (
           <Button
@@ -235,6 +254,17 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
             onClick={() => setProviderBookingModalOpen(true)}
           >
             Gestionar reserva
+          </Button>
+        ) : null}
+        {showClientBookingTools ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="border-primary/40 bg-background font-semibold shadow-sm hover:bg-primary/15"
+            onClick={() => setClientBookingModalOpen(true)}
+          >
+            Gestionar mi reserva
           </Button>
         ) : null}
         {showProviderServiceTools ? (
@@ -473,6 +503,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
   }, [allowNavigate, isAuthenticated, conversationsQuery.isSuccess, conversations, getOrCreateConversation, setLocation, toast, setSelectedConversationId]);
 
   const handleSendMessage = () => {
+    if (serviceChatLocked) return;
     const text = messageInput.trim();
     if (!text || sendMessage.isPending) return;
     sendMessage.mutate({ content: text, type: "text" }, {
@@ -488,12 +519,13 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
   };
 
   const handleShareLocation = () => {
-    if (sendMessage.isPending || selectedConversationId == null) return;
+    if (serviceChatLocked || sendMessage.isPending || selectedConversationId == null) return;
     setPendingShareLocation(null);
     setLocationDialogOpen(true);
   };
 
   const confirmShareLocation = () => {
+    if (serviceChatLocked) return;
     if (!pendingShareLocation) {
       toast({
         variant: "destructive",
@@ -599,6 +631,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                         onBack={handleBackFromChat}
                         reminderText={chatReminderText ?? undefined}
                         reminderActions={reminderActions}
+                        chatLocked={serviceChatLocked}
                       />
                     </div>
                   ) : (
@@ -653,6 +686,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                         onBack={handleBackFromChat}
                         reminderText={chatReminderText ?? undefined}
                         reminderActions={reminderActions}
+                        chatLocked={serviceChatLocked}
                       />
                     ) : (
                       <ChatEmptyState />
@@ -729,6 +763,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                         reminderText={chatReminderText ?? undefined}
                         reminderActions={reminderActions}
                         pinInputToBottom
+                        chatLocked={serviceChatLocked}
                       />
                     </div>
                   ) : (
@@ -793,6 +828,7 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
                           onBack={handleBackFromChat}
                           reminderText={chatReminderText ?? undefined}
                           reminderActions={reminderActions}
+                          chatLocked={serviceChatLocked}
                         />
                       ) : (
                         <ChatEmptyState />
@@ -810,6 +846,14 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
         onOpenChange={setProviderBookingModalOpen}
         bookingId={bookingIdForContext}
         conversationId={selectedConversationId}
+      />
+      <ChatClientBookingModal
+        open={clientBookingModalOpen}
+        onOpenChange={setClientBookingModalOpen}
+        bookingId={bookingIdForContext}
+        conversationId={selectedConversationId}
+        associateUserId={recipientId ?? null}
+        ownershipVerified={showClientBookingTools}
       />
     </div>
   );

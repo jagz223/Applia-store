@@ -36,6 +36,8 @@ interface ChatWindowProps {
    * En escritorio / embedded no se usa.
    */
   pinInputToBottom?: boolean;
+  /** Reserva/servicio terminado: no enviar mensajes. */
+  chatLocked?: boolean;
 }
 
 export function ChatWindow({
@@ -55,6 +57,7 @@ export function ChatWindow({
   reminderText,
   reminderActions,
   pinInputToBottom = false,
+  chatLocked = false,
 }: ChatWindowProps) {
   const { user } = useAuth();
   const push = usePushNotifications();
@@ -93,7 +96,7 @@ export function ChatWindow({
 
   const firstDate = messages[0]?.createdAt;
 
-  const attachDisabled = isSending || !!conversation.otherParticipant?.isDeleted;
+  const attachDisabled = isSending || !!conversation.otherParticipant?.isDeleted || chatLocked;
 
   const showReminderStrip = Boolean(reminderText) || Boolean(reminderActions);
 
@@ -214,6 +217,11 @@ export function ChatWindow({
             </Button>
           </div>
         ) : null}
+        {chatLocked ? (
+          <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-center text-sm text-foreground">
+            Chat cerrado: el servicio finalizó. No puedes enviar más mensajes. El hilo se archivará de tu lista cuando venza el plazo indicado arriba.
+          </div>
+        ) : null}
       </div>
 
       {/* Lista scroll; en móvil /chat la barra de envío va fija abajo (pinInputToBottom). */}
@@ -238,8 +246,14 @@ export function ChatWindow({
               onChange={onMessageInputChange}
               onSend={onSendMessage}
               isSending={isSending}
-              disabled={isSending || !!conversation.otherParticipant?.isDeleted}
-              placeholder={conversation.otherParticipant?.isDeleted ? "No puedes enviar mensajes a un usuario deshabilitado" : undefined}
+              disabled={isSending || !!conversation.otherParticipant?.isDeleted || chatLocked}
+              placeholder={
+                chatLocked
+                  ? "Chat cerrado por finalización del servicio"
+                  : conversation.otherParticipant?.isDeleted
+                    ? "No puedes enviar mensajes a un usuario deshabilitado"
+                    : undefined
+              }
             />
           </div>
         ) : null}
@@ -256,8 +270,14 @@ export function ChatWindow({
             onChange={onMessageInputChange}
             onSend={onSendMessage}
             isSending={isSending}
-            disabled={isSending || !!conversation.otherParticipant?.isDeleted}
-            placeholder={conversation.otherParticipant?.isDeleted ? "No puedes enviar mensajes a un usuario deshabilitado" : undefined}
+            disabled={isSending || !!conversation.otherParticipant?.isDeleted || chatLocked}
+            placeholder={
+              chatLocked
+                ? "Chat cerrado por finalización del servicio"
+                : conversation.otherParticipant?.isDeleted
+                  ? "No puedes enviar mensajes a un usuario deshabilitado"
+                  : undefined
+            }
             className="border-t-0"
           />
         </div>

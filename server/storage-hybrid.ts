@@ -9,7 +9,7 @@ import type { FirestoreStorage } from "./storage-firestore";
 const FIRESTORE_METHODS = new Set([
   "getUserById", "getUserByEmail", "getUserByPhone", "createUser", "updateUser", "updateUserPassword",
   "getUserRole", "updateUserRole",
-  "getCategories", "updateCategory", "getSubcategories", "getSubcategoryById", "createSubcategory", "updateSubcategory", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId",
+  "getCategories", "updateCategory", "getSubcategories", "getSubcategoryById", "createSubcategory", "updateSubcategory", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId", "getPrimaryVehicleByUserId",
   "getAllServices", "getService", "createService",
   "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "acknowledgeBookingProChanges", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getPendingBookingRatings", "submitBookingRating",
@@ -63,6 +63,9 @@ export class HybridStorage {
   createProviderVehicle(input: any) { return this.delegate("createProviderVehicle", [input]); }
   getPrimaryVehicleByProviderId(providerId: number) {
     return this.delegate("getPrimaryVehicleByProviderId", [providerId]);
+  }
+  getPrimaryVehicleByUserId(userId: string) {
+    return this.delegate("getPrimaryVehicleByUserId", [userId]);
   }
   getAllServices(
     categoryId?: number,

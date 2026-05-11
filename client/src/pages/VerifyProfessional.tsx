@@ -10,6 +10,7 @@ import {
   useVerifyingStatusMe,
   useCurrentProvider,
   useCategories,
+  usePlatformSubscriptionFees,
 } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { uploadProfessionalCredential, uploadVerificationIdImage } from "@/lib/firebase-client";
@@ -124,21 +125,53 @@ export default function VerifyProfessional() {
   const patchCredential = usePatchProfessionalVerificationCredential();
   const { data: verifyingStatus, isLoading: verifyingStatusLoading } = useVerifyingStatusMe(enabled);
   const isRenewalSimple = (provider as any)?.isVerified === true;
+  const { data: subscriptionFees } = usePlatformSubscriptionFees({ enabled });
+  const categorySlug = useMemo(() => {
+    const direct = typeof (provider as any)?.category === "string" ? String((provider as any).category).trim() : "";
+    if (direct) return direct;
+    const id = Number((provider as any)?.categoryId);
+    if (!Number.isFinite(id)) return "";
+    const cat = categories.find((c: any) => Number(c?.id) === id);
+    return typeof (cat as any)?.slug === "string" ? String((cat as any).slug).trim() : "";
+  }, [provider, categories]);
+  const monthlyUsd = useMemo(() => {
+    const map = (subscriptionFees as any)?.feesBySlug as Record<string, number> | undefined;
+    const v = map && categorySlug ? Number(map[categorySlug]) : NaN;
+    return Number.isFinite(v) ? v : 15;
+  }, [subscriptionFees, categorySlug]);
 
   useEffect(() => {
     ensureDefaultVerifyReturnPath();
   }, []);
 
+  const hasImage = Boolean(verification?.imageUrl?.trim());
+  const hasCredential = Boolean(verification?.professionalCredentialUrl?.trim());
+  const hasPayment =
+    Boolean(verification?.transferReceiptCode?.trim()) && Boolean(verification?.transferDate?.trim());
+
   /** Documento y pago enviados y en revisión: volver a la pantalla previa (el banner sigue hasta que admin verifique). */
   useEffect(() => {
     if (verLoading || verifyingStatusLoading || !verifyingStatus) return;
     const txPending = verifyingStatus.transacction_verified === "pending";
-    const idPending = verifyingStatus.identification_verified === "pending";
     if (!txPending) return;
-    // Renovación simple: solo hay pago; onboarding: suele tener ambos en pending.
-    if (!isRenewalSimple && !idPending) return;
+    if (isRenewalSimple) {
+      setLocation(consumeVerifyReturnPath());
+      return;
+    }
+    const idPending = verifyingStatus.identification_verified === "pending";
+    if (!idPending) return;
+    if (!hasImage || !hasCredential || !hasPayment) return;
     setLocation(consumeVerifyReturnPath());
-  }, [verLoading, verifyingStatusLoading, verifyingStatus, isRenewalSimple, setLocation]);
+  }, [
+    verLoading,
+    verifyingStatusLoading,
+    verifyingStatus,
+    isRenewalSimple,
+    setLocation,
+    hasImage,
+    hasCredential,
+    hasPayment,
+  ]);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -180,8 +213,8 @@ export default function VerifyProfessional() {
       toast({
         title: isCarGo ? "Licencia de conducir enviada" : "Documento profesional enviado",
         description: isCarGo
-          ? "Se guardó en Mis documentos. El equipo la revisará en tu verificación de movilidad."
-          : "Se guardó en Mis documentos. El admin lo verá en tu verificación.",
+          ? "Se guardó en Mis documentos. Cuando también registres el pago, el equipo podrá revisar todo junto."
+          : "Se guardó en Mis documentos. Cuando completes identificación, este documento y el pago, el equipo revisará tu solicitud.",
       });
     } catch (err: unknown) {
       toast({
@@ -217,11 +250,6 @@ export default function VerifyProfessional() {
     );
   }
 
-  const hasImage = Boolean(verification?.imageUrl?.trim());
-  const hasCredential = Boolean(verification?.professionalCredentialUrl?.trim());
-  const hasPayment =
-    Boolean(verification?.transferReceiptCode?.trim()) && Boolean(verification?.transferDate?.trim());
-
   const identificationVerifiedState = verifyingStatus?.identification_verified ?? "rejected";
   const transactionVerifiedState = verifyingStatus?.transacction_verified ?? "rejected";
 
@@ -240,6 +268,32 @@ export default function VerifyProfessional() {
     transactionVerifiedState === "pending" ||
     transactionVerifiedState === "verified";
 
+  const canContinueToPayment = isRenewalSimple || (hasImage && hasCredential);
+
+  const credentialStepLabel = isCarGo ? "Licencia de conducir" : "Documento profesional";
+
+  const paymentUnlockReminder = useMemo(() => {
+    if (isRenewalSimple) return null;
+    if (!hasImage) {
+      return {
+        headline: "Paso 1 de 3 · Documento de identidad",
+        detail:
+          "Primero subí tu documento de identidad en la tarjeta de arriba. Después podrás subir la licencia o el documento profesional, y al final el pago.",
+      };
+    }
+    if (!hasCredential) {
+      return {
+        headline: `Paso 2 de 3 · ${credentialStepLabel}`,
+        detail: `Ya tenés la identidad. Subí tu ${isCarGo ? "licencia" : "documento profesional"} en la segunda tarjeta. El botón de pago se habilita cuando ambos documentos estén listos.`,
+      };
+    }
+    return {
+      headline: "Paso 3 de 3 · Cuota",
+      detail:
+        "Documentación completa. Continuá al pago para registrar la cuota; el equipo revisará todo junto.",
+    };
+  }, [isRenewalSimple, hasImage, hasCredential, isCarGo]);
+
   return (
     <div className="container max-w-xl py-8 sm:py-12 px-4">
       <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground mb-6" asChild>
@@ -254,7 +308,7 @@ export default function VerifyProfessional() {
       </h1>
       <p className="text-muted-foreground text-sm mb-8">
         {isRenewalSimple
-          ? "Solo necesitas subir el comprobante de USD 15. No te pediremos documentos nuevamente."
+          ? `Solo necesitas subir el comprobante de tu cuota (${monthlyUsd} USD/mes según tu categoría). No te pediremos documentos nuevamente.`
           : isCarGo
             ? "Completa la verificación para que los clientes puedan usar tus servicios de movilidad. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."
             : "Completa ambos pasos. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."}
@@ -315,34 +369,6 @@ export default function VerifyProfessional() {
         </Card>
         ) : null}
 
-        <Card className={step2Locked ? "opacity-60 bg-muted/10" : ""}>
-          <CardHeader>
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <CardTitle className="text-lg">
-                  {isCarGo ? "Cuota de asociado · Servicios de movilidad" : "Cuota por ser profesional"}
-                </CardTitle>
-                <CardDescription>
-                  {isCarGo
-                    ? "Es una cuota de USD 15 por mes de visibilidad en la plataforma. Con la primera validación podrás operar como asociado; cada mes debés renovar para seguir publicado. Si pagás antes de vencer el período, al validar el comprobante se suma un mes desde tu fecha de vencimiento actual."
-                    : "Es una cuota de USD 15 por mes para mantener tu servicio visible en el catálogo. Con la primera validación quedás publicado; cada mes debés renovar. Si pagás antes de vencer, al validar el comprobante se suma un mes desde tu vencimiento actual (no perdés lo ya pagado)."}
-                </CardDescription>
-              </div>
-              {step2Locked ? <Lock className="h-5 w-5 text-muted-foreground shrink-0" /> : null}
-            </div>
-          </CardHeader>
-          <CardContent className="flex justify-end">
-            <Button
-              type="button"
-              disabled={step2Locked || verifyingStatusLoading}
-              variant="default"
-              onClick={() => setLocation("/professional/verify/payment")}
-            >
-              Continuar al pago
-            </Button>
-          </CardContent>
-        </Card>
-
         {!isRenewalSimple ? (
           <Card className={uploadingCredential || patchCredential.isPending ? "opacity-90" : ""}>
           <CardHeader>
@@ -363,18 +389,23 @@ export default function VerifyProfessional() {
               type="file"
               accept="image/jpeg,image/png,application/pdf,.pdf"
               className="hidden"
-              disabled={uploadingCredential || patchCredential.isPending}
+              disabled={!hasImage || uploadingCredential || patchCredential.isPending}
               onChange={handleCredentialFile}
             />
+            {!hasImage ? (
+              <p className="text-sm text-muted-foreground mb-3">
+                Este paso se habilita cuando subas tu documento de identidad (primera tarjeta). El orden completo lo ves en la sección de pago abajo.
+              </p>
+            ) : null}
             {hasCredential ? (
               <p className="text-sm text-muted-foreground mb-3">
                 {isCarGo ? "Licencia enviada. Puedes reemplazarla si lo necesitas." : "Documento enviado. Puedes reemplazarlo si lo necesitas."}
               </p>
-            ) : (
+            ) : hasImage ? (
               <p className="text-sm text-muted-foreground mb-3">
-                Si no lo tienes ahora, puedes volver después y subirlo. Se guardará en Mis documentos.
+                Adjuntá aquí tu documento. Cuando esté listo, podrás ir al pago desde la última tarjeta.
               </p>
-            )}
+            ) : null}
             {hasCredential && verification?.professionalCredentialUrl ? (
               <UploadedMiniPreview
                 url={verification.professionalCredentialUrl}
@@ -386,7 +417,7 @@ export default function VerifyProfessional() {
             <Button
               type="button"
               variant="secondary"
-              disabled={uploadingCredential || patchCredential.isPending}
+              disabled={!hasImage || uploadingCredential || patchCredential.isPending}
               className="gap-2"
               onClick={() => credentialInputRef.current?.click()}
             >
@@ -401,6 +432,82 @@ export default function VerifyProfessional() {
           </CardContent>
         </Card>
         ) : null}
+
+        <Card className={step2Locked ? "opacity-60 bg-muted/10" : ""}>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle className="text-lg">
+                  {isCarGo ? "Cuota de asociado · Servicios de movilidad" : "Cuota por ser profesional"}
+                </CardTitle>
+                <CardDescription>
+                  {isCarGo
+                    ? `Es una cuota de USD ${monthlyUsd} por mes de visibilidad en la plataforma (según tu categoría). Con la primera validación podrás operar como asociado; cada mes debés renovar para seguir publicado. Si pagás antes de vencer el período, al validar el comprobante se suma un mes desde tu fecha de vencimiento actual.`
+                    : `Es una cuota de USD ${monthlyUsd} por mes para mantener tu servicio visible en el catálogo (según tu categoría). Con la primera validación quedás publicado; cada mes debés renovar. Si pagás antes de vencer, al validar el comprobante se suma un mes desde tu vencimiento actual (no perdés lo ya pagado).`}
+                </CardDescription>
+              </div>
+              {step2Locked ? <Lock className="h-5 w-5 text-muted-foreground shrink-0" /> : null}
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {!isRenewalSimple && paymentUnlockReminder ? (
+              <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-3 text-sm text-amber-950 dark:text-amber-50/90">
+                <p className="font-semibold leading-snug">{paymentUnlockReminder.headline}</p>
+                <p className="mt-1.5 leading-relaxed text-amber-950/90 dark:text-amber-50/85">{paymentUnlockReminder.detail}</p>
+                <ol className="mt-3 space-y-1.5 text-xs text-amber-950/85 dark:text-amber-50/80 [counter-reset:step]">
+                  <li
+                    className={`flex gap-2 [counter-increment:step] before:content-[counter(step)] before:flex before:h-5 before:w-5 before:shrink-0 before:items-center before:justify-center before:rounded-full before:text-[10px] before:font-bold ${
+                      hasImage
+                        ? "before:bg-emerald-600/25 before:text-emerald-900 dark:before:text-emerald-100"
+                        : "before:bg-amber-600/30 before:text-amber-950 dark:before:text-amber-50"
+                    }`}
+                  >
+                    <span className={hasImage ? "line-through opacity-75" : "font-medium"}>
+                      Documento de identidad {hasImage ? "(listo)" : "(pendiente)"}
+                    </span>
+                  </li>
+                  <li
+                    className={`flex gap-2 [counter-increment:step] before:content-[counter(step)] before:flex before:h-5 before:w-5 before:shrink-0 before:items-center before:justify-center before:rounded-full before:text-[10px] before:font-bold ${
+                      hasCredential
+                        ? "before:bg-emerald-600/25 before:text-emerald-900 dark:before:text-emerald-100"
+                        : "before:bg-amber-600/30 before:text-amber-950 dark:before:text-amber-50"
+                    }`}
+                  >
+                    <span
+                      className={
+                        hasCredential ? "line-through opacity-75" : !hasImage ? "opacity-55" : "font-medium"
+                      }
+                    >
+                      {credentialStepLabel} {hasCredential ? "(listo)" : "(pendiente)"}
+                    </span>
+                  </li>
+                  <li
+                    className={`flex gap-2 [counter-increment:step] before:content-[counter(step)] before:flex before:h-5 before:w-5 before:shrink-0 before:items-center before:justify-center before:rounded-full before:text-[10px] before:font-bold ${
+                      canContinueToPayment
+                        ? "before:bg-emerald-600/25 before:text-emerald-900 dark:before:text-emerald-100"
+                        : "before:bg-amber-600/30 before:text-amber-950 dark:before:text-amber-50"
+                    }`}
+                  >
+                    <span className={canContinueToPayment ? "font-medium" : "opacity-55"}>
+                      Pago de la cuota {canContinueToPayment ? "(desbloqueado)" : "(se habilita al completar documentos)"}
+                    </span>
+                  </li>
+                </ol>
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Button
+              type="button"
+              disabled={step2Locked || verifyingStatusLoading || !canContinueToPayment}
+              variant="default"
+              className="shrink-0 sm:ml-auto"
+              onClick={() => setLocation("/professional/verify/payment")}
+            >
+              Continuar al pago
+            </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {hasPayment && verification?.transferDate ? (

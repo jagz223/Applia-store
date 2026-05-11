@@ -3,11 +3,15 @@ import { Link, useLocation } from "wouter";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED, FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, Phone, Radio, Settings, Star, Tags, XCircle } from "lucide-react";
+import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, Phone, Radio, Settings, Star, Tags, X, XCircle } from "lucide-react";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider, useWallet } from "@/hooks/use-mango-data";
 import { MOBILITY_UI } from "@shared/mobility-ui-labels";
+import {
+  NEGOTIATION_OFFER_REMOVED_REASON_RIDER_REJECTED,
+  NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN,
+} from "@shared/mobility-negotiation";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { providerHasGoBrand } from "@shared/provider-go";
 import { DriverCargoMap } from "@/components/driver/DriverCargoMap";
@@ -48,6 +52,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { GoDriverNegotiationBoardPanel } from "@/components/go/GoDriverNegotiationBoardPanel";
 
 function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const R = 6371000;
@@ -143,12 +149,15 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const incomingOffer = goDriverUi?.currentOffer?.offer ?? null;
   const incomingModule = goDriverUi?.currentOffer?.module ?? null;
   const incomingOpen = incomingOffer != null;
+  /** Modal grande solo para ofertas clásicas (precio estándar / cola). El regateo va al tablero (sheet). */
+  const classicOfferModalOpen = incomingOpen && !!incomingOffer && !incomingOffer.isNegotiated;
   const [respondBusy, setRespondBusy] = useState(false);
-  const [negotiationBusy, setNegotiationBusy] = useState(false);
-  const [negotiationEditor, setNegotiationEditor] = useState<{
+  const [negotiationBoardOpen, setNegotiationBoardOpen] = useState(false);
+  /** Tras enviar oferta de regateo: recordatorio compacto hasta match / retiro / servicio activo. */
+  const [driverNegotiationSent, setDriverNegotiationSent] = useState<{
     rideId: string;
     module: "cargo" | "pack";
-    amountDraft: string;
+    amountUsd: number;
   } | null>(null);
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const [activeRideOffer, setActiveRideOffer] = useState<CargoRideOfferPayload | null>(null);
@@ -268,6 +277,31 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     return () => goDriverUi.registerOpenHistory(null);
   }, [goDriverUi]);
 
+  const canOpenDriverNegotiationBoard = isAdmin || provider?.isVerified === true;
+
+  useEffect(() => {
+    if (!goDriverUi) return;
+    goDriverUi.registerOpenNegotiationBoard(() => {
+      if (!canOpenDriverNegotiationBoard) {
+        toast({
+          title: "Perfil no verificado",
+          description:
+            "Verifica tu perfil profesional para ver el tablero de regateo y poder ofertar en taxi y delivery.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setNegotiationBoardOpen(true);
+    });
+    return () => goDriverUi.registerOpenNegotiationBoard(null);
+  }, [goDriverUi, canOpenDriverNegotiationBoard, toast]);
+
+  useEffect(() => {
+    if (negotiationBoardOpen && !canOpenDriverNegotiationBoard) {
+      setNegotiationBoardOpen(false);
+    }
+  }, [negotiationBoardOpen, canOpenDriverNegotiationBoard]);
+
   useEffect(() => {
     if (!navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
@@ -283,10 +317,12 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     const onCargoOffer = (p: CargoRideOfferPayload) => {
       // Si ya hay un servicio activo, ignorar ofertas nuevas (evita modal pegado/sonido).
       if (activeRideIdRef.current) return;
+      if (p?.isNegotiated) return;
       goDriverUi?.pushOffer("cargo", p);
     };
     const onPackOffer = (p: CargoRideOfferPayload) => {
       if (activeRideIdRef.current) return;
+      if (p?.isNegotiated) return;
       goDriverUi?.pushOffer("pack", p);
     };
     const onCargoTaken = (p: { rideId: string }) => {
@@ -329,21 +365,28 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   }, [socket, goDriverUi]);
 
   useEffect(() => {
-    if (!socket) return;
-    const onAccepted = async (p: { rideId: string; conversationId?: number | null }) => {
+    if (!socket || !user?.id) return;
+
+    const hydrateFromAccepted = async (
+      p: { rideId: string; conversationId?: number | null },
+      serviceModule: "cargo" | "pack"
+    ) => {
       if (!p?.rideId) return;
       if (activeRideIdRef.current === p.rideId) return;
       const token = localStorage.getItem("token");
-      if (!token || !user?.id) return;
+      if (!token) return;
+      const base = serviceModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
       try {
-        const res = await fetch(`${rideApiBase}/${encodeURIComponent(p.rideId)}`, {
+        const res = await fetch(`${base}/${encodeURIComponent(p.rideId)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
         const ride = (await res.json()) as MobilityRideHydration;
         if (ride.driverUserId !== user.id) return;
         if (ride.status !== "matched" && ride.status !== "in_progress") return;
+        setNegotiationBoardOpen(false);
         goDriverUi?.clearOffers?.();
+        setDriverNegotiationSent(null);
         setActiveConversationId(p.conversationId ?? ride.conversationId ?? null);
         setActiveRideId(ride.id);
         setActiveRideOffer(mapApiRideToOffer(ride));
@@ -352,30 +395,67 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setPaymentConfirmed(
           (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
         );
-        saveGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo", ride.id);
+        saveGoDriverActiveRideId(serviceModule === "pack" ? "pack" : "cargo", ride.id);
         lastServiceRouteFetchRef.current = null;
       } catch {
         /* ignore */
       }
     };
-    socket.on(`${rideSocketPrefix}accepted`, onAccepted);
+
+    const onCargoAccepted = (p: { rideId: string; conversationId?: number | null }) => void hydrateFromAccepted(p, "cargo");
+    const onPackAccepted = (p: { rideId: string; conversationId?: number | null }) => void hydrateFromAccepted(p, "pack");
+    socket.on("cargo:ride:accepted", onCargoAccepted);
+    socket.on("pack:ride:accepted", onPackAccepted);
     return () => {
-      socket.off(`${rideSocketPrefix}accepted`, onAccepted);
+      socket.off("cargo:ride:accepted", onCargoAccepted);
+      socket.off("pack:ride:accepted", onPackAccepted);
     };
-  }, [socket, rideApiBase, rideSocketPrefix, user?.id, goDriverUi, goSlug]);
+  }, [socket, user?.id, goDriverUi]);
 
   useEffect(() => {
     if (!socket) return;
-    const onNegoRemoved = (ev: { rideId: string }) => {
+    /** Un retiro masivo emite un evento por viaje; agrupamos el aviso de retirada. */
+    let withdrawnToastTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushWithdrawnToast = () => {
+      withdrawnToastTimer = null;
+      toast({
+        title: "Ofertas actualizadas",
+        description:
+          "Se retiraron tus ofertas en otros regateos porque ya tomaste otro servicio o ya no aplican.",
+      });
+    };
+
+    const onNegoRemoved = (ev: { rideId: string; reason?: string }) => {
       const cur = goDriverUi?.currentOffer?.offer?.rideId ?? null;
       if (cur && ev?.rideId === cur) {
-        toast({ description: "El cliente descartó tu oferta de regateo." });
         goDriverUi?.resolveOfferAndShowNext(ev.rideId);
       }
+      setDriverNegotiationSent((s) => (s?.rideId === ev?.rideId ? null : s));
+
+      const rejected = ev.reason === NEGOTIATION_OFFER_REMOVED_REASON_RIDER_REJECTED;
+      const withdrawn = ev.reason === NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN;
+
+      if (rejected) {
+        toast({
+          title: "Oferta rechazada",
+          description: "Rechazado: podés volver a ofertar en este servicio.",
+        });
+        return;
+      }
+      if (withdrawn) {
+        if (withdrawnToastTimer) clearTimeout(withdrawnToastTimer);
+        withdrawnToastTimer = setTimeout(flushWithdrawnToast, 380);
+        return;
+      }
+      toast({
+        title: "Regateo",
+        description: "Tu oferta ya no está activa en ese viaje.",
+      });
     };
     socket.on("cargo:ride:negotiation:offer_removed", onNegoRemoved);
     socket.on("pack:ride:negotiation:offer_removed", onNegoRemoved);
     return () => {
+      if (withdrawnToastTimer) clearTimeout(withdrawnToastTimer);
       socket.off("cargo:ride:negotiation:offer_removed", onNegoRemoved);
       socket.off("pack:ride:negotiation:offer_removed", onNegoRemoved);
     };
@@ -398,9 +478,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         if (cancelled) return;
         const cargoOffer = cargo?.offer ?? null;
         const packOffer = pack?.offer ?? null;
-        if (cargoOffer && !activeRideIdRef.current) {
+        if (cargoOffer && !cargoOffer.isNegotiated && !activeRideIdRef.current) {
           goDriverUi.pushOffer("cargo", cargoOffer);
-        } else if (packOffer && !activeRideIdRef.current) {
+        } else if (packOffer && !packOffer.isNegotiated && !activeRideIdRef.current) {
           goDriverUi.pushOffer("pack", packOffer);
         }
       } catch {
@@ -433,8 +513,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         if (cancelled || activeRideIdRef.current) return;
         const cargoOffer = cargo?.offer ?? null;
         const packOffer = pack?.offer ?? null;
-        if (cargoOffer) goDriverUi.pushOffer("cargo", cargoOffer);
-        else if (packOffer) goDriverUi.pushOffer("pack", packOffer);
+        if (cargoOffer && !cargoOffer.isNegotiated) goDriverUi.pushOffer("cargo", cargoOffer);
+        else if (packOffer && !packOffer.isNegotiated) goDriverUi.pushOffer("pack", packOffer);
       } catch {
         /* ignore */
       }
@@ -446,26 +526,26 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   }, [goDriverUi, receivingCargo, receivingPack, canReceive, providerVehicle?.vehicle_type]);
 
   useEffect(() => {
-    if (!incomingOpen) return;
+    if (!classicOfferModalOpen) return;
     const loop = startCargoOfferBellLoop();
     return () => loop.stop();
-  }, [incomingOpen]);
+  }, [classicOfferModalOpen]);
 
   // Si llega una oferta mientras el chat está abierto, cerrar el chat para no bloquear la interacción.
   useEffect(() => {
-    if (!incomingOpen) return;
+    if (!classicOfferModalOpen) return;
     if (!chatOpen) return;
     closeChat();
-  }, [incomingOpen, chatOpen, closeChat]);
+  }, [classicOfferModalOpen, chatOpen, closeChat]);
 
   // Si llega una oferta del otro módulo, cambiar de pestaña automáticamente.
   useEffect(() => {
-    if (!incomingOpen || !incomingModule) return;
+    if (!classicOfferModalOpen || !incomingModule) return;
     if (activeRideIdRef.current) return;
     const target = incomingModule === "pack" ? "/go/delivery/driver" : "/go/taxi/driver";
     const cur = goSlug === "pack" ? "/go/delivery/driver" : "/go/taxi/driver";
     if (target !== cur) setLocation(target);
-  }, [incomingOpen, incomingModule, setLocation, goSlug]);
+  }, [classicOfferModalOpen, incomingModule, setLocation, goSlug]);
 
   useEffect(() => {
     if (!socket) return;
@@ -526,6 +606,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setActiveRideOffer(null);
       setActiveRideStarted(false);
       setPaymentConfirmed(false);
+      setDriverNegotiationSent(null);
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
       lastServiceRouteFetchRef.current = null;
@@ -535,7 +616,10 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setActiveConversationId(null);
     };
     const onCancelled = (p: { rideId: string; cancelledBy?: "rider" | "driver" }) => {
-      if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
+      if (p?.rideId) {
+        goDriverUi?.resolveOfferAndShowNext(p.rideId);
+        setDriverNegotiationSent((s) => (s?.rideId === p.rideId ? null : s));
+      }
       // Si era una oferta (búsqueda) y el usuario cancela, cerrar al instante y avisar.
       if (p.rideId !== activeRideIdRef.current) {
         const offerId = goDriverUi?.currentOffer?.offer?.rideId ?? null;
@@ -552,6 +636,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setActiveRideOffer(null);
       setActiveRideStarted(false);
       setPaymentConfirmed(false);
+      setDriverNegotiationSent(null);
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
       lastServiceRouteFetchRef.current = null;
@@ -674,6 +759,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       // UX: cerrar al instante (aunque el backend tarde). Así el driver no queda "bloqueado" y puede ver nuevas ofertas.
       goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
       goDriverUi?.clearOffers?.();
+      setDriverNegotiationSent((s) => (s?.rideId === snapOffer.rideId ? null : s));
       setRespondBusy(true);
       try {
         const base = snapModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
@@ -730,6 +816,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
       goDriverUi?.clearOffers?.();
       if (accept) {
+        setDriverNegotiationSent(null);
         if (data.conversationId != null) setActiveConversationId(data.conversationId);
         setActiveRideId(snapOffer.rideId);
         setActiveRideOffer(snapOffer);
@@ -767,40 +854,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setRespondBusy(false);
     }
   };
-
-  const submitNegotiationOffer = useCallback(
-    async (rideId: string, mod: "cargo" | "pack", amountUsd: number) => {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        toast({ title: "Sesión", description: "Inicia sesión de nuevo.", variant: "destructive" });
-        return;
-      }
-      // UX: cerrar al instante para no bloquear nuevas notificaciones.
-      goDriverUi?.resolveOfferAndShowNext(rideId);
-      goDriverUi?.clearOffers?.();
-      setNegotiationBusy(true);
-      try {
-        const base = mod === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
-        const res = await fetch(`${base}/${encodeURIComponent(rideId)}/negotiation/driver-offer`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ amountUsd }),
-        });
-        const data = (await res.json().catch(() => ({}))) as { message?: string };
-        if (!res.ok) throw new Error(data.message || "No se pudo enviar la oferta");
-        toast({ title: "Oferta enviada", description: "El cliente verá tu propuesta en su lista." });
-      } catch (e) {
-        toast({
-          title: "No se pudo enviar",
-          description: e instanceof Error ? e.message : "Intenta de nuevo",
-          variant: "destructive",
-        });
-      } finally {
-        setNegotiationBusy(false);
-      }
-    },
-    [goDriverUi, toast]
-  );
 
   const startRide = async () => {
     if (!activeRideId) return;
@@ -866,6 +919,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setActiveRideOffer(null);
       setActiveRideStarted(false);
       setPaymentConfirmed(false);
+      setDriverNegotiationSent(null);
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
       lastServiceRouteFetchRef.current = null;
@@ -908,6 +962,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setActiveRideOffer(null);
       setActiveRideStarted(false);
       setPaymentConfirmed(false);
+      setDriverNegotiationSent(null);
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
       lastServiceRouteFetchRef.current = null;
@@ -1028,6 +1083,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setPaymentConfirmed(
           (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
         );
+        setDriverNegotiationSent(null);
       } catch {
         if (alive) clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       }
@@ -1099,6 +1155,46 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       : PROVIDER_WALLET_FLOOR_USD;
   const formatUsdLocal = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(n);
+
+  const driverNegotiationSentForUi = (() => {
+    const s = driverNegotiationSent;
+    if (!s || incomingOpen || activeRideOffer) return null;
+    if (s.module !== (goSlug === "pack" ? "pack" : "cargo")) return null;
+    return s;
+  })();
+
+  const driverNegotiationBubble = driverNegotiationSentForUi ? (
+    <div
+      className="rounded-lg border border-amber-500/45 bg-amber-500/10 px-2 py-1.5 shadow-md ring-1 ring-amber-500/20 backdrop-blur-md max-md:max-w-[min(100%,20rem)] dark:bg-amber-500/15 dark:ring-amber-400/25 sm:rounded-xl sm:px-3 sm:py-2"
+      role="status"
+    >
+      <div className="flex items-start gap-1.5 sm:gap-2">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500/25 text-amber-900 dark:text-amber-100 sm:h-8 sm:w-8">
+          <Tags className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold leading-tight text-amber-950 dark:text-amber-50 sm:text-xs">
+            Regateo · esperando al cliente
+          </p>
+          <p className="mt-0.5 text-[10px] leading-snug text-amber-950/85 dark:text-amber-50/90 sm:text-[11px]">
+            <span className="font-mono font-medium tabular-nums">{formatUsdLocal(driverNegotiationSentForUi.amountUsd)}</span>
+            <span className="max-md:hidden"> · Te avisamos si te elige o retira la oferta.</span>
+            <span className="md:hidden"> · Te avisamos.</span>
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 touch-manipulation text-amber-900 hover:bg-amber-500/20 dark:text-amber-100 sm:h-8 sm:w-8"
+          aria-label="Ocultar recordatorio"
+          onClick={() => setDriverNegotiationSent(null)}
+        >
+          <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+        </Button>
+      </div>
+    </div>
+  ) : null;
 
   /** Móvil: solo deslizante; historial, chat y ajustes van en la barra inferior Go. */
   const controlsBlockMobile = (
@@ -1310,7 +1406,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   );
 
   const headerBlock = (
-    <header className="mb-3 shrink-0">
+    <header className="mb-3 shrink-0 space-y-2">
+      {driverNegotiationBubble}
       {receiving && canReceive ? (
         <div className="rounded-2xl border border-emerald-500/45 bg-gradient-to-br from-emerald-600/15 via-background to-background p-4 shadow-sm dark:from-emerald-500/10">
           <div className="flex gap-3">
@@ -1388,21 +1485,29 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           </div>
           <div className="relative z-30 flex min-h-0 flex-1 flex-col pointer-events-none" >
             <div className="pointer-events-auto shrink-0 space-y-1.5 px-3 pt-2">
+              {driverNegotiationBubble}
               {receiving && canReceive ? (
-                <div className="rounded-xl border border-emerald-500/45 bg-background/85 p-2 shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:bg-emerald-500/10 dark:ring-white/10">
-                  <div className="flex items-start gap-2">
-                    <span className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600/20 ring-1 ring-emerald-500/40 dark:bg-emerald-400/15">
-                      <Radio className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-100" aria-hidden />
+                <div className="rounded-lg border border-emerald-500/45 bg-background/88 p-1.5 shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:bg-emerald-500/10 dark:ring-white/10 sm:rounded-xl sm:p-2">
+                  <div className="flex items-start gap-1.5 sm:gap-2">
+                    <span className="relative mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600/20 ring-1 ring-emerald-500/40 dark:bg-emerald-400/15 sm:h-7 sm:w-7">
+                      <Radio className="h-3 w-3 text-emerald-800 dark:text-emerald-100 sm:h-3.5 sm:w-3.5" aria-hidden />
                       <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/20 [animation-duration:2.5s]" aria-hidden />
                     </span>
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="font-display text-sm font-bold leading-tight text-emerald-950 dark:text-emerald-50">
+                    <div className="min-w-0 flex-1 space-y-0.5 sm:space-y-1">
+                      <p className="font-display text-xs font-bold leading-tight text-emerald-950 dark:text-emerald-50 sm:text-sm">
                         {goSlug === "pack" ? `Disponible · ${MOBILITY_UI.delivery}` : `Disponible · ${MOBILITY_UI.taxiService}`}
                       </p>
-                      <p className="text-[10px] leading-snug text-emerald-950/80 dark:text-emerald-50/85">
-                        {goSlug === "pack"
-                          ? "Los envíos no son instantáneos. GPS encendido. Para salir de línea, desliza abajo."
-                          : "Los pedidos no son instantáneos. GPS encendido. Para salir de línea, desliza abajo."}
+                      <p className="text-[9px] leading-snug text-emerald-950/80 dark:text-emerald-50/85 sm:text-[10px]">
+                        <span className="sm:hidden">
+                          {goSlug === "pack"
+                            ? "Envíos no instantáneos · GPS · salir: desliza abajo."
+                            : "Pedidos no instantáneos · GPS · salir: desliza abajo."}
+                        </span>
+                        <span className="hidden sm:inline">
+                          {goSlug === "pack"
+                            ? "Los envíos no son instantáneos. GPS encendido. Para salir de línea, desliza abajo."
+                            : "Los pedidos no son instantáneos. GPS encendido. Para salir de línea, desliza abajo."}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -1548,107 +1653,37 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       </Dialog>
 
       <CargoIncomingRideDialog
-        open={incomingOpen}
+        open={classicOfferModalOpen}
         offer={incomingOffer}
         module={incomingModule ?? undefined}
         busy={respondBusy}
         driverPos={geoPos}
         onAccept={() => void respondToOffer(true)}
         onDecline={() => void respondToOffer(false)}
-        onNegotiationPropose={
-          incomingOffer?.isNegotiated && incomingModule
-            ? (amt) => submitNegotiationOffer(incomingOffer.rideId, incomingModule, amt)
-            : undefined
-        }
-        onNegotiationChangeAmount={
-          incomingOffer?.isNegotiated && incomingModule
-            ? (initialAmountUsd) => {
-                // Debe cerrar este modal aunque la oferta siga activa.
-                goDriverUi?.resolveOfferAndShowNext(incomingOffer.rideId);
-                goDriverUi?.clearOffers?.();
-                setNegotiationEditor({
-                  rideId: incomingOffer.rideId,
-                  module: incomingModule,
-                  amountDraft: String(Number.isFinite(initialAmountUsd) ? initialAmountUsd : incomingOffer.estimatedUsd),
-                });
-              }
-            : undefined
-        }
-        negotiationBusy={negotiationBusy}
       />
 
-      <Dialog open={negotiationEditor != null} onOpenChange={(open) => (!open ? setNegotiationEditor(null) : null)}>
-        <DialogContent className="max-w-[420px]">
-          <DialogHeader>
-            <DialogTitle>Cambiar monto</DialogTitle>
-            <DialogDescription>Envía tu oferta. El cliente la verá en su lista de regateo.</DialogDescription>
-          </DialogHeader>
-          {negotiationEditor ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  disabled={negotiationBusy}
-                  onClick={() => {
-                    const n = Math.max(0.01, Number(negotiationEditor.amountDraft) - 0.25);
-                    setNegotiationEditor((s) => (s ? { ...s, amountDraft: n.toFixed(2) } : s));
-                  }}
-                >
-                  −
-                </Button>
-                <input
-                  className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-center font-mono text-sm"
-                  inputMode="decimal"
-                  value={negotiationEditor.amountDraft}
-                  onChange={(e) => setNegotiationEditor((s) => (s ? { ...s, amountDraft: e.target.value } : s))}
-                  aria-label="Monto en USD"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  disabled={negotiationBusy}
-                  onClick={() => {
-                    const n = Math.max(0.01, Number(negotiationEditor.amountDraft) + 0.25);
-                    setNegotiationEditor((s) => (s ? { ...s, amountDraft: n.toFixed(2) } : s));
-                  }}
-                >
-                  +
-                </Button>
-              </div>
-            </div>
-          ) : null}
-          <DialogFooter className="gap-2 sm:gap-2">
-            <Button type="button" variant="outline" disabled={negotiationBusy} onClick={() => setNegotiationEditor(null)}>
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              disabled={negotiationBusy || !negotiationEditor}
-              onClick={() => {
-                if (!negotiationEditor) return;
-                const n = Number(negotiationEditor.amountDraft);
-                if (!Number.isFinite(n) || n < 0.01) return;
-                const rideId = negotiationEditor.rideId;
-                const mod = negotiationEditor.module;
-                setNegotiationEditor(null);
-                void submitNegotiationOffer(rideId, mod, Math.round(n * 100) / 100);
-              }}
-            >
-              {negotiationBusy ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-                  Enviando…
-                </>
-              ) : (
-                "Enviar oferta"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <Sheet open={negotiationBoardOpen} onOpenChange={setNegotiationBoardOpen}>
+        <SheetContent
+          side="bottom"
+          className="flex max-h-[min(96dvh,900px)] min-h-[min(70dvh,560px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0 sm:mx-auto sm:max-w-[min(96vw,1180px)]"
+        >
+          <SheetHeader className="shrink-0 space-y-1 border-b border-border px-4 py-3 text-left">
+            <SheetTitle className="font-display text-lg">Regateo · {goSlug === "pack" ? MOBILITY_UI.delivery : MOBILITY_UI.taxiService}</SheetTitle>
+            <SheetDescription>
+              Solicitudes con monto a negociar. Se actualizan solas cada 5 segundos; también puedes pulsar actualizar.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 overflow-hidden px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-4">
+            <GoDriverNegotiationBoardPanel
+              active={negotiationBoardOpen}
+              providerVehicleType={providerVehicle?.vehicle_type}
+              providerIsPetFriendly={!!providerVehicle?.is_pet_friendly}
+              canSubmitNegotiationOffers={isAdmin || provider?.isVerified === true}
+              onOfferSubmitted={(rideId, amountUsd, module) => setDriverNegotiationSent({ rideId, module, amountUsd })}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={startConfirmOpen} onOpenChange={setStartConfirmOpen}>
         <DialogContent className="max-w-[420px]">

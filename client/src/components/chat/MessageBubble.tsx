@@ -40,7 +40,7 @@ export function MessageBubble({ text, type, time, isOwn, isSystem = false, statu
       <div className="flex justify-center px-2 py-1" role="status" aria-label="Mensaje del sistema">
         <div className="max-w-[92%] rounded-lg border border-border/80 bg-muted/60 px-3 py-2 shadow-sm">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Sistema</p>
-          <p className="mt-1 text-center text-sm leading-snug text-foreground">{text}</p>
+          <p className="mt-1 text-center text-sm leading-snug text-foreground whitespace-pre-wrap">{text}</p>
           <p className="mt-1 text-center text-[10px] text-muted-foreground">{time}</p>
         </div>
       </div>

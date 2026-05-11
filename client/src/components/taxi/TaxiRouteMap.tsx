@@ -1,10 +1,11 @@
 import { createPortal } from "react-dom";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   MapContainer,
   TileLayer,
   CircleMarker,
   GeoJSON,
+  Marker,
   ZoomControl,
   useMap,
   useMapEvents,
@@ -23,10 +24,21 @@ import {
   MapPaneBearing,
   MapPerspectiveControls,
 } from "@/components/taxi/MapPerspectiveControls";
+import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
 
 export type MapPoint = { lat: number; lon: number; label?: string };
 
-const NO_NEARBY_VEHICLES: readonly { id: string; lat: number; lon: number }[] = [];
+/** Marcador de conductor / vehículo en ruta (icono según tipo). */
+export type TaxiRouteVehicleMarker = {
+  id: string;
+  lat: number;
+  lon: number;
+  kind?: "vehicle" | "driver";
+  /** Código de vehículo (`motorcycle`, `car`, …); si falta se usa `markerVehicleTypeFallback`. */
+  vehicleType?: string | null;
+};
+
+const NO_NEARBY_VEHICLES: readonly TaxiRouteVehicleMarker[] = [];
 
 function MapClickLayer({ onPick }: { onPick: (lat: number, lon: number) => void }) {
   useMapEvents({
@@ -221,9 +233,11 @@ export interface TaxiRouteMapProps {
   routeGeometryKey?: number;
   routeGeometry: GeoJsonObject | null;
   onMapPick: (lat: number, lon: number) => void;
-  nearbyDemoVehicles?: ReadonlyArray<{ id: string; lat: number; lon: number }>;
+  nearbyDemoVehicles?: ReadonlyArray<TaxiRouteVehicleMarker>;
   /** Marcadores extra (p. ej. ubicación del conductor). */
-  extraMarkers?: ReadonlyArray<{ id: string; lat: number; lon: number; kind?: "vehicle" | "driver" }>;
+  extraMarkers?: ReadonlyArray<TaxiRouteVehicleMarker>;
+  /** Si un marcador no trae `vehicleType`, se usa este valor (p. ej. tipo elegido por el pasajero en búsqueda). */
+  markerVehicleTypeFallback?: string | null;
   suppressMapPick?: boolean;
   wrapperClassName?: string;
   /** Contenedor padre con altura definida (p. ej. pantalla completa). */
@@ -249,6 +263,7 @@ export function TaxiRouteMap({
   onMapPick,
   nearbyDemoVehicles = NO_NEARBY_VEHICLES,
   extraMarkers,
+  markerVehicleTypeFallback = null,
   suppressMapPick = false,
   wrapperClassName,
   fullscreen = false,
@@ -271,7 +286,24 @@ export function TaxiRouteMap({
       lat: v.lat,
       lon: v.lon,
       kind: "vehicle" as const,
+      vehicleType: v.vehicleType,
     }));
+
+  const getVehicleMarkerIcon = useMemo(() => {
+    const cache = new Map<string, L.DivIcon>();
+    return (vehicleType: string | null | undefined) => {
+      const key = vehicleType ?? "__default";
+      let icon = cache.get(key);
+      if (!icon) {
+        icon = createDriverVehicleIcon(vehicleType);
+        cache.set(key, icon);
+      }
+      return icon;
+    };
+  }, []);
+
+  const resolveMarkerVehicleType = (v: TaxiRouteVehicleMarker) =>
+    v.vehicleType ?? markerVehicleTypeFallback ?? undefined;
 
   const fitStart = routeFocus?.start ?? start;
   const fitEnd = routeFocus?.end ?? end;
@@ -366,16 +398,12 @@ export function TaxiRouteMap({
                 />
               )}
               {markers.map((v) => (
-                <CircleMarker
+                <Marker
                   key={v.id}
-                  center={[v.lat, v.lon]}
-                  radius={v.kind === "driver" ? 9 : 8}
-                  pathOptions={{
-                    color: v.kind === "driver" ? "#0ea5e9" : "#b45309",
-                    fillColor: v.kind === "driver" ? "#38bdf8" : "#fbbf24",
-                    fillOpacity: 0.92,
-                    weight: v.kind === "driver" ? 3 : 2,
-                  }}
+                  position={[v.lat, v.lon]}
+                  icon={getVehicleMarkerIcon(resolveMarkerVehicleType(v))}
+                  interactive={false}
+                  zIndexOffset={v.kind === "driver" ? 620 : 600}
                 />
               ))}
             </MapContainer>

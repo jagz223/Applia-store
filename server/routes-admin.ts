@@ -37,6 +37,7 @@ import {
   extendVisibilitySubscriptionEndsAtByMonths,
   parseVisibilitySubscriptionEndMs,
 } from "@shared/professional-listing-subscription";
+import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
@@ -473,6 +474,11 @@ export function registerAdminRoutes(app: Express): void {
           ((provider as any)?.isVerified === true && (st as any)?.transacction_verified === "pending" && (st as any)?.identification_verified !== "pending"
             ? "renewal"
             : "onboarding");
+
+        const isRenewalProvider = (provider as any)?.isVerified === true;
+        if (!isRenewalProvider && !isAssociateOnboardingDossierComplete(profVer)) {
+          continue;
+        }
 
         items.push({
           userId,

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Car, History, Package, Store, MessageSquare, Settings, Bell, TrendingUp } from "lucide-react";
+import { Car, History, Menu, Package, Store, MessageSquare, Settings, Bell, TrendingUp, Tags } from "lucide-react";
 import { useGoChat } from "@/contexts/GoChatContext";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
-import { useCategoryVisibility } from "@/hooks/use-mango-data";
+import { useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { mobilityHistorySheetTitle, mobilityServiceLabel } from "@shared/mobility-ui-labels";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,10 @@ type Tab = {
   label: string;
   icon: React.ReactNode;
   onClick?: () => void;
+  ariaLabel?: string;
+  /** Deshabilitar ítem (p. ej. regateo sin perfil verificado). */
+  disabled?: boolean;
+  nativeTitle?: string;
 };
 
 function formatUsd(n: number): string {
@@ -45,9 +49,14 @@ export function GoBottomNav() {
   const goDriverUi = useGoDriverUi();
   const { notifications } = useSocket();
   const { toast } = useToast();
+  const { data: currentProvider } = useCurrentProvider();
+  const isAdmin = user?.role === "admin";
+  const canUseDriverNegotiationBoard = isAdmin || currentProvider?.isVerified === true;
   const [riderHistoryOpen, setRiderHistoryOpen] = useState(false);
   const [driverEarningsOpen, setDriverEarningsOpen] = useState(false);
   const [goQuickSettingsOpen, setGoQuickSettingsOpen] = useState(false);
+  /** Conductor: menú tipo hamburguesa (Historial / Ingresos / Config) para no saturar la barra. */
+  const [driverMoreMenuOpen, setDriverMoreMenuOpen] = useState(false);
   const unreadNotif = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
 
   // Preferir email para evitar colisiones si el backend cambia el tipo de id.
@@ -158,22 +167,16 @@ export function GoBottomNav() {
           : null,
         isDriverView && goDriverUi
           ? {
-              href: "__go_driver_history__",
-              label: "Historial",
-              icon: <History className="h-5 w-5" aria-hidden />,
-              onClick: () => goDriverUi.openHistory(),
+              href: "__go_driver_regateo__",
+              label: "Regateo",
+              icon: <Tags className="h-5 w-5" aria-hidden />,
+              onClick: () => goDriverUi.openNegotiationBoard(),
+              disabled: !canUseDriverNegotiationBoard,
+              nativeTitle: !canUseDriverNegotiationBoard
+                ? "Verifica tu perfil profesional para ver el tablero de regateo (taxi y delivery)."
+                : undefined,
             }
           : null,
-        isDriverView
-          ? {
-              href: "__go_driver_earnings__",
-              label: "Ingresos",
-              icon: <TrendingUp className="h-5 w-5" aria-hidden />,
-              onClick: () => setDriverEarningsOpen(true),
-            }
-          : null,
-        /** En conductor: acceso a ajustes. En cliente /go/cargo no mostramos el tab redundante "Mapa". */
-        isDriverView ? { href: configHref, label: "Config", icon: <Settings className="h-5 w-5" aria-hidden /> } : null,
         {
           href: "__go_notifications__",
           label: "Avisos",
@@ -181,6 +184,16 @@ export function GoBottomNav() {
           onClick: openNotifications,
         },
         { href: "__go_chat__", label: "Chat", icon: <MessageSquare className="h-5 w-5" aria-hidden />, onClick: openChat },
+        isDriverView && goDriverUi
+          ? {
+              href: "__go_driver_more__",
+              label: "Más",
+              icon: <Menu className="h-5 w-5" aria-hidden />,
+              onClick: () => setDriverMoreMenuOpen(true),
+              /** Para accesibilidad en el map de botones (no es Tab real). */
+              ariaLabel: "Más: historial, ingresos y configuración",
+            }
+          : null,
       ].filter(Boolean) as Tab[],
     [
       openChat,
@@ -190,6 +203,7 @@ export function GoBottomNav() {
       packHref,
       configHref,
       isDriverView,
+      user?.role,
       isCargoDriverView,
       isPackDriverView,
       showShop,
@@ -199,6 +213,7 @@ export function GoBottomNav() {
       isAuthenticated,
       toast,
       setLocation,
+      canUseDriverNegotiationBoard,
     ]
   );
 
@@ -228,7 +243,13 @@ export function GoBottomNav() {
           style={!desktopNav ? { gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` } : undefined}
         >
           {tabs.map((t) => {
-            const active = tabIsActive(location, t.href, !!t.onClick);
+            const onSettings =
+              t.href === configHref || (configHref.length > 1 && location.startsWith(`${configHref}/`));
+            const active =
+              tabIsActive(location, t.href, !!t.onClick) ||
+              (t.href === "__go_driver_more__" &&
+                isDriverView &&
+                (driverMoreMenuOpen || driverEarningsOpen || onSettings));
             const isChatTab = t.href === "__go_chat__";
             const isNotifTab = t.href.startsWith("/notifications") || t.href === "__go_notifications__";
             const isGoDriverTab = isDriverView && (t.href === "/go/taxi/driver" || t.href === "/go/delivery/driver");
@@ -244,19 +265,24 @@ export function GoBottomNav() {
               !!activeRiderService &&
               ((activeRiderService.module === "cargo" && t.href === "/go/delivery") ||
                 (activeRiderService.module === "pack" && t.href === "/go/taxi"));
+            const tabDisabled = !!t.disabled;
+            const blockedByVerify = tabDisabled;
             return (
               <Button
-                key={t.label}
+                key={t.href}
                 type="button"
                 variant="ghost"
-                disabled={blockedByService || blockedByRiderService}
+                aria-label={t.ariaLabel ?? t.label}
+                title={t.nativeTitle}
+                disabled={blockedByService || blockedByRiderService || tabDisabled}
                 className={cn(
                   "touch-manipulation flex-col gap-0.5 rounded-xl border-0 shadow-none transition-[transform,background-color,color,box-shadow] duration-150 ease-out",
                   desktopNav
                     ? "h-auto min-h-[3.35rem] w-[4.75rem] max-w-[5.5rem] shrink-0 px-2 py-2"
                     : "h-12 w-full",
                   "active:scale-[0.94] active:bg-muted/95",
-                  (blockedByService || blockedByRiderService) && "opacity-55 pointer-events-auto active:scale-100",
+                  (blockedByService || blockedByRiderService || blockedByVerify) &&
+                    "opacity-55 pointer-events-auto active:scale-100",
                   highlightChat && !active
                     ? "bg-primary text-primary-foreground shadow-lg ring-1 ring-primary/35 [&_svg]:text-primary-foreground"
                     : active
@@ -264,7 +290,10 @@ export function GoBottomNav() {
                     : "text-foreground/90 [&_svg]:text-foreground/85 hover:bg-muted/80 hover:text-foreground"
                 )}
                 onClick={() => {
-                  if (t.onClick) return t.onClick();
+                  if (t.onClick) {
+                    t.onClick();
+                    return;
+                  }
                   if (blockedByService) {
                     toast({
                       title: "Servicio en curso",
@@ -303,13 +332,74 @@ export function GoBottomNav() {
                     </span>
                   ) : null}
                 </span>
-                <span className="text-[11px] leading-tight">{t.label}</span>
+                <span className="max-w-[4.25rem] truncate text-[11px] leading-tight">{t.label}</span>
               </Button>
             );
           })}
         </div>
       </nav>
       </div>
+
+      <Sheet open={driverMoreMenuOpen} onOpenChange={setDriverMoreMenuOpen}>
+        <SheetContent
+          side="bottom"
+          className="rounded-t-2xl border-t border-border px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:mx-auto sm:max-w-md"
+        >
+          <SheetHeader className="space-y-1 pb-2 text-left">
+            <SheetTitle className="font-display text-lg">Conductor</SheetTitle>
+            <SheetDescription>Historial, ingresos y configuración del servicio.</SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-2 py-2">
+            {goDriverUi ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 w-full justify-start gap-3 px-3 text-left font-normal"
+                onClick={() => {
+                  setDriverMoreMenuOpen(false);
+                  goDriverUi.openHistory();
+                }}
+              >
+                <History className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium text-foreground">Historial</span>
+                  <span className="block text-xs text-muted-foreground">Viajes completados como conductor</span>
+                </span>
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 w-full justify-start gap-3 px-3 text-left font-normal"
+              onClick={() => {
+                setDriverMoreMenuOpen(false);
+                setDriverEarningsOpen(true);
+              }}
+            >
+              <TrendingUp className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium text-foreground">Ingresos</span>
+                <span className="block text-xs text-muted-foreground">Cartera y actividad</span>
+              </span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 w-full justify-start gap-3 px-3 text-left font-normal"
+              onClick={() => {
+                setDriverMoreMenuOpen(false);
+                setLocation(configHref);
+              }}
+            >
+              <Settings className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium text-foreground">Configuración</span>
+                <span className="block text-xs text-muted-foreground">Ajustes del conductor en Go</span>
+              </span>
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={driverEarningsOpen} onOpenChange={setDriverEarningsOpen}>
         <SheetContent

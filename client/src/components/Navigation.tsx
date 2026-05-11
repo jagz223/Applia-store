@@ -175,7 +175,10 @@ export function Navigation() {
   const { incomplete: associateOnboardingIncomplete, associatePanelHref } = useAssociateOnboardingIncomplete();
   const associateNavPath = location.split("?")[0];
   const showAssociateOnboardingBanner =
-    isAuthenticated && associateOnboardingIncomplete && associateNavPath !== "/become-pro";
+    isAuthenticated &&
+    associateOnboardingIncomplete &&
+    associateNavPath !== "/become-pro" &&
+    !hasAdminRole(user);
   /** Panel / continuar alta: perfil proveedor, rol professional, o onboarding marcado en localStorage. */
   const showAssociatePanelButton = !isVerifiedCarGoDriver && (isProfessional || associateOnboardingIncomplete);
   /** Acceso al panel de actividad del asociado para drivers (ahora permitido). */

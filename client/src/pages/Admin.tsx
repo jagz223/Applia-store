@@ -2970,7 +2970,7 @@ export default function AdminPanel() {
                               </div>
 
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Costo (USD)</Label>
+                                <Label className="text-xs text-muted-foreground">Costo</Label>
                                 <Input
                                   className="h-9"
                                   value={costValue}
@@ -3043,7 +3043,7 @@ export default function AdminPanel() {
                                       setPendingAdminChange({
                                         bookingId: id,
                                         payload: { cost: n },
-                                        summary: `Actualizar costo de la reserva #${id} a $${n.toFixed(2)} USD`,
+                                        summary: `Actualizar costo de la reserva #${id} a $${n.toFixed(2)}`,
                                       });
                                     }}
                                   >
@@ -3051,7 +3051,7 @@ export default function AdminPanel() {
                                     Guardar costo
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Actualiza el costo (USD) de la reserva. Requiere confirmación.</TooltipContent>
+                                <TooltipContent>Actualiza el costo de la reserva. Requiere confirmación.</TooltipContent>
                               </Tooltip>
 
                               <Tooltip>
