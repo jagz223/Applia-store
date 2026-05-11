@@ -38,6 +38,10 @@ type Props = {
   busyDriverId: string | null;
   onDismissOffer: (driverUserId: string) => void;
   onAcceptOffer: (driverUserId: string) => void;
+  /** Cancela el servicio en servidor (confirmación en el padre). */
+  onCancelSearch: () => void;
+  /** Texto del botón inferior (p. ej. envío vs viaje). */
+  cancelSearchLabel?: string;
 };
 
 export function RiderNegotiationOffersModal({
@@ -47,13 +51,15 @@ export function RiderNegotiationOffersModal({
   busyDriverId,
   onDismissOffer,
   onAcceptOffer,
+  onCancelSearch,
+  cancelSearchLabel = "Cancelar búsqueda",
 }: Props) {
   if (!open || !rideId) return null;
   if (typeof document === "undefined") return null;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[2147482000] flex flex-col justify-end bg-black/50 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur-sm md:items-center md:justify-center md:p-4"
+      className="fixed inset-0 z-[48000] flex flex-col justify-end bg-black/50 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur-sm md:items-center md:justify-center md:p-4"
       role="dialog"
       aria-modal
       aria-labelledby="nego-offers-title"
@@ -142,6 +148,17 @@ export function RiderNegotiationOffersModal({
               })}
             </ul>
           )}
+        </div>
+        <div className="shrink-0 border-t border-border bg-background px-3 py-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            disabled={busyDriverId != null}
+            onClick={onCancelSearch}
+          >
+            {cancelSearchLabel}
+          </Button>
         </div>
       </div>
     </div>,

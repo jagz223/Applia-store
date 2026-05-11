@@ -235,6 +235,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const [negotiationOffersOpen, setNegotiationOffersOpen] = useState(false);
   const [negotiationOffers, setNegotiationOffers] = useState<RiderNegotiationOfferRow[]>([]);
   const [negotiationOfferBusyId, setNegotiationOfferBusyId] = useState<string | null>(null);
+  /** Si el diálogo de cancelar se abrió desde el modal de ofertas de regateo (para reabrir ofertas al descartar). */
+  const cancelSearchOpenedFromNegotiationRef = useRef(false);
   /** Monto acordado al hacer match (incluye regateo aceptado). */
   const [matchedFareUsd, setMatchedFareUsd] = useState<number | null>(null);
   const { data: mobilityFaresDto } = usePlatformMobilityFares({ enabled: !isPackGoClient });
@@ -555,6 +557,20 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     setVehiclePickerOpen(false);
     setCancelServiceDialogOpen(true);
   }, [vehicleModalStep, riderTripInProgress]);
+
+  const openCancelFromNegotiationOffers = useCallback(() => {
+    cancelSearchOpenedFromNegotiationRef.current = true;
+    setNegotiationOffersOpen(false);
+    openCancelServiceDialog();
+  }, [openCancelServiceDialog]);
+
+  const handleCancelServiceDialogOpenChange = useCallback((open: boolean) => {
+    setCancelServiceDialogOpen(open);
+    if (open) return;
+    if (!cancelSearchOpenedFromNegotiationRef.current) return;
+    cancelSearchOpenedFromNegotiationRef.current = false;
+    if (activeRideIdRef.current) setNegotiationOffersOpen(true);
+  }, []);
 
   const confirmCancelService = useCallback(async () => {
     const rideId = activeRideIdRef.current;
@@ -2452,6 +2468,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         busyDriverId={negotiationOfferBusyId}
         onDismissOffer={(id) => void dismissNegotiationOffer(id)}
         onAcceptOffer={(id) => void acceptNegotiationOffer(id)}
+        onCancelSearch={openCancelFromNegotiationOffers}
+        cancelSearchLabel={isPackGoClient ? "Cancelar búsqueda de envío" : "Cancelar búsqueda"}
       />
 
       {/* Wallet/Recargar ahora viven en `GoBottomNav` (barra inferior). */}
@@ -2471,7 +2489,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         </Button>
       ) : null}
 
-      <Dialog open={cancelServiceDialogOpen} onOpenChange={setCancelServiceDialogOpen}>
+      <Dialog open={cancelServiceDialogOpen} onOpenChange={handleCancelServiceDialogOpenChange}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
             <DialogTitle>
