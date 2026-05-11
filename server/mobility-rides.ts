@@ -12,6 +12,10 @@ import { getIO, getUserActivePath } from "./socket";
 import { genFebStorage } from "./storage-genfeb";
 import { catalogService } from "./services";
 import { notificationService } from "./services/notification.service";
+import {
+  registerMobilityNegotiationWithdraw,
+  withdrawDriverNegotiationOffersEverywhere,
+} from "./negotiation-cross-withdraw";
 import crypto from "crypto";
 
 export type TaxiVehicleKind = "moto" | "auto" | "pet_car" | "camioneta";
@@ -202,6 +206,8 @@ function distanceToRideStart(ride: RideRecord, pres: DriverPresence): number {
 function insertDriverByDistance(ride: RideRecord, driverId: string) {
   if (ride.offeredDriverIds.includes(driverId)) return false;
   if (ride.currentOfferDriverId === driverId) return false;
+  const declinedAt = ride.declinedAtByDriverId?.[driverId];
+  if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) return false;
   const pres = onlineDrivers.get(driverId);
   if (!pres) return false;
   if (!rideWantsPresence(ride, pres)) return false;
@@ -446,6 +452,27 @@ function emitNegotiationOffersUpdated(io: SocketIOServer, ride: RideRecord) {
   });
 }
 
+/** Quita al conductor de las listas de regateo de otros viajes (mismo módulo). */
+function withdrawDriverMobilityNegotiationOffersElsewhere(
+  io: SocketIOServer,
+  driverUserId: string,
+  keepRideId: string
+) {
+  for (const ride of rides.values()) {
+    if (ride.id === keepRideId) continue;
+    if (ride.status !== "searching" || !ride.isNegotiated || ride.driverUserId != null) continue;
+    const list = ride.offers ?? [];
+    if (!list.some((o) => o.driverUserId === driverUserId)) continue;
+    ride.offers = list.filter((o) => o.driverUserId !== driverUserId);
+    emitNegotiationOffersUpdated(io, ride);
+    io.to(`user:${driverUserId}`).emit("cargo:ride:negotiation:offer_removed", { rideId: ride.id });
+    const p = pendingOfferByDriverId.get(driverUserId);
+    if (p?.rideId === ride.id) pendingOfferByDriverId.delete(driverUserId);
+  }
+}
+
+registerMobilityNegotiationWithdraw(withdrawDriverMobilityNegotiationOffersElsewhere);
+
 function negotiationInvitePayload(
   ride: RideRecord,
   rider: Awaited<ReturnType<typeof buildRiderPublic>>,
@@ -680,7 +707,7 @@ export function registerMobilityRideRoutes(app: Express) {
         status: "searching",
         vehicleType: body.vehicleType,
         paymentMethod: body.paymentMethod,
-        paymentConfirmed: true,
+        paymentConfirmed: negotiated ? false : true,
         estimatedUsd: offerUsd,
         suggestedUsd,
         isNegotiated: negotiated,
@@ -807,6 +834,32 @@ export function registerMobilityRideRoutes(app: Express) {
     }
   });
 
+  /** El conductor cierra la invitación al regateo sin enviar monto (no usa POST /respond). */
+  app.post("/api/mobility/rides/:rideId/negotiation/decline-invite", authenticateJWT, async (req: any, res) => {
+    try {
+      const driverUserId = req.user?.id as string;
+      if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const rideId = String(req.params.rideId);
+      const ride = rides.get(rideId);
+      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (!ride.isNegotiated || ride.status !== "searching" || ride.driverUserId != null) {
+        return res.status(409).json({ message: "Este viaje no acepta esta acción ahora" });
+      }
+      if (!ride.offeredDriverIds.includes(driverUserId)) {
+        return res.status(403).json({ message: "No estás invitado a este servicio" });
+      }
+      ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
+      ride.declinedAtByDriverId[driverUserId] = Date.now();
+      ride.offeredDriverIds = ride.offeredDriverIds.filter((id) => id !== driverUserId);
+      const p = pendingOfferByDriverId.get(driverUserId);
+      if (p?.rideId === ride.id) pendingOfferByDriverId.delete(driverUserId);
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[mobility] negotiation decline-invite", e);
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
   app.post("/api/mobility/rides/:rideId/negotiation/accept/:driverId", authenticateJWT, async (req: any, res) => {
     try {
       const riderUserId = req.user?.id as string;
@@ -835,10 +888,13 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.driverUserId = driverId;
       ride.status = "matched";
       ride.isNegotiated = true;
+      ride.paymentConfirmed = false;
       clearRideTimers(ride.id);
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
+
+      withdrawDriverNegotiationOffersEverywhere(io, driverId, rideId);
 
       const notifyTaken = new Set<string>();
       for (const o of ride.offersArchive[ride.offersArchive.length - 1]!.offersSnapshot) {
@@ -954,6 +1010,8 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.driverUserId = driverUserId;
       ride.status = "matched";
       clearRideTimers(ride.id);
+
+      withdrawDriverNegotiationOffersEverywhere(io, driverUserId, rideId);
 
       const driver = await buildDriverPublic(driverUserId);
       const pres = onlineDrivers.get(driverUserId);

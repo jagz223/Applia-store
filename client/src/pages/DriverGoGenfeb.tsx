@@ -408,6 +408,38 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     };
   }, [goDriverUi]);
 
+  /** Al activar “recibir pedidos” con una búsqueda de regateo ya en curso, traer oferta pendiente al instante. */
+  useEffect(() => {
+    if (!goDriverUi) return;
+    if (!receivingCargo && !receivingPack) return;
+    if (!canReceive || !providerVehicle?.vehicle_type) return;
+    if (activeRideIdRef.current) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const auth = localStorage.getItem("token");
+        const headers: Record<string, string> = auth ? { Authorization: `Bearer ${auth}` } : {};
+        const [cargoRes, packRes] = await Promise.all([
+          fetch("/api/mobility/driver/pending-offer", { headers }),
+          fetch("/api/pack/driver/pending-offer", { headers }),
+        ]);
+        const cargo = cargoRes.ok ? await cargoRes.json().catch(() => null) : null;
+        const pack = packRes.ok ? await packRes.json().catch(() => null) : null;
+        if (cancelled || activeRideIdRef.current) return;
+        const cargoOffer = cargo?.offer ?? null;
+        const packOffer = pack?.offer ?? null;
+        if (cargoOffer) goDriverUi.pushOffer("cargo", cargoOffer);
+        else if (packOffer) goDriverUi.pushOffer("pack", packOffer);
+      } catch {
+        /* ignore */
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [goDriverUi, receivingCargo, receivingPack, canReceive, providerVehicle?.vehicle_type]);
+
   useEffect(() => {
     if (!incomingOpen) return;
     const loop = startCargoOfferBellLoop();
@@ -622,10 +654,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     if (!incomingOffer) return;
     const snapOffer = incomingOffer;
     const snapModule = incomingModule;
-    // UX: cerrar el modal inmediatamente (la respuesta al backend puede tardar).
-    // En aceptar también lo cerramos ya, para evitar que quede "pegado" en pantalla.
-    goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
-    if (accept) goDriverUi?.clearOffers?.();
     const token = localStorage.getItem("token");
     if (!token) {
       toast({
@@ -636,6 +664,37 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setLocation("/login");
       return;
     }
+
+    if (snapOffer.isNegotiated && !accept) {
+      setRespondBusy(true);
+      try {
+        const base = snapModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+        const res = await fetch(
+          `${base}/${encodeURIComponent(snapOffer.rideId)}/negotiation/decline-invite`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        if (!res.ok) throw new Error(data.message || "No se pudo rechazar la invitación");
+      } catch (e) {
+        toast({
+          title: "No se pudo rechazar",
+          description: e instanceof Error ? e.message : "Intenta de nuevo.",
+          variant: "destructive",
+        });
+      } finally {
+        setRespondBusy(false);
+      }
+      goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+      goDriverUi?.clearOffers?.();
+      return;
+    }
+
+    // UX: cerrar el modal enseguida en flujo clásico (la respuesta al backend puede tardar).
+    goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+    if (accept) goDriverUi?.clearOffers?.();
     setRespondBusy(true);
     try {
       const base = snapModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
@@ -725,6 +784,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         if (!res.ok) throw new Error(data.message || "No se pudo enviar la oferta");
         toast({ title: "Oferta enviada", description: "El cliente verá tu propuesta en su lista." });
         goDriverUi?.resolveOfferAndShowNext(snap.rideId);
+        goDriverUi?.clearOffers?.();
       } catch (e) {
         toast({
           title: "No se pudo enviar",
@@ -1160,8 +1220,15 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
                 Pago confirmado
               </span>
             ) : (
-              <Button type="button" size="sm" variant="secondary" className="h-9 rounded-full px-3" onClick={() => void confirmPayment()}>
-                Pago confirmado
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-9 rounded-full px-3"
+                onClick={() => void confirmPayment()}
+                aria-label="Confirmar que recibiste el dinero"
+              >
+                Recibí el dinero
               </Button>
             )
           ) : null}
