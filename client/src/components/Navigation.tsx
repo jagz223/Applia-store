@@ -336,8 +336,11 @@ export function Navigation() {
       <div className="container flex h-14 min-[400px]:h-16 max-w-7xl items-center justify-between gap-1 px-2 min-[400px]:px-4 sm:px-6 lg:px-8 mx-auto min-w-0">
         
         {/* Logo & Desktop Nav */}
-        <div className="flex items-center gap-8">
-          <Link href={exploreCategoryDisplayName ? "/explore" : "/"} className="flex items-center gap-1.5 min-[400px]:gap-2 shrink-0">
+        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4 lg:gap-8">
+          <Link
+            href={exploreCategoryDisplayName ? "/explore" : "/"}
+            className="flex min-w-0 items-center gap-1.5 min-[400px]:gap-2 overflow-hidden"
+          >
             <span
               className="flex h-7 w-7 min-[400px]:h-8 min-[400px]:w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background p-0.5 ring-1 ring-border"
               aria-hidden
@@ -352,7 +355,7 @@ export function Navigation() {
               />
             </span>
             <span className="sr-only">GenFeb, inicio</span>
-            <span className="hidden text-xl font-bold font-display text-primary sm:inline-block tracking-wider">
+            <span className="hidden min-w-0 max-w-[11rem] truncate text-left text-base font-bold font-display text-primary tracking-wider min-[400px]:text-xl sm:inline-block sm:max-w-[13rem] md:max-w-[16rem] lg:max-w-[20rem]">
               {exploreCategoryDisplayName ?? <>GENFEB</>}
             </span>
           </Link>

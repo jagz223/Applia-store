@@ -65,6 +65,12 @@ export type ProviderUpdate = Partial<
     "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate" | "skills" | "isVerified"
   > & {
     subcategoryId?: number | null;
+    /** Nivel de preparación (escolaridad, cursos, talleres). Se sincroniza con `coursesCompleted` en Firestore. */
+    preparationLevel?: string | null;
+    /** Certificaciones y respaldos (títulos, carnés). */
+    certifications?: string | null;
+    /** @deprecated Usar `preparationLevel`; se sigue aceptando por compatibilidad. */
+    coursesCompleted?: string | null;
     /** ISO fin de período mensual USD 15 (visibilidad en catálogo). */
     visibilitySubscriptionEndsAt?: string | Date | null;
     /**

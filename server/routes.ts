@@ -579,6 +579,8 @@ export async function registerRoutes(
         z.union([z.string(), z.number()]).optional().nullable()
       ),
       coursesCompleted: z.string().trim().max(8000).optional(),
+      /** Alias preferido de `coursesCompleted` (nivel de preparación). */
+      preparationLevel: z.string().trim().max(8000).optional(),
       certifications: z.string().trim().max(8000).optional(),
     });
 
@@ -600,6 +602,8 @@ export async function registerRoutes(
       vehicle: z.any().optional(),
       /** Fix Go / Man Go: texto libre guardado en el perfil (Firestore). */
       coursesCompleted: z.string().trim().max(8000).optional(),
+      /** Alias preferido de `coursesCompleted` (nivel de preparación). */
+      preparationLevel: z.string().trim().max(8000).optional(),
       certifications: z.string().trim().max(8000).optional(),
     });
   const updateProviderBodySchema = z.object({
@@ -610,6 +614,9 @@ export async function registerRoutes(
     yearsExperience: z.number().int().min(0).optional(),
     hourlyRate: z.string().optional(),
     skills: providerSkillsSchema.optional(),
+    preparationLevel: z.string().trim().max(8000).optional(),
+    coursesCompleted: z.string().trim().max(8000).optional(),
+    certifications: z.string().trim().max(8000).optional(),
   });
 
   app.post(api.providers.create.path, authenticateJWT, async (req: any, res) => {
@@ -629,6 +636,7 @@ export async function registerRoutes(
         vehicle: vehicleFromBody,
         goBrands,
         coursesCompleted: coursesCompletedRaw,
+        preparationLevel: preparationLevelRaw,
         certifications: certificationsRaw,
         ...providerInsert
       } = data;
@@ -666,6 +674,9 @@ export async function registerRoutes(
       }
       const coursesCompleted =
         typeof coursesCompletedRaw === "string" && coursesCompletedRaw.trim() !== "" ? coursesCompletedRaw.trim() : undefined;
+      const preparationLevelFromBody =
+        typeof preparationLevelRaw === "string" && preparationLevelRaw.trim() !== "" ? preparationLevelRaw.trim() : undefined;
+      const preparationMerged = preparationLevelFromBody ?? coursesCompleted;
       const certifications =
         typeof certificationsRaw === "string" && certificationsRaw.trim() !== "" ? certificationsRaw.trim() : undefined;
 
@@ -688,7 +699,9 @@ export async function registerRoutes(
         yearsExperience: providerInsert.yearsExperience ?? 0,
         hourlyRate: providerInsert.hourlyRate ?? null,
         skills: providerInsert.skills ?? [],
-        ...(coursesCompleted != null ? { coursesCompleted } : {}),
+        ...(preparationMerged != null
+          ? { preparationLevel: preparationMerged, coursesCompleted: preparationMerged }
+          : {}),
         ...(certifications != null ? { certifications } : {}),
       } as any);
       if (keepStaffRole) {

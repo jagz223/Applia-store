@@ -35,9 +35,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { isBeforeToday } from "@/lib/date-utils";
 import { useToast } from "@/hooks/use-toast";
 import { getCategoryDisplayName } from "@shared/default-categories";
+import {
+  isProfessionalListingCategorySlug,
+  isTradeListingCategorySlug,
+  resolveCertificationsText,
+  resolvePreparationLevel,
+} from "@shared/provider-preparation";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
+import { ProviderCredentialSections } from "@/components/service/ProviderCredentialSections";
 const SKILL_ICONS = [Cog, Lightbulb, LineChart, Wrench, Sparkles, Target, Award] as const;
 
 export default function ServiceDetails() {
@@ -127,6 +134,9 @@ export default function ServiceDetails() {
     yearsExperience?: number;
     bio?: string;
     skills?: string[] | null;
+    preparationLevel?: string | null;
+    coursesCompleted?: string | null;
+    certifications?: string | null;
     isVerified?: boolean;
     rating?: string | number | null;
     reviewCount?: number | null;
@@ -166,6 +176,17 @@ export default function ServiceDetails() {
       .slice(0, 2)
       .map((w) => w[0]?.toUpperCase())
       .join("") || "?";
+
+  const categorySlug = String((service.category as { slug?: string } | undefined)?.slug ?? "");
+  const isTradeCategory = isTradeListingCategorySlug(categorySlug);
+  const isProfessionalCategory = isProfessionalListingCategorySlug(categorySlug);
+  const preparationText = resolvePreparationLevel(providerProfile);
+  const certificationsText = resolveCertificationsText(providerProfile);
+  const showCredentialSections =
+    (isTradeCategory && (preparationText.length > 0 || certificationsText.length > 0)) ||
+    (isProfessionalCategory && certificationsText.length > 0);
+  const hideBioBecauseTradeCredentials =
+    isTradeCategory && (preparationText.length > 0 || certificationsText.length > 0);
 
   const isOwnService = myProviderProfile?.id === service.providerId;
   /** Solo mostrar acceso al chat si hay una reserva activa para este servicio; si la única reserva fue cancelada, no mostrar. */
@@ -264,11 +285,25 @@ export default function ServiceDetails() {
                   </span>
                 ) : null}
               </Badge>
+              {isProfessionalCategory && isOwnService ? (
+                <p className="text-sm text-muted-foreground">
+                  El título de abajo es el nombre público de tu oferta en el catálogo (puedes cambiarlo en «Editar
+                  servicio»).
+                </p>
+              ) : null}
               <h2 className="font-display text-2xl font-bold text-foreground md:text-3xl">{service.title}</h2>
               <p className="text-base leading-relaxed text-muted-foreground">{service.description}</p>
             </section>
 
-            {providerProfile?.bio ? (
+            {showCredentialSections ? (
+              <ProviderCredentialSections
+                showPreparationSection={isTradeCategory}
+                preparationLevel={preparationText}
+                certifications={certificationsText}
+              />
+            ) : null}
+
+            {!hideBioBecauseTradeCredentials && providerProfile?.bio ? (
               <section className="space-y-3">
                 <h3 className="text-lg font-bold text-foreground">Biografía y enfoque profesional</h3>
                 <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-muted-foreground">

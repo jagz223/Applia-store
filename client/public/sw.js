@@ -9,8 +9,6 @@ const PRECACHE_ASSETS = [
   '/offline.html',
   '/manifest.json',
   '/manifest.webmanifest',
-  '/favicon.png',
-  '/favicon.png',
   '/genfeb-logo-new.png',
 ];
 

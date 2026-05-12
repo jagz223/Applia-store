@@ -1494,6 +1494,10 @@ export class InMemoryStorage implements IStorage {
   }
 
   async createProvider(insertProvider: InsertProvider): Promise<Provider> {
+    const prepMerged =
+      (insertProvider as { preparationLevel?: string | null }).preparationLevel?.trim() ||
+      (insertProvider as { coursesCompleted?: string | null }).coursesCompleted?.trim() ||
+      null;
     const newProvider = {
       id: this.providerIdCounter++,
       userId: insertProvider.userId,
@@ -1501,7 +1505,8 @@ export class InMemoryStorage implements IStorage {
       category: insertProvider.category ?? null,
       subcategoryId: (insertProvider as any).subcategoryId ?? null,
       goBrands: (insertProvider as any).goBrands ?? null,
-      coursesCompleted: (insertProvider as { coursesCompleted?: string | null }).coursesCompleted ?? null,
+      preparationLevel: prepMerged,
+      coursesCompleted: prepMerged,
       certifications: (insertProvider as { certifications?: string | null }).certifications ?? null,
       profession: insertProvider.profession,
       bio: insertProvider.bio || "",
