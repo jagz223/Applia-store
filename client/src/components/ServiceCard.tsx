@@ -1,5 +1,12 @@
 import { type ServiceWithProvider } from "@shared/schema";
 import { getCategoryDisplayName } from "@shared/default-categories";
+import {
+  isCatalogCredentialCategorySlug,
+  isProfessionalListingCategorySlug,
+  isTradeListingCategorySlug,
+  resolveCertificationsText,
+  resolvePreparationLevel,
+} from "@shared/provider-preparation";
 import { Link } from "wouter";
 import { Star, ArrowRight, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +19,18 @@ interface ServiceCardProps {
 
 export function ServiceCard({ service }: ServiceCardProps) {
   const avatarUrl = getProviderUserAvatarUrl(service.provider);
+  const categorySlug = String((service.category as { slug?: string } | undefined)?.slug ?? "");
+  const preparationSnippet = resolvePreparationLevel(
+    service.provider as { preparationLevel?: string | null; coursesCompleted?: string | null }
+  );
+  const certificationsSnippet = resolveCertificationsText(
+    service.provider as { certifications?: string | null }
+  );
+  const showPreparationInCard = isTradeListingCategorySlug(categorySlug) && preparationSnippet.length > 0;
+  const showCertificationsInCard =
+    isCatalogCredentialCategorySlug(categorySlug) && certificationsSnippet.length > 0;
+  const hasCredentialSnippets = showPreparationInCard || showCertificationsInCard;
+  const showProfessionalOfferLabel = isProfessionalListingCategorySlug(categorySlug);
 
   return (
     <motion.div
@@ -80,14 +99,35 @@ export function ServiceCard({ service }: ServiceCardProps) {
             </div>
 
             {/* Title */}
+            {showProfessionalOfferLabel ? (
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary/85">Título de la oferta</p>
+            ) : null}
             <h3 className="mb-2 text-lg font-bold font-display leading-snug text-foreground group-hover:text-primary transition-colors line-clamp-2">
               {service.title}
             </h3>
 
             {/* Description */}
-            <p className="mb-4 text-sm text-muted-foreground line-clamp-2 flex-1">
+            <p
+              className={`text-sm text-muted-foreground line-clamp-2 flex-1 ${hasCredentialSnippets ? "mb-2" : "mb-4"}`}
+            >
               {service.description}
             </p>
+            {hasCredentialSnippets ? (
+              <div className="mb-4 space-y-2">
+                {showPreparationInCard ? (
+                  <p className="text-xs text-muted-foreground line-clamp-2 border-l-2 border-primary/35 pl-2">
+                    <span className="font-medium text-foreground">Preparación: </span>
+                    {preparationSnippet}
+                  </p>
+                ) : null}
+                {showCertificationsInCard ? (
+                  <p className="text-xs text-muted-foreground line-clamp-2 border-l-2 border-primary/35 pl-2">
+                    <span className="font-medium text-foreground">Certificaciones: </span>
+                    {certificationsSnippet}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             {/* Footer */}
             <div className="mt-auto flex items-center justify-end pt-4 border-t border-border/50">

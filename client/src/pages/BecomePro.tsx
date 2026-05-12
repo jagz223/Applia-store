@@ -30,6 +30,7 @@ import {
   SERVICE_DESCRIPTION_INLINE_HINT,
   ServiceDescriptionInfoButton,
 } from "@/components/ServiceDescriptionHints";
+import { CertificationsVisibilityHint } from "@/components/service/CertificationsVisibilityHint";
 import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryCanonicalName } from "@shared/default-categories";
 
 /** Solo categorías válidas para proveedor (excluye legal/financial, que son subcategorías). */
@@ -94,7 +95,7 @@ const becomeProCategoryFields = {
 };
 
 const becomeProTradeFields = {
-  coursesCompleted: z.string().optional(),
+  preparationLevel: z.string().optional(),
   certifications: z.string().optional(),
 };
 
@@ -130,20 +131,12 @@ function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
 
       const isTrade = slug === "technical" || slug === "maintenance";
       if (isTrade) {
-        const courses = (data.coursesCompleted ?? "").trim();
-        const certs = (data.certifications ?? "").trim();
-        if (courses.length < 10) {
+        const prep = (data.preparationLevel ?? "").trim();
+        if (prep.length < 10) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: "Indica los cursos o formación realizados (mínimo 10 caracteres).",
-            path: ["coursesCompleted"],
-          });
-        }
-        if (certs.length < 10) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Indica tus certificaciones (mínimo 10 caracteres).",
-            path: ["certifications"],
+            message: "Describe tu nivel de preparación (escolaridad, cursos, talleres). Mínimo 10 caracteres.",
+            path: ["preparationLevel"],
           });
         }
         return;
@@ -207,7 +200,7 @@ export default function BecomePro() {
       hourlyRate: "50",
       serviceTitle: "",
       serviceDescription: "",
-      coursesCompleted: "",
+      preparationLevel: "",
       certifications: "",
       vehicle: { ...DEFAULT_VEHICLE_FORM },
     },
@@ -224,6 +217,7 @@ export default function BecomePro() {
   const isPackGo = selectedCategorySlug === "delivery";
   const isGoDriverCategory = isCarGo || isPackGo;
   const isTradeCategory = selectedCategorySlug === "technical" || selectedCategorySlug === "maintenance";
+  const isProfessionalCategory = selectedCategorySlug === "professional";
   const isFocusCatalogCategory =
     selectedCategorySlug === "professional" ||
     selectedCategorySlug === "technical" ||
@@ -252,7 +246,7 @@ export default function BecomePro() {
     form.setValue("yearsExperience", 0);
     form.setValue("hourlyRate", "");
     form.setValue("skills", []);
-    form.setValue("coursesCompleted", "");
+    form.setValue("preparationLevel", "");
     form.setValue("certifications", "");
   }, [isGoDriverCategory, form]);
 
@@ -412,11 +406,11 @@ export default function BecomePro() {
       vehiclePayload = parsed.data;
     }
 
-    const { vehicle: _vehicleForm, coursesCompleted: coursesRaw, certifications: certsRaw, ...rest } = data;
+    const { vehicle: _vehicleForm, preparationLevel: prepRaw, certifications: certsRaw, ...rest } = data;
     void _vehicleForm;
 
     const isTrade = slug === "technical" || slug === "maintenance";
-    const coursesTrim = (coursesRaw ?? "").trim();
+    const prepTrim = (prepRaw ?? "").trim();
     const certsTrim = (certsRaw ?? "").trim();
 
     let professionOut = rest.profession;
@@ -426,18 +420,32 @@ export default function BecomePro() {
     let skillsOut = data.skills ?? [];
 
     if (isTrade) {
-      professionOut = coursesTrim.split("\n")[0]?.slice(0, 200) || "Servicios técnicos";
-      bioOut = [`Formación y cursos:\n${coursesTrim}`, `Certificaciones:\n${certsTrim}`].join("\n\n");
+      professionOut = prepTrim.split("\n")[0]?.slice(0, 200) || "Servicios técnicos";
+      const certBlock = certsTrim ? `Certificaciones:\n${certsTrim}` : "";
+      bioOut = certBlock
+        ? [`Nivel de preparación:\n${prepTrim}`, certBlock].join("\n\n")
+        : `Nivel de preparación:\n${prepTrim}`;
       const subLabel = subcategories.find((s) => s.id === data.subcategoryId)?.name ?? "Servicio";
       serviceTitleOut = subLabel;
-      serviceDescriptionOut = certsTrim.length > 0 ? certsTrim : coursesTrim;
-      skillsOut = certsTrim
-        .split(/[,;\n]/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .slice(0, 25);
-      if (skillsOut.length === 0 && certsTrim.length > 0) {
-        skillsOut = [certsTrim.slice(0, 120)];
+      serviceDescriptionOut = certsTrim.length > 0 ? certsTrim : prepTrim;
+      if (certsTrim.length > 0) {
+        skillsOut = certsTrim
+          .split(/[,;\n]/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 25);
+        if (skillsOut.length === 0) {
+          skillsOut = [certsTrim.slice(0, 120)];
+        }
+      } else {
+        skillsOut = prepTrim
+          .split(/[,;\n]/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 25);
+        if (skillsOut.length === 0 && prepTrim.length > 0) {
+          skillsOut = [prepTrim.slice(0, 120)];
+        }
       }
     }
 
@@ -462,12 +470,13 @@ export default function BecomePro() {
         serviceTitle: serviceTitleOut,
         serviceDescription: serviceDescriptionOut,
         ...(goDriver && vehiclePayload ? { vehicle: vehiclePayload } : {}),
-        ...(isTrade && coursesTrim ? { coursesCompleted: coursesTrim } : {}),
-        ...(isTrade && certsTrim ? { certifications: certsTrim } : {}),
+        ...(isTrade && prepTrim ? { preparationLevel: prepTrim, coursesCompleted: prepTrim } : {}),
+        ...(!goDriver && certsTrim ? { certifications: certsTrim } : {}),
       } as InsertProvider & {
         serviceTitle?: string;
         serviceDescription?: string;
         vehicle?: typeof vehiclePayload;
+        preparationLevel?: string;
         coursesCompleted?: string;
         certifications?: string;
       },
@@ -956,16 +965,19 @@ export default function BecomePro() {
                 <>
                   <FormField
                     control={form.control}
-                    name="coursesCompleted"
+                    name="preparationLevel"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Nombre de los cursos realizados</FormLabel>
+                        <FormLabel>Nivel de preparación</FormLabel>
                         <FormDescription className="text-xs">
-                          Formación técnica, talleres o programas relacionados con tu especialidad (Servicios Técnicos o Mantenimiento).
+                          Incluye tu escolaridad o nivel formal alcanzado (por ejemplo, primaria, bachillerato, técnico,
+                          universitario) y la formación complementaria: cursos, talleres o programas en Servicios técnicos o
+                          Mantenimiento. Se mostrará en la ficha pública del servicio en la sección «Nivel de preparación» y
+                          podrás editarlo después en «Editar servicio».
                         </FormDescription>
                         <FormControl>
                           <Textarea
-                            placeholder="Ej. Curso de instalaciones sanitarias IPAC 2023; Certificación en refrigeración doméstica…"
+                            placeholder="Ej. Bachillerato completo; curso de instalaciones sanitarias IPAC 2023; taller de refrigeración doméstica…"
                             className="min-h-[100px] resize-y"
                             {...field}
                           />
@@ -979,14 +991,17 @@ export default function BecomePro() {
                     name="certifications"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Certificaciones obtenidas</FormLabel>
+                        <FormLabel>Certificaciones obtenidas (opcional)</FormLabel>
                         <FormDescription className="text-xs">
-                          Títulos, carnés o certificados que respaldan tu trabajo.
+                          Títulos, diplomas, maestrías, doctorados, carnés o certificados que respalden tu trabajo. Si solo
+                          tienes formación en cursos, puedes dejarlo vacío: no se mostrará ninguna sección de certificaciones
+                          hasta que lo completes aquí o en «Editar servicio».
                         </FormDescription>
+                        <CertificationsVisibilityHint />
                         <FormControl>
                           <Textarea
-                            placeholder="Ej. Certificado EPA sección 608; carné de electricista habilitado…"
-                            className="min-h-[100px] resize-y"
+                            placeholder="Ej. Certificado EPA sección 608; carné de electricista habilitado; PhD en…"
+                            className="min-h-[100px] resize-y mt-2"
                             {...field}
                           />
                         </FormControl>
@@ -1145,6 +1160,30 @@ export default function BecomePro() {
                       </FormItem>
                     )}
                   />
+
+                  {!isTradeCategory && isProfessionalCategory ? (
+                    <FormField
+                      control={form.control}
+                      name="certifications"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Certificaciones obtenidas (opcional)</FormLabel>
+                          <FormDescription className="text-xs">
+                            Maestrías, doctorados, registro profesional, títulos universitarios o certificaciones sectoriales.
+                          </FormDescription>
+                          <CertificationsVisibilityHint />
+                          <FormControl>
+                            <Textarea
+                              placeholder="Ej. Abogado de los Tribunales; máster en tributación; PhD en…; certificación CPA…"
+                              className="min-h-[100px] resize-y mt-2"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : null}
                 </>
               )}
 

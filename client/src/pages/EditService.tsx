@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRoute, Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, ArrowLeft, AlertTriangle } from "lucide-react";
+import { Loader2, ArrowLeft, Sparkles } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,8 +22,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useState } from "react";
 import { professionalBioFieldSchema } from "@shared/schema";
 import { providerSkillsSchema } from "@shared/skills-schema";
 import { ProviderSkillsField } from "@/components/ProviderSkillsField";
@@ -31,18 +29,40 @@ import {
   SERVICE_DESCRIPTION_INLINE_HINT,
   ServiceDescriptionInfoButton,
 } from "@/components/ServiceDescriptionHints";
+import { CertificationsVisibilityHint } from "@/components/service/CertificationsVisibilityHint";
+import {
+  isProfessionalListingCategorySlug,
+  isTradeListingCategorySlug,
+  resolveCertificationsText,
+  resolvePreparationLevel,
+} from "@shared/provider-preparation";
 
-const editServiceSchema = z.object({
-  title: z.string().min(1, "El nombre es obligatorio").max(500),
-  description: z.string().max(5000).optional(),
-  price: z.string().min(1, "El precio es obligatorio"),
-  // imageUrl existe en el backend, pero ya no se configura desde la UI.
-  imageUrl: z.string().url("URL no válida").optional().or(z.literal("")),
-  professionalBio: professionalBioFieldSchema,
-  skills: providerSkillsSchema,
-});
+function buildEditServiceSchema(isTrade: boolean) {
+  return z
+    .object({
+      title: z.string().min(1, "El nombre es obligatorio").max(500),
+      description: z.string().max(5000).optional(),
+      price: z.string().min(1, "El precio es obligatorio"),
+      imageUrl: z.string().url("URL no válida").optional().or(z.literal("")),
+      professionalBio: professionalBioFieldSchema,
+      skills: providerSkillsSchema,
+      preparationLevel: z.string().optional(),
+      certifications: z.string().optional(),
+    })
+    .superRefine((vals, ctx) => {
+      if (!isTrade) return;
+      const p = (vals.preparationLevel ?? "").trim();
+      if (p.length < 10) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Describe tu nivel de preparación (escolaridad, cursos, talleres). Mínimo 10 caracteres.",
+          path: ["preparationLevel"],
+        });
+      }
+    });
+}
 
-type EditServiceForm = z.infer<typeof editServiceSchema>;
+type EditServiceForm = z.infer<ReturnType<typeof buildEditServiceSchema>>;
 
 export default function EditService() {
   const [, params] = useRoute("/edit-service/:id");
@@ -54,12 +74,19 @@ export default function EditService() {
   const updateService = useUpdateService(id);
   const updateProvider = useUpdateProvider();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  
+
   const isAdmin = hasAdminRole(user);
-  
-  // Cooldown calculation (removed upon user request)
-  // const lastEditedAt = (service as any)?.lastEditedAt ? new Date((service as any).lastEditedAt) : null;
+
   const isBlocked = false;
+
+  const categorySlug = useMemo(
+    () => String((service?.category as { slug?: string } | undefined)?.slug ?? ""),
+    [service?.category]
+  );
+  const isTrade = isTradeListingCategorySlug(categorySlug);
+  const isProfessional = isProfessionalListingCategorySlug(categorySlug);
+
+  const editServiceSchema = useMemo(() => buildEditServiceSchema(isTrade), [isTrade]);
 
   const form = useForm<EditServiceForm>({
     resolver: zodResolver(editServiceSchema),
@@ -70,21 +97,30 @@ export default function EditService() {
       imageUrl: "",
       professionalBio: "",
       skills: [] as string[],
+      preparationLevel: "",
+      certifications: "",
     },
   });
 
   useEffect(() => {
-    if (service) {
-      const p = service.provider as { bio?: string; skills?: string[] | null } | undefined;
-      form.reset({
-        title: service.title ?? "",
-        description: service.description ?? "",
-        price: String(service.price ?? "0"),
-        imageUrl: service.imageUrl ?? "",
-        professionalBio: p?.bio ?? "",
-        skills: Array.isArray(p?.skills) ? [...p.skills] : [],
-      });
-    }
+    if (!service) return;
+    const p = service.provider as {
+      bio?: string;
+      skills?: string[] | null;
+      preparationLevel?: string | null;
+      coursesCompleted?: string | null;
+      certifications?: string | null;
+    } | undefined;
+    form.reset({
+      title: service.title ?? "",
+      description: service.description ?? "",
+      price: String(service.price ?? "0"),
+      imageUrl: service.imageUrl ?? "",
+      professionalBio: p?.bio ?? "",
+      skills: Array.isArray(p?.skills) ? [...p.skills] : [],
+      preparationLevel: resolvePreparationLevel(p),
+      certifications: resolveCertificationsText(p),
+    });
   }, [service, form]);
 
   const isOwner = provider && service && service.providerId === provider.id;
@@ -96,7 +132,17 @@ export default function EditService() {
     try {
       await updateProvider.mutateAsync({
         providerId,
-        data: { bio: vals.professionalBio.trim(), skills: vals.skills },
+        data: {
+          bio: vals.professionalBio.trim(),
+          skills: vals.skills,
+          ...(isTrade
+            ? {
+                preparationLevel: (vals.preparationLevel ?? "").trim(),
+                certifications: (vals.certifications ?? "").trim(),
+              }
+            : {}),
+          ...(!isTrade && isProfessional ? { certifications: (vals.certifications ?? "").trim() } : {}),
+        },
       });
       await updateService.mutateAsync({
         title: vals.title,
@@ -112,7 +158,7 @@ export default function EditService() {
 
   const onSubmit = () => {
     if (isAdmin) {
-      handleSaveConfirmed(); // Admin doesn't get cooldown, so no warning needed, or warn anyway? Warn anyway is fine, but skip is better.
+      handleSaveConfirmed();
     } else {
       setConfirmOpen(true);
     }
@@ -159,7 +205,11 @@ export default function EditService() {
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-display font-bold text-primary mb-2">Editar servicio</h1>
         <p className="text-muted-foreground">
-          Modifica tu publicación: datos del servicio y tu biografía profesional (50–700 caracteres).
+          {isTrade
+            ? "Actualiza tu publicación: título, descripción, nivel de preparación, certificaciones, habilidades y biografía."
+            : isProfessional
+              ? "Actualiza título, descripción, certificados opcionales, habilidades y biografía. Lo que escribas en certificaciones se verá en la ficha pública si no está vacío."
+              : "Modifica tu publicación: datos del servicio y tu biografía profesional (50–700 caracteres)."}
         </p>
       </div>
 
@@ -167,12 +217,31 @@ export default function EditService() {
         <CardHeader>
           <CardTitle>Tu servicio y perfil</CardTitle>
           <CardDescription>
-            Mismo formulario que al registrarte como proveedor: nombre, descripción, habilidades y biografía pública.
+            {isTrade
+              ? "En Servicios técnicos y Mantenimiento el catálogo muestra también tu nivel de preparación y, si las indicas, tus certificaciones."
+              : isProfessional
+                ? "En Servicios profesionales puedes publicar certificaciones y títulos (maestría, doctorado, etc.); aparecen en la ficha del servicio solo si el campo no está vacío."
+                : "Mismo formulario que al registrarte como proveedor: nombre, descripción, habilidades y biografía pública."}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              {isProfessional ? (
+                <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 text-sm">
+                  <div className="flex gap-2">
+                    <Sparkles className="h-4 w-4 shrink-0 text-primary mt-0.5" aria-hidden />
+                    <div>
+                      <p className="font-medium text-foreground">Título de la oferta</p>
+                      <p className="mt-1 text-muted-foreground">
+                        El campo «Nombre del servicio» es el título público que verán los clientes en el catálogo junto a tu
+                        nombre. Asegúrate de que describa claramente tu oferta.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <FormField
                 control={form.control}
                 name="title"
@@ -216,6 +285,77 @@ export default function EditService() {
                 )}
               />
 
+              {isTrade ? (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="preparationLevel"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nivel de preparación</FormLabel>
+                        <FormDescription className="text-xs">
+                          Escolaridad o nivel formal (ej. primaria, bachillerato, técnico, universitario) y formación
+                          complementaria: cursos, talleres o programas.
+                        </FormDescription>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Ej. Bachillerato completo; curso de redes Cisco; taller de soldadura industrial…"
+                            className="min-h-[120px] resize-y"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="certifications"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Certificaciones obtenidas (opcional)</FormLabel>
+                        <FormDescription className="text-xs">
+                          Si lo completas, tendrá su propia sección en la ficha pública del servicio.
+                        </FormDescription>
+                        <CertificationsVisibilityHint />
+                        <FormControl>
+                          <Textarea
+                            placeholder="Ej. Certificado EPA sección 608; carné habilitado; maestría en…"
+                            className="min-h-[120px] resize-y mt-2"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              ) : null}
+
+              {isProfessional && !isTrade ? (
+                <FormField
+                  control={form.control}
+                  name="certifications"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Certificaciones obtenidas (opcional)</FormLabel>
+                      <FormDescription className="text-xs">
+                        Maestrías, doctorados, registro profesional, títulos o certificaciones que quieras mostrar en tu ficha.
+                      </FormDescription>
+                      <CertificationsVisibilityHint />
+                      <FormControl>
+                        <Textarea
+                          placeholder="Ej. Doctorado en Derecho; registro contador; certificación internacional…"
+                          className="min-h-[120px] resize-y mt-2"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : null}
+
               <ProviderSkillsField control={form.control} name="skills" />
 
               <FormField
@@ -241,11 +381,6 @@ export default function EditService() {
                 )}
               />
 
-              {/*
-                Deshabilitado: no se configura foto del servicio.
-                La foto que se muestra en el detalle es únicamente la del asociado.
-              */}
-
               <Button
                 type="submit"
                 className="w-full text-lg h-12"
@@ -264,7 +399,7 @@ export default function EditService() {
           </Form>
         </CardContent>
       </Card>
-      
+
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

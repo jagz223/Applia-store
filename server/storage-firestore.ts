@@ -32,6 +32,7 @@ import { calcCommission, calcProviderNet, roundToCents } from "@shared/platform-
 import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { isFullAdmin } from "@shared/roles";
+import { resolveCertificationsText, resolvePreparationLevel } from "@shared/provider-preparation";
 import type { ProfessionalVerification, ProfessionalVerificationState } from "@shared/professional-verification";
 import type { VerifyingStatus } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
@@ -623,6 +624,7 @@ class FirestoreStorageImpl implements IStorage {
     provider: Provider,
     ownerRole: string | undefined,
   ): Provider & {
+    preparationLevel: string;
     visibilitySubscriptionEndsAt: string | null;
     isVerified: boolean;
     isListingPublished: boolean;
@@ -640,8 +642,10 @@ class FirestoreStorageImpl implements IStorage {
     });
     const subscriptionDaysRemaining =
       visibilitySubscriptionEndsAt != null ? listingSubscriptionDaysRemaining(visibilitySubscriptionEndsAt) : null;
+    const preparationLevel = resolvePreparationLevel(provider as { preparationLevel?: string | null; coursesCompleted?: string | null });
     return {
       ...provider,
+      preparationLevel,
       visibilitySubscriptionEndsAt,
       isVerified: isVerifiedIdentity,
       isListingPublished,
@@ -699,6 +703,10 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("providers");
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.PROVIDERS).doc(id.toString());
+    const prepRaw =
+      (provider as { preparationLevel?: string | null }).preparationLevel?.trim() ||
+      (provider as { coursesCompleted?: string | null }).coursesCompleted?.trim() ||
+      null;
     const newProvider = {
       id,
       ...provider,
@@ -706,7 +714,8 @@ class FirestoreStorageImpl implements IStorage {
       category: provider.category ?? null,
       subcategoryId: (provider as { subcategoryId?: number | null }).subcategoryId ?? null,
       goBrands: (provider as any).goBrands ?? null,
-      coursesCompleted: (provider as { coursesCompleted?: string | null }).coursesCompleted ?? null,
+      preparationLevel: prepRaw,
+      coursesCompleted: prepRaw,
       certifications: (provider as { certifications?: string | null }).certifications ?? null,
       isVerified: Boolean((provider as { isVerified?: boolean }).isVerified),
       rating: String((provider as { rating?: unknown }).rating ?? "0"),
@@ -830,6 +839,11 @@ class FirestoreStorageImpl implements IStorage {
     for (const [k, v] of Object.entries(data)) {
       if (v !== undefined) updates[k] = v;
     }
+    if (updates.preparationLevel !== undefined) {
+      updates.coursesCompleted = updates.preparationLevel;
+    } else if (updates.coursesCompleted !== undefined) {
+      updates.preparationLevel = updates.coursesCompleted;
+    }
     if (Object.keys(updates).length === 0) {
       return { id: parseInt(doc.id), ...doc.data() } as Provider;
     }
@@ -916,9 +930,20 @@ class FirestoreStorageImpl implements IStorage {
       const searchLower = search.toLowerCase();
       return applyPublicServicePriceList(
         servicesWithProviders.filter(
-          (s) =>
-            s.title?.toLowerCase().includes(searchLower) ||
-            s.description?.toLowerCase().includes(searchLower)
+          (s) => {
+            const prep = resolvePreparationLevel(
+              (s.provider ?? undefined) as { preparationLevel?: string | null; coursesCompleted?: string | null }
+            );
+            const certs = resolveCertificationsText(
+              (s.provider ?? undefined) as { certifications?: string | null }
+            );
+            return (
+              s.title?.toLowerCase().includes(searchLower) ||
+              s.description?.toLowerCase().includes(searchLower) ||
+              prep.toLowerCase().includes(searchLower) ||
+              certs.toLowerCase().includes(searchLower)
+            );
+          }
         )
       );
     }

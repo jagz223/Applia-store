@@ -5,7 +5,8 @@ import { useCategories, useCategoryVisibility, useServices, useSubcategories } f
 import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { ServiceListItem } from "@/components/ServiceListItem";
 import { Input } from "@/components/ui/input";
-import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp, Bookmark, Layers } from "lucide-react";
+import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp, Bookmark } from "lucide-react";
+import { ExploreFilterCollapsedSummary } from "@/components/explore/ExploreFilterCollapsedSummary";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CategoryIcon } from "@/components/CategoryIcon";
@@ -198,13 +199,13 @@ export default function Explore() {
               <ArrowLeft className="h-4 w-4" />
               {exploreFrom === "categories" ? "Volver a categorías" : "Volver a Explorar"}
             </Button>
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_min(20rem,100%)] lg:items-center lg:gap-6">
               <div className="min-w-0">
-                <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
+                <h1 className="text-2xl font-display font-bold text-foreground break-words sm:text-3xl lg:text-4xl">
                   {categoryDisplayName}
                 </h1>
               </div>
-              <div className="relative w-full md:w-80 shrink-0">
+              <div className="relative w-full min-w-0 shrink-0 lg:max-w-md">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   placeholder="Buscar en esta categoría..."
@@ -237,8 +238,10 @@ export default function Explore() {
                 {selectedSubcategoryData ? ` · ${selectedSubcategoryData.name}` : ""}
               </p>
               {subcategories.length > 0 && (
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-muted-foreground mr-1">Subcategorías:</span>
+                <div className="mt-4 flex w-full min-w-0 flex-wrap items-center gap-2">
+                  <span className="w-full text-sm font-medium text-muted-foreground sm:mr-1 sm:w-auto">
+                    Subcategorías:
+                  </span>
                   {subcategories.map((sub) => (
                     <button
                       key={sub.id}
@@ -278,29 +281,12 @@ export default function Explore() {
                   Guardar vista
                 </Button>
               ) : (
-                <motion.div
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.28, ease: [0.33, 1, 0.68, 1] }}
-                  className="flex flex-wrap items-center gap-2 w-full justify-between"
-                >
-                  <p className="text-xs sm:text-sm text-muted-foreground truncate max-w-[min(100%,28rem)]">
-                    <span className="font-medium text-foreground/80">Vista guardada:</span>{" "}
-                    {categoryDisplayName}
-                    {selectedSubcategoryData ? ` · ${selectedSubcategoryData.name}` : ""}
-                    {search.trim() ? ` · "${search.trim()}"` : ""}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 rounded-full shrink-0"
-                    onClick={() => setFiltersPanelExpanded(true)}
-                  >
-                    <Layers className="h-4 w-4" />
-                    Mostrar filtros
-                  </Button>
-                </motion.div>
+                <ExploreFilterCollapsedSummary onExpand={() => setFiltersPanelExpanded(true)}>
+                  <span className="font-medium text-foreground/80">Vista guardada:</span>{" "}
+                  {categoryDisplayName}
+                  {selectedSubcategoryData ? ` · ${selectedSubcategoryData.name}` : ""}
+                  {search.trim() ? ` · "${search.trim()}"` : ""}
+                </ExploreFilterCollapsedSummary>
               )}
             </div>
           </div>
@@ -309,14 +295,14 @@ export default function Explore() {
         /* Vista sin categoría: Explorar Servicios con filtros */
         <div className="border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-background/90 dark:bg-background/92 shadow-sm transition-shadow duration-300">
           <div className={`container mx-auto px-4 max-w-7xl ${filtersPanelExpanded ? "py-6" : "py-3"}`}>
-            <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
+            <div className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_min(22rem,100%)] lg:items-center lg:gap-6">
               <div className="min-w-0">
-                <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground flex items-center gap-3">
-                  <Sparkles className="h-7 w-7 text-primary shrink-0" />
-                  Explorar Servicios
+                <h1 className="text-2xl font-display font-bold text-foreground flex flex-wrap items-center gap-3 sm:text-3xl">
+                  <Sparkles className="h-7 w-7 shrink-0 text-primary" aria-hidden />
+                  <span className="min-w-0 break-words">Explorar Servicios</span>
                 </h1>
               </div>
-              <div className="relative w-full md:w-96 shrink-0">
+              <div className="relative w-full min-w-0 shrink-0 lg:max-w-lg">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   placeholder="Buscar servicios..."
@@ -357,8 +343,10 @@ export default function Explore() {
                     {filtersPanelExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
                   </span>
                 </button>
-                <div className="flex flex-wrap items-center gap-2 md:flex">
-                  <span className="text-sm font-medium text-muted-foreground mr-1 hidden md:inline">Tipo de servicio:</span>
+                <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
+                  <span className="hidden w-full text-sm font-medium text-muted-foreground md:mr-1 md:inline md:w-auto">
+                    Tipo de servicio:
+                  </span>
                   <button
                     onClick={() => setProviderCategory(undefined)}
                     className={`px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 ${
@@ -399,26 +387,9 @@ export default function Explore() {
                   Guardar vista
                 </Button>
               ) : (
-                <motion.div
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.28, ease: [0.33, 1, 0.68, 1] }}
-                  className="flex flex-wrap items-center gap-2 w-full justify-between"
-                >
-                  <p className="text-xs sm:text-sm text-muted-foreground truncate max-w-[min(100%,28rem)]">
-                    <span className="font-medium text-foreground/80">Vista guardada:</span> {filterSummaryLabel}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 rounded-full shrink-0"
-                    onClick={() => setFiltersPanelExpanded(true)}
-                  >
-                    <Layers className="h-4 w-4" />
-                    Mostrar filtros
-                  </Button>
-                </motion.div>
+                <ExploreFilterCollapsedSummary onExpand={() => setFiltersPanelExpanded(true)}>
+                  <span className="font-medium text-foreground/80">Vista guardada:</span> {filterSummaryLabel}
+                </ExploreFilterCollapsedSummary>
               )}
             </div>
           </div>

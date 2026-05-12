@@ -1,5 +1,12 @@
 import type { ServiceWithProvider } from "@shared/schema";
 import { getCategoryDisplayName } from "@shared/default-categories";
+import {
+  isCatalogCredentialCategorySlug,
+  isProfessionalListingCategorySlug,
+  isTradeListingCategorySlug,
+  resolveCertificationsText,
+  resolvePreparationLevel,
+} from "@shared/provider-preparation";
 import { Link } from "wouter";
 import { Star, ArrowRight, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +43,17 @@ export function ServiceListItem({ service }: ServiceListItemProps) {
     data: completedCount,
     isLoading: completedCountLoading,
   } = useProviderCompletedCount(Number.isFinite(providerId) ? providerId : undefined);
+
+  const categorySlug = String((service.category as { slug?: string } | undefined)?.slug ?? "");
+  const preparationSnippet = resolvePreparationLevel(service.provider as { preparationLevel?: string | null; coursesCompleted?: string | null });
+  const certificationsSnippet = resolveCertificationsText(
+    service.provider as { certifications?: string | null }
+  );
+  const showPreparationInList =
+    isTradeListingCategorySlug(categorySlug) && preparationSnippet.length > 0;
+  const showCertificationsInList =
+    isCatalogCredentialCategorySlug(categorySlug) && certificationsSnippet.length > 0;
+  const showProfessionalOfferLabel = isProfessionalListingCategorySlug(categorySlug);
 
   return (
     <motion.div
@@ -93,8 +111,23 @@ export function ServiceListItem({ service }: ServiceListItemProps) {
           </div>
 
           <div className="px-5 pb-5">
+            {showProfessionalOfferLabel ? (
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary/85 mb-1">Título de la oferta</p>
+            ) : null}
             <p className="font-display font-bold text-foreground mb-1 line-clamp-1">{service.title}</p>
             <p className="text-sm text-muted-foreground line-clamp-2">{service.description}</p>
+            {showPreparationInList ? (
+              <p className="text-xs text-muted-foreground mt-2 line-clamp-2 border-l-2 border-primary/35 pl-2.5">
+                <span className="font-medium text-foreground">Preparación: </span>
+                {preparationSnippet}
+              </p>
+            ) : null}
+            {showCertificationsInList ? (
+              <p className="text-xs text-muted-foreground mt-2 line-clamp-2 border-l-2 border-primary/35 pl-2.5">
+                <span className="font-medium text-foreground">Certificaciones: </span>
+                {certificationsSnippet}
+              </p>
+            ) : null}
           </div>
         </div>
       </Link>

@@ -369,6 +369,7 @@ export function useCreateProvider() {
         serviceTitle?: string;
         serviceDescription?: string;
         vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle;
+        preparationLevel?: string;
         coursesCompleted?: string;
         certifications?: string;
       }
@@ -407,6 +408,9 @@ export type ProviderPatchPayload = {
   hourlyRate?: string;
   categoryId?: number;
   skills?: string[];
+  preparationLevel?: string;
+  certifications?: string;
+  coursesCompleted?: string;
 };
 
 /** Actualizar perfil de proveedor (p. ej. biografía). No muestra toast en éxito; invalida caché. */
