@@ -3,11 +3,25 @@ import { Link, useLocation } from "wouter";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED, FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BadgeCheck, CheckCircle2, ChevronDown, ChevronUp, Loader2, MessageSquare, Phone, Radio, Settings, Star, Tags, X, XCircle } from "lucide-react";
+import {
+  BadgeCheck,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  MessageSquare,
+  Phone,
+  Radio,
+  Settings,
+  Star,
+  Tags,
+  X,
+  XCircle,
+} from "lucide-react";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider, useWallet } from "@/hooks/use-mango-data";
-import { MOBILITY_UI } from "@shared/mobility-ui-labels";
+import { MOBILITY_UI, mobilityServiceLabel } from "@shared/mobility-ui-labels";
 import {
   NEGOTIATION_OFFER_REMOVED_REASON_RIDER_REJECTED,
   NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN,
@@ -121,7 +135,7 @@ function mapApiRideToOffer(ride: MobilityRideHydration): CargoRideOfferPayload {
 
 export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" | "pack" } = {}) {
   const queryClient = useQueryClient();
-  const { openChat, resetChat, isOpen: chatOpen, closeChat } = useGoChat();
+  const { openChat, resetChat, isOpen: chatOpen, closeChat, setMobilityChatReminder } = useGoChat();
   const { socket } = useSocket();
   const rideApiBase = goSlug === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
   const rideSocketPrefix = goSlug === "pack" ? "pack:ride:" : "cargo:ride:";
@@ -173,6 +187,18 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   }, [activeRideOffer]);
 
   useEffect(() => {
+    if (activeRideId && activeRideOffer) {
+      setMobilityChatReminder(
+        goSlug === "pack"
+          ? "Recordatorio: este chat es con tu cliente y el paquete del envío."
+          : "Recordatorio: este chat es con tu pasajero.",
+      );
+    } else {
+      setMobilityChatReminder(null);
+    }
+  }, [activeRideId, activeRideOffer, goSlug, setMobilityChatReminder]);
+
+  useEffect(() => {
     if (!activeRideOffer) setActiveRidePanelCollapsed(false);
   }, [activeRideOffer]);
 
@@ -186,6 +212,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const [cancelServiceOpen, setCancelServiceOpen] = useState(false);
   const [cancelServiceBusy, setCancelServiceBusy] = useState(false);
   const [searchClientConfirmOpen, setSearchClientConfirmOpen] = useState(false);
+  const [confirmPaymentOpen, setConfirmPaymentOpen] = useState(false);
   const [searchingClient, setSearchingClient] = useState(false);
   const [serviceRouteGeometry, setServiceRouteGeometry] = useState<GeoJsonObject | null>(null);
   const [serviceEtaSec, setServiceEtaSec] = useState<number | null>(null);
@@ -898,6 +925,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       });
       if (!res.ok) throw new Error();
       setPaymentConfirmed(true);
+      setConfirmPaymentOpen(false);
     } catch {
       /* toast opcional */
     }
@@ -996,7 +1024,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     lastServiceRouteFetchRef.current = { lat: g.lat, lon: g.lon, at: now };
     setServiceRouteLoading(true);
     try {
-      // Backend espera from/to en formato lon,lat (OSRM).
+      // Backend espera from/to en formato lon,lat (Geoapify / GeoJSON).
       const res = await fetch(`/api/maps/route?from=${g.lon},${g.lat}&to=${serviceNavTarget.lon},${serviceNavTarget.lat}`);
       if (!res.ok) throw new Error("route");
       const data = (await res.json()) as { geometry?: GeoJsonObject; durationSec?: number };
@@ -1325,10 +1353,10 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
                 size="sm"
                 variant="secondary"
                 className="h-9 rounded-full px-3"
-                onClick={() => void confirmPayment()}
-                aria-label="Confirmar que recibiste el dinero"
+                onClick={() => setConfirmPaymentOpen(true)}
+                aria-label="Confirmar que recibiste el pago"
               >
-                Recibí el dinero
+                Recibí el pago
               </Button>
             )
           ) : null}
@@ -1685,6 +1713,32 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         </SheetContent>
       </Sheet>
 
+      <Dialog open={confirmPaymentOpen} onOpenChange={setConfirmPaymentOpen}>
+        <DialogContent className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>¿Confirmas que recibiste el pago?</DialogTitle>
+            <DialogDescription>
+              Solo marca esta opción cuando el cliente ya te haya entregado el dinero o la transferencia haya acreditado.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button type="button" variant="outline" onClick={() => setConfirmPaymentOpen(false)}>
+              No, volver
+            </Button>
+            <Button
+              type="button"
+              className="gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
+              onClick={() => {
+                void confirmPayment();
+              }}
+            >
+              <CheckCircle2 className="h-4 w-4" aria-hidden />
+              Sí, recibí el pago
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={startConfirmOpen} onOpenChange={setStartConfirmOpen}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
@@ -1788,32 +1842,55 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       <Dialog open={rateDialogOpen} onOpenChange={() => { /* bloqueado */ }}>
         <DialogContent
           hideClose
-          className="sm:max-w-md"
+          className="border-primary/20 bg-gradient-to-b from-primary/[0.07] via-background to-background sm:max-w-md"
           onPointerDownOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
-          <DialogHeader>
-            <DialogTitle>¿Cómo se portó el Cliente?</DialogTitle>
+          <DialogHeader className="space-y-3 text-center sm:text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 ring-2 ring-emerald-500/30">
+              <CheckCircle2 className="h-7 w-7 text-emerald-600 dark:text-emerald-400" aria-hidden />
+            </div>
+            <DialogTitle className="text-balance text-lg font-semibold leading-snug sm:text-xl">
+              {goSlug === "pack" ? "El envío ha terminado" : "El viaje ha terminado"}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-1 text-balance text-sm leading-relaxed text-muted-foreground">
+                <p className="text-foreground/90">
+                  {goSlug === "pack"
+                    ? "¿Estás conforme con el trato del cliente y la coordinación del paquete?"
+                    : "¿Estás conforme con el trato de tu pasajero?"}
+                </p>
+                <p>
+                  Calificá con las estrellas a{" "}
+                  <span className="font-semibold text-foreground">{rateTargetRef.current?.targetName ?? "tu cliente"}</span>{" "}
+                  para {mobilityServiceLabel(goSlug)}.
+                </p>
+              </div>
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Califica a <span className="font-medium text-foreground">{rateTargetRef.current?.targetName ?? "tu cliente"}</span>.
-            </p>
-            <div className="flex items-center justify-center gap-2">
-              {[1, 2, 3, 4, 5].map((v) => {
-                const active = v <= rateStars;
-                return (
-                  <button
-                    key={v}
-                    type="button"
-                    className="p-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => setRateStars(v)}
-                    aria-label={`${v} estrellas`}
-                  >
-                    <Star className={`h-8 w-8 ${active ? "text-amber-500 fill-amber-500" : "text-muted-foreground"}`} />
-                  </button>
-                );
-              })}
+          <div className="space-y-5">
+            <div className="rounded-xl border border-border/80 bg-card/90 px-2 py-5 shadow-sm sm:px-3">
+              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Tu calificación
+              </p>
+              <div className="flex items-center justify-center gap-1 sm:gap-2">
+                {[1, 2, 3, 4, 5].map((v) => {
+                  const active = v <= rateStars;
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      className="rounded-lg p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-1.5"
+                      onClick={() => setRateStars(v)}
+                      aria-label={`${v} estrellas`}
+                    >
+                      <Star
+                        className={`h-9 w-9 sm:h-8 sm:w-8 ${active ? "fill-amber-500 text-amber-500" : "text-muted-foreground/70"}`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <Button className="w-full" onClick={() => void submitRideRating()} disabled={rateBusy}>
               {rateBusy ? "Enviando…" : "Enviar calificación"}

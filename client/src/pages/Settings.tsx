@@ -1,10 +1,15 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearch } from "wouter";
-import { ArrowLeft, Loader2, User, Building2 } from "lucide-react";
+import { ArrowLeft, Car, Loader2, User, Building2, Trash2 } from "lucide-react";
+import { isGoVehicleProvider } from "@shared/provider-car-go";
+import { SETTINGS_VEHICLE_SECTION_QUERY_KEY } from "@shared/settings-notification-urls";
+import { useCategories, useCurrentProvider } from "@/hooks/use-mango-data";
+import { resolveVehicleKind } from "@/components/driver/cargo-map-markers";
+import { ProviderVehicleChangeRequestDialog } from "@/components/provider/ProviderVehicleChangeRequestDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,8 +24,6 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { useState } from "react";
-import { Trash2 } from "lucide-react";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import {
   AlertDialog,
@@ -37,6 +40,14 @@ import {
 function sanitizeAccountNumber(value: string): string {
   return value.replace(/[^\d\s\-]/g, "").replace(/\s+/g, " ").trim();
 }
+
+/** Etiqueta corta para tipo de unidad en resúmenes de configuración. */
+const GO_VEHICLE_TYPE_LABELS: Record<string, string> = {
+  motorcycle: "Moto",
+  car: "Carro",
+  pickup_truck: "Camioneta",
+  truck: "Camión",
+};
 
 const profileSchema = z.object({
   email: z.string().email("Correo inválido").optional().or(z.literal("")),
@@ -87,6 +98,57 @@ export default function Settings() {
   const [changeReqField, setChangeReqField] = useState<"email" | "name" | "phone">("phone");
   const [changeReqReason, setChangeReqReason] = useState("");
   const [isSendingRequest, setIsSendingRequest] = useState(false);
+  const [vehicleChangeOpen, setVehicleChangeOpen] = useState(false);
+  const vehicleSettingsSectionRef = useRef<HTMLDivElement | null>(null);
+  const [vehicleSectionHighlight, setVehicleSectionHighlight] = useState(false);
+
+  const isProfessional = (user as { role?: string } | null)?.role === "professional";
+  const { data: provider, isLoading: providerLoading, isError: providerError } = useCurrentProvider();
+  const { data: categories = [] } = useCategories();
+  const showGoVehicleCard =
+    isProfessional &&
+    !providerLoading &&
+    !providerError &&
+    provider != null &&
+    isGoVehicleProvider(provider, categories);
+
+  const { data: providerVehicleRow, isLoading: providerVehicleLoading } = useQuery({
+    queryKey: ["/api/me/provider-vehicle"],
+    queryFn: async () => {
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/me/provider-vehicle", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 401) return null;
+      if (!res.ok) return null;
+      return res.json() as Promise<Record<string, unknown> | null>;
+    },
+    enabled: isAuthenticated && showGoVehicleCard,
+  });
+
+  const openVehicleSectionFromNotification = useMemo(() => {
+    try {
+      return new URLSearchParams(searchQs || "").get(SETTINGS_VEHICLE_SECTION_QUERY_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }, [searchQs]);
+
+  useEffect(() => {
+    if (!openVehicleSectionFromNotification || !showGoVehicleCard) return;
+    if (providerVehicleLoading) return;
+    const el = vehicleSettingsSectionRef.current;
+    if (!el) return;
+    const scrollTimer = window.setTimeout(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setVehicleSectionHighlight(true);
+    }, 250);
+    const unhighlightTimer = window.setTimeout(() => setVehicleSectionHighlight(false), 5200);
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(unhighlightTimer);
+    };
+  }, [openVehicleSectionFromNotification, showGoVehicleCard, providerVehicleLoading]);
 
   const form = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -315,6 +377,82 @@ export default function Settings() {
       </div>
 
       <ThemeAppearanceCard className="mb-6" />
+
+      {showGoVehicleCard ? (
+        <>
+          <div
+            ref={vehicleSettingsSectionRef}
+            className={`mb-6 scroll-mt-24 rounded-xl transition-shadow duration-300 ${
+              vehicleSectionHighlight ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+            }`}
+          >
+            <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Car className="h-5 w-5" />
+                Tu vehículo (taxi / delivery / marketplace)
+              </CardTitle>
+              <CardDescription>
+                Si cambias de moto, carro o modalidad (taxi / delivery / marketplace), envía una solicitud. Un administrador debe
+                aprobarla antes de que quede registrada, igual que con el cambio de datos de cuenta.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {providerVehicleLoading ? (
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  Cargando datos del vehículo…
+                </p>
+              ) : providerVehicleRow &&
+                (providerVehicleRow.license_plate ||
+                  providerVehicleRow.brand ||
+                  providerVehicleRow.model ||
+                  providerVehicleRow.vehicle_type) ? (
+                <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+                  <p>
+                    <span className="text-muted-foreground">Tipo:</span>{" "}
+                    <span className="font-medium text-foreground">
+                      {GO_VEHICLE_TYPE_LABELS[
+                        resolveVehicleKind(providerVehicleRow.vehicle_type as string | undefined)
+                      ] ?? "Vehículo"}
+                    </span>
+                  </p>
+                  {(String(providerVehicleRow.brand ?? "").trim() ||
+                    String(providerVehicleRow.model ?? "").trim()) ? (
+                    <p>
+                      <span className="text-muted-foreground">Unidad:</span>{" "}
+                      <span className="font-medium text-foreground">
+                        {[providerVehicleRow.brand, providerVehicleRow.model].filter(Boolean).join(" ")}
+                        {providerVehicleRow.model_year != null ? ` · ${String(providerVehicleRow.model_year)}` : ""}
+                      </span>
+                    </p>
+                  ) : null}
+                  {providerVehicleRow.license_plate ? (
+                    <p>
+                      <span className="text-muted-foreground">Placa:</span>{" "}
+                      <span className="font-mono font-medium">{String(providerVehicleRow.license_plate)}</span>
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">
+                  Aún no hay un vehículo registrado o faltan datos. Completa la solicitud para que el equipo pueda
+                  validar tu unidad y puedas operar con normalidad.
+                </p>
+              )}
+              <Button type="button" variant="outline" className="w-full" onClick={() => setVehicleChangeOpen(true)}>
+                Solicitar cambio de vehículo
+              </Button>
+            </CardContent>
+          </Card>
+          </div>
+          <ProviderVehicleChangeRequestDialog
+            open={vehicleChangeOpen}
+            onOpenChange={setVehicleChangeOpen}
+            vehicleRow={providerVehicleRow ?? null}
+          />
+        </>
+      ) : null}
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">

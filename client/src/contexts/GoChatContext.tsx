@@ -4,6 +4,9 @@ type GoChatState = {
   isOpen: boolean;
   selectedConversationId: number | null;
   chatBadge: number;
+  /** Franja de recordatorio en el chat embebido Go (pasajero / conductor). */
+  mobilityChatReminder: string | null;
+  setMobilityChatReminder: (text: string | null) => void;
   openChat: () => void;
   /** Abre el drawer de chat y selecciona una conversación (p. ej. tras emparejar Car Go). */
   openChatWithConversation: (conversationId: number) => void;
@@ -25,6 +28,7 @@ export function GoChatProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   const [chatBadge, setChatBadge] = useState(0);
+  const [mobilityChatReminder, setMobilityChatReminder] = useState<string | null>(null);
 
   const openChat = useCallback(() => {
     setIsOpen(true);
@@ -52,6 +56,7 @@ export function GoChatProvider({ children }: { children: React.ReactNode }) {
     setIsOpen(false);
     setSelectedConversationId(null);
     setChatBadge(0);
+    setMobilityChatReminder(null);
   }, []);
 
   const value = useMemo<GoChatState>(
@@ -59,6 +64,8 @@ export function GoChatProvider({ children }: { children: React.ReactNode }) {
       isOpen,
       selectedConversationId,
       chatBadge,
+      mobilityChatReminder,
+      setMobilityChatReminder,
       openChat,
       openChatWithConversation,
       primeCarGoConversation,
@@ -67,7 +74,20 @@ export function GoChatProvider({ children }: { children: React.ReactNode }) {
       resetChat,
       setSelectedConversationId,
     }),
-    [isOpen, selectedConversationId, chatBadge, openChat, openChatWithConversation, primeCarGoConversation, closeChat, bumpChatBadge, resetChat]
+    [
+      isOpen,
+      selectedConversationId,
+      chatBadge,
+      mobilityChatReminder,
+      setMobilityChatReminder,
+      openChat,
+      openChatWithConversation,
+      primeCarGoConversation,
+      closeChat,
+      bumpChatBadge,
+      resetChat,
+      setSelectedConversationId,
+    ]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

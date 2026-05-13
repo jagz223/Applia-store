@@ -20,7 +20,7 @@ export type TaxiVehicleModalStep =
 
 export type TaxiPaymentMethod = "cash" | "bank_transfer";
 
-type VehicleOption = { type: TaxiVehicleKind; label: string; Icon: LucideIcon };
+type VehicleOption = { type: TaxiVehicleKind; label: string; Icon: LucideIcon; description?: string };
 
 const TAXI_MODAL_Z = 2_147_482_000;
 
@@ -219,7 +219,7 @@ export function TaxiVehicleSearchModal({
                     show: { transition: { staggerChildren: 0.06, delayChildren: 0.05 } },
                   }}
                 >
-                  {vehicleOptions.map(({ type, label, Icon }) => {
+                  {vehicleOptions.map(({ type, label, Icon, description }) => {
                     const sug = typeof suggestedUsdByVehicle?.[type] === "number" ? (suggestedUsdByVehicle[type] as number) : null;
                     return (
                     <motion.div
@@ -240,6 +240,11 @@ export function TaxiVehicleSearchModal({
                       >
                         <Icon className="h-7 w-7 shrink-0 text-primary sm:h-9 sm:w-9" aria-hidden />
                         <span className="text-xs font-semibold text-foreground sm:text-sm">{label}</span>
+                        {description ? (
+                          <span className="line-clamp-2 text-[10px] leading-tight text-muted-foreground sm:text-[11px]">
+                            {description}
+                          </span>
+                        ) : null}
                         <span className="text-[11px] sm:text-xs text-muted-foreground tabular-nums">
                           {sug == null ? "—" : `Ref. ${formatUsd(sug)}`}
                         </span>

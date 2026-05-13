@@ -11,7 +11,7 @@ import {
   FIRESTORE_COLLECTIONS,
   initializeFirebase,
 } from "./firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
 import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
 import type { 
@@ -828,6 +828,67 @@ class FirestoreStorageImpl implements IStorage {
       model_year: typeof d.model_year === "number" ? d.model_year : null,
       is_pet_friendly: !!d.is_pet_friendly,
     };
+  }
+
+  async getPrimaryVehicleFullByUserId(userId: string): Promise<Record<string, unknown> | null> {
+    if (!this.db) return null;
+    const uid = String(userId ?? "").trim();
+    if (!uid) return null;
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.VEHICLES).where("userId", "==", uid).limit(1).get();
+    if (snap.empty) return null;
+    const doc = snap.docs[0];
+    const data = doc.data() as Record<string, unknown>;
+    const idNum = parseInt(doc.id, 10);
+    return { ...data, id: Number.isFinite(idNum) ? idNum : data.id };
+  }
+
+  async upsertPrimaryProviderVehicle(input: {
+    providerId: number;
+    userId: string;
+    vehicle: InsertProviderVehicle;
+  }): Promise<{ id: number }> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.VEHICLES).where("userId", "==", input.userId).limit(20).get();
+    let targetRef: DocumentReference | null = null;
+    let targetId = 0;
+    for (const doc of snap.docs) {
+      const d = doc.data() as { providerId?: number; id?: number };
+      if (d.providerId === input.providerId) {
+        targetRef = doc.ref;
+        targetId = parseInt(doc.id, 10) || Number(d.id) || 0;
+        break;
+      }
+    }
+    if (!targetRef && !snap.empty) {
+      targetRef = snap.docs[0].ref;
+      const d0 = snap.docs[0].data() as { id?: number };
+      targetId = parseInt(snap.docs[0].id, 10) || Number(d0.id) || 0;
+    }
+    const v = input.vehicle;
+    const petAllowed = v.vehicle_type === "car" || v.vehicle_type === "pickup_truck";
+    const now = new Date();
+    const flat: Record<string, unknown> = {
+      providerId: input.providerId,
+      userId: input.userId,
+      license_plate: v.license_plate,
+      model_year: v.model_year,
+      brand: v.brand,
+      model: v.model,
+      vehicle_status: v.vehicle_status,
+      vehicle_type: v.vehicle_type,
+      is_pet_friendly: petAllowed ? Boolean(v.is_pet_friendly) : false,
+      exterior_color: v.exterior_color ?? null,
+      passenger_seats: v.passenger_seats ?? null,
+      insurance_expires_at: v.insurance_expires_at ?? null,
+      mileage_km: v.mileage_km ?? null,
+      service_notes: v.service_notes ?? null,
+      updatedAt: now,
+    };
+    if (targetRef) {
+      await targetRef.update(flat);
+      return { id: targetId };
+    }
+    return this.createProviderVehicle(input);
   }
 
   async updateProvider(id: number, data: import("./storage-contracts").ProviderUpdate): Promise<Provider | undefined> {
@@ -2787,18 +2848,38 @@ class FirestoreStorageImpl implements IStorage {
   }
 
   // ============ PETICIONES DE CAMBIO DE CUENTA ============
-  async createAccountChangeRequest(input: { userId: string; field: "email" | "name" | "phone"; reason: string }): Promise<any> {
+  async createAccountChangeRequest(input: {
+    userId: string;
+    field: "email" | "name" | "phone" | "vehicle";
+    reason: string;
+    proposal?: unknown;
+  }): Promise<any> {
     if (!this.db) throw new Error("Firestore no configurado");
     const userId = String(input.userId ?? "").trim();
     const field = input.field;
     const reason = String(input.reason ?? "").trim();
     if (!userId) throw new Error("userId requerido");
-    if (!["email", "name", "phone"].includes(field)) throw new Error("field inválido");
+    if (!["email", "name", "phone", "vehicle"].includes(field)) throw new Error("field inválido");
     if (!reason) throw new Error("reason requerido");
+    if (field === "vehicle" && (input.proposal == null || typeof input.proposal !== "object")) {
+      throw new Error("proposal requerido para cambio de vehículo");
+    }
+
+    const pend = await this.db
+      .collection(FIRESTORE_COLLECTIONS.ACCOUNT_CHANGE_REQUESTS)
+      .where("userId", "==", userId)
+      .where("status", "==", "pending")
+      .get();
+    for (const d of pend.docs) {
+      const f = String((d.data() as any)?.field ?? "");
+      if (field === "vehicle" && f === "vehicle") {
+        throw new Error("Ya tienes una solicitud de vehículo pendiente.");
+      }
+    }
 
     const id = await this.getNextId("account_change_requests");
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.ACCOUNT_CHANGE_REQUESTS).doc(id.toString());
-    const created = {
+    const created: Record<string, unknown> = {
       id,
       userId,
       field,
@@ -2808,6 +2889,9 @@ class FirestoreStorageImpl implements IStorage {
       resolvedAt: null,
       resolvedBy: null,
     };
+    if (field === "vehicle") {
+      created.proposal = input.proposal;
+    }
     await docRef.set(created);
     return created;
   }

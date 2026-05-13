@@ -126,6 +126,11 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       const u = data.url ?? data.data?.url;
       return typeof u === "string" && u.startsWith("/") ? u : "/settings";
     }
+    case "vehicle_change_request_approved":
+    case "vehicle_change_request_rejected": {
+      const u = data.url ?? data.data?.url;
+      return typeof u === "string" && u.startsWith("/") ? u : "/settings";
+    }
     default:
       return "/dashboard";
   }
@@ -251,6 +256,10 @@ export function NotificationBell() {
         return <Bell className="h-4 w-4 text-green-500" />;
       case "account_change_request_rejected":
         return <Bell className="h-4 w-4 text-amber-500" />;
+      case "vehicle_change_request_approved":
+        return <Bell className="h-4 w-4 text-green-500" />;
+      case "vehicle_change_request_rejected":
+        return <Bell className="h-4 w-4 text-amber-500" />;
       default:
         return <Bell className="h-4 w-4 text-gray-500" />;
     }
@@ -349,6 +358,11 @@ export function NotificationBell() {
       if (name && amount) return `${name} solicito retirar $${amount} USD. Revisa Solicitudes de Retiro en el Panel de Administracion.`;
       return "Un asociado solicito retirar fondos. Revisa la pestana Solicitudes de Retiro en el Panel de Administracion.";
     }
+    if (type === "admin" && data?.type === "pending_account_change_request") {
+      const msg = data?.message ?? data?.data?.message;
+      if (typeof msg === "string" && msg.trim()) return msg.trim();
+      return "Un asociado envió una solicitud de cambio de datos o vehículo. Revisa Gestión de asociados.";
+    }
     if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
       return data?.message ?? "El retiro fue procesado por otro administrador. Revisa Solicitudes de Retiro.";
     }
@@ -365,6 +379,13 @@ export function NotificationBell() {
         ? "Abre Configuración para actualizar tu perfil."
         : "Revisa o vuelve a solicitar el cambio en Configuración.";
     }
+    if (type === "vehicle_change_request_approved" || type === "vehicle_change_request_rejected") {
+      const msg = data?.message ?? (data as any)?.data?.message;
+      if (typeof msg === "string" && msg.trim()) return msg.trim();
+      return type === "vehicle_change_request_approved"
+        ? "Abre Configuración para ver tu vehículo actualizado."
+        : "Revisa el motivo en Configuración o envía una nueva solicitud.";
+    }
     return null;
   };
 
@@ -378,6 +399,7 @@ export function NotificationBell() {
     }
     if (type === "admin" && data?.type === "recharge_pending") return "Nueva solicitud de recarga";
     if (type === "admin" && data?.type === "withdrawal_requested") return "Nueva solicitud de retiro";
+    if (type === "admin" && data?.type === "pending_account_change_request") return "Nueva petición de asociado";
     if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
       return data?.action === "rejected" ? "Retiro rechazado por otro admin" : "Retiro aprobado por otro admin";
     }
@@ -412,6 +434,11 @@ export function NotificationBell() {
       const label =
         field === "email" ? "Correo" : field === "name" ? "Nombre" : field === "phone" ? "Teléfono" : "Perfil";
       return type === "account_change_request_approved" ? `${label}: aprobado` : `${label}: rechazado`;
+    }
+    if (type === "vehicle_change_request_approved" || type === "vehicle_change_request_rejected") {
+      const t = data?.title ?? (data as any)?.data?.title;
+      if (typeof t === "string" && t.trim()) return t.trim();
+      return type === "vehicle_change_request_approved" ? "Vehículo actualizado" : "Vehículo: solicitud rechazada";
     }
     if (type === "message") {
       const d = data ?? ({} as any);

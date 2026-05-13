@@ -24,6 +24,12 @@ export function effectiveHiddenCategorySlugs(apiHidden: string[] | undefined | n
 /** Car / Shop / Pack Go tienen vistas propias (Go); no deben mezclarse en el catálogo general de Explorar. */
 export const MOBILITY_GO_PROVIDER_SLUGS = ["transport", "marketplace", "delivery"] as const;
 
+/** Taxi (`transport`), delivery o marketplace: perfiles que operan como conductores Go con vehículo. */
+export function isMobilityGoDriverVehicleCategorySlug(slug: string | null | undefined): boolean {
+  const s = String(slug ?? "").trim().toLowerCase();
+  return (MOBILITY_GO_PROVIDER_SLUGS as readonly string[]).includes(s);
+}
+
 export const CATEGORY_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   technical: "Servicios Técnicos",
   professional: "Servicios Profesionales",

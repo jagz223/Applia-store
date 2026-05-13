@@ -113,8 +113,13 @@ export interface IStorage
   createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any>;
   markNotificationAsRead(notificationId: number): Promise<void>;
 
-  // Peticiones de cambio de cuenta (correo/nombre/teléfono)
-  createAccountChangeRequest(input: { userId: string; field: "email" | "name" | "phone"; reason: string }): Promise<any>;
+  // Peticiones de cambio de cuenta (correo/nombre/teléfono/vehículo Go)
+  createAccountChangeRequest(input: {
+    userId: string;
+    field: "email" | "name" | "phone" | "vehicle";
+    reason: string;
+    proposal?: unknown;
+  }): Promise<any>;
   getMyAccountChangeRequests(userId: string): Promise<any[]>;
   getPendingAccountChangeRequests(): Promise<any[]>;
   resolveAccountChangeRequest(args: { id: number; action: "approve" | "reject"; adminUserId: string }): Promise<any>;
@@ -1360,23 +1365,34 @@ export class InMemoryStorage implements IStorage {
 
   // ============== PETICIONES DE CAMBIO DE CUENTA ==============
 
-  async createAccountChangeRequest(input: { userId: string; field: "email" | "name" | "phone"; reason: string }): Promise<any> {
+  async createAccountChangeRequest(input: {
+    userId: string;
+    field: "email" | "name" | "phone" | "vehicle";
+    reason: string;
+    proposal?: unknown;
+  }): Promise<any> {
     const userId = String(input.userId ?? "").trim();
     const field = input.field;
     const reason = String(input.reason ?? "").trim();
     if (!userId) throw new Error("userId requerido");
-    if (!["email", "name", "phone"].includes(field)) throw new Error("field inválido");
+    if (!["email", "name", "phone", "vehicle"].includes(field)) throw new Error("field inválido");
     if (!reason) throw new Error("reason requerido");
+    if (field === "vehicle") {
+      if (this.accountChangeRequests.some((r) => r.userId === userId && r.status === "pending" && r.field === "vehicle")) {
+        throw new Error("Ya tienes una solicitud de vehículo pendiente.");
+      }
+    }
 
     const created = {
       id: this.accountChangeRequestIdCounter++,
       userId,
       field,
       reason,
-      status: "pending",
+      status: "pending" as const,
       createdAt: new Date(),
       resolvedAt: null,
       resolvedBy: null,
+      ...(field === "vehicle" && input.proposal != null ? { proposal: input.proposal } : {}),
     };
     this.accountChangeRequests.unshift(created);
     return created;
@@ -1578,6 +1594,41 @@ export class InMemoryStorage implements IStorage {
       model_year: veh.model_year ?? null,
       is_pet_friendly: !!veh.is_pet_friendly,
     };
+  }
+
+  async getPrimaryVehicleFullByUserId(userId: string): Promise<Record<string, unknown> | null> {
+    const row = this.vehicles.find((v: { userId?: string }) => v.userId === userId);
+    if (!row) return null;
+    const veh = row.vehicle as import("@shared/vehicle-schema").InsertProviderVehicle | undefined;
+    if (!veh) return null;
+    return {
+      id: row.id,
+      providerId: row.providerId,
+      userId: row.userId,
+      ...veh,
+    };
+  }
+
+  async upsertPrimaryProviderVehicle(input: {
+    providerId: number;
+    userId: string;
+    vehicle: import("@shared/vehicle-schema").InsertProviderVehicle;
+  }): Promise<{ id: number }> {
+    const idx = this.vehicles.findIndex(
+      (v: { userId?: string; providerId?: number }) => v.userId === input.userId && v.providerId === input.providerId
+    );
+    if (idx !== -1) {
+      const id = this.vehicles[idx].id;
+      this.vehicles[idx] = { ...this.vehicles[idx], vehicle: input.vehicle };
+      return { id };
+    }
+    const j = this.vehicles.findIndex((v: { userId?: string }) => v.userId === input.userId);
+    if (j !== -1) {
+      const id = this.vehicles[j].id;
+      this.vehicles[j] = { ...this.vehicles[j], providerId: input.providerId, vehicle: input.vehicle };
+      return { id };
+    }
+    return this.createProviderVehicle(input);
   }
 
   async updateProvider(id: number, data: import("./storage-contracts").ProviderUpdate): Promise<Provider | undefined> {
