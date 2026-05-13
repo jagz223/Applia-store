@@ -1,6 +1,6 @@
 /**
- * Texto legal: condiciones de uso para prestadores (profesionales) — GenFeb.
- * Se muestra en el modal obligatorio hasta aceptar.
+ * Texto legal: condiciones de uso (prestadores y clientes) — GenFeb.
+ * Se muestra en /politics y en el modal obligatorio hasta aceptar (prestadores).
  */
 export function ProviderTermsOfUseContent() {
   return (
@@ -22,8 +22,10 @@ export function ProviderTermsOfUseContent() {
         <p>
           <strong>2. OBJETO Y CATEGORÍAS DE SERVICIOS</strong>
           <br />
-          El objeto es el uso de la infraestructura tecnológica de GenFeb para la intermediación de servicios y
-          productos en las siguientes áreas:
+          El objeto es el uso de la infraestructura de GenFeb como <strong>canal de difusión y contacto</strong>: publicar
+          perfiles y servicios, facilitar la comunicación (incluido el chat) y herramientas operativas. La contratación y
+          el cobro del servicio o producto entre el cliente y el prestador se acuerdan <strong>entre esas partes</strong>;
+          GenFeb no actúa como intermediario financiero ni procesa esos pagos en la aplicación. Áreas cubiertas:
         </p>
         <ul className="list-disc pl-5 space-y-1">
           <li>
@@ -55,24 +57,39 @@ export function ProviderTermsOfUseContent() {
         </p>
         <ul className="list-disc pl-5 space-y-1">
           <li>
-            <strong>Comisión por Intermediación:</strong> Una tasa fija del 10% sobre el valor bruto de cada
-            transacción o servicio concretado a través de La Plataforma.
+            <strong>Cuota por visibilidad y uso de la plataforma:</strong> GenFeb puede cobrar una{" "}
+            <strong>suscripción o cuota periódica fija</strong> por mantener activa la publicación del perfil y los
+            servicios, y por el acceso a las funciones de la aplicación. El monto, periodicidad y condiciones concretas se
+            informan <strong>en la propia aplicación</strong> y pueden variar según categoría o tipo de prestador. Esa
+            cuota <strong>no sustituye ni incluye</strong> el precio del servicio que el Prestador cobre al cliente final.
           </li>
           <li>
-            <strong>Suscripción de Uso:</strong> Un pago mensual base de $10,00 USD (Diez dólares americanos) por
-            concepto de mantenimiento de perfil y acceso a la red de clientes.
+            <strong>Sin cobro por transacción a través de GenFeb:</strong> La Plataforma{" "}
+            <strong>no retiene, no custodia ni liquida</strong> entre las partes el pago del servicio contratado entre
+            cliente y Prestador. Los medios, forma y momento del pago son acordados directamente entre ellos (incluido el
+            uso del chat u otros canales que faciliten el contacto).
+          </li>
+          <li>
+            <strong>Precios de referencia, regateo (taxi, delivery y análogos):</strong> En categorías donde la
+            aplicación muestre <strong>precios base o de referencia</strong>, dichos importes son orientativos. El
+            cliente y el conductor o repartidor pueden <strong>ajustar el precio</strong> mediante las funciones de
+            regateo o negociación previstas, complementadas con el chat, hasta alcanzar un acuerdo.{" "}
+            <strong>GenFeb no cobra comisión ni tarifa sobre ese acuerdo</strong>; el precio final y su cumplimiento son
+            responsabilidad exclusiva de las partes.
           </li>
         </ul>
         <p>
           <strong>4.1. Cláusula de Actualización de Valores:</strong>
           <br />
-          GenFeb se reserva la facultad de ajustar las tarifas o suscripciones descritas bajo los
-          siguientes justificativos:
+          GenFeb se reserva la facultad de ajustar la cuota de suscripción o visibilidad y demás tarifas propias de la
+          Plataforma, con los siguientes criterios orientativos:
         </p>
         <ul className="list-disc pl-5 space-y-1">
           <li>Inversión en mejoras de ciberseguridad y nuevas funciones de la aplicación GenFeb.</li>
-          <li>Ajustes por inflación (IPC) o incrementos en costos de proveedores de software y pasarelas de pago.</li>
-          <li>Inversión en campañas de marketing masivo para beneficio de los Prestadores.</li>
+          <li>
+            Ajustes por inflación (IPC) o incrementos en costos de infraestructura, software y operación del servicio.
+          </li>
+          <li>Inversión en campañas de marketing para beneficio de la comunidad de Prestadores.</li>
         </ul>
         <p>
           <strong>5. RÉGIMEN DISCIPLINARIO Y SANCIONES</strong>
@@ -103,38 +120,42 @@ export function ProviderTermsOfUseContent() {
       </section>
 
       <section className="space-y-2">
-        <p className="font-semibold">PARTE II: AVISO DE SEGURIDAD Y GARANTÍA (PARA EL CLIENTE FINAL)</p>
-        <p className="font-medium">¡Tu seguridad y tus pagos dentro de la plataforma están protegidos!</p>
+        <p className="font-semibold">PARTE II: INFORMACIÓN PARA EL CLIENTE FINAL (CONTACTO, PRECIOS Y PAGOS)</p>
         <p>
-          Para garantizar una experiencia de alta calidad, GenFeb solo respalda los servicios gestionados íntegramente a
-          través de nuestra plataforma oficial. Al realizar tus pagos y contactos dentro de GenFeb, obtienes:
+          GenFeb es principalmente un <strong>espacio para conocer prestadores</strong>, ver información publicada y{" "}
+          <strong>ponerse en contacto</strong> (incluido el chat). El contrato de prestación del servicio o entrega del
+          bien lo celebran <strong>el cliente y el prestador entre sí</strong>; el pago acordado se realiza por medios y
+          condiciones que ellos definan. <strong>GenFeb no mueve ni custodia el dinero de esa operación</strong> dentro
+          de la aplicación en este modelo de uso.
         </p>
         <ul className="list-disc pl-5 space-y-1">
           <li>
-            <strong>Garantía Técnica:</strong> Mediación en caso de fallos en servicios profesionales.
+            <strong>Precio acordado:</strong> En servicios como taxi o delivery pueden mostrarse precios base o de
+            referencia; el importe final puede modificarse mediante <strong>regateo o negociación</strong> y el chat,
+            hasta que cliente y conductor o repartidor estén de acuerdo.
           </li>
           <li>
-            <strong>Seguro de Ruta:</strong> Monitoreo GPS en servicios de transporte (Taxis/Tricimotos).
+            <strong>Verificación:</strong> Cuando corresponda, GenFeb puede exigir documentación a los Prestadores con
+            fines de verificación; ello no sustituye la diligencia del cliente al contratar.
           </li>
           <li>
-            <strong>Protección de Compra:</strong> Garantía de recepción del producto exacto en el Marketplace.
-          </li>
-          <li>
-            <strong>Verificación:</strong> Acceso exclusivo a prestadores con antecedentes y documentos validados.
+            <strong>Limitación:</strong> Las herramientas de la app (mensajería, ubicación u otras) son auxiliares. Salvo
+            disposición legal imperativa, GenFeb no garantiza el resultado del servicio ni asume obligación de
+            reembolso por disputas comerciales o de pago entre cliente y prestador.
           </li>
         </ul>
         <p>
-          <strong>⚠️ ADVERTENCIA:</strong> Los acuerdos cerrados fuera de los canales oficiales de GenFeb pueden quedar
-          fuera del alcance de las garantías y medidas de soporte que la plataforma ofrece cuando la relación se gestiona
-          íntegramente a través de la aplicación.
+          <strong>⚠️ ADVERTENCIA:</strong> Cualquier acuerdo económico o prestacional queda bajo responsabilidad de las
+          partes que contratan. Se recomienda dejar constancia por los canales que utilicen y verificar identidad y
+          condiciones antes de pagar o recibir el servicio.
         </p>
       </section>
 
       <section className="space-y-2">
-        <p className="font-semibold">PARTE III: PROTOCOLO ADMINISTRATIVO DE VERIFICACIÓN (USO INTERNO)</p>
+        <p className="font-semibold">PARTE III: REQUISITOS DE VERIFICACIÓN PARA PRESTADORES</p>
         <p>
-          Para la activación de cualquier Prestador, el administrador de GenFeb debe validar la carga de los siguientes
-          documentos en el sistema:
+          Para la activación o mantenimiento de la cuenta de Prestador, GenFeb puede solicitar y validar en el sistema la
+          siguiente documentación (según políticas vigentes):
         </p>
         <ul className="list-disc pl-5 space-y-1">
           <li>
