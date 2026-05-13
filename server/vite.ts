@@ -9,6 +9,12 @@ import { nanoid } from "nanoid";
 const viteLogger = createLogger();
 
 export async function setupVite(server: Server, app: Express) {
+  const faviconPng = path.resolve(import.meta.dirname, "..", "client", "public", "favicon.png");
+  app.get("/favicon.ico", (_req, res) => {
+    res.type("image/png");
+    res.sendFile(faviconPng);
+  });
+
   const serverOptions = {
     middlewareMode: true,
     hmr: { server, path: "/vite-hmr" },
