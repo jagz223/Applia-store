@@ -43,6 +43,8 @@ type Props = {
   mode: "page" | "embedded";
   selectedConversationId?: number | null;
   onSelectedConversationIdChange?: (id: number | null) => void;
+  /** Chat Go embebido: recordatorio de contexto (pasajero ↔ conductor) sin tocar reservas. */
+  mobilityEmbeddedReminder?: string | null;
 };
 
 /** Altura del área de chat (viewport menos header aproximado). */
@@ -73,7 +75,12 @@ function stripConversationFromUrl(setLocation: (path: string, opts?: { replace?:
   setLocation(qs ? `/chat?${qs}` : "/chat", { replace: true });
 }
 
-export function ChatPanel({ mode, selectedConversationId: externalId, onSelectedConversationIdChange }: Props) {
+export function ChatPanel({
+  mode,
+  selectedConversationId: externalId,
+  onSelectedConversationIdChange,
+  mobilityEmbeddedReminder = null,
+}: Props) {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const allowNavigate = mode === "page";
   const [pathname, setLocation] = useLocation();
@@ -209,7 +216,10 @@ export function ChatPanel({ mode, selectedConversationId: externalId, onSelected
           : null
       : null;
 
-  const chatReminderText = graceBannerText ?? bookingOrServiceReminder;
+  const chatReminderText =
+    graceBannerText ??
+    bookingOrServiceReminder ??
+    (mode === "embedded" && mobilityEmbeddedReminder ? mobilityEmbeddedReminder : null);
 
   const serviceChatLocked =
     selectedConversation?.messagesLocked === true ||

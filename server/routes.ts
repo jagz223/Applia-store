@@ -62,7 +62,7 @@ export async function registerRoutes(
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.json(null);
-      const v = await genFebStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id);
+      const v = await genFebStorage.getPrimaryVehicleFullByUserId(userId);
       res.json(v ?? null);
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });

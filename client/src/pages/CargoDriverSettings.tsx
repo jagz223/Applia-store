@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Car, LayoutDashboard, Loader2, Route, Star } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider } from "@/hooks/use-mango-data";
-import { isCarGoProvider } from "@shared/provider-car-go";
+import { isGoVehicleProvider } from "@shared/provider-car-go";
 import { resolveVehicleKind } from "@/components/driver/cargo-map-markers";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { loadTripLog, type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton";
+import { ProviderVehicleChangeRequestDialog } from "@/components/provider/ProviderVehicleChangeRequestDialog";
 
 const VEHICLE_LABEL: Record<string, string> = {
   motorcycle: "Moto",
@@ -21,13 +22,18 @@ const VEHICLE_LABEL: Record<string, string> = {
 };
 
 export default function CargoDriverSettings() {
-  const [, setLocation] = useLocation();
+  const [loc, setLocation] = useLocation();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
   const [localTrips, setLocalTrips] = useState<CargoDriverTripLog[]>([]);
+  const [vehicleChangeOpen, setVehicleChangeOpen] = useState(false);
 
-  const allowed = !!provider?.isVerified && isCarGoProvider(provider, categories);
+  const isDeliveryUi = loc.includes("/delivery/");
+  const goDriverBase = isDeliveryUi ? "/go/delivery/driver" : "/go/taxi/driver";
+  const goModuleLabel = isDeliveryUi ? "Delivery" : "Taxi";
+
+  const allowed = !!provider?.isVerified && isGoVehicleProvider(provider, categories);
 
   const { data: vehicle, isLoading: vehicleLoading } = useQuery({
     queryKey: ["/api/me/provider-vehicle"],
@@ -38,13 +44,7 @@ export default function CargoDriverSettings() {
       });
       if (res.status === 401) return null;
       if (!res.ok) return null;
-      return res.json() as Promise<{
-        vehicle_type: string;
-        brand?: string | null;
-        model?: string | null;
-        license_plate?: string | null;
-        model_year?: number | null;
-      } | null>;
+      return res.json() as Promise<Record<string, unknown> | null>;
     },
     enabled: isAuthenticated && !authLoading,
   });
@@ -88,7 +88,7 @@ export default function CargoDriverSettings() {
     "Conductor";
 
   const vehicleLabel = (() => {
-    const k = resolveVehicleKind(vehicle?.vehicle_type);
+    const k = resolveVehicleKind(vehicle?.vehicle_type as string | undefined);
     return VEHICLE_LABEL[k] ?? "Vehículo";
   })();
 
@@ -114,13 +114,17 @@ export default function CargoDriverSettings() {
       <div className="container mx-auto max-w-lg px-4 pt-6">
         <div className="mb-6 flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="icon" className="shrink-0" asChild>
-            <Link href="/go/taxi/driver" aria-label="Volver a Taxi">
+            <Link href={goDriverBase} aria-label={`Volver a ${goModuleLabel}`}>
               <ArrowLeft className="h-5 w-5" />
             </Link>
           </Button>
           <div className="min-w-0 flex-1">
-            <h1 className="font-display text-2xl font-bold text-foreground">Taxi — Configuración</h1>
-            <p className="text-sm text-muted-foreground">Tu panel como conductor (no el panel general de asociado).</p>
+            <h1 className="font-display text-2xl font-bold text-foreground">
+              {goModuleLabel} — Configuración
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Tu panel como conductor {isDeliveryUi ? "de reparto" : "de taxi"} (no el panel general de asociado).
+            </p>
           </div>
           <Button
             variant="outline"
@@ -166,7 +170,7 @@ export default function CargoDriverSettings() {
               <Car className="h-5 w-5 text-primary" />
               Tu vehículo
             </CardTitle>
-            <CardDescription>Datos registrados en Taxi</CardDescription>
+            <CardDescription>Datos registrados en {goModuleLabel}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {vehicleLoading ? (
@@ -177,7 +181,7 @@ export default function CargoDriverSettings() {
                   <span className="text-muted-foreground">Tipo:</span>{" "}
                   <span className="font-medium text-foreground">{vehicleLabel}</span>
                 </p>
-                {(vehicle.brand || vehicle.model) && (
+                {(String(vehicle.brand ?? "").trim() || String(vehicle.model ?? "").trim()) ? (
                   <p>
                     <span className="text-muted-foreground">Unidad:</span>{" "}
                     <span className="font-medium text-foreground">
@@ -185,19 +189,28 @@ export default function CargoDriverSettings() {
                       {vehicle.model_year != null ? ` · ${vehicle.model_year}` : ""}
                     </span>
                   </p>
-                )}
-                {vehicle.license_plate && (
+                ) : null}
+                {String(vehicle.license_plate ?? "").trim() ? (
                   <p>
                     <span className="text-muted-foreground">Placa:</span>{" "}
-                    <span className="font-mono font-medium">{vehicle.license_plate}</span>
+                    <span className="font-mono font-medium">{String(vehicle.license_plate)}</span>
                   </p>
-                )}
+                ) : null}
               </>
             ) : (
-              <p className="text-muted-foreground">No hay datos de vehículo enlazados.</p>
+              <p className="text-muted-foreground">No hay datos de vehículo enlazados. Solicita el alta o cambio para poder operar.</p>
             )}
+            <Button type="button" variant="outline" className="mt-3 w-full" onClick={() => setVehicleChangeOpen(true)}>
+              Solicitar cambio de vehículo
+            </Button>
           </CardContent>
         </Card>
+
+        <ProviderVehicleChangeRequestDialog
+          open={vehicleChangeOpen}
+          onOpenChange={setVehicleChangeOpen}
+          vehicleRow={vehicle ?? null}
+        />
 
         <Card>
           <CardHeader className="pb-2">
@@ -208,12 +221,12 @@ export default function CargoDriverSettings() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold tabular-nums text-foreground">{tripCount}</p>
-            <p className="text-xs text-muted-foreground mt-1">Viajes completados en Taxi.</p>
+            <p className="text-xs text-muted-foreground mt-1">Viajes completados en {goModuleLabel}.</p>
           </CardContent>
         </Card>
 
         <Button className="mt-8 w-full" variant="secondary" asChild>
-          <Link href="/go/taxi/driver">Volver a servicios de Taxi</Link>
+          <Link href={goDriverBase}>Volver a servicios de {goModuleLabel}</Link>
         </Button>
       </div>
     </div>

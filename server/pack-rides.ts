@@ -24,7 +24,12 @@ import {
   RIDER_DRIVER_NOT_AVAILABLE_MESSAGE,
 } from "@shared/mobility-negotiation";
 import { driverIsBusyCrossModule, registerPackDriverBusy } from "./driver-busy-cross-module";
+import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import crypto from "crypto";
+
+/** Primer mensaje del hilo al crear la conversación del envío (sin mencionar precio por chat aún). */
+const PACK_RIDE_CHAT_OPENING =
+  "Chat iniciado. Podéis usar este chat para coordinar ajustes del envío cuando lo necesiten.";
 
 export type PackVehicleKind = "moto" | "auto" | "camioneta";
 export type PackPaymentMethod = "cash" | "bank_transfer";
@@ -99,6 +104,7 @@ type RideRecord = {
   currentOfferDriverId: string | null;
   offerExpiresAt: number | null;
   driverSearchingClient?: boolean;
+  riderNotifiedDriverNearPickup?: boolean;
   financialsSettled?: boolean;
   declinedAtByDriverId?: Record<string, number>;
   isNegotiated?: boolean;
@@ -161,6 +167,24 @@ function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: numb
   const la2 = (b.lat * Math.PI) / 180;
   const x = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+}
+
+const PACK_DRIVER_NEAR_PICKUP_RADIUS_M = 400;
+
+async function appendPackRideSystemMessage(conversationId: number | null | undefined, content: string): Promise<void> {
+  const cid = conversationId == null ? NaN : Number(conversationId);
+  if (!Number.isFinite(cid)) return;
+  try {
+    await genFebStorage.createMessage({
+      conversationId: cid,
+      senderId: CHAT_SYSTEM_SENDER_ID,
+      content,
+      type: "system",
+      status: "sent",
+    });
+  } catch (e) {
+    console.error("[pack] appendPackRideSystemMessage", e);
+  }
 }
 
 function freshDriversForVehicle(kind: PackVehicleKind): DriverPresence[] {
@@ -432,6 +456,30 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
       if (!data?.rideId) return;
       const ride = rides.get(data.rideId);
       if (!ride || ride.driverUserId !== user.id || (ride.status !== "matched" && ride.status !== "in_progress")) return;
+      const lat = Number(data.lat);
+      const lon = Number(data.lon);
+      if (
+        ride.status === "matched" &&
+        !ride.riderNotifiedDriverNearPickup &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon)
+      ) {
+        const m = haversineM(ride.start, { lat, lon });
+        if (m <= PACK_DRIVER_NEAR_PICKUP_RADIUS_M) {
+          ride.riderNotifiedDriverNearPickup = true;
+          void appendPackRideSystemMessage(
+            ride.conversationId,
+            "Tu repartidor está muy cerca del punto de recogida del paquete.",
+          );
+          try {
+            void notificationService.sendPushToUser(ride.riderUserId, {
+              title: "Delivery",
+              body: "Tu repartidor está cerca del punto de recogida.",
+              data: { url: "/go/delivery", type: "pack_driver_near_pickup", rideId: data.rideId },
+            });
+          } catch {}
+        }
+      }
       io.to(`user:${ride.riderUserId}`).emit("pack:ride:driver_location", {
         rideId: data.rideId,
         lat: data.lat,
@@ -891,10 +939,9 @@ export function registerPackRideRoutes(app: Express) {
         ride.conversationId = conversationId;
         await genFebStorage.createMessage({
           conversationId,
-          senderId: driverId,
-          content:
-            "Chat iniciado. Aquí pueden acordar el precio final del envío. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
-          type: "text",
+          senderId: CHAT_SYSTEM_SENDER_ID,
+          content: PACK_RIDE_CHAT_OPENING,
+          type: "system",
           status: "sent",
         });
       } catch (ce) {
@@ -995,10 +1042,9 @@ export function registerPackRideRoutes(app: Express) {
         ride.conversationId = conversationId;
         await genFebStorage.createMessage({
           conversationId,
-          senderId: driverUserId,
-          content:
-            "Chat iniciado. Aquí pueden acordar el precio final del envío. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
-          type: "text",
+          senderId: CHAT_SYSTEM_SENDER_ID,
+          content: PACK_RIDE_CHAT_OPENING,
+          type: "system",
           status: "sent",
         });
       } catch {}
@@ -1165,10 +1211,9 @@ export function registerPackRideRoutes(app: Express) {
         ride.conversationId = conversationId;
         await genFebStorage.createMessage({
           conversationId,
-          senderId: driverId,
-          content:
-            "Chat iniciado. Aquí pueden acordar el precio final del envío. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
-          type: "text",
+          senderId: CHAT_SYSTEM_SENDER_ID,
+          content: PACK_RIDE_CHAT_OPENING,
+          type: "system",
           status: "sent",
         });
       } catch {}
@@ -1199,10 +1244,25 @@ export function registerPackRideRoutes(app: Express) {
       const ride = rides.get(rideId);
       if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
       if (ride.driverUserId !== driverUserId) return res.status(403).json({ message: "Sin acceso" });
+      if (ride.status !== "matched") return res.status(409).json({ message: "No se puede buscar en este estado" });
+      if (ride.driverSearchingClient) {
+        return res.json({ ok: true, alreadySearching: true });
+      }
       ride.driverSearchingClient = true;
       const io = getIO();
       io?.to(`user:${ride.riderUserId}`).emit("pack:ride:driver_searching", { rideId });
       io?.to(`user:${driverUserId}`).emit("pack:ride:driver_searching", { rideId });
+      void appendPackRideSystemMessage(
+        ride.conversationId,
+        "El repartidor inició la búsqueda para coordinar contigo la recogida del paquete.",
+      );
+      try {
+        void notificationService.sendPushToUser(ride.riderUserId, {
+          title: "Delivery",
+          body: "Tu repartidor inició la búsqueda para llegar hasta ti.",
+          data: { url: "/go/delivery", type: "pack_driver_searching", rideId },
+        });
+      } catch {}
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
@@ -1222,6 +1282,19 @@ export function registerPackRideRoutes(app: Express) {
       const io = getIO();
       io?.to(`user:${ride.riderUserId}`).emit("pack:ride:started", { rideId });
       io?.to(`user:${driverUserId}`).emit("pack:ride:started", { rideId });
+      if (ride.conversationId != null) {
+        try {
+          await genFebStorage.createMessage({
+            conversationId: ride.conversationId,
+            senderId: CHAT_SYSTEM_SENDER_ID,
+            content: "Envío en curso. Podéis seguir coordinando por este chat durante el trayecto.",
+            type: "system",
+            status: "sent",
+          });
+        } catch (me) {
+          console.error("[pack] seed chat on start", me);
+        }
+      }
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
@@ -1239,6 +1312,28 @@ export function registerPackRideRoutes(app: Express) {
       const lat = Number((req.body as any)?.lat);
       const lon = Number((req.body as any)?.lon);
       const io = getIO();
+      if (
+        ride.status === "matched" &&
+        !ride.riderNotifiedDriverNearPickup &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon)
+      ) {
+        const m = haversineM(ride.start, { lat, lon });
+        if (m <= PACK_DRIVER_NEAR_PICKUP_RADIUS_M) {
+          ride.riderNotifiedDriverNearPickup = true;
+          void appendPackRideSystemMessage(
+            ride.conversationId,
+            "Tu repartidor está muy cerca del punto de recogida del paquete.",
+          );
+          try {
+            void notificationService.sendPushToUser(ride.riderUserId, {
+              title: "Delivery",
+              body: "Tu repartidor está cerca del punto de recogida.",
+              data: { url: "/go/delivery", type: "pack_driver_near_pickup", rideId },
+            });
+          } catch {}
+        }
+      }
       io?.to(`user:${ride.riderUserId}`).emit("pack:ride:driver_location", { rideId, lat, lon });
       res.json({ ok: true });
     } catch (e: any) {

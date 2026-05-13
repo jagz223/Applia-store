@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { 
@@ -78,8 +78,113 @@ import { firstAvailableSubcategoryIcon } from "@shared/subcategory-lucide-pickli
 import { SubcategoryIconPicker } from "@/components/admin/SubcategoryIconPicker";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
+import {
+  sanitizeDecimalUsdInput,
+  parseDecimalUsdInputToNumber,
+  usdAmountInputDisplay,
+  isTrailingDecimalUsdIncomplete,
+  coerceUsdDraftValueToNumber,
+} from "@/lib/decimal-usd-input";
 
 const USERS_PAGE_SIZE = 10;
+
+/** Coinciden con `DEFAULT_*` del servidor (merge al guardar si falta un campo en el borrador). */
+const MOBILITY_PATCH_DEFAULTS = {
+  moto: { baseUsd: 1.75, perKmUsd: 0.5 },
+  auto: { baseDayUsd: 1.5, baseNightUsd: 1.75, perKmUsd: 0.85, petExtraUsd: 1.0 },
+  camioneta: { baseUsd: 20.0, perKmUsd: 1.25, petExtraUsd: 2.0 },
+} as const;
+
+const PACK_PATCH_DEFAULTS = {
+  moto: { baseUsd: 1.75, perKmUsd: 0.5 },
+  auto: { baseUsd: 2.25, perKmUsd: 0.85 },
+  camioneta: { baseUsd: 20.0, perKmUsd: 1.25 },
+} as const;
+
+function numFieldForPatch(v: unknown, fb: unknown, def: number): number {
+  const x = coerceUsdDraftValueToNumber(v);
+  if (x !== undefined) return x;
+  const y = coerceUsdDraftValueToNumber(fb);
+  if (y !== undefined) return y;
+  return def;
+}
+
+function mergeMobilityDraftForPatch(draft: unknown, serverFares: unknown) {
+  const d = (draft ?? {}) as any;
+  const f = (serverFares ?? {}) as any;
+  const fb = MOBILITY_PATCH_DEFAULTS;
+  return {
+    moto: {
+      baseUsd: numFieldForPatch(d.moto?.baseUsd, f.moto?.baseUsd, fb.moto.baseUsd),
+      perKmUsd: numFieldForPatch(d.moto?.perKmUsd, f.moto?.perKmUsd, fb.moto.perKmUsd),
+    },
+    auto: {
+      baseDayUsd: numFieldForPatch(d.auto?.baseDayUsd, f.auto?.baseDayUsd, fb.auto.baseDayUsd),
+      baseNightUsd: numFieldForPatch(d.auto?.baseNightUsd, f.auto?.baseNightUsd, fb.auto.baseNightUsd),
+      perKmUsd: numFieldForPatch(d.auto?.perKmUsd, f.auto?.perKmUsd, fb.auto.perKmUsd),
+      petExtraUsd: numFieldForPatch(d.auto?.petExtraUsd, f.auto?.petExtraUsd, fb.auto.petExtraUsd),
+    },
+    camioneta: {
+      baseUsd: numFieldForPatch(d.camioneta?.baseUsd, f.camioneta?.baseUsd, fb.camioneta.baseUsd),
+      perKmUsd: numFieldForPatch(d.camioneta?.perKmUsd, f.camioneta?.perKmUsd, fb.camioneta.perKmUsd),
+      petExtraUsd: numFieldForPatch(d.camioneta?.petExtraUsd, f.camioneta?.petExtraUsd, fb.camioneta.petExtraUsd),
+    },
+  };
+}
+
+function mergePackDraftForPatch(draft: unknown, serverFares: unknown) {
+  const d = (draft ?? {}) as any;
+  const f = (serverFares ?? {}) as any;
+  const fb = PACK_PATCH_DEFAULTS;
+  return {
+    moto: {
+      baseUsd: numFieldForPatch(d.moto?.baseUsd, f.moto?.baseUsd, fb.moto.baseUsd),
+      perKmUsd: numFieldForPatch(d.moto?.perKmUsd, f.moto?.perKmUsd, fb.moto.perKmUsd),
+    },
+    auto: {
+      baseUsd: numFieldForPatch(d.auto?.baseUsd, f.auto?.baseUsd, fb.auto.baseUsd),
+      perKmUsd: numFieldForPatch(d.auto?.perKmUsd, f.auto?.perKmUsd, fb.auto.perKmUsd),
+    },
+    camioneta: {
+      baseUsd: numFieldForPatch(d.camioneta?.baseUsd, f.camioneta?.baseUsd, fb.camioneta.baseUsd),
+      perKmUsd: numFieldForPatch(d.camioneta?.perKmUsd, f.camioneta?.perKmUsd, fb.camioneta.perKmUsd),
+    },
+  };
+}
+
+function patchMobilityFareField(
+  setDraft: Dispatch<SetStateAction<any>>,
+  section: "auto" | "moto" | "camioneta",
+  field: string,
+  raw: string
+) {
+  const sanitized = sanitizeDecimalUsdInput(raw);
+  setDraft((s: any) => {
+    const root = { ...(s ?? {}) };
+    const nest = { ...(root[section] ?? {}) };
+    if (sanitized === "") {
+      delete nest[field];
+    } else {
+      const n = parseDecimalUsdInputToNumber(sanitized);
+      if (n !== undefined) {
+        nest[field] = n;
+      } else if (isTrailingDecimalUsdIncomplete(sanitized)) {
+        nest[field] = sanitized;
+      }
+    }
+    root[section] = nest;
+    return root;
+  });
+}
+
+function patchPackFareField(
+  setDraft: Dispatch<SetStateAction<any>>,
+  section: "auto" | "moto" | "camioneta",
+  field: string,
+  raw: string
+) {
+  patchMobilityFareField(setDraft, section, field, raw);
+}
 
 async function fetchWithAuth(url: string) {
   const token = localStorage.getItem("token");
@@ -1005,6 +1110,39 @@ function AdminCategoriesTab() {
   );
 }
 
+/** Resumen legible para admins de una propuesta `field: vehicle`. */
+function formatVehicleChangeProposalSummary(
+  proposal: unknown,
+  categoriesForLabels: Array<{ id: number; name?: string | null; slug?: string | null }>,
+): string {
+  if (!proposal || typeof proposal !== "object") return "";
+  const p = proposal as {
+    categoryId?: number;
+    goBrands?: string[];
+    vehicle?: {
+      brand?: string | null;
+      model?: string | null;
+      license_plate?: string | null;
+      vehicle_type?: string | null;
+    };
+  };
+  const catRow =
+    typeof p.categoryId === "number" ? categoriesForLabels.find((c) => c.id === p.categoryId) : undefined;
+  const catLabel = String(catRow?.name ?? catRow?.slug ?? (p.categoryId != null ? `categoría #${p.categoryId}` : "")).trim();
+  const v = p.vehicle ?? {};
+  const unit = [v.brand, v.model]
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const plate = String(v.license_plate ?? "").trim();
+  const vt = String(v.vehicle_type ?? "").trim();
+  const head = [catLabel || null, vt || null, unit || null, plate || null].filter(Boolean).join(" · ");
+  const brands =
+    Array.isArray(p.goBrands) && p.goBrands.length > 0 ? `Roles Go: ${p.goBrands.join(", ")}` : "";
+  return [head, brands].filter(Boolean).join("\n");
+}
+
 /** Pestañas solo para administrador (no Soporte TI). */
 const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts", "services"] as const;
 
@@ -1034,7 +1172,9 @@ export default function AdminPanel() {
   const [commissionPendingPercent, setCommissionPendingPercent] = useState<number | null>(null);
   const [mobilityFaresDraft, setMobilityFaresDraft] = useState<any>(null);
   const [packFaresDraft, setPackFaresDraft] = useState<any>(null);
-  const [subscriptionFeesDraft, setSubscriptionFeesDraft] = useState<Record<string, number> | null>(null);
+  const [subscriptionFeesDraft, setSubscriptionFeesDraft] = useState<Partial<Record<string, number | string>> | null>(
+    null
+  );
   const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== "undefined") {
@@ -1466,10 +1606,11 @@ export default function AdminPanel() {
   type AdminAccountChangeRequest = {
     id: number;
     userId: string;
-    field: "email" | "name" | "phone";
+    field: "email" | "name" | "phone" | "vehicle";
     reason: string;
     status: "pending" | "approved" | "rejected";
     createdAt: string | Date;
+    proposal?: unknown;
     user?: { id: string; name?: string; lastName?: string; email?: string; phone?: string; role?: string } | null;
   };
 
@@ -1706,9 +1847,10 @@ export default function AdminPanel() {
                     <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="font-medium">Peticiones de cambio de datos</p>
+                          <p className="font-medium">Peticiones de cuenta y vehículo Go</p>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Solicitudes para permitir editar correo, nombre o teléfono (se habilita 1 vez).
+                            Solicitudes para permitir editar correo, nombre o teléfono (una vez), y cambios de vehículo
+                            en Go (taxi / delivery) con datos propuestos.
                           </p>
                         </div>
                       </div>
@@ -1726,7 +1868,19 @@ export default function AdminPanel() {
                                 ? `${u?.name ?? ""} ${u?.lastName ?? ""}`.trim()
                                 : u?.email) || r.userId;
                             const fieldLabel =
-                              r.field === "email" ? "correo" : r.field === "name" ? "nombre" : "número de teléfono";
+                              r.field === "email"
+                                ? "correo"
+                                : r.field === "name"
+                                  ? "nombre"
+                                  : r.field === "phone"
+                                    ? "número de teléfono"
+                                    : r.field === "vehicle"
+                                      ? "vehículo (Go)"
+                                      : r.field;
+                            const vehicleSummary =
+                              r.field === "vehicle"
+                                ? formatVehicleChangeProposalSummary(r.proposal, adminCategoriesRaw)
+                                : "";
                             return (
                               <div key={r.id} className="rounded-lg border bg-background p-3 space-y-2">
                                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1770,6 +1924,11 @@ export default function AdminPanel() {
                                     </Button>
                                   </div>
                                 </div>
+                                {vehicleSummary ? (
+                                  <p className="whitespace-pre-wrap rounded-md border border-border/50 bg-muted/40 p-2 text-xs text-foreground">
+                                    {vehicleSummary}
+                                  </p>
+                                ) : null}
                                 <p className="text-sm text-muted-foreground break-words">{r.reason}</p>
                               </div>
                             );
@@ -3779,15 +3938,20 @@ export default function AdminPanel() {
                                   <Label>Mensualidad (USD)</Label>
                                   <Input
                                     inputMode="decimal"
-                                    value={v ?? ""}
+                                    value={usdAmountInputDisplay(v)}
                                     placeholder="15"
                                     onChange={(e) => {
-                                      const raw = e.target.value;
-                                      const n = raw === "" ? NaN : Number(raw);
-                                      setSubscriptionFeesDraft((prev) => ({
-                                        ...(prev ?? {}),
-                                        [slug]: Number.isFinite(n) ? n : (prev?.[slug] ?? 0),
-                                      }));
+                                      const sanitized = sanitizeDecimalUsdInput(e.target.value);
+                                      setSubscriptionFeesDraft((prev) => {
+                                        const next = { ...(prev ?? {}) };
+                                        if (sanitized === "") delete next[slug];
+                                        else {
+                                          const n = parseDecimalUsdInputToNumber(sanitized);
+                                          if (n !== undefined) next[slug] = n;
+                                          else if (isTrailingDecimalUsdIncomplete(sanitized)) next[slug] = sanitized;
+                                        }
+                                        return next;
+                                      });
                                     }}
                                   />
                                 </div>
@@ -3801,7 +3965,23 @@ export default function AdminPanel() {
                           onClick={async () => {
                             if (!subscriptionFeesDraft) return;
                             try {
-                              await patchSubscriptionFees.mutateAsync(subscriptionFeesDraft);
+                              const serverMap = (subscriptionFees as any)?.feesBySlug as
+                                | Record<string, number>
+                                | undefined;
+                              const feesBySlug: Record<string, number> = {};
+                              for (const c of adminCategoriesRaw.filter(
+                                (x: any) => typeof x?.slug === "string" && String(x.slug).trim().length > 0
+                              )) {
+                                const sl = String(c.slug);
+                                const raw = subscriptionFeesDraft[sl];
+                                const n = coerceUsdDraftValueToNumber(raw);
+                                feesBySlug[sl] = n !== undefined
+                                  ? n
+                                  : Number.isFinite(Number(serverMap?.[sl]))
+                                    ? Number(serverMap![sl])
+                                    : 15;
+                              }
+                              await patchSubscriptionFees.mutateAsync(feesBySlug);
                               toast({ title: "Guardado", description: "Mensualidades por categoría actualizadas." });
                             } catch (e) {
                               toast({ title: "Error", description: e instanceof Error ? e.message : "No se pudo guardar", variant: "destructive" });
@@ -3852,104 +4032,64 @@ export default function AdminPanel() {
                             <div className="space-y-1">
                               <Label>Auto · Base día</Label>
                               <Input
-                                value={mobilityFaresDraft?.auto?.baseDayUsd ?? ""}
-                                onChange={(e) =>
-                                  setMobilityFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    auto: { ...(s?.auto ?? {}), baseDayUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(mobilityFaresDraft?.auto?.baseDayUsd)}
+                                onChange={(e) => patchMobilityFareField(setMobilityFaresDraft, "auto", "baseDayUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Auto · Base noche</Label>
                               <Input
-                                value={mobilityFaresDraft?.auto?.baseNightUsd ?? ""}
-                                onChange={(e) =>
-                                  setMobilityFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    auto: { ...(s?.auto ?? {}), baseNightUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(mobilityFaresDraft?.auto?.baseNightUsd)}
+                                onChange={(e) => patchMobilityFareField(setMobilityFaresDraft, "auto", "baseNightUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Auto · USD por km</Label>
                               <Input
-                                value={mobilityFaresDraft?.auto?.perKmUsd ?? ""}
-                                onChange={(e) =>
-                                  setMobilityFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    auto: { ...(s?.auto ?? {}), perKmUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(mobilityFaresDraft?.auto?.perKmUsd)}
+                                onChange={(e) => patchMobilityFareField(setMobilityFaresDraft, "auto", "perKmUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Pet Car · Extra</Label>
                               <Input
-                                value={mobilityFaresDraft?.auto?.petExtraUsd ?? ""}
-                                onChange={(e) =>
-                                  setMobilityFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    auto: { ...(s?.auto ?? {}), petExtraUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(mobilityFaresDraft?.auto?.petExtraUsd)}
+                                onChange={(e) => patchMobilityFareField(setMobilityFaresDraft, "auto", "petExtraUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Moto · Base</Label>
                               <Input
-                                value={mobilityFaresDraft?.moto?.baseUsd ?? ""}
-                                onChange={(e) =>
-                                  setMobilityFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    moto: { ...(s?.moto ?? {}), baseUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(mobilityFaresDraft?.moto?.baseUsd)}
+                                onChange={(e) => patchMobilityFareField(setMobilityFaresDraft, "moto", "baseUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Moto · USD por km</Label>
                               <Input
-                                value={mobilityFaresDraft?.moto?.perKmUsd ?? ""}
-                                onChange={(e) =>
-                                  setMobilityFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    moto: { ...(s?.moto ?? {}), perKmUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(mobilityFaresDraft?.moto?.perKmUsd)}
+                                onChange={(e) => patchMobilityFareField(setMobilityFaresDraft, "moto", "perKmUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Camioneta · Base</Label>
                               <Input
-                                value={mobilityFaresDraft?.camioneta?.baseUsd ?? ""}
-                                onChange={(e) =>
-                                  setMobilityFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    camioneta: { ...(s?.camioneta ?? {}), baseUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(mobilityFaresDraft?.camioneta?.baseUsd)}
+                                onChange={(e) => patchMobilityFareField(setMobilityFaresDraft, "camioneta", "baseUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Camioneta · USD por km</Label>
                               <Input
-                                value={mobilityFaresDraft?.camioneta?.perKmUsd ?? ""}
-                                onChange={(e) =>
-                                  setMobilityFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    camioneta: { ...(s?.camioneta ?? {}), perKmUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(mobilityFaresDraft?.camioneta?.perKmUsd)}
+                                onChange={(e) => patchMobilityFareField(setMobilityFaresDraft, "camioneta", "perKmUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
@@ -3959,7 +4099,9 @@ export default function AdminPanel() {
                               disabled={patchMobilityFares.isPending || !mobilityFaresDraft}
                               onClick={async () => {
                                 try {
-                                  await patchMobilityFares.mutateAsync(mobilityFaresDraft);
+                                  await patchMobilityFares.mutateAsync(
+                                    mergeMobilityDraftForPatch(mobilityFaresDraft, (mobilityFares as any)?.fares)
+                                  );
                                   toast({ title: "Guardado", description: "Tarifas de Taxi actualizadas." });
                                 } catch (e) {
                                   toast({ title: "Error", description: e instanceof Error ? e.message : "No se pudo guardar", variant: "destructive" });
@@ -3978,78 +4120,48 @@ export default function AdminPanel() {
                             <div className="space-y-1">
                               <Label>Moto · Base</Label>
                               <Input
-                                value={packFaresDraft?.moto?.baseUsd ?? ""}
-                                onChange={(e) =>
-                                  setPackFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    moto: { ...(s?.moto ?? {}), baseUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(packFaresDraft?.moto?.baseUsd)}
+                                onChange={(e) => patchPackFareField(setPackFaresDraft, "moto", "baseUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Moto · USD por km</Label>
                               <Input
-                                value={packFaresDraft?.moto?.perKmUsd ?? ""}
-                                onChange={(e) =>
-                                  setPackFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    moto: { ...(s?.moto ?? {}), perKmUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(packFaresDraft?.moto?.perKmUsd)}
+                                onChange={(e) => patchPackFareField(setPackFaresDraft, "moto", "perKmUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Auto · Base</Label>
                               <Input
-                                value={packFaresDraft?.auto?.baseUsd ?? ""}
-                                onChange={(e) =>
-                                  setPackFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    auto: { ...(s?.auto ?? {}), baseUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(packFaresDraft?.auto?.baseUsd)}
+                                onChange={(e) => patchPackFareField(setPackFaresDraft, "auto", "baseUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Auto · USD por km</Label>
                               <Input
-                                value={packFaresDraft?.auto?.perKmUsd ?? ""}
-                                onChange={(e) =>
-                                  setPackFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    auto: { ...(s?.auto ?? {}), perKmUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(packFaresDraft?.auto?.perKmUsd)}
+                                onChange={(e) => patchPackFareField(setPackFaresDraft, "auto", "perKmUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Camioneta · Base</Label>
                               <Input
-                                value={packFaresDraft?.camioneta?.baseUsd ?? ""}
-                                onChange={(e) =>
-                                  setPackFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    camioneta: { ...(s?.camioneta ?? {}), baseUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(packFaresDraft?.camioneta?.baseUsd)}
+                                onChange={(e) => patchPackFareField(setPackFaresDraft, "camioneta", "baseUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
                             <div className="space-y-1">
                               <Label>Camioneta · USD por km</Label>
                               <Input
-                                value={packFaresDraft?.camioneta?.perKmUsd ?? ""}
-                                onChange={(e) =>
-                                  setPackFaresDraft((s: any) => ({
-                                    ...(s ?? {}),
-                                    camioneta: { ...(s?.camioneta ?? {}), perKmUsd: Number(e.target.value) },
-                                  }))
-                                }
+                                value={usdAmountInputDisplay(packFaresDraft?.camioneta?.perKmUsd)}
+                                onChange={(e) => patchPackFareField(setPackFaresDraft, "camioneta", "perKmUsd", e.target.value)}
                                 inputMode="decimal"
                               />
                             </div>
@@ -4059,7 +4171,9 @@ export default function AdminPanel() {
                               disabled={patchPackFares.isPending || !packFaresDraft}
                               onClick={async () => {
                                 try {
-                                  await patchPackFares.mutateAsync(packFaresDraft);
+                                  await patchPackFares.mutateAsync(
+                                    mergePackDraftForPatch(packFaresDraft, (packFares as any)?.fares)
+                                  );
                                   toast({ title: "Guardado", description: "Tarifas de Delivery actualizadas." });
                                 } catch (e) {
                                   toast({ title: "Error", description: e instanceof Error ? e.message : "No se pudo guardar", variant: "destructive" });

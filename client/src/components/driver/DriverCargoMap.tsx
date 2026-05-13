@@ -2,13 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Marker, ZoomControl, useMap, GeoJSON, CircleMarker } from "react-leaflet";
 import L from "leaflet";
-import { Loader2, Navigation } from "lucide-react";
+import { Loader2, LocateFixed, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { GeoJsonObject } from "geojson";
 import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
 import { useTheme } from "@/contexts/ThemeContext";
 import "@/components/taxi/leaflet-config";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
+import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { cn } from "@/lib/utils";
 import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
@@ -118,12 +119,22 @@ function PositionLeafletZoomStack({
 }
 
 /**
- * Mismo apilado que +/−: nodo en `.leaflet-top` (z-index 1000 de Leaflet), justo *debajo* del control de zoom,
- * no superpuesto en Z ni con cálculo frágil de `top`.
+ * Mismo apilado que +/−: debajo del zoom. Siempre visible cuando `showRecenter`:
+ * - con GPS ya conocido: centra el mapa en el conductor;
+ * - si aún no hay fix (p. ej. permisos o timeout): vuelve a pedir ubicación con `getCurrentPosition`.
  */
-function RecenterControl({ me, fullscreen }: { me: { lat: number; lon: number }; fullscreen: boolean }) {
+function DriverMapRecenterToolbar({
+  me,
+  onLocated,
+  fullscreen,
+}: {
+  me: { lat: number; lon: number } | null;
+  onLocated: (p: { lat: number; lon: number }) => void;
+  fullscreen: boolean;
+}) {
   const map = useMap();
   const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const [locating, setLocating] = useState(false);
 
   useLayoutEffect(() => {
     const root = map.getContainer();
@@ -133,7 +144,7 @@ function RecenterControl({ me, fullscreen }: { me: { lat: number; lon: number };
     if (!col) return;
 
     const el = document.createElement("div");
-    el.setAttribute("data-genfeb", "recenter");
+    el.setAttribute("data-genfeb", "driver-map-recenter");
     el.className = "leaflet-control";
 
     let raf = 0;
@@ -171,7 +182,36 @@ function RecenterControl({ me, fullscreen }: { me: { lat: number; lon: number };
     };
   }, [map, fullscreen]);
 
+  const centerOn = useCallback(
+    (lat: number, lon: number) => {
+      map.setView(L.latLng(lat, lon), Math.max(map.getZoom(), 15), { animate: true });
+      requestAnimationFrame(() => map.invalidateSize({ animate: false }));
+    },
+    [map]
+  );
+
+  const handleClick = useCallback(() => {
+    if (me) {
+      centerOn(me.lat, me.lon);
+      return;
+    }
+    if (!navigator.geolocation) return;
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const p = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        onLocated(p);
+        centerOn(p.lat, p.lon);
+        setLocating(false);
+      },
+      () => setLocating(false),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 25_000 }
+    );
+  }, [me, onLocated, centerOn]);
+
   if (!host) return null;
+
+  const hasFix = me != null;
 
   return createPortal(
     <div className="!mt-3 w-full border-t border-foreground/20 pt-3">
@@ -179,17 +219,23 @@ function RecenterControl({ me, fullscreen }: { me: { lat: number; lon: number };
         type="button"
         size="icon"
         variant="secondary"
+        disabled={locating}
         className={cn(
           "h-12 w-12 rounded-full border-2 border-foreground/30 bg-background text-foreground",
-          "shadow-md ring-2 ring-foreground/10 hover:bg-muted hover:ring-foreground/25"
+          "shadow-md ring-2 ring-foreground/10 hover:bg-muted hover:ring-foreground/25",
+          locating && "opacity-80"
         )}
-        aria-label="Centrar mapa en mi posición"
-        onClick={() => {
-          map.setView(L.latLng(me.lat, me.lon), Math.max(map.getZoom(), 15), { animate: true });
-          requestAnimationFrame(() => map.invalidateSize({ animate: false }));
-        }}
+        aria-label={hasFix ? "Centrar mapa en mi posición" : "Obtener mi ubicación y centrar el mapa"}
+        title={hasFix ? "Centrar en mi posición" : "Buscar de nuevo mi GPS y centrar"}
+        onClick={handleClick}
       >
-        <Navigation className="h-5 w-5 text-foreground" strokeWidth={2.5} />
+        {locating ? (
+          <Loader2 className="h-5 w-5 animate-spin text-foreground" aria-hidden />
+        ) : hasFix ? (
+          <Navigation className="h-5 w-5 text-foreground" strokeWidth={2.5} aria-hidden />
+        ) : (
+          <LocateFixed className="h-5 w-5 text-foreground" strokeWidth={2.5} aria-hidden />
+        )}
       </Button>
     </div>,
     host
@@ -309,14 +355,17 @@ export function DriverCargoMap({
                 url={raster.url}
                 maxZoom={raster.maxZoom}
                 {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
+                {...(raster.apiKey ? { apiKey: raster.apiKey } : {})}
               />
               <LeafletMapLayoutFix />
               <WatchDriverPosition onPosition={onPosition} />
+              {showRecenter ? (
+                <DriverMapRecenterToolbar me={me} onLocated={onPosition} fullscreen={!!fullscreen} />
+              ) : null}
               {me && (
                 <>
                   <Marker position={[me.lat, me.lon]} icon={driverIcon} interactive={false} zIndexOffset={600} />
                   <FlyToFirstFix lat={me.lat} lon={me.lon} />
-                  {showRecenter ? <RecenterControl me={me} fullscreen={!!fullscreen} /> : null}
                 </>
               )}
               {end ? <FitToService start={start} end={end} me={me} /> : null}
@@ -347,6 +396,7 @@ export function DriverCargoMap({
               ) : null}
             </MapContainer>
           </div>
+          <GeoapifyMapAttribution />
           {MAP_PERSPECTIVE_CONTROLS_VISIBLE ? (
             <MapPerspectiveControls
               tiltDeg={tiltDeg}
@@ -360,7 +410,8 @@ export function DriverCargoMap({
       {!me && ready && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3">
           <p className="rounded-full border border-border bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow">
-            Buscando tu ubicación… activa el GPS si no aparece.
+            Buscando tu ubicación… activa el GPS. Si tarda, usa el botón de ubicación junto a +/− en el mapa para
+            intentar de nuevo.
           </p>
         </div>
       )}

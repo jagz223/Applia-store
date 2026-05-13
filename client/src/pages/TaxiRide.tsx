@@ -4,7 +4,22 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Link, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
-import { ArrowLeft, Bike, Car, ChevronDown, ChevronUp, Loader2, MapPin, Maximize2, Minimize2, Navigation, PawPrint, Phone, Star, Truck } from "lucide-react";
+import {
+  ArrowLeft,
+  Bike,
+  Car,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  MapPin,
+  Maximize2,
+  Minimize2,
+  Navigation,
+  PawPrint,
+  Phone,
+  Star,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { TaxiRouteMap, type MapPoint } from "@/components/taxi/TaxiRouteMap";
 import { RiderNegotiationOffersModal, type RiderNegotiationOfferRow } from "@/components/taxi/RiderNegotiationOffersModal";
 import { TaxiVehicleSearchModal } from "@/components/taxi/TaxiVehicleSearchModal";
+import { CamionetaVehicleIcon } from "@/components/taxi/CamionetaVehicleIcon";
 import type { TaxiPaymentMethod, TaxiVehicleKind, TaxiVehicleModalStep } from "@/components/taxi/TaxiVehicleSearchModal";
 import type { GeoJsonObject } from "geojson";
 import { useGoChat } from "@/contexts/GoChatContext";
@@ -31,7 +47,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
-import { MOBILITY_UI } from "@shared/mobility-ui-labels";
+import { MOBILITY_UI, mobilityServiceLabel } from "@shared/mobility-ui-labels";
 import { RIDER_DRIVER_NOT_AVAILABLE_MESSAGE } from "@shared/mobility-negotiation";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
@@ -101,11 +117,18 @@ const VEHICLE_OPTIONS: ReadonlyArray<{
   type: TaxiVehicleKind;
   label: string;
   Icon: LucideIcon;
+  /** Texto breve bajo el precio de referencia (solo donde aplique). */
+  description?: string;
 }> = [
   { type: "moto", label: "Moto", Icon: Bike },
   { type: "auto", label: "Auto", Icon: Car },
   { type: "pet_car", label: "Pet Car", Icon: PawPrint },
-  { type: "camioneta", label: "Camioneta", Icon: Truck },
+  {
+    type: "camioneta",
+    label: "Camioneta",
+    Icon: CamionetaVehicleIcon as LucideIcon,
+    description: "Vehículo más grande.",
+  },
 ];
 
 function vehicleTypeLabel(type: string | undefined): string | null {
@@ -182,7 +205,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const rateTargetRef = useRef<{ rideId: string; target: "driver"; targetName: string } | null>(null);
   const [location, setLocation] = useLocation();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { primeCarGoConversation, resetChat } = useGoChat();
+  const { primeCarGoConversation, resetChat, setMobilityChatReminder } = useGoChat();
   const { socket } = useSocket();
   const { toast } = useToast();
   const params = useMemo(() => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""), []);
@@ -384,6 +407,24 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const rideSocketPrefix = goSlug === "pack" ? "pack:ride:" : "cargo:ride:";
 
   const isGoClient = location === goBasePath;
+
+  useEffect(() => {
+    if (!isGoClient) {
+      setMobilityChatReminder(null);
+      return;
+    }
+    const conv = matchedDriverInfo?.conversationId;
+    if (activeRideId && conv != null) {
+      setMobilityChatReminder(
+        isPackGoClient
+          ? "Recordatorio: este chat es con tu repartidor para coordinar el envío."
+          : "Recordatorio: este chat es con tu conductor para coordinar el encuentro.",
+      );
+    } else {
+      setMobilityChatReminder(null);
+    }
+  }, [isGoClient, activeRideId, matchedDriverInfo?.conversationId, isPackGoClient, setMobilityChatReminder]);
+
   const matchedDriverFullName = useMemo(() => {
     if (!matchedDriverInfo) return "";
     const d = matchedDriverInfo.driver as unknown as { name?: string; lastName?: string; last_name?: string };
@@ -615,7 +656,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const loadDriverEtaRoute = useCallback(async (driverPos: { lat: number; lon: number }, target: Place) => {
     setDriverEtaLoading(true);
     try {
-      // Backend espera from/to en formato lon,lat (OSRM).
+      // Backend espera from/to en formato lon,lat (Geoapify / GeoJSON).
       const res = await fetch(`/api/maps/route?from=${driverPos.lon},${driverPos.lat}&to=${target.lon},${target.lat}`);
       if (!res.ok) throw new Error();
       const data = (await res.json()) as { geometry?: GeoJsonObject; distanceM?: number; durationSec?: number };
@@ -1437,7 +1478,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         setRouteMeta({ distanceM: fallback.distanceM, durationSec: fallback.durationSec });
         setRouteGeometry(fallback.geometry);
         setRouteError(body?.message ?? "Ruta aproximada (sin motor de rutas).");
-        // Reintento rápido: OSRM/Nominatim a veces falla tras recargar.
+        // Reintento rápido: el backend de rutas a veces falla tras recargar.
         window.setTimeout(() => {
           if (start && end) void fetch(url).then(async (r) => {
             const b = (await r.json().catch(() => null)) as any;
@@ -1501,6 +1542,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       }
     );
   };
+
+  /** Mismo flujo que móvil: GPS de partida + pestaña origen (mapa Go escritorio y fullscreen). */
+  const goClientMapRecenter =
+    matchedDriverInfo
+      ? null
+      : () => {
+          setMapTarget("start");
+          useMyLocationAsStart();
+        };
 
   const FALLBACK_CENTER: [number, number] = [-0.22, -78.5];
   const FALLBACK_ZOOM = 7;
@@ -1600,14 +1650,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 nearbyDemoVehicles={nearbyDriverMarkers}
                 markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                 suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
-                onRecenter={
-                  matchedDriverInfo
-                    ? null
-                    : () => {
-                        setMapTarget("start");
-                        useMyLocationAsStart();
-                      }
-                }
+                onRecenter={goClientMapRecenter}
                 wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full"
               />
               {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
@@ -2369,6 +2412,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   nearbyDemoVehicles={nearbyDriverMarkers}
                   markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                   suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
+                  onRecenter={goClientMapRecenter}
                   wrapperClassName="!rounded-none !border-0 !shadow-none h-full min-h-0 w-full flex-1"
                 />
                 {(reverseLoading || routeLoading) && (
@@ -2446,6 +2490,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   nearbyDemoVehicles={nearbyDriverMarkers}
                   markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                   suppressMapPick={vehicleModalStep === "searching"}
+                  onRecenter={goClientMapRecenter}
                 />
                 {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
                   <div className="absolute bottom-3 left-3 z-[55] flex items-center gap-2 rounded-lg border bg-background/90 px-3 py-2 text-xs shadow">
@@ -2580,33 +2625,55 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       </Dialog>
 
       <Dialog open={rateDialogOpen} onOpenChange={() => { /* bloqueado */ }}>
-        <DialogContent hideClose className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle>¿Cómo se portó el {uiWords.Driver}?</DialogTitle>
+        <DialogContent
+          hideClose
+          className="border-primary/20 bg-gradient-to-b from-primary/[0.07] via-background to-background sm:max-w-md"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader className="space-y-3 text-center sm:text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 ring-2 ring-emerald-500/30">
+              <CheckCircle2 className="h-7 w-7 text-emerald-600 dark:text-emerald-400" aria-hidden />
+            </div>
+            <DialogTitle className="text-balance text-lg font-semibold leading-snug sm:text-xl">
+              {isPackGoClient ? "Tu repartidor ha terminado el envío" : "Tu conductor ha terminado el viaje"}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-1 text-balance text-sm leading-relaxed text-muted-foreground">
+                <p className="text-foreground/90">¿Estás conforme con el trato?</p>
+                <p>
+                  Calificá con las estrellas a{" "}
+                  <span className="font-semibold text-foreground">
+                    {rateTargetRef.current?.targetName ?? `tu ${uiWords.driver}`}
+                  </span>
+                  . Tu opinión ayuda a mejorar {mobilityServiceLabel(isPackGoClient ? "pack" : "cargo")}.
+                </p>
+              </div>
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Califica a{" "}
-              <span className="font-medium text-foreground">
-                {rateTargetRef.current?.targetName ?? `tu ${uiWords.driver}`}
-              </span>
-              .
-            </p>
-            <div className="flex items-center justify-center gap-2">
-              {[1,2,3,4,5].map((v) => {
-                const active = v <= rateStars;
-                return (
-                  <button
-                    key={v}
-                    type="button"
-                    className="p-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => setRateStars(v)}
-                    aria-label={`${v} estrellas`}
-                  >
-                    <Star className={`h-8 w-8 ${active ? "text-amber-500 fill-amber-500" : "text-muted-foreground"}`} />
-                  </button>
-                );
-              })}
+          <div className="space-y-5">
+            <div className="rounded-xl border border-border/80 bg-card/90 px-2 py-5 shadow-sm sm:px-3">
+              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Tu calificación
+              </p>
+              <div className="flex items-center justify-center gap-1 sm:gap-2">
+                {[1, 2, 3, 4, 5].map((v) => {
+                  const active = v <= rateStars;
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      className="rounded-lg p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-1.5"
+                      onClick={() => setRateStars(v)}
+                      aria-label={`${v} estrellas`}
+                    >
+                      <Star
+                        className={`h-9 w-9 sm:h-8 sm:w-8 ${active ? "fill-amber-500 text-amber-500" : "text-muted-foreground/70"}`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <Button className="w-full" onClick={() => void submitRideRating()} disabled={rateBusy}>
               {rateBusy ? "Enviando…" : "Enviar calificación"}
