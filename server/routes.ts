@@ -24,14 +24,16 @@ import { registerPayPalRoutes } from "./routes-paypal";
 import { registerRoleRoutes } from "./routes-roles";
 import { registerAdminRoutes } from "./routes-admin";
 import { registerMapRoutes } from "./routes-maps";
-import { registerMobilityRideRoutes } from "./mobility-rides";
-import { registerPackRideRoutes } from "./pack-rides";
+import { registerMobilityRideRoutes, mobilityPanicResolveContext } from "./mobility-rides";
+import { registerPackRideRoutes, packPanicResolveContext } from "./pack-rides";
 import { registerSeoRoutes } from "./seo";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
+import { ensureGoPanicAllowed, markGoPanicSent, notifyGoPanicAdmins } from "./mobility-panic-notify";
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
 import { MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
+import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
 import { categorySlugFromProvider, getSubscriptionFeesByCategorySlug, subscriptionMonthlyUsdForCategorySlug } from "./subscription-fees";
 import {
   validateAssignableServiceCategory,
@@ -52,6 +54,99 @@ export async function registerRoutes(
   registerMapRoutes(app);
   registerMobilityRideRoutes(app);
   registerPackRideRoutes(app);
+
+  /** Pánico Genfeb Go: ruta única bajo `/api` (evita 404 si el enrutado por segmentos falla en algún despliegue). */
+  const goPanicBodySchema = z.object({
+    rideId: z.string().min(1),
+    module: z.enum(["taxi", "delivery"]),
+  });
+
+  app.post("/api/go/panic", authenticateJWT, async (req: any, res) => {
+    try {
+      const parsed = goPanicBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.errors });
+      }
+      const { rideId, module } = parsed.data;
+      const uid = String(req.user?.id ?? "");
+      if (!uid) return res.status(401).json({ message: "Unauthorized" });
+
+      if (module === "taxi") {
+        const ctx = await mobilityPanicResolveContext(rideId);
+        if (!ctx) return res.status(404).json({ message: "Viaje no encontrado" });
+        const { ride, riderParty, driverParty } = ctx;
+        if (ride.riderUserId !== uid && ride.driverUserId !== uid) {
+          return res.status(403).json({ message: "Sin acceso" });
+        }
+        if (ride.status !== "in_progress") {
+          return res.status(409).json({
+            message: "El botón de pánico solo está disponible durante el viaje en curso.",
+          });
+        }
+        if (!ride.driverUserId || !driverParty) {
+          return res.status(409).json({ message: "Este viaje aún no tiene conductor asignado." });
+        }
+        try {
+          ensureGoPanicAllowed(rideId, uid);
+        } catch (e: any) {
+          if (e?.message === "PANIC_COOLDOWN") {
+            return res.status(429).json({
+              message: "Ya enviaste una alerta de pánico hace poco. Espera unos segundos antes de repetir.",
+            });
+          }
+          throw e;
+        }
+        const pressedBy = ride.riderUserId === uid ? "rider" : "driver";
+        await notifyGoPanicAdmins({
+          moduleLabel: "Taxi",
+          rideId,
+          pressedBy,
+          rider: riderParty,
+          driver: driverParty,
+        });
+        markGoPanicSent(rideId, uid);
+        return res.json({ ok: true, rideId });
+      }
+
+      const ctx = await packPanicResolveContext(rideId);
+      if (!ctx) return res.status(404).json({ message: "Viaje no encontrado" });
+      const { ride, riderParty, driverParty } = ctx;
+      if (ride.riderUserId !== uid && ride.driverUserId !== uid) {
+        return res.status(403).json({ message: "Sin acceso" });
+      }
+      if (ride.status !== "in_progress") {
+        return res.status(409).json({
+          message: "El botón de pánico solo está disponible durante el envío en curso.",
+        });
+      }
+      if (!ride.driverUserId || !driverParty) {
+        return res.status(409).json({ message: "Este envío aún no tiene repartidor asignado." });
+      }
+      try {
+        ensureGoPanicAllowed(rideId, uid);
+      } catch (e: any) {
+        if (e?.message === "PANIC_COOLDOWN") {
+          return res.status(429).json({
+            message: "Ya enviaste una alerta de pánico hace poco. Espera unos segundos antes de repetir.",
+          });
+        }
+        throw e;
+      }
+      const pressedBy = ride.riderUserId === uid ? "rider" : "driver";
+      await notifyGoPanicAdmins({
+        moduleLabel: "Delivery",
+        rideId,
+        pressedBy,
+        rider: riderParty,
+        driver: driverParty,
+      });
+      markGoPanicSent(rideId, uid);
+      return res.json({ ok: true, rideId });
+    } catch (e: any) {
+      console.error("[api/go/panic]", e);
+      return res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
 
   // GET /api/me/provider — perfil de proveedor del usuario autenticado (Create Service, Dashboard). Ruta explícita y temprana.
   app.get("/api/me/provider", authenticateJWT, async (req: any, res) => {
@@ -76,10 +171,8 @@ export async function registerRoutes(
   });
 
   const enrollGoDriverBodySchema = z.object({
-    profession: z.string().trim().min(2).max(200),
-    bio: professionalBioFieldSchema,
-    serviceTitle: z.string().trim().min(2).max(500),
-    serviceDescription: z.string().trim().min(50).max(5000),
+    serviceTitle: z.string().trim().max(500).optional(),
+    serviceDescription: z.string().trim().max(5000).optional(),
     vehicle: z.any().optional(),
   });
 
@@ -96,6 +189,19 @@ export async function registerRoutes(
       const pid = (provider as { id: number }).id;
       const categories = await catalogService.getCategories();
       const existingV = await genFebStorage.getPrimaryVehicleByProviderId(pid);
+
+      const titleIn = typeof body.serviceTitle === "string" ? body.serviceTitle.trim() : "";
+      const descIn = typeof body.serviceDescription === "string" ? body.serviceDescription.trim() : "";
+      const prevTitle = String((provider as { goDriverOfferTitle?: unknown }).goDriverOfferTitle ?? "").trim();
+      const prevDesc = String((provider as { goDriverOfferDescription?: unknown }).goDriverOfferDescription ?? "").trim();
+      const defaultTitle = "Conductor Genfeb Go";
+      const defaultDesc =
+        "Servicios de taxi y delivery en Genfeb Go. Puedes personalizar título y descripción desde Mis servicios cuando quieras.";
+      const serviceTitle = titleIn.length >= 2 ? titleIn : prevTitle || defaultTitle;
+      let serviceDescription = descIn.length >= 50 ? descIn : prevDesc;
+      if (serviceDescription.length < 50) {
+        serviceDescription = defaultDesc;
+      }
 
       if (!existingV) {
         if (body.vehicle == null) {
@@ -139,10 +245,8 @@ export async function registerRoutes(
 
       await catalogService.updateProvider(pid, {
         goBrands: merged,
-        profession: body.profession,
-        bio: body.bio,
-        goDriverOfferTitle: body.serviceTitle,
-        goDriverOfferDescription: body.serviceDescription,
+        goDriverOfferTitle: serviceTitle,
+        goDriverOfferDescription: serviceDescription,
       });
 
       const hasTransport = providerHasGoBrand({ ...provider, goBrands: merged }, "transport", categories);
@@ -549,18 +653,32 @@ export async function registerRoutes(
     res.json(mine);
   });
 
-  const createServiceBodySchema = insertServiceSchema.extend({
-    subcategoryId: z.number().int().positive().optional().nullable(),
+  const serviceListingProfileBodySchema = z.object({
+    listingBio: z.string().trim().max(8000).optional(),
+    listingProfession: z.string().trim().max(200).optional(),
+    listingYearsExperience: z.number().int().min(0).max(80).optional(),
+    listingSkills: providerSkillsSchema.optional(),
+    listingPreparationLevel: z.string().trim().max(8000).optional(),
+    listingCertifications: z.string().trim().max(8000).optional(),
   });
-  const updateServiceBodySchema = z.object({
-    title: z.string().min(1).max(500).optional(),
-    description: z.string().max(5000).optional(),
-    price: z.string().optional(),
-    imageUrl: z.string().url().optional().or(z.literal("")),
-    isActive: z.boolean().optional(),
-    categoryId: z.number().int().positive().optional(),
-    subcategoryId: z.number().int().positive().optional().nullable(),
-  });
+
+  const createServiceBodySchema = insertServiceSchema
+    .extend({
+      subcategoryId: z.number().int().positive().optional().nullable(),
+    })
+    .merge(serviceListingProfileBodySchema);
+
+  const updateServiceBodySchema = z
+    .object({
+      title: z.string().min(1).max(500).optional(),
+      description: z.string().max(5000).optional(),
+      price: z.string().optional(),
+      imageUrl: z.string().url().optional().or(z.literal("")),
+      isActive: z.boolean().optional(),
+      categoryId: z.number().int().positive().optional(),
+      subcategoryId: z.number().int().positive().optional().nullable(),
+    })
+    .merge(serviceListingProfileBodySchema);
 
   app.post(api.services.create.path, authenticateJWT, async (req: any, res) => {
     try {
@@ -671,6 +789,18 @@ export async function registerRoutes(
         nextCategoryId
       );
       if (!subCheck.ok) return res.status(400).json({ message: subCheck.message });
+
+      if (data.isActive !== undefined && !isAdmin) {
+        const categoriesForVisibility = await catalogService.getCategories();
+        const catForVisibility = categoriesForVisibility.find((c) => c.id === nextCategoryId);
+        const slugForVisibility = String(catForVisibility?.slug ?? "").trim().toLowerCase();
+        if (isSelfServiceCatalogActiveToggleDisallowedForCategorySlug(slugForVisibility)) {
+          return res.status(403).json({
+            message:
+              "Activar o pausar este servicio en el catálogo no está disponible desde el panel general (Taxi, envíos o marketplace se gestionan en la app de conductor).",
+          });
+        }
+      }
 
       const updatePayload = {
         ...data,

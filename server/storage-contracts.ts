@@ -82,8 +82,6 @@ export type ProviderUpdate = Partial<
     visibilitySubscriptionLastPaymentKey?: string | null;
     visibilitySubscriptionLastPaymentApprovedAt?: string | Date | null;
     visibilitySubscriptionLastPaymentApprovedBy?: string | null;
-    /** Módulos Go (taxi, delivery, marketplace). */
-    goBrands?: string[] | null;
     /** Título corto de la oferta Go (taxi/delivery) para paneles propios. */
     goDriverOfferTitle?: string | null;
     /** Descripción de la oferta Go (taxi/delivery). */
@@ -93,7 +91,16 @@ export type ProviderUpdate = Partial<
 
 /** Datos parciales para actualizar un servicio (solo campos editables). */
 export type ServiceUpdate = Partial<
-  Pick<Service, "title" | "description" | "price" | "imageUrl" | "isActive" | "categoryId"> & { subcategoryId?: number | null }
+  Pick<Service, "title" | "description" | "price" | "imageUrl" | "isActive" | "categoryId"> & {
+    subcategoryId?: number | null;
+    /** Ficha de catálogo propia de este servicio (evita pisar otras ofertas del mismo asociado). */
+    listingBio?: string | null;
+    listingProfession?: string | null;
+    listingYearsExperience?: number | null;
+    listingSkills?: string[] | null;
+    listingPreparationLevel?: string | null;
+    listingCertifications?: string | null;
+  }
 >;
 
 /** Contrato para catálogo: categorías, subcategorías, proveedores, servicios. */

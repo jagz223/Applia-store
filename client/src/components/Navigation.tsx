@@ -5,8 +5,9 @@ import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { useAssociateOnboardingIncomplete } from "@/hooks/use-associate-onboarding-incomplete";
 import { hasAdminRole, canAccessAssociateActivityDashboard } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
-import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility } from "@/hooks/use-mango-data";
+import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility, useProviderVehicle } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
+import { providerHasGoBrand, type ProviderGoRef } from "@shared/provider-go";
 import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
@@ -145,6 +146,17 @@ export function Navigation() {
   /** Cualquier servicio propio (activo o inactivo) para el enlace a Mis servicios. */
   const hasMyServiceNav = myServices.length > 0;
 
+  const { data: providerVehicle, isLoading: providerVehicleLoading } = useProviderVehicle({
+    enabled: isAuthenticated && isProfessional && !!providerProfile,
+  });
+  const canUseGoDriverConducir =
+    isProfessional &&
+    !!providerProfile &&
+    !!providerVehicle &&
+    typeof providerVehicle.vehicle_type === "string" &&
+    providerHasGoBrand(providerProfile as ProviderGoRef, "transport", categories) &&
+    providerHasGoBrand(providerProfile as ProviderGoRef, "delivery", categories);
+
   const isAdmin = (user as { role?: string } | null)?.role === "admin";
   /** Conductor Car Go (verificado o no): acceso a vista driver (recibir) en Go. */
   const isCarGoDriver = !!providerProfile && isCarGoProvider(providerProfile, categories);
@@ -200,11 +212,12 @@ export function Navigation() {
               </Link>
             </DropdownMenuItem>
           )}
-          {canSeeMobility && (isAdmin || (isProfessional && !myServicesLoading && isCarGoDriver)) && (
+          {canSeeMobility &&
+            (isAdmin || (isProfessional && !myServicesLoading && !providerVehicleLoading && (isCarGoDriver || canUseGoDriverConducir))) && (
             <DropdownMenuItem asChild>
               <Link href="/go/taxi/driver" className="flex items-center gap-2 w-full">
                 <Car className="h-4 w-4" />
-                <span>Driver!</span>
+                <span>Conducir</span>
               </Link>
             </DropdownMenuItem>
           )}
@@ -586,14 +599,16 @@ export function Navigation() {
                     Mis servicios
                   </Link>
                 )}
-                {canSeeMobility && (isAdmin || (isProfessional && isCarGoDriver && !myServicesLoading)) && (
+                {canSeeMobility &&
+                  (isAdmin ||
+                    (isProfessional && !myServicesLoading && !providerVehicleLoading && (isCarGoDriver || canUseGoDriverConducir))) && (
                   <Link
                     href="/go/taxi/driver"
                     className="text-lg font-medium flex items-center gap-2 hover:text-primary transition-colors"
                     onClick={() => setMobileOpen(false)}
                   >
                     <Car className="h-5 w-5 shrink-0" />
-                    Driver!
+                    Conducir
                   </Link>
                 )}
                 {isAuthenticated && (

@@ -5,6 +5,8 @@ type PushPayload = {
   title: string;
   body: string;
   data?: Record<string, string>;
+  /** Alertas críticas (pánico): prioridad alta, vibración en web, sonido por defecto en Android/iOS. */
+  urgent?: boolean;
 };
 
 type DevicePlatform = "web" | "android" | "ios" | "unknown";
@@ -124,6 +126,19 @@ class NotificationService {
 
     const data = payload.data ?? {};
     const dataStr = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
+    const urgent = payload.urgent === true;
+    const webNotif: admin.messaging.WebpushNotification = {
+      title: payload.title,
+      body: payload.body,
+      icon: "/genfeb-logo-new.png",
+      ...(urgent
+        ? ({
+            requireInteraction: true,
+            vibrate: [200, 120, 200, 120, 200, 120, 400],
+            silent: false,
+          } as admin.messaging.WebpushNotification)
+        : {}),
+    };
     const message: admin.messaging.MulticastMessage = {
       tokens,
       notification: {
@@ -132,20 +147,17 @@ class NotificationService {
       },
       data: dataStr,
       webpush: {
-        notification: {
-          title: payload.title,
-          body: payload.body,
-          icon: "/genfeb-logo-new.png",
-        },
-        fcmOptions: data.url ? { link: data.url } : undefined,
+        notification: webNotif,
+        fcmOptions: data.url ? { link: String(data.url) } : undefined,
       },
       // Android / iOS: importante para que el mismo envío funcione con tokens de teléfono.
       android: {
-        priority: "high",
+        priority: urgent ? "high" : "high",
         notification: {
           title: payload.title,
           body: payload.body,
           icon: "ic_launcher",
+          ...(urgent ? { sound: "default" } : {}),
         },
       },
       apns: {

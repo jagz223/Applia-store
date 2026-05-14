@@ -3,7 +3,7 @@ import { useRoute, Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useService, useUpdateService, useCurrentProvider, useUpdateProvider, useCategories, useMyServices, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
+import { useService, useUpdateService, useCurrentProvider, useCategories, useMyServices, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
@@ -78,7 +78,6 @@ export default function EditService() {
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { user } = useAuth();
   const updateService = useUpdateService(id);
-  const updateProvider = useUpdateProvider();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isAdmin = hasAdminRole(user);
@@ -149,6 +148,18 @@ export default function EditService() {
       coursesCompleted?: string | null;
       certifications?: string | null;
     } | undefined;
+    const svc = service as {
+      listingBio?: string | null;
+      listingSkills?: string[] | null;
+      listingPreparationLevel?: string | null;
+      listingCertifications?: string | null;
+    };
+    const bioFromListing = typeof svc.listingBio === "string" ? svc.listingBio : undefined;
+    const skillsFromListing = Array.isArray(svc.listingSkills) ? [...svc.listingSkills] : undefined;
+    const prepFromListing =
+      typeof svc.listingPreparationLevel === "string" ? svc.listingPreparationLevel : undefined;
+    const certsFromListing = typeof svc.listingCertifications === "string" ? svc.listingCertifications : undefined;
+
     form.reset({
       categoryId: Number((service as { categoryId: number }).categoryId),
       subcategoryId: (service as { subcategoryId?: number | null }).subcategoryId ?? null,
@@ -156,37 +167,22 @@ export default function EditService() {
       description: service.description ?? "",
       price: String(service.price ?? "0"),
       imageUrl: service.imageUrl ?? "",
-      professionalBio: p?.bio ?? "",
-      skills: Array.isArray(p?.skills) ? [...p.skills] : [],
-      preparationLevel: resolvePreparationLevel(p),
-      certifications: resolveCertificationsText(p),
+      professionalBio: bioFromListing ?? p?.bio ?? "",
+      skills: skillsFromListing ?? (Array.isArray(p?.skills) ? [...p.skills] : []),
+      preparationLevel: prepFromListing ?? resolvePreparationLevel(p),
+      certifications: certsFromListing ?? resolveCertificationsText(p),
     });
   }, [service, form]);
 
   const isOwner = provider && service && service.providerId === provider.id;
 
   const handleSaveConfirmed = async () => {
+    if (!service) return;
     const vals = form.getValues();
-    const providerId = service?.provider && "id" in service.provider ? (service.provider as { id: number }).id : undefined;
-    if (providerId == null) return;
     const slug = String(categories.find((c) => c.id === vals.categoryId)?.slug ?? "");
     const trade = isTradeListingCategorySlug(slug);
     const professionalListing = isProfessionalListingCategorySlug(slug);
     try {
-      await updateProvider.mutateAsync({
-        providerId,
-        data: {
-          bio: vals.professionalBio.trim(),
-          skills: vals.skills,
-          ...(trade
-            ? {
-                preparationLevel: (vals.preparationLevel ?? "").trim(),
-                certifications: (vals.certifications ?? "").trim(),
-              }
-            : {}),
-          ...(!trade && professionalListing ? { certifications: (vals.certifications ?? "").trim() } : {}),
-        },
-      });
       await updateService.mutateAsync({
         title: vals.title,
         description: vals.description ?? "",
@@ -194,6 +190,15 @@ export default function EditService() {
         imageUrl: vals.imageUrl || undefined,
         categoryId: vals.categoryId,
         subcategoryId: vals.subcategoryId ?? null,
+        listingBio: vals.professionalBio.trim(),
+        listingSkills: vals.skills,
+        ...(trade
+          ? {
+              listingPreparationLevel: (vals.preparationLevel ?? "").trim(),
+              listingCertifications: (vals.certifications ?? "").trim(),
+            }
+          : {}),
+        ...(!trade && professionalListing ? { listingCertifications: (vals.certifications ?? "").trim() } : {}),
       });
       setLocation(`/service/${id}`);
     } catch {
@@ -251,22 +256,22 @@ export default function EditService() {
         <h1 className="text-3xl font-display font-bold text-primary mb-2">Editar servicio</h1>
         <p className="text-muted-foreground">
           {isTrade
-            ? "Actualiza tu publicación: título, descripción, nivel de preparación, certificaciones, habilidades y biografía."
+            ? "Actualiza título, descripción, preparación, certificaciones, habilidades y biografía. Todo queda guardado en esta ficha, sin pisar tus otras ofertas."
             : isProfessional
-              ? "Actualiza título, descripción, certificados opcionales, habilidades y biografía. Lo que escribas en certificaciones se verá en la ficha pública si no está vacío."
-              : "Modifica tu publicación: datos del servicio y tu biografía profesional (50–700 caracteres)."}
+              ? "Actualiza título, descripción, certificaciones opcionales, habilidades y biografía de esta oferta. Cada servicio tiene su propia copia en el catálogo."
+              : "Modifica los datos de esta publicación; la biografía y habilidades que guardes aquí son solo de este servicio."}
         </p>
       </div>
 
       <Card className="border-border/50 shadow-xl">
         <CardHeader>
-          <CardTitle>Tu servicio y perfil</CardTitle>
+          <CardTitle>Tu servicio y ficha pública</CardTitle>
           <CardDescription>
             {isTrade
-              ? "En Servicios técnicos y Mantenimiento el catálogo muestra también tu nivel de preparación y, si las indicas, tus certificaciones."
+              ? "Los cambios en preparación, certificaciones, habilidades y biografía se aplican solo a este servicio en el catálogo."
               : isProfessional
-                ? "En Servicios profesionales puedes publicar certificaciones y títulos (maestría, doctorado, etc.); aparecen en la ficha del servicio solo si el campo no está vacío."
-                : "Mismo formulario que al registrarte como proveedor: nombre, descripción, habilidades y biografía pública."}
+                ? "Certificaciones, habilidades y biografía se guardan en esta ficha; no modifican automáticamente otras ofertas que tengas."
+                : "Los datos de perfil visibles en esta publicación son propios de este servicio cuando los guardas aquí."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -498,9 +503,9 @@ export default function EditService() {
               <Button
                 type="submit"
                 className="w-full text-lg h-12"
-                disabled={updateService.isPending || updateProvider.isPending || isBlocked}
+                disabled={updateService.isPending || isBlocked}
               >
-                {updateService.isPending || updateProvider.isPending ? (
+                {updateService.isPending ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Guardando...

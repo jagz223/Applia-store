@@ -16,6 +16,7 @@ import {
   type ProviderWithUser,
   type ServiceWithProvider,
 } from "@shared/schema";
+import { mergeProviderWithServiceListingProfile } from "@shared/service-listing-profile";
 import { eq, and, like, desc } from "drizzle-orm";
 const getDb = async () => (await import("./db")).db;
 
@@ -108,20 +109,33 @@ export class DatabaseStorage implements IStorage {
         category: true
       }
     });
-    return await query;
+    const rows = await query;
+    return rows.map((row) => {
+      const merged = mergeProviderWithServiceListingProfile(
+        row.provider as unknown as Record<string, unknown>,
+        row as unknown as Record<string, unknown>,
+      );
+      return { ...row, provider: (merged ?? row.provider) as typeof row.provider } as ServiceWithProvider;
+    });
   }
 
   async getService(id: number): Promise<ServiceWithProvider | undefined> {
     const db = await getDb();
-    return await db.query.services.findFirst({
+    const row = await db.query.services.findFirst({
       where: eq(services.id, id),
       with: {
         provider: {
-          with: { user: true }
+          with: { user: true },
         },
-        category: true
-      }
+        category: true,
+      },
     });
+    if (!row) return undefined;
+    const merged = mergeProviderWithServiceListingProfile(
+      row.provider as unknown as Record<string, unknown>,
+      row as unknown as Record<string, unknown>,
+    );
+    return { ...row, provider: (merged ?? row.provider) as typeof row.provider } as ServiceWithProvider;
   }
 
   async createService(insertService: InsertService): Promise<Service> {
@@ -283,7 +297,16 @@ class MemoryStorage implements IStorage {
     return list.map((s) => {
       const provider = this._providers.find((p) => p.id === s.providerId)!;
       const user = { id: provider.userId } as unknown as User;
-      return { ...s, provider: { ...provider, user }, category: this._categories.find((c) => c.id === s.categoryId)! } as ServiceWithProvider;
+      const providerWithUser = { ...provider, user };
+      const merged = mergeProviderWithServiceListingProfile(
+        providerWithUser as unknown as Record<string, unknown>,
+        s as unknown as Record<string, unknown>,
+      );
+      return {
+        ...s,
+        provider: merged ?? providerWithUser,
+        category: this._categories.find((c) => c.id === s.categoryId)!,
+      } as ServiceWithProvider;
     });
   }
 
@@ -292,7 +315,16 @@ class MemoryStorage implements IStorage {
     if (!s) return undefined;
     const provider = this._providers.find((p) => p.id === s.providerId)!;
     const user = { id: provider.userId } as unknown as User;
-    return { ...s, provider: { ...provider, user }, category: this._categories.find((c) => c.id === s.categoryId)! } as ServiceWithProvider;
+    const providerWithUser = { ...provider, user };
+    const merged = mergeProviderWithServiceListingProfile(
+      providerWithUser as unknown as Record<string, unknown>,
+      s as unknown as Record<string, unknown>,
+    );
+    return {
+      ...s,
+      provider: merged ?? providerWithUser,
+      category: this._categories.find((c) => c.id === s.categoryId)!,
+    } as ServiceWithProvider;
   }
 
   async createService(insertService: InsertService): Promise<Service> {

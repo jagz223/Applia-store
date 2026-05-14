@@ -15,6 +15,7 @@ import { Loader2, ArrowLeft, PackageOpen, Plus, Car, Bike, Package } from "lucid
 import { motion } from "framer-motion";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { providerHasGoBrand } from "@shared/provider-go";
+import { computeMyServicesCardRows } from "@shared/my-services-display-policy";
 
 const VEHICLE_TYPE_LABEL: Record<string, string> = {
   motorcycle: "Moto",
@@ -73,9 +74,10 @@ export default function MyServices() {
 
   const showBecomeDriverCta = mobilityGoVisible && !!provider && !driverEnrollmentComplete;
 
-  const sortedServices = useMemo(() => {
-    return [...services].sort((a, b) => (a.title || "").localeCompare(b.title || "", "es"));
-  }, [services]);
+  const { rows: cardRows, allServicesWereGoCatalogOnly } = useMemo(
+    () => computeMyServicesCardRows({ services, showDriverPreview }),
+    [services, showDriverPreview],
+  );
 
   if (!authLoading && !isAuthenticated) {
     return <Redirect to="/login" />;
@@ -237,7 +239,7 @@ export default function MyServices() {
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
             <p className="text-muted-foreground">Cargando tus servicios…</p>
           </div>
-        ) : sortedServices.length === 0 ? (
+        ) : services.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -264,13 +266,26 @@ export default function MyServices() {
               ) : null}
             </div>
           </motion.div>
+        ) : allServicesWereGoCatalogOnly ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-dashed border-border/80 bg-muted/20 px-4 py-10 text-center"
+          >
+            <p className="mx-auto max-w-lg text-sm text-muted-foreground leading-relaxed">
+              Los servicios de <span className="font-medium text-foreground">taxi, envíos y marketplace</span> no se
+              listan aquí: los ves en la vista previa de conductor. Cuando agregues un{" "}
+              <span className="font-medium text-foreground">servicio de otra categoría</span> (por ejemplo mantenimiento
+              o técnicos), aparecerá en esta lista para editarlo o abrir la ficha pública.
+            </p>
+          </motion.div>
         ) : (
           <>
             <p className="mb-6 text-muted-foreground">
-              {sortedServices.length} servicio{sortedServices.length === 1 ? "" : "s"}
+              {cardRows.length} servicio{cardRows.length === 1 ? "" : "s"}
             </p>
             <div className="flex flex-col gap-4">
-              {sortedServices.map((service, index) => (
+              {cardRows.map((service, index) => (
                 <motion.div
                   key={service.id}
                   initial={{ opacity: 0, y: 12 }}

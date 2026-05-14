@@ -1,7 +1,5 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertServiceSchema } from "@shared/schema";
-import { z } from "zod";
 import {
   useCreateService,
   useCurrentProvider,
@@ -16,33 +14,59 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { Loader2, Sparkles, ArrowLeft } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
 import { getCategoryDisplayName, effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 import {
   SERVICE_DESCRIPTION_INLINE_HINT,
   ServiceDescriptionInfoButton,
+  BiographyOnboardingInfoButton,
 } from "@/components/ServiceDescriptionHints";
-
-const createServiceFormSchema = insertServiceSchema.extend({
-  subcategoryId: z.number().int().positive().optional().nullable(),
-});
-
-type CreateServiceFormValues = z.infer<typeof createServiceFormSchema>;
+import { CertificationsVisibilityHint } from "@/components/service/CertificationsVisibilityHint";
+import { ProviderSkillsField } from "@/components/ProviderSkillsField";
+import {
+  createServiceCategorySlug,
+  createServiceIsFocusCatalogSlug,
+  createServiceRequiresSubcategory,
+  getCreateServiceCategoryIntro,
+  getCreateServiceFormPlaceholders,
+  isProfessionalListingCategorySlug,
+  isTradeListingCategorySlug,
+} from "@shared/create-service-catalog-context";
+import { buildCreateServiceFormSchema, type CreateServiceFormValues } from "@shared/create-service-form-schema";
+import { buildServiceListingProfileFromCreateForm } from "@shared/service-listing-profile";
+import {
+  CATALOG_FOCUS_BIO_DESCRIPTION,
+  CATALOG_FOCUS_CERTIFICATIONS_PROFESSIONAL_DESCRIPTION,
+  CATALOG_FOCUS_CERTIFICATIONS_TRADE_DESCRIPTION,
+  CATALOG_FOCUS_PREPARATION_LEVEL_DESCRIPTION,
+  CATALOG_FOCUS_SERVICE_DESCRIPTION_OPTIONAL_NOTE,
+  CATALOG_FOCUS_SERVICE_TITLE_DESCRIPTION,
+  catalogFocusSubcategoryFormDescription,
+  CATALOG_CREATE_SERVICE_ISOLATION_NOTE,
+} from "@shared/catalog-focus-form-copy";
+import type { InsertService } from "@shared/schema";
 
 export default function CreateService() {
   const { user, isLoading: authLoading } = useAuth();
   const { data: providerFromApi, isLoading: providerApiLoading } = useCurrentProvider();
-  /** Proveedor: primero del usuario (auth/me); si no, de la API dedicada (por si auth/me no trajo provider en caché). */
   const provider = user?.provider ?? providerFromApi ?? null;
   const { data: categories } = useCategories();
+  const categoriesRef = useRef(categories ?? []);
+  categoriesRef.current = categories ?? [];
+
+  const createServiceFormSchema = useMemo(
+    () => buildCreateServiceFormSchema(() => categoriesRef.current),
+    [],
+  );
+
   const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(
     () => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)),
-    [visibility]
+    [visibility],
   );
   const shouldFetchMyServices =
     !!user &&
@@ -62,6 +86,12 @@ export default function CreateService() {
       price: "0",
       imageUrl: "",
       isActive: true,
+      preparationLevel: "",
+      certifications: "",
+      yearsExperience: 0,
+      skills: [],
+      profession: "",
+      bio: "",
     },
   });
 
@@ -88,7 +118,7 @@ export default function CreateService() {
 
   const usedCategoryIds = useMemo(
     () => new Set(myServices.map((s) => Number((s as { categoryId: number }).categoryId)).filter((n) => !Number.isNaN(n))),
-    [myServices]
+    [myServices],
   );
 
   const availableCategories = useMemo(() => {
@@ -103,8 +133,21 @@ export default function CreateService() {
   }, [availableCategories, resolvedProviderCategoryId]);
 
   const categoryIdValue = form.watch("categoryId");
+  const selectedSlug = useMemo(
+    () => createServiceCategorySlug(categoryIdValue, categories ?? []),
+    [categoryIdValue, categories],
+  );
+  const isFocusCatalog = createServiceIsFocusCatalogSlug(selectedSlug);
+  const isTrade = isTradeListingCategorySlug(selectedSlug);
+  const isProfessional = isProfessionalListingCategorySlug(selectedSlug);
+  const needsSubcategory = createServiceRequiresSubcategory(selectedSlug);
+  const categoryIntro = getCreateServiceCategoryIntro(selectedSlug);
+  const placeholders = useMemo(() => getCreateServiceFormPlaceholders(selectedSlug), [selectedSlug]);
+  const descriptionWatch = form.watch("description");
+  const descriptionLength = descriptionWatch?.length ?? 0;
+
   const { data: subcategories = [] } = useSubcategories(
-    categoryIdValue != null && categoryIdValue > 0 ? categoryIdValue : undefined
+    categoryIdValue != null && categoryIdValue > 0 ? categoryIdValue : undefined,
   );
 
   useEffect(() => {
@@ -158,12 +201,38 @@ export default function CreateService() {
     );
   }
 
-  function onSubmit(data: CreateServiceFormValues) {
-    data.imageUrl = "";
-    const payload = { ...data, subcategoryId: data.subcategoryId ?? undefined };
-    createService.mutate(payload, {
-      onSuccess: () => setLocation("/my-services"),
+  async function onSubmit(data: CreateServiceFormValues) {
+    if (!provider) return;
+
+    const slug = createServiceCategorySlug(data.categoryId, categories ?? []);
+    const listing = buildServiceListingProfileFromCreateForm(slug, {
+      yearsExperience: data.yearsExperience,
+      skills: data.skills ?? [],
+      profession: data.profession,
+      bio: data.bio,
+      preparationLevel: data.preparationLevel,
+      certifications: data.certifications,
     });
+
+    const servicePayload = {
+      providerId: data.providerId,
+      categoryId: data.categoryId,
+      subcategoryId: data.subcategoryId ?? undefined,
+      title: data.title.trim(),
+      description: data.description.trim(),
+      price: "0",
+      imageUrl: "",
+      isActive: data.isActive ?? true,
+      ...listing,
+    } as InsertService & { subcategoryId?: number } & typeof listing;
+
+    try {
+      await createService.mutateAsync(servicePayload as InsertService);
+    } catch {
+      return;
+    }
+
+    setLocation("/my-services");
   }
 
   if (availableCategories.length === 0) {
@@ -187,29 +256,42 @@ export default function CreateService() {
     );
   }
 
+  const subcategoryRequired = needsSubcategory && subcategories.length > 0;
+  const submitPending = createService.isPending;
+
   return (
     <div className="container max-w-2xl py-12 px-4">
-      <Card>
+      <Button variant="ghost" className="mb-4 gap-2 -ml-2" asChild>
+        <Link href="/my-services">
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          Volver a Mis servicios
+        </Link>
+      </Button>
+
+      <div className="mb-8 text-center">
+        <h1 className="text-3xl font-display font-bold text-primary mb-2">Nuevo servicio de catálogo</h1>
+        <p className="text-muted-foreground">
+          Es el mismo tipo de preguntas que cuando te diste de alta como asociado en esta categoría, pero{" "}
+          <strong className="text-foreground">empiezas en blanco</strong>: no traemos título, años, habilidades ni biografía
+          de tus otras ofertas. Rellena todo pensando solo en <strong className="text-foreground">este</strong> servicio que
+          quieres publicar.
+        </p>
+        <div className="mt-6 rounded-xl border border-border/60 bg-muted/30 p-4 text-left text-sm text-muted-foreground max-w-xl mx-auto">
+          {CATALOG_CREATE_SERVICE_ISOLATION_NOTE}
+        </div>
+      </div>
+
+      <Card className="border-border/50 shadow-xl">
         <CardHeader>
-          <CardTitle>Agregar nuevo servicio</CardTitle>
+          <CardTitle>Perfil de proveedor</CardTitle>
+          <CardDescription>
+            Indica categoría y datos de esta oferta. Lo que escribas aquí aplica solo a este servicio y no modifica lo que
+            ya tenías en otras categorías u ofertas.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField
-                control={form.control}
-                name="title"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Título del servicio</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ej: Limpieza completa de hogar" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
               <FormField
                 control={form.control}
                 name="categoryId"
@@ -229,18 +311,18 @@ export default function CreateService() {
                       <SelectContent>
                         {availableCategories.map((cat) => (
                           <SelectItem key={String(cat.id)} value={String(cat.id)}>
-                            {getCategoryDisplayName(cat as any)}
+                            {getCategoryDisplayName(cat as never)}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      Solo se muestran categorías de catálogo que aún no usas en otro servicio propio. Tu perfil de
-                      asociado sigue en{" "}
+                      Solo aparecen categorías de catálogo que aún no usas en otro servicio tuyo. Sigue apareciendo tu
+                      registro principal en{" "}
                       <span className="font-medium text-foreground">
-                        {providerCategory ? getCategoryDisplayName(providerCategory) : "tu categoría de registro"}
+                        {providerCategory ? getCategoryDisplayName(providerCategory) : "la categoría en la que te registraste"}
                       </span>
-                      ; este servicio puede publicarse en otra categoría si está libre.
+                      ; aquí eliges otra línea y el formulario arranca vacío, sin copiar lo de tus otros servicios.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -253,18 +335,31 @@ export default function CreateService() {
                   name="subcategoryId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Subcategoría (opcional)</FormLabel>
+                      <FormLabel>{needsSubcategory ? "Subcategoría" : "Subcategoría (opcional)"}</FormLabel>
+                      <FormDescription className="text-xs">
+                        {catalogFocusSubcategoryFormDescription(needsSubcategory)}
+                      </FormDescription>
                       <Select
-                        onValueChange={(v) => field.onChange(v === "none" || !v ? undefined : Number(v))}
-                        value={field.value != null ? String(field.value) : "none"}
+                        onValueChange={(v) => field.onChange(!v || v === "none" ? undefined : Number(v))}
+                        value={
+                          field.value != null && Number(field.value) > 0
+                            ? String(field.value)
+                            : subcategoryRequired
+                              ? undefined
+                              : "none"
+                        }
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Selecciona una subcategoría" />
+                            <SelectValue
+                              placeholder={
+                                subcategoryRequired ? "Selecciona una subcategoría" : "Selecciona una subcategoría"
+                              }
+                            />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="none">Ninguna</SelectItem>
+                          {!subcategoryRequired ? <SelectItem value="none">Ninguna</SelectItem> : null}
                           {subcategories.map((sub) => (
                             <SelectItem key={String(sub.id)} value={String(sub.id)}>
                               {sub.name}
@@ -276,6 +371,220 @@ export default function CreateService() {
                     </FormItem>
                   )}
                 />
+              ) : needsSubcategory ? (
+                <p className="text-sm text-amber-600 dark:text-amber-500">
+                  No hay subcategorías cargadas para esta categoría. Si el problema continúa, contacta soporte; no podrás
+                  publicar sin elegir subcategoría.
+                </p>
+              ) : null}
+
+              {isFocusCatalog && categoryIntro ? (
+                <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+                  <p className="text-sm font-semibold text-foreground">Guía rápida</p>
+                  <p className="text-sm text-muted-foreground mt-1">{categoryIntro}</p>
+                </div>
+              ) : null}
+
+              {isTrade ? (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="preparationLevel"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nivel de preparación</FormLabel>
+                        <FormDescription className="text-xs">{CATALOG_FOCUS_PREPARATION_LEVEL_DESCRIPTION}</FormDescription>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Ej. Bachillerato completo; curso de instalaciones sanitarias IPAC 2023; taller de refrigeración doméstica…"
+                            className="min-h-[100px] resize-y"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="certifications"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Certificaciones obtenidas (opcional)</FormLabel>
+                        <FormDescription className="text-xs">{CATALOG_FOCUS_CERTIFICATIONS_TRADE_DESCRIPTION}</FormDescription>
+                        <CertificationsVisibilityHint />
+                        <FormControl>
+                          <Textarea
+                            placeholder="Ej. Certificado EPA sección 608; carné de electricista habilitado; PhD en…"
+                            className="min-h-[100px] resize-y mt-2"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="yearsExperience"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Años de experiencia</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={0}
+                            {...field}
+                            onChange={(e) => field.onChange(parseInt(e.target.value, 10) || 0)}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              ) : null}
+
+              {isFocusCatalog ? (
+                <>
+                  {isProfessional ? (
+                    <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 text-sm">
+                      <div className="flex gap-2">
+                        <Sparkles className="h-4 w-4 shrink-0 text-primary mt-0.5" aria-hidden />
+                        <div>
+                          <p className="font-medium text-foreground">Título de la oferta</p>
+                          <p className="mt-1 text-muted-foreground">
+                            El campo «Nombre del servicio» es el título público que verán los clientes en el catálogo junto a
+                            tu nombre. Asegúrate de que describa claramente esta oferta.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <FormField
+                    control={form.control}
+                    name="profession"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Profesión / Título</FormLabel>
+                        <FormControl>
+                          <Input placeholder={placeholders.profession} {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="title"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nombre del servicio</FormLabel>
+                        <FormDescription>{CATALOG_FOCUS_SERVICE_TITLE_DESCRIPTION}</FormDescription>
+                        <FormControl>
+                          <Input placeholder={placeholders.serviceTitle} {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="description"
+                    render={({ field }) => (
+                      <FormItem>
+                        <div className="flex items-center gap-2">
+                          <FormLabel className="mb-0">Descripción del servicio</FormLabel>
+                          <ServiceDescriptionInfoButton ariaLabel="Información: descripción del servicio" />
+                        </div>
+                        <FormDescription>{SERVICE_DESCRIPTION_INLINE_HINT}</FormDescription>
+                        <p className="text-xs text-muted-foreground -mt-1">{CATALOG_FOCUS_SERVICE_DESCRIPTION_OPTIONAL_NOTE}</p>
+                        <FormControl>
+                          <Textarea
+                            placeholder={placeholders.serviceDescription}
+                            className="min-h-[120px] resize-y"
+                            {...field}
+                          />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground flex justify-end tabular-nums">{descriptionLength}/5000</p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="yearsExperience"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Años de experiencia</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={0}
+                            {...field}
+                            onChange={(e) => field.onChange(parseInt(e.target.value, 10) || 0)}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <ProviderSkillsField control={form.control} name="skills" />
+
+                  <FormField
+                    control={form.control}
+                    name="bio"
+                    render={({ field }) => (
+                      <FormItem>
+                        <div className="flex items-center gap-2">
+                          <FormLabel className="mb-0">Biografía y enfoque profesional</FormLabel>
+                          <BiographyOnboardingInfoButton />
+                        </div>
+                        <FormDescription>{CATALOG_FOCUS_BIO_DESCRIPTION}</FormDescription>
+                        <FormControl>
+                          <Textarea
+                            placeholder={placeholders.bio}
+                            className="min-h-[140px] resize-y"
+                            maxLength={700}
+                            {...field}
+                          />
+                        </FormControl>
+                        <p className="text-xs text-muted-foreground flex justify-between gap-2">
+                          <span>Obligatorio: mínimo 50 caracteres, máximo 700.</span>
+                          <span className="tabular-nums shrink-0">{field.value?.length ?? 0}/700</span>
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {!isTrade && isProfessional ? (
+                    <FormField
+                      control={form.control}
+                      name="certifications"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Certificaciones obtenidas (opcional)</FormLabel>
+                          <FormDescription className="text-xs">{CATALOG_FOCUS_CERTIFICATIONS_PROFESSIONAL_DESCRIPTION}</FormDescription>
+                          <CertificationsVisibilityHint />
+                          <FormControl>
+                            <Textarea
+                              placeholder="Ej. Abogado de los Tribunales; máster en tributación; PhD en…; certificación CPA…"
+                              className="min-h-[100px] resize-y mt-2"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : null}
+                </>
               ) : null}
 
               <FormField
@@ -284,26 +593,8 @@ export default function CreateService() {
                 render={({ field }) => <input type="hidden" {...field} />}
               />
 
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <div className="flex items-center gap-2">
-                      <FormLabel className="mb-0">Descripción del servicio</FormLabel>
-                      <ServiceDescriptionInfoButton />
-                    </div>
-                    <FormDescription>{SERVICE_DESCRIPTION_INLINE_HINT}</FormDescription>
-                    <FormControl>
-                      <Textarea placeholder="Qué incluye este servicio?" className="h-32" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <Button type="submit" className="w-full" disabled={createService.isPending}>
-                {createService.isPending ? "Creando..." : "Crear servicio"}
+              <Button type="submit" className="w-full" disabled={submitPending}>
+                {submitPending ? "Guardando…" : "Crear servicio"}
               </Button>
             </form>
           </Form>

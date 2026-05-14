@@ -23,9 +23,43 @@ export function PushForegroundHandler() {
         if (!messaging || cancelled) return;
 
         const { onMessage } = await import("firebase/messaging");
-        const unsubscribe = onMessage(messaging, () => {
-          // Solo mantener la suscripción activa; la campanita se actualiza por Socket.IO.
-          // No mostrar toast para no duplicar con la notificación que ya añade el socket.
+        const unsubscribe = onMessage(messaging, (payload) => {
+          const t = payload.data?.type;
+          if (t === "go_panic") {
+            try {
+              const Ctx =
+                window.AudioContext ||
+                (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+              if (Ctx) {
+                const ctx = new Ctx();
+                const o = ctx.createOscillator();
+                const g = ctx.createGain();
+                o.type = "square";
+                o.frequency.value = 880;
+                g.gain.value = 0.12;
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.start();
+                setTimeout(() => {
+                  try {
+                    o.stop();
+                    void ctx.close();
+                  } catch {
+                    /* ignore */
+                  }
+                }, 180);
+              }
+            } catch {
+              /* ignore */
+            }
+            try {
+              if ("vibrate" in navigator && typeof navigator.vibrate === "function") {
+                navigator.vibrate([350, 150, 350, 150, 350]);
+              }
+            } catch {
+              /* ignore */
+            }
+          }
         });
         unsubRef.current = unsubscribe;
       } catch {

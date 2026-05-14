@@ -3,6 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./models/auth";
 import { relations } from "drizzle-orm";
+import type { ServiceListingProfileFields } from "./service-listing-profile";
 
 export * from "./models/auth";
 
@@ -135,9 +136,10 @@ export type InsertService = z.infer<typeof insertServiceSchema>;
 export type InsertBooking = z.infer<typeof insertBookingSchema>;
 
 export type ProviderWithUser = Provider & { user: typeof users.$inferSelect };
-export type ServiceWithProvider = Service & {
-  provider: ProviderWithUser;
-  category: Category;
-  /** Subcategoría enriquecida (ej. Servicios Legales) cuando el servicio tiene subcategoryId. */
-  subcategory?: { id: number; name: string } | null;
-};
+export type ServiceWithProvider = Service &
+  ServiceListingProfileFields & {
+    provider: ProviderWithUser;
+    category: Category;
+    /** Subcategoría enriquecida (ej. Servicios Legales) cuando el servicio tiene subcategoryId. */
+    subcategory?: { id: number; name: string } | null;
+  };

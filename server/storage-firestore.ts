@@ -33,6 +33,7 @@ import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shar
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { isFullAdmin } from "@shared/roles";
 import { resolveCertificationsText, resolvePreparationLevel } from "@shared/provider-preparation";
+import { mergeProviderWithServiceListingProfile } from "@shared/service-listing-profile";
 import type { ProfessionalVerification, ProfessionalVerificationState } from "@shared/professional-verification";
 import type { VerifyingStatus } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
@@ -963,9 +964,13 @@ class FirestoreStorageImpl implements IStorage {
         }
         subcategory = subcategoryCache.get(Number(subId)) ?? null;
       }
+      const mergedProvider = mergeProviderWithServiceListingProfile(
+        providerWithUser as unknown as Record<string, unknown>,
+        service as unknown as Record<string, unknown>,
+      ) as typeof providerWithUser;
       servicesWithProviders.push({
         ...service,
-        provider: providerWithUser ?? undefined,
+        provider: mergedProvider ?? undefined,
         category: category ?? (allCategories[0] as Category),
         subcategory,
       } as ServiceWithProvider);
@@ -1037,9 +1042,14 @@ class FirestoreStorageImpl implements IStorage {
       const sub = await this.getSubcategoryById(Number(subId));
       if (sub) subcategory = { id: sub.id, name: sub.name };
     }
+    const mergedProvider = mergeProviderWithServiceListingProfile(
+      providerWithUser as unknown as Record<string, unknown>,
+      service as unknown as Record<string, unknown>,
+    ) as typeof providerWithUser;
+
     return applyPublicServicePrice({
       ...service,
-      provider: providerWithUser ?? undefined,
+      provider: mergedProvider ?? undefined,
       category: category ?? ({} as Category),
       subcategory,
     } as ServiceWithProvider) as ServiceWithProvider;

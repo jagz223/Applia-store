@@ -39,6 +39,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton";
+import { BookingsCatalogServicesPanel } from "@/components/professional/BookingsCatalogServicesPanel";
+import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
 import { useAuth } from "@/hooks/use-auth";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { useCategories } from "@/hooks/use-mango-data";
@@ -241,10 +243,15 @@ type BookingItem = {
   confirmedByClient?: boolean;
   notes?: string | null;
   user?: { firstName?: string; lastName?: string; name?: string };
-  service?: { title: string; price?: string };
+  service?: { title: string; price?: string; category?: { slug?: string } };
   userId?: string;
   paymentMethod?: string;
 };
+
+function bookingUsesMobilityCatalogCategory(b: BookingItem): boolean {
+  const slug = String(b.service?.category?.slug ?? "").trim().toLowerCase();
+  return isSelfServiceCatalogActiveToggleDisallowedForCategorySlug(slug);
+}
 
 const BOOKINGS_SUB_TABS = ["pending", "in_progress", "ready", "history"] as const;
 type BookingsSubTab = (typeof BOOKINGS_SUB_TABS)[number];
@@ -268,7 +275,10 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
     history: 1,
   });
 
-  const list = (bookings ?? []) as BookingItem[];
+  const list = useMemo(
+    () => ((bookings ?? []) as BookingItem[]).filter((b) => !bookingUsesMobilityCatalogCategory(b)),
+    [bookings],
+  );
   const pending = useMemo(() => list.filter((b) => b.status === "pending"), [list]);
   const ready = useMemo(
     () =>
@@ -524,6 +534,7 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
 
   return (
     <>
+      <BookingsCatalogServicesPanel className="mb-6" />
       <Dialog open={pendingScheduleChange != null} onOpenChange={(open) => (!open ? setPendingScheduleChange(null) : undefined)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -559,7 +570,8 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
         <CardHeader>
           <CardTitle className="text-xl leading-tight">Gestión de reservas</CardTitle>
           <CardDescription>
-            Solicitudes de clientes: puedes cambiar la fecha acordada y actualizar el estado de cada reserva.
+            Reservas de servicios del catálogo (sin taxi, envíos ni marketplace). Podés cambiar la fecha acordada y el
+            estado de cada reserva.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -1054,7 +1066,6 @@ function ProfessionalDashboardInner() {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const tab = new URLSearchParams(search).get("tab");
     if (tab === "transactions") return "overview";
-    if (tab === "bookings" && isTaxiDriver) return "overview";
     const t =
       tab && DASHBOARD_TABS.includes(tab as (typeof DASHBOARD_TABS)[number]) ? tab : "overview";
     return t;
@@ -1149,7 +1160,6 @@ function ProfessionalDashboardInner() {
   }, []);
 
   const setTab = (value: string) => {
-    if (isTaxiDriver && value === "bookings") return;
     setCurrentTabState(value);
     setLocation(`/professional-dashboard?tab=${value}`);
   };
@@ -1158,12 +1168,10 @@ function ProfessionalDashboardInner() {
   const pendingOrActiveCount = overviewStats?.pendingOrActiveCount ?? 0;
 
   const { data: providerBookings } = useBookingsByProvider();
-  const bookingsSafe = (providerBookings ?? []) as Array<{
-    status?: string;
-    cost?: number | string;
-    completedAt?: unknown;
-    date?: unknown;
-  }>;
+  const bookingsSafe = useMemo(() => {
+    const raw = (providerBookings ?? []) as BookingItem[];
+    return raw.filter((b) => !bookingUsesMobilityCatalogCategory(b));
+  }, [providerBookings]);
 
   const completedBookings = useMemo(
     () => bookingsSafe.filter((b) => b.status === "completed") as BookingItem[],
@@ -1346,11 +1354,9 @@ function ProfessionalDashboardInner() {
               <TabsTrigger value="overview" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">
                 Resumen
               </TabsTrigger>
-              {!isTaxiDriver ? (
-                <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">
-                  Reservas
-                </TabsTrigger>
-              ) : null}
+              <TabsTrigger value="bookings" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">
+                Reservas
+              </TabsTrigger>
               <TabsTrigger value="invoices" className="flex-shrink-0 min-w-[max-content] px-3 py-2 text-sm sm:flex-initial sm:px-3 sm:py-1.5">
                 Facturas
               </TabsTrigger>
@@ -1423,7 +1429,7 @@ function ProfessionalDashboardInner() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg sm:text-xl">Estadísticas de reservas</CardTitle>
                   <CardDescription className="text-xs sm:text-sm">
-                    Desglose por estado en tu lista de reservas
+                    Desglose por estado en reservas de servicios del catálogo (sin taxi, envíos ni marketplace).
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1462,11 +1468,9 @@ function ProfessionalDashboardInner() {
             </div>
           </TabsContent>
 
-          {!isTaxiDriver ? (
-            <TabsContent value="bookings">
-              <ProviderBookingsTab highlightedBookingId={highlightedBookingId} />
-            </TabsContent>
-          ) : null}
+          <TabsContent value="bookings">
+            <ProviderBookingsTab highlightedBookingId={highlightedBookingId} />
+          </TabsContent>
 
           <TabsContent value="invoices">
             <InvoicesTabContent />

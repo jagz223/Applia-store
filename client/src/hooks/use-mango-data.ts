@@ -339,10 +339,8 @@ export function useProviderVehicle(options?: { enabled?: boolean }) {
 }
 
 export type EnrollGoDriverPayload = {
-  profession: string;
-  bio: string;
-  serviceTitle: string;
-  serviceDescription: string;
+  serviceTitle?: string;
+  serviceDescription?: string;
   vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle;
 };
 
@@ -379,8 +377,9 @@ export function useEnrollGoDriver() {
       debouncedRefetch(queryClient, [api.providers.me.path]);
       debouncedRefetch(queryClient, ["/api/me/provider-vehicle"]);
       toast({
-        title: "Perfil de conductor actualizado",
-        description: "Ya tienes habilitados taxi y delivery en Genfeb Go (según verificación y suscripción).",
+        title: "Genfeb Go activado",
+        description:
+          "Taxi y delivery quedan habilitados en tu cuenta (según verificación y suscripción). Puedes abrir Genfeb Go para conducir.",
       });
     },
     onError: (err: Error) => {
@@ -611,6 +610,12 @@ export type ServiceUpdatePayload = {
   isActive?: boolean;
   categoryId?: number;
   subcategoryId?: number | null;
+  listingBio?: string;
+  listingProfession?: string;
+  listingYearsExperience?: number;
+  listingSkills?: string[];
+  listingPreparationLevel?: string;
+  listingCertifications?: string;
 };
 
 /** Servicios del proveedor actual (solo si está autenticado y es proveedor). */
@@ -695,6 +700,43 @@ export function useUpdateService(serviceId: number) {
       queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
       debouncedRefetch(queryClient, [api.services.list.path]);
       debouncedRefetch(queryClient, [api.services.get.path, serviceId]);
+      debouncedRefetch(queryClient, ["/api/me/services"]);
+      toast({ title: "Servicio actualizado", description: "Los cambios se han guardado correctamente." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+/** PATCH /api/services/:id con cualquier id (p. ej. lista en dashboard). */
+export function usePatchService() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ serviceId, data }: { serviceId: number; data: ServiceUpdatePayload }) => {
+      const token = getToken();
+      const res = await fetch(`/api/services/${serviceId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message || "No se pudo actualizar el servicio");
+      }
+      return res.json();
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: [api.services.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.services.get.path, variables.serviceId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      debouncedRefetch(queryClient, [api.services.list.path]);
+      debouncedRefetch(queryClient, [api.services.get.path, variables.serviceId]);
       debouncedRefetch(queryClient, ["/api/me/services"]);
       toast({ title: "Servicio actualizado", description: "Los cambios se han guardado correctamente." });
     },

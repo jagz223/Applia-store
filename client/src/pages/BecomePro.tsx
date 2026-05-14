@@ -8,7 +8,8 @@ import { insertProviderVehicleSchema, type VehicleType } from "@shared/vehicle-s
 import { useQueryClient } from "@tanstack/react-query";
 import { useCreateProvider, useCurrentProvider, useCategories, useSubcategories, useCategoryVisibility } from "@/hooks/use-mango-data";
 import { useNhtsaMakes, useNhtsaModelsForMake, useNhtsaYearsForMakeModel } from "@/hooks/use-nhtsa-vpic";
-import { VehicleSearchCombobox } from "@/components/vehicle/VehicleSearchCombobox";
+import { GoDriverVehicleFormGrid, goVehicleCanMarkPetFriendly } from "@/components/provider/GoDriverVehicleFormGrid";
+import { GoThreeServicesReminder } from "@/components/provider/GoThreeServicesReminder";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { api } from "@shared/routes";
@@ -22,7 +23,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { ProviderSkillsField } from "@/components/ProviderSkillsField";
 import {
@@ -32,27 +33,24 @@ import {
 } from "@/components/ServiceDescriptionHints";
 import { CertificationsVisibilityHint } from "@/components/service/CertificationsVisibilityHint";
 import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryCanonicalName } from "@shared/default-categories";
+import {
+  GO_DRIVER_OFFER_KIND_LABELS,
+  goOfferKindToVehicleType,
+  vehicleTypeToGoOfferKind,
+  type GoDriverOfferKindSlug,
+} from "@shared/go-driver-offer-kind";
+import {
+  CATALOG_FOCUS_BIO_DESCRIPTION,
+  CATALOG_FOCUS_CERTIFICATIONS_PROFESSIONAL_DESCRIPTION,
+  CATALOG_FOCUS_CERTIFICATIONS_TRADE_DESCRIPTION,
+  CATALOG_FOCUS_PREPARATION_LEVEL_DESCRIPTION,
+  CATALOG_FOCUS_SERVICE_DESCRIPTION_OPTIONAL_NOTE,
+  CATALOG_FOCUS_SERVICE_TITLE_DESCRIPTION,
+  catalogFocusSubcategoryFormDescription,
+} from "@shared/catalog-focus-form-copy";
 
 /** Solo categorías válidas para proveedor (excluye legal/financial, que son subcategorías). */
 const PROVIDER_CATEGORY_SLUGS = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
-
-const VEHICLE_TYPE_OPTIONS: { value: VehicleType; label: string }[] = [
-  { value: "motorcycle", label: "Moto" },
-  { value: "car", label: "Carro" },
-  { value: "pickup_truck", label: "Camioneta" },
-  { value: "truck", label: "Camión" },
-];
-
-const VEHICLE_STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "active", label: "Activo" },
-  { value: "inactive", label: "Inactivo" },
-  { value: "maintenance", label: "Mantenimiento" },
-  { value: "pending_inspection", label: "Inspección pendiente" },
-];
-
-function canMarkPetFriendly(vehicleType: string): boolean {
-  return vehicleType === "car" || vehicleType === "pickup_truck";
-}
 
 const DEFAULT_VEHICLE_FORM = {
   license_plate: "",
@@ -117,7 +115,7 @@ function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
     .merge(z.object({ vehicle: z.any().optional() }))
     .superRefine((data, ctx) => {
       const slug = categories.find((c) => c.id === data.categoryId)?.slug;
-      if (slug === "transport" || slug === "delivery") return;
+      if (slug === "transport" || slug === "delivery" || slug === "marketplace") return;
 
       const needsSub =
         slug === "technical" || slug === "maintenance" || slug === "professional";
@@ -215,7 +213,8 @@ export default function BecomePro() {
     selectedCategoryId != null ? categories.find((c) => c.id === selectedCategoryId)?.slug : undefined;
   const isCarGo = selectedCategorySlug === "transport";
   const isPackGo = selectedCategorySlug === "delivery";
-  const isGoDriverCategory = isCarGo || isPackGo;
+  const isShopGo = selectedCategorySlug === "marketplace";
+  const isGoDriverCategory = isCarGo || isPackGo || isShopGo;
   const isTradeCategory = selectedCategorySlug === "technical" || selectedCategorySlug === "maintenance";
   const isProfessionalCategory = selectedCategorySlug === "professional";
   const isFocusCatalogCategory =
@@ -226,14 +225,9 @@ export default function BecomePro() {
     selectedCategorySlug === "technical" ||
     selectedCategorySlug === "maintenance" ||
     selectedCategorySlug === "professional";
-  const [enablePackGoSoon, setEnablePackGoSoon] = useState(true);
-  const [enableShopGoSoon, setEnableShopGoSoon] = useState(true);
-  const [enableCarGoAlso, setEnableCarGoAlso] = useState(true);
   const goOfferKind = useMemo(() => {
     if (!isGoDriverCategory) return "carro" as const;
-    if (vehicleType === "motorcycle") return "moto" as const;
-    if (vehicleType === "pickup_truck" || vehicleType === "truck") return "camion" as const;
-    return "carro" as const;
+    return vehicleTypeToGoOfferKind(vehicleType);
   }, [isGoDriverCategory, vehicleType]);
 
   /** Al elegir taxi o delivery ocultamos el bloque de perfil; limpiamos valores por si el usuario cambió de otra categoría. */
@@ -309,11 +303,6 @@ export default function BecomePro() {
     };
   }, [isFocusCatalogCategory, selectedCategorySlug]);
 
-  // Si elige Delivery, por defecto sugerimos habilitar también transporte (taxi); el usuario puede desmarcar.
-  useEffect(() => {
-    if (isPackGo) setEnableCarGoAlso(true);
-  }, [isPackGo]);
-
   const { data: nhtsaMakes = [], isLoading: nhtsaMakesLoading, isError: nhtsaMakesError } = useNhtsaMakes();
   const { data: nhtsaModels = [], isLoading: nhtsaModelsLoading, isError: nhtsaModelsError } =
     useNhtsaModelsForMake(isGoDriverCategory ? vehicleBrand : null);
@@ -334,7 +323,7 @@ export default function BecomePro() {
   }, [selectedCategoryId, form]);
 
   useEffect(() => {
-    if (!canMarkPetFriendly(String(vehicleType ?? "car"))) {
+    if (!goVehicleCanMarkPetFriendly(String(vehicleType ?? "car"))) {
       form.setValue("vehicle.is_pet_friendly", false);
     }
   }, [vehicleType, form]);
@@ -388,9 +377,8 @@ export default function BecomePro() {
 
   function onSubmit(data: BecomeProForm) {
     const slug = data.categoryId != null ? categories?.find((c) => c.id === data.categoryId)?.slug : undefined;
-    const transport = slug === "transport";
-    const delivery = slug === "delivery";
-    const goDriver = transport || delivery;
+    const goDriver =
+      slug === "transport" || slug === "delivery" || slug === "marketplace";
 
     let vehiclePayload: ReturnType<typeof insertProviderVehicleSchema.parse> | undefined;
     if (goDriver) {
@@ -458,11 +446,7 @@ export default function BecomePro() {
         category: slug ?? data.category ?? undefined,
         ...(goDriver
           ? {
-              goBrands: [
-                transport || enableCarGoAlso ? "transport" : null,
-                delivery || enablePackGoSoon ? "delivery" : null,
-                enableShopGoSoon ? "marketplace" : null,
-              ].filter(Boolean),
+              goBrands: ["transport", "delivery", "marketplace"],
             }
           : {}),
         subcategoryId: data.subcategoryId ?? undefined,
@@ -506,7 +490,9 @@ export default function BecomePro() {
             ? `Registro · ${getCategoryCanonicalName({ slug: "transport" })}`
             : isPackGo
               ? `Registro · ${getCategoryCanonicalName({ slug: "delivery" })}`
-              : "Datos de proveedor"}
+              : isShopGo
+                ? `Registro · ${getCategoryCanonicalName({ slug: "marketplace" })}`
+                : "Datos de proveedor"}
         </h1>
         <p className="text-muted-foreground">
           {isGoDriverCategory ? (
@@ -587,17 +573,8 @@ export default function BecomePro() {
                   <FormLabel>Tipo de oferta (subcategoría)</FormLabel>
                   <Select
                     onValueChange={(v) => {
-                      const kind = (v as "moto" | "carro" | "camion") ?? "carro";
-                      const cur = form.getValues("vehicle.vehicle_type") as VehicleType | undefined;
-                      const wanted: VehicleType =
-                        kind === "moto"
-                          ? "motorcycle"
-                          : kind === "camion"
-                            ? cur === "truck" || cur === "pickup_truck"
-                              ? cur
-                              : "pickup_truck"
-                            : "car";
-                      form.setValue("vehicle.vehicle_type", wanted);
+                      const kind = (v as GoDriverOfferKindSlug) ?? "carro";
+                      form.setValue("vehicle.vehicle_type", goOfferKindToVehicleType(kind));
                     }}
                     value={goOfferKind}
                   >
@@ -607,9 +584,9 @@ export default function BecomePro() {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="moto">Moto</SelectItem>
-                      <SelectItem value="carro">Carro</SelectItem>
-                      <SelectItem value="camion">Camión</SelectItem>
+                      <SelectItem value="moto">{GO_DRIVER_OFFER_KIND_LABELS.moto}</SelectItem>
+                      <SelectItem value="carro">{GO_DRIVER_OFFER_KIND_LABELS.carro}</SelectItem>
+                      <SelectItem value="camion">{GO_DRIVER_OFFER_KIND_LABELS.camion}</SelectItem>
                     </SelectContent>
                   </Select>
                 </FormItem>
@@ -620,11 +597,7 @@ export default function BecomePro() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>{needsSubcategory ? "Subcategoría" : "Subcategoría (opcional)"}</FormLabel>
-                      <FormDescription className="text-xs">
-                        {needsSubcategory
-                          ? "Elige tu especialidad según la categoría (por ejemplo en Servicios Técnicos, Mantenimiento o Servicios Profesionales)."
-                          : "Afina tu perfil en el catálogo si aplica."}
-                      </FormDescription>
+                      <FormDescription className="text-xs">{catalogFocusSubcategoryFormDescription(needsSubcategory)}</FormDescription>
                       <Select
                         onValueChange={(v) => field.onChange(v === "none" || !v ? undefined : Number(v))}
                         value={field.value != null ? String(field.value) : needsSubcategory ? undefined : "none"}
@@ -649,309 +622,29 @@ export default function BecomePro() {
                 />
               ) : null}
 
-              {isGoDriverCategory ? (
-                <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-2">
-                  <p className="font-semibold">También habilitar</p>
-                  <p className="text-sm text-muted-foreground">
-                    {isCarGo
-                      ? `Quienes ofrecen ${getCategoryCanonicalName({ slug: "transport" })} pueden activar también Delivery y Marketplace.`
-                      : `Quienes ofrecen ${getCategoryCanonicalName({ slug: "delivery" })} pueden activar también transporte (taxi) y Marketplace.`}
-                  </p>
-                  {isCarGo ? (
-                    <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
-                      <span className="min-w-0">
-                        <span className="font-medium">Delivery</span>
-                      </span>
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        checked={enablePackGoSoon}
-                        onChange={(e) => setEnablePackGoSoon(e.target.checked)}
-                      />
-                    </label>
-                  ) : (
-                    <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
-                      <span className="min-w-0">
-                        <span className="font-medium">Servicios de transporte (Taxi)</span>
-                      </span>
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        checked={enableCarGoAlso}
-                        onChange={(e) => setEnableCarGoAlso(e.target.checked)}
-                      />
-                    </label>
-                  )}
-                  <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
-                    <span className="min-w-0">
-                      <span className="font-medium">Marketplace</span>{" "}
-                      <span className="text-xs text-muted-foreground">(Próximamente activo)</span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={enableShopGoSoon}
-                      onChange={(e) => setEnableShopGoSoon(e.target.checked)}
-                    />
-                  </label>
-                </div>
-              ) : null}
+              {isGoDriverCategory ? <GoThreeServicesReminder /> : null}
 
               {isGoDriverCategory && (
-                <div className="space-y-4 rounded-lg border border-border/60 bg-muted/30 p-4">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">Datos del vehículo</h3>
-                    <p className="text-xs text-muted-foreground mt-1">Elige bien el tipo de vehículo que vas a usar.</p>
-                    {(nhtsaMakesError || nhtsaModelsError || nhtsaYearsError) && (
-                      <p className="text-xs text-destructive mt-2">
-                        No se pudo cargar el catálogo. Comprueba tu conexión e inténtalo de nuevo.
-                      </p>
-                    )}
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <FormField
-                      control={form.control}
-                      name="vehicle.vehicle_type"
-                      render={({ field }) => (
-                        <FormItem className="sm:col-span-2">
-                          <FormLabel>Tipo de vehículo</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value ?? "car"}>
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {VEHICLE_TYPE_OPTIONS.map((o) => (
-                                <SelectItem key={o.value} value={o.value}>
-                                  {o.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormDescription className="text-xs">
-                            Seleccionado:{" "}
-                            <span className="font-medium text-foreground">
-                              {VEHICLE_TYPE_OPTIONS.find((o) => o.value === (field.value ?? "car"))?.label ?? "Carro"}
-                            </span>
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.brand"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Marca</FormLabel>
-                          <FormControl>
-                            <VehicleSearchCombobox
-                              value={field.value ?? ""}
-                              onChange={(v) => {
-                                field.onChange(v);
-                                form.setValue("vehicle.model", "");
-                              }}
-                              options={nhtsaMakes}
-                              isLoading={nhtsaMakesLoading}
-                              placeholder="Buscar marca…"
-                              searchPlaceholder="Escribe para filtrar marcas…"
-                              emptyMessage="No hay marcas que coincidan."
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.model"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Modelo</FormLabel>
-                          <FormControl>
-                            <VehicleSearchCombobox
-                              value={field.value ?? ""}
-                              onChange={field.onChange}
-                              options={nhtsaModels}
-                              isLoading={nhtsaModelsLoading}
-                              disabled={!String(vehicleBrand ?? "").trim()}
-                              placeholder={!String(vehicleBrand ?? "").trim() ? "Elige una marca primero" : "Buscar modelo…"}
-                              searchPlaceholder="Escribe para filtrar modelos…"
-                              emptyMessage={
-                                !String(vehicleBrand ?? "").trim()
-                                  ? "Selecciona una marca."
-                                  : nhtsaModelsLoading
-                                    ? "Cargando…"
-                                    : "No hay modelos que coincidan."
-                              }
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.model_year"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Año del vehículo</FormLabel>
-                          <FormDescription className="text-xs">
-                            Depende de marca y modelo (NHTSA). Escribe para filtrar entre los años disponibles.
-                          </FormDescription>
-                          <FormControl>
-                            <VehicleSearchCombobox
-                              value={field.value ? String(field.value) : ""}
-                              onChange={(s) =>
-                                field.onChange(s ? parseInt(s, 10) : (nhtsaYears[0] ?? new Date().getFullYear()))
-                              }
-                              options={yearOptionsStrings}
-                              isLoading={nhtsaYearsLoading}
-                              disabled={!String(vehicleBrand ?? "").trim() || !String(vehicleModelWatch ?? "").trim()}
-                              placeholder={
-                                !String(vehicleBrand ?? "").trim() || !String(vehicleModelWatch ?? "").trim()
-                                  ? "Elige marca y modelo primero"
-                                  : nhtsaYearsLoading
-                                    ? "Cargando años…"
-                                    : "Buscar año…"
-                              }
-                              searchPlaceholder="Escribe el año…"
-                              emptyMessage={
-                                nhtsaYearsLoading
-                                  ? "Cargando…"
-                                  : yearOptionsStrings.length === 0
-                                    ? "Sin años en catálogo para esta marca y modelo."
-                                    : "Sin coincidencias."
-                              }
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.license_plate"
-                      render={({ field }) => (
-                        <FormItem className="sm:col-span-2">
-                          <FormLabel>Placa</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Ej. ABC1234" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.vehicle_status"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Estado operativo</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value ?? "active"}>
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {VEHICLE_STATUS_OPTIONS.map((o) => (
-                                <SelectItem key={o.value} value={o.value}>
-                                  {o.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.exterior_color"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Color exterior (opcional)</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Ej. Blanco perla" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.insurance_expires_at"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Vencimiento seguro (opcional)</FormLabel>
-                          <FormControl>
-                            <Input type="date" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.mileage_km"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Kilometraje (opcional)</FormLabel>
-                          <FormControl>
-                            <Input
-                              type="number"
-                              min={0}
-                              {...field}
-                              value={field.value === "" || field.value == null ? "" : field.value}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                field.onChange(v === "" ? "" : parseInt(v, 10));
-                              }}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.service_notes"
-                      render={({ field }) => (
-                        <FormItem className="sm:col-span-2">
-                          <FormLabel>Notas del vehículo / servicio (opcional)</FormLabel>
-                          <FormDescription>Accesorios, condición, equipamiento relevante para el viaje.</FormDescription>
-                          <FormControl>
-                            <Textarea className="min-h-[72px] resize-y" maxLength={500} {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vehicle.is_pet_friendly"
-                      render={({ field }) => (
-                        <FormItem className="sm:col-span-2 flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3">
-                          <FormControl>
-                            <Checkbox
-                              checked={field.value}
-                              disabled={!canMarkPetFriendly(String(vehicleType ?? ""))}
-                              onCheckedChange={(c) => field.onChange(c === true)}
-                            />
-                          </FormControl>
-                          <div className="space-y-1 leading-none">
-                            <FormLabel className="cursor-pointer">Dispuesto a transportar mascotas</FormLabel>
-                            <FormDescription>
-                              Solo disponible para tipo carro o camioneta. En otros tipos no aplica.
-                            </FormDescription>
-                          </div>
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </div>
+                <GoDriverVehicleFormGrid
+                  control={form.control}
+                  setValue={form.setValue}
+                  vehicleType={vehicleType}
+                  vehicleBrand={vehicleBrand}
+                  vehicleModelWatch={vehicleModelWatch}
+                  nhtsaMakes={nhtsaMakes}
+                  nhtsaMakesLoading={nhtsaMakesLoading}
+                  nhtsaMakesError={nhtsaMakesError}
+                  nhtsaModels={nhtsaModels}
+                  nhtsaModelsLoading={nhtsaModelsLoading}
+                  nhtsaModelsError={nhtsaModelsError}
+                  nhtsaYears={nhtsaYears}
+                  nhtsaYearsLoading={nhtsaYearsLoading}
+                  nhtsaYearsError={nhtsaYearsError}
+                  yearOptionsStrings={yearOptionsStrings}
+                  sectionTitle="Datos del vehículo"
+                  sectionLead="Elige bien el tipo de vehículo que vas a usar."
+                  nhtsaErrorMessage="No se pudo cargar el catálogo. Comprueba tu conexión e inténtalo de nuevo."
+                />
               )}
 
               {!isGoDriverCategory && isFocusCatalogCategory && categoryIntro ? (
@@ -969,12 +662,7 @@ export default function BecomePro() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Nivel de preparación</FormLabel>
-                        <FormDescription className="text-xs">
-                          Incluye tu escolaridad o nivel formal alcanzado (por ejemplo, primaria, bachillerato, técnico,
-                          universitario) y la formación complementaria: cursos, talleres o programas en Servicios técnicos o
-                          Mantenimiento. Se mostrará en la ficha pública del servicio en la sección «Nivel de preparación» y
-                          podrás editarlo después en «Editar servicio».
-                        </FormDescription>
+                        <FormDescription className="text-xs">{CATALOG_FOCUS_PREPARATION_LEVEL_DESCRIPTION}</FormDescription>
                         <FormControl>
                           <Textarea
                             placeholder="Ej. Bachillerato completo; curso de instalaciones sanitarias IPAC 2023; taller de refrigeración doméstica…"
@@ -992,11 +680,7 @@ export default function BecomePro() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Certificaciones obtenidas (opcional)</FormLabel>
-                        <FormDescription className="text-xs">
-                          Títulos, diplomas, maestrías, doctorados, carnés o certificados que respalden tu trabajo. Si solo
-                          tienes formación en cursos, puedes dejarlo vacío: no se mostrará ninguna sección de certificaciones
-                          hasta que lo completes aquí o en «Editar servicio».
-                        </FormDescription>
+                        <FormDescription className="text-xs">{CATALOG_FOCUS_CERTIFICATIONS_TRADE_DESCRIPTION}</FormDescription>
                         <CertificationsVisibilityHint />
                         <FormControl>
                           <Textarea
@@ -1061,9 +745,7 @@ export default function BecomePro() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Nombre del servicio</FormLabel>
-                        <FormDescription>
-                          Título público de tu servicio en el catálogo (editable después en «Editar servicio»).
-                        </FormDescription>
+                        <FormDescription>{CATALOG_FOCUS_SERVICE_TITLE_DESCRIPTION}</FormDescription>
                         <FormControl>
                           <Input placeholder={contextualPlaceholders.serviceTitle} {...field} />
                         </FormControl>
@@ -1082,10 +764,7 @@ export default function BecomePro() {
                           <ServiceDescriptionInfoButton ariaLabel="Información: descripción del servicio" />
                         </div>
                         <FormDescription>{SERVICE_DESCRIPTION_INLINE_HINT}</FormDescription>
-                        <p className="text-xs text-muted-foreground -mt-1">
-                          Opcional: si no escribes nada aquí, el texto de tu biografía (más abajo) se usará como descripción
-                          inicial del servicio.
-                        </p>
+                        <p className="text-xs text-muted-foreground -mt-1">{CATALOG_FOCUS_SERVICE_DESCRIPTION_OPTIONAL_NOTE}</p>
                         <FormControl>
                           <Textarea
                             placeholder={contextualPlaceholders.serviceDescription}
@@ -1140,10 +819,7 @@ export default function BecomePro() {
                           <FormLabel className="mb-0">Biografía y enfoque profesional</FormLabel>
                           <BiographyOnboardingInfoButton />
                         </div>
-                        <FormDescription>
-                          Quién eres y cómo trabajas. Si arriba no pusiste descripción del servicio, este texto se usará como
-                          descripción inicial de tu oferta cuando estés verificado (luego puedes separarlos en «Editar servicio»).
-                        </FormDescription>
+                        <FormDescription>{CATALOG_FOCUS_BIO_DESCRIPTION}</FormDescription>
                         <FormControl>
                           <Textarea
                             placeholder={contextualPlaceholders.bio}
@@ -1168,9 +844,7 @@ export default function BecomePro() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Certificaciones obtenidas (opcional)</FormLabel>
-                          <FormDescription className="text-xs">
-                            Maestrías, doctorados, registro profesional, títulos universitarios o certificaciones sectoriales.
-                          </FormDescription>
+                          <FormDescription className="text-xs">{CATALOG_FOCUS_CERTIFICATIONS_PROFESSIONAL_DESCRIPTION}</FormDescription>
                           <CertificationsVisibilityHint />
                           <FormControl>
                             <Textarea

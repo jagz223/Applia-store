@@ -300,6 +300,26 @@ async function buildDriverPublic(driverUserId: string) {
   };
 }
 
+/** Datos del envío para `POST /api/go/panic` (ruta central en `routes.ts`). */
+export async function packPanicResolveContext(rideId: string) {
+  const ride = rides.get(rideId);
+  if (!ride) return null;
+  const riderPub = await buildRiderPublic(ride.riderUserId);
+  const driverPub = ride.driverUserId ? await buildDriverPublic(ride.driverUserId) : null;
+  return {
+    ride,
+    riderParty: {
+      userId: ride.riderUserId,
+      name: riderPub.name,
+      phone: riderPub.phone,
+      email: riderPub.email,
+    },
+    driverParty: driverPub
+      ? { userId: driverPub.userId, name: driverPub.name, phone: driverPub.phone }
+      : null,
+  };
+}
+
 function emitPackNegotiationOffersUpdated(io: SocketIOServer, ride: RideRecord) {
   io.to(`user:${ride.riderUserId}`).emit("pack:ride:negotiation:offers_updated", {
     rideId: ride.id,

@@ -2567,7 +2567,9 @@ export default function AdminPanel() {
               <Card className="min-w-0">
                 <CardHeader>
                   <CardTitle>Servicios (marcas)</CardTitle>
-                  <CardDescription>Activa o desactiva marcas como Man Go o Fix Go. Solo admin.</CardDescription>
+                  <CardDescription>
+                    Activa o desactiva qué marcas de servicios se muestran en la app. Solo administración.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {serviceBrandsLoading ? (
