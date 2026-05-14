@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useCategories, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
-import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,7 +26,6 @@ export default function Categories() {
   const professionalCat = getCat("professional");
   const maintenanceCat = getCat("maintenance");
   const transportCat = getCat("transport");
-  const deliveryCat = getCat("delivery");
 
   const { data: technicalSubs = [] } = useSubcategories((technicalCat as any)?.id ?? null);
   const { data: professionalSubs = [] } = useSubcategories((professionalCat as any)?.id ?? null);
@@ -64,7 +63,7 @@ export default function Categories() {
     ]) {
       if (!cat) continue;
       const catId = (cat as any).id;
-      const parentName = (cat as any).name;
+      const parentName = getCategoryDisplayName(cat as any);
       for (const sub of subs) {
         const def = DEFAULT_SUBCATEGORIES.find((s) => s.slug === (sub as any).slug);
         items.push({
@@ -81,13 +80,10 @@ export default function Categories() {
     if (transportCat && !hiddenSlugs.has("transport")) {
       items.push({ key: "transport", name: (transportCat as any).name, icon: "Car", parentName: "Conductores disponibles", href: "/go/taxi" });
     }
-    if (deliveryCat && !hiddenSlugs.has("delivery")) {
-      items.push({ key: "delivery", name: (deliveryCat as any).name, icon: "Package", parentName: "Conductores disponibles", href: "/go/delivery" });
-    }
 
     return items;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [technicalSubs, professionalSubs, maintenanceSubs, technicalCat, professionalCat, maintenanceCat, transportCat, deliveryCat, hiddenSlugs]);
+  }, [technicalSubs, professionalSubs, maintenanceSubs, technicalCat, professionalCat, maintenanceCat, transportCat, hiddenSlugs]);
 
   const popularMonthLabel = useMemo(() => {
     const key = monthlyPopularSubcategories?.monthKey;
@@ -154,17 +150,19 @@ export default function Categories() {
                     <div className="p-2.5 rounded-xl bg-primary/10 text-primary group-hover:scale-110 transition-transform">
                       <CategoryIcon name={item.icon} className="w-5 h-5 sm:w-6 sm:h-6" />
                     </div>
-                    <div>
+                    <div className="min-w-0 w-full">
                       <p className="text-xs sm:text-sm font-semibold leading-tight">{item.name}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
-                        {item.parentName}
-                        {monthlyBookingCount != null && monthlyBookingCount > 0 ? (
-                          <span className="block text-secondary tabular-nums font-medium">
-                            {monthlyBookingCount} reserva{monthlyBookingCount === 1 ? "" : "s"} confirmada
-                            {monthlyBookingCount === 1 ? "" : "s"} o completada{monthlyBookingCount === 1 ? "" : "s"} este mes
-                          </span>
-                        ) : null}
-                      </p>
+                      {item.parentName ? (
+                        <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+                          {item.parentName}
+                        </p>
+                      ) : null}
+                      {monthlyBookingCount != null && monthlyBookingCount > 0 ? (
+                        <p className="text-[10px] sm:text-xs text-secondary tabular-nums font-medium mt-0.5 leading-snug">
+                          {monthlyBookingCount} reserva{monthlyBookingCount === 1 ? "" : "s"} confirmada
+                          {monthlyBookingCount === 1 ? "" : "s"} o completada{monthlyBookingCount === 1 ? "" : "s"} este mes
+                        </p>
+                      ) : null}
                     </div>
                   </CardContent>
                 </Card>

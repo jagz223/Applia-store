@@ -24,7 +24,9 @@ import CargoDriverSettings from "@/pages/CargoDriverSettings";
 import ServiceDetails from "@/pages/ServiceDetails";
 import Dashboard from "@/pages/Dashboard";
 import BecomePro from "@/pages/BecomePro";
+import BecomeDriver from "@/pages/BecomeDriver";
 import CreateService from "@/pages/CreateService";
+import MyServices from "@/pages/MyServices";
 import EditService from "@/pages/EditService";
 import Booking from "@/pages/Booking";
 import Vault from "@/pages/Vault";
@@ -77,7 +79,9 @@ function MainRouter() {
       <Route path="/register" component={Register} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/become-pro" component={BecomePro} />
+      <Route path="/become-driver" component={BecomeDriver} />
       <Route path="/create-service" component={CreateService} />
+      <Route path="/my-services" component={MyServices} />
       <Route path="/edit-service/:id" component={EditService} />
       <Route path="/booking" component={Booking} />
       <Route path="/vault" component={Vault} />

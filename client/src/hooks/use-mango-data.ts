@@ -310,6 +310,85 @@ export function useProvider(id: number) {
   });
 }
 
+/** Vehículo principal del proveedor (Car Go / taxi / delivery). */
+export type ProviderPrimaryVehicle = {
+  vehicle_type: string;
+  brand?: string | null;
+  model?: string | null;
+  license_plate?: string | null;
+  model_year?: number | null;
+  is_pet_friendly?: boolean;
+};
+
+export function useProviderVehicle(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["/api/me/provider-vehicle"],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/me/provider-vehicle", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 401) return null;
+      if (!res.ok) throw new Error("No se pudo cargar tu vehículo");
+      return (await res.json()) as ProviderPrimaryVehicle | null;
+    },
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    enabled: options?.enabled !== false,
+  });
+}
+
+export type EnrollGoDriverPayload = {
+  profession: string;
+  bio: string;
+  serviceTitle: string;
+  serviceDescription: string;
+  vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle;
+};
+
+export function useEnrollGoDriver() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (body: EnrollGoDriverPayload) => {
+      const token = getToken();
+      const res = await fetch("/api/me/go-driver", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { message?: string }).message || "No se pudo completar el registro de conductor");
+      }
+      return data as {
+        ok?: boolean;
+        goBrands?: string[];
+        hasPrimaryVehicle?: boolean;
+        hasTransport?: boolean;
+        hasDelivery?: boolean;
+      };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me/provider-vehicle"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      debouncedRefetch(queryClient, [api.providers.me.path]);
+      debouncedRefetch(queryClient, ["/api/me/provider-vehicle"]);
+      toast({
+        title: "Perfil de conductor actualizado",
+        description: "Ya tienes habilitados taxi y delivery en Genfeb Go (según verificación y suscripción).",
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
 export function useCurrentProvider() {
   return useQuery({
     queryKey: [api.providers.me.path],
@@ -323,7 +402,7 @@ export function useCurrentProvider() {
       return api.providers.me.responses[200].parse(await res.json());
     },
     retry: false,
-    // El default global usa staleTime: Infinity; hace falta refresco para isVerified y nav "Mi servicio".
+    // El default global usa staleTime: Infinity; hace falta refresco para isVerified y nav "Mis servicios".
     staleTime: 15_000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -531,6 +610,7 @@ export type ServiceUpdatePayload = {
   imageUrl?: string;
   isActive?: boolean;
   categoryId?: number;
+  subcategoryId?: number | null;
 };
 
 /** Servicios del proveedor actual (solo si está autenticado y es proveedor). */

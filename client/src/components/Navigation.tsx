@@ -7,14 +7,12 @@ import { hasAdminRole, canAccessAssociateActivityDashboard } from "@/lib/auth-ut
 import { Button } from "@/components/ui/button";
 import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
-import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
-import { FEATURE_WALLET_RECHARGE_UI_ENABLED, FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { 
   Briefcase, 
   Calendar, 
-  Home, 
   LayoutDashboard, 
   LogOut, 
   Menu, 
@@ -29,12 +27,6 @@ import {
   Settings,
   ChevronDown,
   List,
-  Pencil,
-  Loader2,
-  Wrench,
-  PackageOpen,
-  Package,
-  Store,
   Car,
   Banknote,
   Star,
@@ -50,10 +42,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useEffect, useMemo } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
 import { ThemeToggleHeaderButton } from "@/components/ThemeToggle";
@@ -103,11 +92,6 @@ export function Navigation() {
   });
   const { data: walletData } = useWallet({ enabled: isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED });
   const walletBalance = typeof walletData?.wallet === "number" ? walletData.wallet : 0;
-  const providerWalletFloorUsd =
-    typeof (walletData as { providerWalletFloorUsd?: number })?.providerWalletFloorUsd === "number"
-      ? (walletData as { providerWalletFloorUsd: number }).providerWalletFloorUsd
-      : PROVIDER_WALLET_FLOOR_USD;
-  const isProviderDebtCapped = !!(walletData as { isProviderDebtCapped?: boolean })?.isProviderDebtCapped;
   const userRating = FEATURE_WALLET_RECHARGE_UI_ENABLED
     ? typeof (walletData as { rating?: number } | undefined)?.rating === "number"
       ? (walletData as { rating: number }).rating
@@ -117,8 +101,6 @@ export function Navigation() {
       : 5;
   const formatWallet = (n: number) =>
     new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
-  const formatWalletDetailed = (n: number) =>
-    new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
   const [location] = useLocation();
   const { exploreCategoryDisplayName: exploreCategoryFromContext } = useExploreCategoryDisplayName();
   const { data: categories = [] } = useCategories();
@@ -140,7 +122,6 @@ export function Navigation() {
   })();
   const exploreCategoryDisplayName = exploreCategoryFromContext ?? exploreCategoryFromUrl;
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [myServicesOpen, setMyServicesOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
@@ -161,11 +142,8 @@ export function Navigation() {
   const hasProviderForDashboard =
     !!providerProfile || !!(user as { provider?: unknown } | null)?.provider;
   const canAccessActivityDashboard = canAccessAssociateActivityDashboard(user, hasProviderForDashboard);
-  /** Panel "Mis servicios" visible solo si tiene al menos un servicio activo (condición distinta a Crear servicio). */
-  const activeServices = myServices.filter((s) => s.isActive !== false);
-  /** Cualquier servicio propio (aunque esté inactivo) para poder abrir el panel y editar. */
-  const hasMyServiceNav = activeServices.length > 0 || myServices.length > 0;
-  const panelService = activeServices[0] ?? myServices[0] ?? null;
+  /** Cualquier servicio propio (activo o inactivo) para el enlace a Mis servicios. */
+  const hasMyServiceNav = myServices.length > 0;
 
   const isAdmin = (user as { role?: string } | null)?.role === "admin";
   /** Conductor Car Go (verificado o no): acceso a vista driver (recibir) en Go. */
@@ -185,53 +163,6 @@ export function Navigation() {
   const showAssociateActivityForDriver = isVerifiedCarGoDriver;
   const associateActivityHref = "/professional-dashboard";
 
-  const getServiceIcon = (service: any) => {
-    const iconName = service?.category?.icon ?? service?.category?.type ?? service?.category?.slug;
-    const name = String(iconName ?? "").toLowerCase();
-
-    // Preferimos `category.icon` si el backend lo trae (lucide name).
-    if (typeof iconName === "string") {
-      switch (iconName.toLowerCase()) {
-        case "wrench":
-          return <Wrench className="h-5 w-5" />;
-        case "home":
-          return <Home className="h-5 w-5" />;
-        case "briefcase":
-          return <Briefcase className="h-5 w-5" />;
-        case "package":
-          return <Package className="h-5 w-5" />;
-        case "store":
-          return <Store className="h-5 w-5" />;
-        case "car":
-          return <Car className="h-5 w-5" />;
-      }
-    }
-
-    // Fallback por slug/type si falta el icon.
-    switch (name) {
-      case "technical":
-        return <Wrench className="h-5 w-5" />;
-      case "maintenance":
-        return <Home className="h-5 w-5" />;
-      case "professional":
-        return <Briefcase className="h-5 w-5" />;
-      case "delivery":
-        return <Package className="h-5 w-5" />;
-      case "marketplace":
-        return <Store className="h-5 w-5" />;
-      case "transport":
-        return <Car className="h-5 w-5" />;
-      default:
-        return <Wrench className="h-5 w-5" />;
-    }
-  };
-
-  const getServiceBrand = (service: any) => {
-    const category = service?.category;
-    const brand = getCategoryDisplayName(category);
-    return brand || category?.name || "Servicio";
-  };
-
   const NavLinks = () => (
     <>
       <Link href="/" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/') ? 'text-primary' : 'text-muted-foreground'}`}>
@@ -242,7 +173,7 @@ export function Navigation() {
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive('/services') || isActive('/booking') ? 'text-primary' : 'text-muted-foreground'}`}>
+          <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive("/my-services") || isActive("/services") || isActive("/booking") ? "text-primary" : "text-muted-foreground"}`}>
             Servicios <ChevronDown className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
@@ -277,15 +208,12 @@ export function Navigation() {
               </Link>
             </DropdownMenuItem>
           )}
-          {isProfessional && !myServicesLoading && hasMyServiceNav && !isVerifiedCarGoDriver && (
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault();
-                setMyServicesOpen(true);
-              }}
-            >
-              <List className="h-4 w-4" />
-              <span>Mi Servicio</span>
+          {isProfessional && !myServicesLoading && hasMyServiceNav && (
+            <DropdownMenuItem asChild>
+              <Link href="/my-services" className="flex items-center gap-2 w-full">
+                <List className="h-4 w-4" />
+                <span>Mis servicios</span>
+              </Link>
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
@@ -651,19 +579,12 @@ export function Navigation() {
                         Crear servicio
                       </Link>
                     )}
-                    {!myServicesLoading && hasMyServiceNav && (
-                      <button
-                        type="button"
-                        className="text-lg font-medium text-left w-full hover:text-primary transition-colors"
-                        onClick={() => {
-                          setMobileOpen(false);
-                          setMyServicesOpen(true);
-                        }}
-                      >
-                        Mi Servicio
-                      </button>
-                    )}
                   </>
+                )}
+                {isProfessional && !myServicesLoading && hasMyServiceNav && (
+                  <Link href="/my-services" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                    Mis servicios
+                  </Link>
                 )}
                 {canSeeMobility && (isAdmin || (isProfessional && isCarGoDriver && !myServicesLoading)) && (
                   <Link
@@ -796,159 +717,6 @@ export function Navigation() {
         </div>
       )}
     </nav>
-
-    {/* Panel Mi Servicio */}
-    <Sheet open={myServicesOpen} onOpenChange={setMyServicesOpen}>
-      <SheetContent
-        side="left"
-        // En móviles (ej. 344x) evita que el panel se vea “demasiado largo” (se queda fijo arriba).
-        className="w-[360px] max-w-[92vw] bg-card border-r border-border overflow-y-auto rounded-r-xl shadow-lg top-0 bottom-auto h-auto max-h-[calc(100vh-1rem)] p-0"
-      >
-        <div className="p-6">
-          <div className="pb-4 border-b border-border/80">
-            <h2 className="text-xl font-bold text-foreground tracking-tight">Mi Servicio</h2>
-            <p className="text-sm text-muted-foreground mt-1">Tu publicación destacada</p>
-          </div>
-
-          {providerProfile && FEATURE_WALLET_RECHARGE_UI_ENABLED ? (
-            <div className="mt-5 rounded-xl border border-border/70 bg-muted/30 p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Cartera GenFeb</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg border border-border/60 bg-background/80 px-3 py-2.5">
-                  <p className="text-[10px] font-medium text-muted-foreground">Saldo actual</p>
-                  <p
-                    className={cn(
-                      "mt-0.5 text-base font-bold tabular-nums leading-tight",
-                      walletBalance < 0 && "text-amber-600 dark:text-amber-400"
-                    )}
-                  >
-                    {walletData === undefined ? "—" : formatWalletDetailed(walletBalance)}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.07] px-3 py-2.5 dark:bg-amber-500/10">
-                  <p className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
-                    <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600" aria-hidden />
-                    Máx. saldo negativo
-                  </p>
-                  <p className="mt-0.5 text-base font-bold tabular-nums leading-tight text-foreground">
-                    {walletData === undefined ? "—" : formatWalletDetailed(providerWalletFloorUsd)}
-                  </p>
-                </div>
-              </div>
-              {FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? (
-                isProviderDebtCapped ? (
-                  <p className="mt-3 text-[11px] leading-snug text-amber-950 dark:text-amber-100 border-t border-amber-500/25 pt-3">
-                    Llegaste al límite de deuda: no podrás aceptar más servicios pagados en efectivo o transferencia hasta
-                    recargar (donde aplique). Podrás seguir con pago en Saldo GenFeb.
-                  </p>
-                ) : (
-                  <p className="mt-3 text-[10px] text-muted-foreground leading-snug">
-                    Con efectivo o transferencia, GenFeb retiene comisión; el saldo no puede bajar de este piso.
-                  </p>
-                )
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="mt-5 space-y-4">
-            {myServicesLoading ? (
-              <Card className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-                <CardContent className="p-4">
-                  <div className="flex items-start gap-3">
-                    <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
-                    <div className="flex-1 min-w-0 space-y-2">
-                      <Skeleton className="h-5 w-[75%]" />
-                      <Skeleton className="h-4 w-[50%]" />
-                      <Skeleton className="h-4 w-[90%] mt-3" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : panelService == null ? (
-              <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
-                <div className="rounded-full bg-muted/60 p-6 mb-4">
-                  <PackageOpen className="h-12 w-12 text-muted-foreground" />
-                </div>
-                <p className="text-base font-medium text-foreground mb-1">Aún no has creado servicios</p>
-                <p className="text-sm text-muted-foreground mb-6 max-w-[260px]">
-                  ¡Empieza ahora y publica tu primer servicio para que los clientes puedan reservarlo!
-                </p>
-                {SHOW_CREATE_SERVICE && (
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" asChild>
-                    <Link href="/create-service" onClick={() => setMyServicesOpen(false)}>
-                      <PlusCircle className="h-4 w-4 mr-2" />
-                      Crear servicio
-                    </Link>
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <TooltipProvider delayDuration={300}>
-                <Card className="rounded-xl border border-border/60 bg-card shadow-sm hover:shadow-md transition-shadow overflow-hidden">
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
-                        {getServiceIcon(panelService)}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-bold text-base text-foreground truncate">{panelService.title ?? "—"}</h3>
-
-                        <div className="flex flex-wrap items-center gap-2 mt-2">
-                          <span className="text-xs text-muted-foreground">{getServiceBrand(panelService)}</span>
-                        </div>
-
-                        {panelService.subcategory?.name && (
-                          <div className="text-xs text-muted-foreground mt-1">Subcategoría: {panelService.subcategory.name}</div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                              asChild
-                            >
-                              <Link href={`/edit-service/${panelService.id}`} onClick={() => setMyServicesOpen(false)}>
-                                <Pencil className="h-4 w-4" />
-                              </Link>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Editar</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <p className="text-xs font-medium text-muted-foreground mb-1.5">Descripción</p>
-                      <div
-                        className="max-h-36 sm:max-h-44 overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-muted/15 px-2.5 py-2 text-sm text-muted-foreground break-words leading-relaxed [scrollbar-gutter:stable]"
-                        tabIndex={0}
-                        role="region"
-                        aria-label="Descripción del servicio"
-                      >
-                        {panelService.description ? panelService.description : "—"}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`/service/${panelService.id}`} onClick={() => setMyServicesOpen(false)}>
-                          Ver en el sitio
-                        </Link>
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TooltipProvider>
-            )}
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
     </>
   );
 }

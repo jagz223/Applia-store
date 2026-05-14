@@ -64,7 +64,12 @@ export default function Explore() {
       categories.filter(
         (c) => {
           const slug = (c as { slug?: string }).slug;
-          return slug && providerSlugs.has(slug) && !hiddenSlugs.has(slug);
+          return (
+            !!slug &&
+            providerSlugs.has(slug) &&
+            !hiddenSlugs.has(slug) &&
+            slug !== "delivery"
+          );
         }
       ),
     [categories, hiddenSlugs]
@@ -97,7 +102,7 @@ export default function Explore() {
     }
   }, [parsedCatUrl, parsedSubUrl]);
 
-  /** Categorías con flujo propio: movilidad/tienda/delivery se abren en esta sección. */
+  /** Categorías con flujo propio: movilidad/tienda se abren en esta sección (delivery no se muestra en filtros). */
   useEffect(() => {
     if (!providerCategoryFromUrl) return;
     const id = Number(providerCategoryFromUrl);
@@ -109,7 +114,7 @@ export default function Explore() {
     const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
     if (slug === "transport") return setLocation(`/go/taxi${fromQs}`);
     if (slug === "marketplace") return setLocation(`/go/shop${fromQs}`);
-    if (slug === "delivery") return setLocation(`/go/delivery${fromQs}`);
+    if (slug === "delivery") return setLocation(`/go/taxi${fromQs}`);
   }, [categories, providerCategoryFromUrl, exploreFrom, setLocation, hiddenSlugs]);
 
   const verifiedServices = useMemo(
@@ -129,8 +134,7 @@ export default function Explore() {
       setLocation("/explore");
       return;
     }
-    const cat = providerCategories.find((c) => c.id === id);
-    /** Movilidad/tienda/delivery: abrir esta sección, no el listado de Explorar. */
+    const cat = categories.find((c) => c.id === id);
     const slug = (cat as { slug?: string } | undefined)?.slug;
     if (slug === "transport") {
       const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
@@ -144,7 +148,12 @@ export default function Explore() {
     }
     if (slug === "delivery") {
       const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
-      setLocation(`/go/delivery${fromQs}`);
+      setLocation(`/go/taxi${fromQs}`);
+      return;
+    }
+    if (!cat || !providerCategories.some((c) => c.id === id)) {
+      setSelectedProviderCategoryId(undefined);
+      setLocation("/explore");
       return;
     }
     setSelectedProviderCategoryId(id);

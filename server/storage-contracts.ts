@@ -80,6 +80,12 @@ export type ProviderUpdate = Partial<
     visibilitySubscriptionLastPaymentKey?: string | null;
     visibilitySubscriptionLastPaymentApprovedAt?: string | Date | null;
     visibilitySubscriptionLastPaymentApprovedBy?: string | null;
+    /** Módulos Go (taxi, delivery, marketplace). */
+    goBrands?: string[] | null;
+    /** Título corto de la oferta Go (taxi/delivery) para paneles propios. */
+    goDriverOfferTitle?: string | null;
+    /** Descripción de la oferta Go (taxi/delivery). */
+    goDriverOfferDescription?: string | null;
   }
 >;
 
