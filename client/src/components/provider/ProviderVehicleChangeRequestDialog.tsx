@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
@@ -159,6 +159,13 @@ export function ProviderVehicleChangeRequestDialog({ open, onOpenChange, vehicle
   );
   const yearOptionsStrings = useMemo(() => nhtsaYears.map(String), [nhtsaYears]);
 
+  /**
+   * Solo rellenar el formulario al abrir el modal (una vez por apertura).
+   * Si dependemos de `provider`/`categories` en cada refetch (p. ej. useCurrentProvider cada 15s),
+   * se resetea el formulario mientras el usuario escribe y los campos parecen "bloqueados".
+   */
+  const vehicleChangeFormSeededRef = useRef(false);
+
   useEffect(() => {
     if (!canMarkPetFriendly(String(vehicleType ?? "car"))) {
       form.setValue("vehicle.is_pet_friendly", false);
@@ -166,7 +173,15 @@ export function ProviderVehicleChangeRequestDialog({ open, onOpenChange, vehicle
   }, [vehicleType, form]);
 
   useEffect(() => {
-    if (!open || !provider) return;
+    if (!open) {
+      vehicleChangeFormSeededRef.current = false;
+      return;
+    }
+    if (!provider) return;
+    if (goCategories.length === 0) return;
+    if (vehicleChangeFormSeededRef.current) return;
+    vehicleChangeFormSeededRef.current = true;
+
     const p = provider as { categoryId?: number; goBrands?: string[] | null };
     const goIds = new Set(goCategories.map((c) => c.id));
     const catId = p.categoryId != null && goIds.has(p.categoryId) ? p.categoryId : goCategories[0]?.id;

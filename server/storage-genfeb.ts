@@ -31,6 +31,7 @@ import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
 import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
+import { DEFAULT_CATEGORIES } from "@shared/default-categories";
 const getDb = async () => (await import("./db")).db;
 
 /**
@@ -1457,14 +1458,15 @@ export class InMemoryStorage implements IStorage {
   // ============== EXISTENTES ==============
   
   async getCategories(): Promise<Category[]> {
-    return [
-      { id: 1, name: "Plomería", slug: "plumbing", type: "technical", icon: "Wrench", imageUrl: "https://images.unsplash.com/photo-1585704032915-c3400ca199e7?auto=format&fit=crop&q=80" },
-      { id: 2, name: "Electricidad", slug: "electrical", type: "technical", icon: "Zap", imageUrl: "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&q=80" },
-      { id: 3, name: "Limpieza", slug: "cleaning", type: "technical", icon: "SprayCan", imageUrl: "https://images.unsplash.com/photo-1581578731117-104f2a41272c?auto=format&fit=crop&q=80" },
-      { id: 4, name: "Tutorías", slug: "tutoring", type: "profession", icon: "BookOpen", imageUrl: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&q=80" },
-      { id: 5, name: "Belleza", slug: "beauty", type: "profession", icon: "Scissors", imageUrl: "https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80" },
-      { id: 6, name: "Mudanzas", slug: "moving", type: "technical", icon: "Truck", imageUrl: "https://images.unsplash.com/photo-1600518464441-9154a4dea21b?auto=format&fit=crop&q=80" },
-    ];
+    /** Misma noción de categorías que el seed / Firestore; BecomePro filtra por slugs de DEFAULT_CATEGORIES. */
+    return DEFAULT_CATEGORIES.map((c, i) => ({
+      id: i + 1,
+      name: c.name,
+      slug: c.slug,
+      type: c.type,
+      icon: c.icon,
+      imageUrl: c.imageUrl ?? null,
+    })) as Category[];
   }
 
   async updateCategory(_id: number, _data: Partial<Category>): Promise<Category | undefined> {
