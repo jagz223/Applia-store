@@ -4,6 +4,7 @@ import L from "leaflet";
 import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
 import { useTheme } from "@/contexts/ThemeContext";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
+import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import "@/components/taxi/leaflet-config";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { Button } from "@/components/ui/button";
@@ -218,36 +219,40 @@ export function SingleLocationPicker({
             Preparando mapa…
           </div>
         ) : (
-          <MapContainer
-            center={marker ? [marker.lat, marker.lon] : DEFAULT_CENTER}
-            zoom={marker ? 14 : DEFAULT_ZOOM}
-            attributionControl={false}
-            className="h-full w-full rounded-xl border border-border z-0"
-            style={{
-              width: "100%",
-              height: "100%",
-              minHeight: mapSize === "sm" ? 260 : 400,
-            }}
-            scrollWheelZoom
-          >
-            <TileLayer
-              key={`tiles-${theme}`}
-              attribution={raster.attribution}
-              url={raster.url}
-              maxZoom={raster.maxZoom}
-              {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
-            />
-            <LeafletMapLayoutFix />
-            <MapClickPick onPick={onMapPick} />
-            {marker && <CenterOnMarker lat={marker.lat} lon={marker.lon} />}
-            {marker && (
-              <CircleMarker
-                center={[marker.lat, marker.lon]}
-                radius={10}
-                pathOptions={{ color: "#ea580c", fillColor: "#fb923c", fillOpacity: 0.9, weight: 2 }}
+          <>
+            <MapContainer
+              center={marker ? [marker.lat, marker.lon] : DEFAULT_CENTER}
+              zoom={marker ? 14 : DEFAULT_ZOOM}
+              attributionControl={false}
+              className="h-full w-full rounded-xl border border-border z-0"
+              style={{
+                width: "100%",
+                height: "100%",
+                minHeight: mapSize === "sm" ? 260 : 400,
+              }}
+              scrollWheelZoom
+            >
+              <TileLayer
+                key={`tiles-${theme}`}
+                attribution={raster.attribution}
+                url={raster.url}
+                maxZoom={raster.maxZoom}
+                {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
+                {...(raster.apiKey ? { apiKey: raster.apiKey } : {})}
               />
-            )}
-          </MapContainer>
+              <LeafletMapLayoutFix />
+              <MapClickPick onPick={onMapPick} />
+              {marker && <CenterOnMarker lat={marker.lat} lon={marker.lon} />}
+              {marker && (
+                <CircleMarker
+                  center={[marker.lat, marker.lon]}
+                  radius={10}
+                  pathOptions={{ color: "#ea580c", fillColor: "#fb923c", fillOpacity: 0.9, weight: 2 }}
+                />
+              )}
+            </MapContainer>
+            <GeoapifyMapAttribution />
+          </>
         )}
         {(reverseLoading || geoLoading) && (
           <div className="absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-background/90 border px-2 py-1.5 text-xs shadow">

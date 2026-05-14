@@ -87,6 +87,10 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       }
       if (data.type === "withdrawal_requested") return "/admin?tab=payouts";
       if (data.type === "withdrawal_processed_by_other") return "/admin?tab=payouts";
+      if (data.type === "pending_account_change_request") {
+        const u = data.url ?? data.data?.url;
+        return typeof u === "string" && u.startsWith("/") ? u : "/admin?tab=overview";
+      }
       // Notificaciones admin antiguas/genéricas: por defecto deben abrir el panel admin.
       return "/admin?tab=overview";
     case "withdrawal_approved":
@@ -117,6 +121,11 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       return data.url ?? "/professional-dashboard";
     case "account_change_request_approved":
     case "account_change_request_rejected": {
+      const u = data.url ?? data.data?.url;
+      return typeof u === "string" && u.startsWith("/") ? u : "/settings";
+    }
+    case "vehicle_change_request_approved":
+    case "vehicle_change_request_rejected": {
       const u = data.url ?? data.data?.url;
       return typeof u === "string" && u.startsWith("/") ? u : "/settings";
     }
@@ -162,6 +171,10 @@ function getIcon(type: string, data?: any) {
       return <Bell className="h-4 w-4 text-green-500" />;
     case "account_change_request_rejected":
       return <Bell className="h-4 w-4 text-amber-500" />;
+    case "vehicle_change_request_approved":
+      return <Bell className="h-4 w-4 text-green-500" />;
+    case "vehicle_change_request_rejected":
+      return <Bell className="h-4 w-4 text-amber-500" />;
     default:
       return <Bell className="h-4 w-4 text-gray-500" />;
   }
@@ -203,6 +216,7 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
   if (type === "admin") {
     if (d.type === "recharge_pending") return "Nueva solicitud de recarga";
     if (d.type === "withdrawal_requested") return "Nueva solicitud de retiro";
+    if (d.type === "pending_account_change_request") return "Nueva petición de asociado";
     if (d.type === "withdrawal_processed_by_other") {
       return d.action === "rejected" ? "Retiro rechazado por otro admin" : "Retiro aprobado por otro admin";
     }
@@ -228,6 +242,12 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
     const label =
       field === "email" ? "Correo" : field === "name" ? "Nombre" : field === "phone" ? "Teléfono" : "Perfil";
     return type === "account_change_request_approved" ? `${label}: aprobado` : `${label}: rechazado`;
+  }
+
+  if (type === "vehicle_change_request_approved" || type === "vehicle_change_request_rejected") {
+    const t = d.title ?? d.data?.title;
+    if (typeof t === "string" && t.trim()) return t.trim();
+    return type === "vehicle_change_request_approved" ? "Vehículo actualizado" : "Vehículo: solicitud rechazada";
   }
 
   if (type === "message") return conversationSenderName ? `Nuevo mensaje de ${truncateText(conversationSenderName, 18)}` : "Nuevo mensaje";
@@ -324,6 +344,11 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
 
   // 4) Notificaciones de admin (p. ej. solicitudes de retiro)
   if (type === "admin") {
+    if (d.type === "pending_account_change_request") {
+      const msg = d.message ?? d.data?.message;
+      if (typeof msg === "string" && msg.trim()) return msg.trim();
+      return "Un asociado envió una solicitud de cambio de datos o vehículo. Revisa Gestión de asociados.";
+    }
     if (d.type === "withdrawal_requested") {
       const name = d.userName ?? d.data?.userName;
       const amount = d.amountFormatted ?? d.data?.amountFormatted ?? d.amount ?? d.data?.amount;
@@ -351,6 +376,14 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     return type === "account_change_request_approved"
       ? "Abre Configuración para actualizar tu perfil."
       : "Revisa o vuelve a solicitar el cambio en Configuración.";
+  }
+
+  if (type === "vehicle_change_request_approved" || type === "vehicle_change_request_rejected") {
+    const msg = d.message ?? d.data?.message;
+    if (typeof msg === "string" && msg.trim()) return msg.trim();
+    return type === "vehicle_change_request_approved"
+      ? "Abre Configuración para ver tu vehículo actualizado."
+      : "Revisa el motivo en Configuración o envía una nueva solicitud.";
   }
 
   return null;

@@ -22,7 +22,8 @@ import { getPackFares, setPackFares } from "./pack-fares";
 import { getSubscriptionFeesByCategorySlug, setSubscriptionFeesByCategorySlug } from "./subscription-fees";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
-import { DEFAULT_CATEGORIES, getCategoryDisplayName } from "@shared/default-categories";
+import { DEFAULT_CATEGORIES, getCategoryDisplayName, isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categories";
+import { SETTINGS_URL_AFTER_VEHICLE_CHANGE_RESOLVED } from "@shared/settings-notification-urls";
 import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
 import {
   getHiddenCategorySlugs,
@@ -38,6 +39,7 @@ import {
   parseVisibilitySubscriptionEndMs,
 } from "@shared/professional-listing-subscription";
 import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
+import { vehicleChangeProposalSchema } from "@shared/vehicle-change-proposal";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
@@ -619,16 +621,41 @@ export function registerAdminRoutes(app: Express): void {
       });
       const body = schema.parse(req.body);
 
+      const rejectReason = body.action === "reject" ? String(body.reason ?? "").trim() : "";
+      if (body.action === "reject" && rejectReason.length < 3) {
+        return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
+      }
+
+      const pendingList = await genFebStorage.getPendingAccountChangeRequests();
+      const pendingRow = (pendingList as any[]).find((r) => Number(r?.id) === id) ?? null;
+      if (!pendingRow) return res.status(404).json({ message: "Petición no encontrada o ya resuelta" });
+
+      const fieldEarly = String((pendingRow as any)?.field ?? "");
+      let parsedVehicleProposal: import("@shared/vehicle-change-proposal").VehicleChangeProposal | null = null;
+      if (body.action === "approve" && fieldEarly === "vehicle") {
+        const parsed = vehicleChangeProposalSchema.safeParse((pendingRow as any)?.proposal);
+        if (!parsed.success) {
+          return res.status(400).json({ message: "Propuesta de vehículo inválida", errors: parsed.error.flatten() });
+        }
+        const userIdEarly = String((pendingRow as any)?.userId ?? "");
+        const provider = await catalogService.getProviderByUserId(userIdEarly);
+        if (!provider) {
+          return res.status(400).json({ message: "El usuario no tiene perfil de asociado." });
+        }
+        const categories = await catalogService.getCategories();
+        const cat = categories.find((c) => c.id === parsed.data.categoryId);
+        const slug = String((cat as { slug?: string })?.slug ?? "");
+        if (!isMobilityGoDriverVehicleCategorySlug(slug)) {
+          return res.status(400).json({ message: "La categoría debe ser taxi, delivery o marketplace." });
+        }
+        parsedVehicleProposal = parsed.data;
+      }
+
       const resolved = await genFebStorage.resolveAccountChangeRequest({
         id,
         action: body.action,
         adminUserId: String(req.user.id),
       });
-
-      const rejectReason = body.action === "reject" ? String(body.reason ?? "").trim() : "";
-      if (body.action === "reject" && rejectReason.length < 3) {
-        return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
-      }
 
       // --- Auditoría ---
       try {
@@ -652,9 +679,18 @@ export function registerAdminRoutes(app: Express): void {
       const userId = String((resolved as any)?.userId ?? "");
       const field = String((resolved as any)?.field ?? "");
       const allowed = field === "email" || field === "name" || field === "phone";
+      const allowedVehicle = field === "vehicle";
 
       const accountFieldLabelEs = (f: string) =>
-        f === "email" ? "correo" : f === "name" ? "nombre" : f === "phone" ? "teléfono" : "perfil";
+        f === "email"
+          ? "correo"
+          : f === "name"
+            ? "nombre"
+            : f === "phone"
+              ? "teléfono"
+              : f === "vehicle"
+                ? "vehículo"
+                : "perfil";
       const capLabel = (f: string) => {
         const s = accountFieldLabelEs(f);
         return s.charAt(0).toUpperCase() + s.slice(1);
@@ -723,6 +759,88 @@ export function registerAdminRoutes(app: Express): void {
             data: { url: "/settings" },
           })
           .catch((err) => console.error("[push-account-change] reject:", err));
+      }
+
+      if (userId && allowedVehicle && body.action === "approve" && parsedVehicleProposal) {
+        const provider = await catalogService.getProviderByUserId(userId);
+        if (provider) {
+          const categories = await catalogService.getCategories();
+          const cat = categories.find((c) => c.id === parsedVehicleProposal!.categoryId);
+          const slug = String((cat as { slug?: string })?.slug ?? "");
+          await catalogService.updateProvider((provider as { id: number }).id, {
+            categoryId: parsedVehicleProposal.categoryId,
+            category: slug,
+            subcategoryId: parsedVehicleProposal.subcategoryId ?? null,
+            goBrands: parsedVehicleProposal.goBrands,
+          } as any);
+          await genFebStorage.upsertPrimaryProviderVehicle({
+            providerId: (provider as { id: number }).id,
+            userId,
+            vehicle: parsedVehicleProposal.vehicle,
+          });
+        }
+        const title = "Tu vehículo ya está configurado";
+        const bodyText =
+          "El equipo aprobó tu solicitud. Abre Configuración para ver placa, tipo de unidad y datos actualizados.";
+        const notifData = {
+          field: "vehicle",
+          url: SETTINGS_URL_AFTER_VEHICLE_CHANGE_RESOLVED,
+          message: bodyText,
+          title,
+        };
+        const created = await genFebStorage.createNotification({
+          userId,
+          type: "vehicle_change_request_approved",
+          data: notifData,
+        });
+        const io = getIO();
+        if (io) {
+          io.to(`user:${userId}`).emit("notification", {
+            id: (created as any)?.id,
+            type: "vehicle_change_request_approved",
+            title,
+            body: bodyText,
+            data: notifData,
+          });
+        }
+        void notificationService
+          .sendPushToUser(userId, {
+            title,
+            body: bodyText,
+            data: {
+              url: SETTINGS_URL_AFTER_VEHICLE_CHANGE_RESOLVED,
+              type: "vehicle_change_request_approved",
+            },
+          })
+          .catch((err) => console.error("[push-vehicle-change] approve:", err));
+      }
+
+      if (userId && allowedVehicle && body.action === "reject") {
+        const title = "Vehículo: solicitud rechazada";
+        const bodyText = `Tu solicitud de cambio de vehículo fue rechazada. Motivo: ${rejectReason}`;
+        const notifData = { field: "vehicle", url: "/settings", message: bodyText, title, reason: rejectReason };
+        const created = await genFebStorage.createNotification({
+          userId,
+          type: "vehicle_change_request_rejected",
+          data: notifData,
+        });
+        const io = getIO();
+        if (io) {
+          io.to(`user:${userId}`).emit("notification", {
+            id: (created as any)?.id,
+            type: "vehicle_change_request_rejected",
+            title,
+            body: bodyText,
+            data: notifData,
+          });
+        }
+        void notificationService
+          .sendPushToUser(userId, {
+            title,
+            body: bodyText,
+            data: { url: "/settings" },
+          })
+          .catch((err) => console.error("[push-vehicle-change] reject:", err));
       }
 
       return res.json({ request: resolved });

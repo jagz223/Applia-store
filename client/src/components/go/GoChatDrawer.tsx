@@ -3,7 +3,7 @@ import { useGoChat } from "@/contexts/GoChatContext";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 
 export function GoChatDrawer() {
-  const { isOpen, closeChat, selectedConversationId, setSelectedConversationId } = useGoChat();
+  const { isOpen, closeChat, selectedConversationId, setSelectedConversationId, mobilityChatReminder } = useGoChat();
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => (!open ? closeChat() : undefined)}>
@@ -20,6 +20,7 @@ export function GoChatDrawer() {
               mode="embedded"
               selectedConversationId={selectedConversationId}
               onSelectedConversationIdChange={setSelectedConversationId}
+              mobilityEmbeddedReminder={mobilityChatReminder}
             />
           </div>
         </div>

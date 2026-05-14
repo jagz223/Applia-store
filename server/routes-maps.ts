@@ -1,41 +1,17 @@
 import type { Express, Request, Response } from "express";
 
-const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
-// OSRM HTTP: el host raíz de FOSSGIS no sirve `/route/v1/...` (404); hace falta el prefijo del perfil.
-// Orden: instancia comunitaria primero (el demo project-osrm suele colgar o cortar por timeout).
-const DEFAULT_OSRM_BASES = [
-  "https://routing.openstreetmap.de/routed-car",
-  "https://router.project-osrm.org",
-] as const;
+const GEOAPIFY_API_KEY = String(
+  process.env.GEOAPIFY_API_KEY ?? process.env.VITE_GEOAPIFY_API_KEY ?? ""
+).trim();
+const GEOAPIFY_BASE = "https://api.geoapify.com/v1";
 
-const OSRM_BASES: readonly string[] = (() => {
-  const raw = String(process.env.OSRM_BASES ?? "").trim();
-  if (!raw) return DEFAULT_OSRM_BASES;
-  const list = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return list.length ? list : DEFAULT_OSRM_BASES;
-})();
-
-/** Identificación requerida por la política de uso de Nominatim. */
 const MAPS_USER_AGENT =
   process.env.MAPS_HTTP_USER_AGENT ||
   "GenFeb-CarGo/1.0 (mapa taxi; contacto: soporte genfeb)";
 
 const MAPS_FETCH_TIMEOUT_MS = Number(process.env.MAPS_FETCH_TIMEOUT_MS || 11_000);
-/** Solo `/api/maps/route`: backends públicos a veces tardan más que geocode/reverse. */
 const MAPS_ROUTE_FETCH_TIMEOUT_MS = Number(process.env.MAPS_ROUTE_FETCH_TIMEOUT_MS || 22_000);
 
-/**
- * Clave OpenRouteService solo en servidor. Si está definida, `/api/maps/route` intenta ORS antes que OSRM público.
- * Acepta `OPENROUTE_SERVICE_KEY` (preferido) o `OPENROUTESERVICE_API_KEY` (alias).
- */
-const OPENROUTESERVICE_API_KEY = String(
-  process.env.OPENROUTE_SERVICE_KEY ?? process.env.OPENROUTESERVICE_API_KEY ?? ""
-).trim();
-const OPENROUTESERVICE_PROFILE =
-  String(process.env.OPENROUTESERVICE_PROFILE ?? "driving-car").trim() || "driving-car";
 const ROUTE_CACHE_TTL_MS = 5 * 60_000;
 const REVERSE_CACHE_TTL_MS = 30 * 60_000;
 
@@ -72,14 +48,6 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
-function nominatimHeaders(): HeadersInit {
-  return {
-    "User-Agent": MAPS_USER_AGENT,
-    Accept: "application/json",
-    "Accept-Language": "es",
-  };
-}
-
 function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const R = 6371000;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
@@ -92,7 +60,6 @@ function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: numb
 
 function fallbackRoute(from: { lon: number; lat: number }, to: { lon: number; lat: number }) {
   const distanceM = haversineM({ lat: from.lat, lon: from.lon }, { lat: to.lat, lon: to.lon });
-  // Aproximación conservadora: 28 km/h urbano.
   const durationSec = Math.round(distanceM / (28_000 / 3600));
   return {
     distanceM,
@@ -113,192 +80,126 @@ function fallbackRoute(from: { lon: number; lat: number }, to: { lon: number; la
   };
 }
 
-/** Espera `lon,lat` (convención OSRM / GeoJSON). */
+/** Espera `lon,lat` (convención GeoJSON usada por el backend taxi). */
 function parseLonLatPair(s: string): { lon: number; lat: number } | null {
   const parts = s.split(",").map((p) => Number(p.trim()));
   if (parts.length !== 2 || !parts.every((n) => Number.isFinite(n))) return null;
   return { lon: parts[0], lat: parts[1] };
 }
 
-/**
- * OpenRouteService (cuenta gratuita de pruebas / luego plan de pago).
- * Documentación: https://openrouteservice.org/dev/#/api-docs
- */
-async function fetchOpenRouteServiceRoute(
-  from: { lon: number; lat: number },
-  to: { lon: number; lat: number }
-): Promise<{ distanceM: number; durationSec: number; geometry: unknown } | null> {
-  if (!OPENROUTESERVICE_API_KEY) return null;
-  const url = `https://api.openrouteservice.org/v2/directions/${encodeURIComponent(
-    OPENROUTESERVICE_PROFILE
-  )}/geojson`;
-  try {
-    const t0 = Date.now();
-    const r = await fetchWithTimeout(
-      url,
-      {
-        method: "POST",
-        headers: {
-          Authorization: OPENROUTESERVICE_API_KEY,
-          "Content-Type": "application/json",
-          Accept: "application/json, application/geo+json",
-        },
-        body: JSON.stringify({
-          coordinates: [
-            [from.lon, from.lat],
-            [to.lon, to.lat],
-          ],
-        }),
-      },
-      MAPS_ROUTE_FETCH_TIMEOUT_MS
-    );
-    if (!r.ok) {
-      const snippet = await r.text().catch(() => "");
-      console.warn(`[maps] ORS route HTTP ${r.status}${snippet ? `: ${snippet.slice(0, 200)}` : ""}`);
-      return null;
-    }
-    const data = (await r.json()) as {
-      type?: string;
-      features?: Array<{
-        type?: string;
-        geometry?: { type?: string; coordinates?: unknown };
-        properties?: { summary?: { distance?: number; duration?: number } };
-      }>;
-    };
-    const feature = data.features?.[0];
-    const summary = feature?.properties?.summary;
-    const geometry = feature?.geometry;
-    if (
-      !geometry ||
-      geometry.type !== "LineString" ||
-      !Array.isArray(geometry.coordinates) ||
-      !summary ||
-      typeof summary.distance !== "number"
-    ) {
-      console.warn("[maps] ORS route: respuesta inesperada (sin LineString/summary)");
-      return null;
-    }
-    const tookMs = Date.now() - t0;
-    console.log(`[maps] route ok via openrouteservice in ${tookMs}ms`);
-    return {
-      distanceM: summary.distance,
-      durationSec: Math.max(0, Math.round(Number(summary.duration) || 0)),
-      geometry,
-    };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[maps] ORS route failed: ${msg}`);
-    return null;
-  }
-}
-
-async function fetchRouteFromBase(
-  base: string,
-  urlPath: string
-): Promise<{ route: { distance?: number; duration?: number; geometry?: unknown }; base: string; tookMs: number }> {
-  const url = `${base}${urlPath}`;
-  const t0 = Date.now();
-  const r = await fetchWithTimeout(
-    url,
-    { headers: { "User-Agent": MAPS_USER_AGENT, Accept: "application/json" } },
-    MAPS_ROUTE_FETCH_TIMEOUT_MS
-  );
-  if (!r.ok) {
-    throw new Error(`HTTP ${r.status} (${base})`);
-  }
-  const data = (await r.json()) as {
-    code?: string;
-    routes?: Array<{ distance?: number; duration?: number; geometry?: unknown }>;
+function geoapifyHeaders(): HeadersInit {
+  return {
+    "User-Agent": MAPS_USER_AGENT,
+    Accept: "application/json",
   };
-  if (data.code !== "Ok" || !data.routes?.[0]) {
-    throw new Error(`OSRM code ${String(data.code)} (${base})`);
-  }
-  return { route: data.routes[0], base, tookMs: Date.now() - t0 };
 }
 
-/** Intenta varios hosts OSRM en paralelo: evita esperar timeout+timeout en serie cuando uno colgaba. */
-async function fetchFirstWorkingRoute(urlPath: string) {
-  const tasks = OSRM_BASES.map((base) =>
-    fetchRouteFromBase(base, urlPath).catch((e) => {
-      const name = (e as any)?.name ? String((e as any).name) : "Error";
-      const msg = (e as any)?.message ? String((e as any).message) : String(e);
-      console.warn(`[maps] route backend failed via ${base}: ${name} ${msg}`);
-      throw e;
-    })
-  );
-  try {
-    const { route, base, tookMs } = await Promise.any(tasks);
-    if (tookMs > 2000) {
-      console.log(`[maps] route ok via ${base} in ${tookMs}ms`);
+/** Une tramos MultiLineString en una sola LineString para compatibilidad con el GeoJSON de Leaflet en taxi. */
+function mergeRouteGeometry(geom: { type?: string; coordinates?: unknown }): unknown {
+  if (!geom || typeof geom !== "object") return null;
+  if (geom.type === "LineString" && Array.isArray(geom.coordinates)) return geom;
+  if (geom.type === "MultiLineString" && Array.isArray(geom.coordinates)) {
+    const lines = geom.coordinates as number[][][];
+    const merged: number[][] = [];
+    for (const line of lines) {
+      if (!Array.isArray(line)) continue;
+      for (const pt of line) {
+        if (Array.isArray(pt) && pt.length >= 2) merged.push(pt);
+      }
     }
-    return route;
-  } catch (e) {
-    if (e instanceof AggregateError && Array.isArray(e.errors) && e.errors.length) {
-      throw e.errors[e.errors.length - 1];
-    }
-    throw e;
+    if (merged.length < 2) return null;
+    return { type: "LineString", coordinates: merged };
   }
+  return geom;
+}
+
+function distanceMetersFromGeoapifyProps(props: Record<string, unknown>): number {
+  const d = Number(props.distance);
+  if (!Number.isFinite(d) || d < 0) return 0;
+  const units = String(props.distance_units ?? "Meters").toLowerCase();
+  if (units.includes("mile")) return Math.round(d * 1609.344);
+  return Math.round(d);
 }
 
 export function registerMapRoutes(app: Express): void {
-  /** Búsqueda de direcciones (proxy Nominatim → evita CORS y fija User-Agent). */
+  const requireGeoapify = (res: Response): boolean => {
+    if (GEOAPIFY_API_KEY) return true;
+    res.status(503).json({
+      message:
+        "Falta GEOAPIFY_API_KEY en el servidor (.env). Para teselas en el cliente añade también VITE_GEOAPIFY_API_KEY.",
+    });
+    return false;
+  };
+
+  /** Búsqueda / autocomplete de direcciones (Geoapify → mismo contrato `{ lat, lon, label }[]`). */
   app.get("/api/maps/geocode", async (req: Request, res: Response) => {
+    if (!requireGeoapify(res)) return;
     const q = String(req.query.q ?? "").trim();
     if (q.length < 2) return res.status(400).json({ message: "Escribe al menos 2 caracteres" });
     if (q.length > 280) return res.status(400).json({ message: "Consulta demasiado larga" });
     const limit = Math.min(10, Math.max(1, Number(req.query.limit) || 6));
-    const url = new URL(`${NOMINATIM_BASE}/search`);
-    url.searchParams.set("format", "json");
-    url.searchParams.set("q", q);
+    const url = new URL(`${GEOAPIFY_BASE}/geocode/autocomplete`);
+    url.searchParams.set("text", q);
     url.searchParams.set("limit", String(limit));
-    url.searchParams.set("addressdetails", "1");
+    url.searchParams.set("lang", "es");
+    url.searchParams.set("apiKey", GEOAPIFY_API_KEY);
     try {
-      const cacheKey = `q=${q.toLowerCase()}&limit=${limit}`;
+      const cacheKey = `ga|q=${q.toLowerCase()}&limit=${limit}`;
       const cached = cacheGet(geocodeCache, cacheKey);
       if (cached) return res.json(cached);
 
-      const r = await fetchWithTimeout(url.toString(), { headers: nominatimHeaders() }, MAPS_FETCH_TIMEOUT_MS);
+      const r = await fetchWithTimeout(url.toString(), { headers: geoapifyHeaders() }, MAPS_FETCH_TIMEOUT_MS);
       if (!r.ok) return res.status(502).json({ message: "Servicio de búsqueda no disponible" });
-      const raw = (await r.json()) as unknown;
-      if (!Array.isArray(raw)) return res.json([]);
-      const out = raw.map((item: any) => ({
-        lat: parseFloat(item.lat),
-        lon: parseFloat(item.lon),
-        label: String(item.display_name ?? ""),
-      }));
-      const filtered = out.filter((x) => Number.isFinite(x.lat) && Number.isFinite(x.lon));
-      cacheSet(geocodeCache, cacheKey, filtered, 60_000);
-      res.json(filtered);
+      const data = (await r.json()) as { features?: unknown[] };
+      const feats = Array.isArray(data.features) ? data.features : [];
+      const out = feats
+        .map((f: any) => {
+          const coords = f?.geometry?.coordinates;
+          const lon = Array.isArray(coords) ? Number(coords[0]) : NaN;
+          const lat = Array.isArray(coords) ? Number(coords[1]) : NaN;
+          const label = String(f?.properties?.formatted ?? f?.properties?.address_line1 ?? "").trim();
+          return { lat, lon, label: label || `${lat}, ${lon}` };
+        })
+        .filter((x) => Number.isFinite(x.lat) && Number.isFinite(x.lon));
+      cacheSet(geocodeCache, cacheKey, out, 60_000);
+      res.json(out);
     } catch {
       res.status(502).json({ message: "No se pudo contactar el servicio de mapas" });
     }
   });
 
-  /** Dirección a partir de coordenadas (geocodificación inversa). */
+  /** Geocodificación inversa (Geoapify). */
   app.get("/api/maps/reverse", async (req: Request, res: Response) => {
+    if (!requireGeoapify(res)) return;
     const lat = Number(req.query.lat);
     const lon = Number(req.query.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       return res.status(400).json({ message: "Coordenadas inválidas" });
     }
-    const url = new URL(`${NOMINATIM_BASE}/reverse`);
-    url.searchParams.set("format", "json");
+    const url = new URL(`${GEOAPIFY_BASE}/geocode/reverse`);
     url.searchParams.set("lat", String(lat));
     url.searchParams.set("lon", String(lon));
+    url.searchParams.set("lang", "es");
+    url.searchParams.set("apiKey", GEOAPIFY_API_KEY);
     try {
       const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
       const cached = cacheGet(reverseCache, cacheKey);
       if (cached) return res.json(cached);
 
-      const r = await fetchWithTimeout(url.toString(), { headers: nominatimHeaders() }, MAPS_FETCH_TIMEOUT_MS);
+      const r = await fetchWithTimeout(url.toString(), { headers: geoapifyHeaders() }, MAPS_FETCH_TIMEOUT_MS);
       if (!r.ok) return res.status(502).json({ message: "Servicio inverso no disponible" });
-      const data = (await r.json()) as { display_name?: string; lat?: string; lon?: string };
-      const outLat = parseFloat(String(data.lat ?? lat));
-      const outLon = parseFloat(String(data.lon ?? lon));
+      const data = (await r.json()) as { features?: any[] };
+      const f = data.features?.[0];
+      const coords = f?.geometry?.coordinates;
+      const outLon = Array.isArray(coords) ? Number(coords[0]) : lon;
+      const outLat = Array.isArray(coords) ? Number(coords[1]) : lat;
+      const label = String(
+        f?.properties?.formatted ?? `${outLat.toFixed(5)}, ${outLon.toFixed(5)}`
+      );
       const payload = {
-        lat: outLat,
-        lon: outLon,
-        label: String(data.display_name ?? `${outLat.toFixed(5)}, ${outLon.toFixed(5)}`),
+        lat: Number.isFinite(outLat) ? outLat : lat,
+        lon: Number.isFinite(outLon) ? outLon : lon,
+        label,
       };
       cacheSet(reverseCache, cacheKey, payload, REVERSE_CACHE_TTL_MS);
       res.json(payload);
@@ -308,47 +209,67 @@ export function registerMapRoutes(app: Express): void {
   });
 
   /**
-   * Ruta en coche (ORS si hay `OPENROUTESERVICE_API_KEY`, si no OSRM público): distancia, duración y geometría Leaflet.
+   * Ruta en coche (Geoapify): distancia, duración y geometría Leaflet.
    * Parámetros: from=lon,lat y to=lon,lat
    */
   app.get("/api/maps/route", async (req: Request, res: Response) => {
+    if (!requireGeoapify(res)) return;
     const from = parseLonLatPair(String(req.query.from ?? ""));
     const to = parseLonLatPair(String(req.query.to ?? ""));
     if (!from || !to) return res.status(400).json({ message: "Usa from=lon,lat y to=lon,lat" });
-    const path = `${from.lon},${from.lat};${to.lon},${to.lat}`;
+    const waypoints = `lonlat:${from.lon},${from.lat}|lonlat:${to.lon},${to.lat}`;
     try {
-      const cacheKey = `from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
+      const cacheKey = `ga|from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
       const cached = cacheGet(routeCache, cacheKey);
       if (cached) return res.json(cached);
 
-      const ors = await fetchOpenRouteServiceRoute(from, to);
-      if (ors) {
-        const payload = {
-          distanceM: ors.distanceM,
-          durationSec: ors.durationSec,
-          geometry: ors.geometry,
-          source: "openrouteservice" as const,
-        };
-        cacheSet(routeCache, cacheKey, payload, ROUTE_CACHE_TTL_MS);
+      const url = new URL(`${GEOAPIFY_BASE}/routing`);
+      url.searchParams.set("waypoints", waypoints);
+      url.searchParams.set("mode", "drive");
+      url.searchParams.set("lang", "es");
+      url.searchParams.set("units", "metric");
+      url.searchParams.set("apiKey", GEOAPIFY_API_KEY);
+
+      const r = await fetchWithTimeout(url.toString(), { headers: geoapifyHeaders() }, MAPS_ROUTE_FETCH_TIMEOUT_MS);
+      if (!r.ok) {
+        const snippet = await r.text().catch(() => "");
+        console.warn(`[maps] Geoapify route HTTP ${r.status}${snippet ? `: ${snippet.slice(0, 200)}` : ""}`);
+        const payload = fallbackRoute(from, to);
+        cacheSet(routeCache, cacheKey, payload, 30_000);
         return res.json(payload);
       }
-
-      const urlPath = `/route/v1/driving/${path}?overview=full&geometries=geojson`;
-      const route = await fetchFirstWorkingRoute(urlPath);
+      const data = (await r.json()) as { features?: any[] };
+      const feature = data.features?.[0];
+      const props = feature?.properties && typeof feature.properties === "object" ? feature.properties : {};
+      const geometry = mergeRouteGeometry(feature?.geometry);
+      const distanceM = distanceMetersFromGeoapifyProps(props as Record<string, unknown>);
+      const durationSec = Math.max(0, Math.round(Number((props as any).time) || 0));
+      if (!geometry) {
+        const payload = fallbackRoute(from, to);
+        cacheSet(routeCache, cacheKey, payload, 30_000);
+        return res.json(payload);
+      }
       const payload = {
-        distanceM: route.distance ?? 0,
-        durationSec: route.duration ?? 0,
-        geometry: route.geometry ?? null,
-        source: "osrm" as const,
+        distanceM,
+        durationSec,
+        geometry,
+        source: "geoapify" as const,
       };
       cacheSet(routeCache, cacheKey, payload, ROUTE_CACHE_TTL_MS);
       res.json(payload);
     } catch (e) {
       console.error("[maps] route failed", e);
       const payload = fallbackRoute(from, to);
-      // Cache corto: el backend real puede recuperarse pronto.
-      cacheSet(routeCache, `fb|from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`, payload, 30_000);
+      cacheSet(
+        routeCache,
+        `fb|from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`,
+        payload,
+        30_000
+      );
       res.json(payload);
     }
   });
 }
+
+// Implementación anterior (Nominatim + OSRM + OpenRouteService): ver
+// `server/routes-maps-legacy-before-geoapify.archive.txt` (no se importa).

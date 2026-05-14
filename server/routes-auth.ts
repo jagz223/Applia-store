@@ -3,6 +3,10 @@ import type { Server } from "http";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { vehicleChangeProposalSchema } from "@shared/vehicle-change-proposal";
+import { isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categories";
+import { isGoVehicleProvider } from "@shared/provider-car-go";
+import { notifyFullAdminsPendingAccountChangeRequest } from "./account-change-notify-admins";
 import { genFebStorage } from "./storage-genfeb";
 
 // Environment variables
@@ -314,24 +318,70 @@ export async function registerAuthRoutes(
     }
   });
 
-  // POST /api/me/account-change-requests - Usuario solicita cambio de email/nombre/teléfono
+  // POST /api/me/account-change-requests - Usuario solicita cambio de email/nombre/teléfono o vehículo Go
   app.post("/api/me/account-change-requests", authenticateJWT, async (req: any, res) => {
     try {
-      const schema = z.object({
-        field: z.enum(["email", "name", "phone"]),
-        reason: z.string().min(3, "Describe brevemente el motivo").max(280, "Máximo 280 caracteres").transform((s) => s.trim()),
-      });
+      const schema = z.union([
+        z.object({
+          field: z.enum(["email", "name", "phone"]),
+          reason: z.string().min(3, "Describe brevemente el motivo").max(280, "Máximo 280 caracteres").transform((s) => s.trim()),
+        }),
+        z.object({
+          field: z.literal("vehicle"),
+          reason: z.string().min(3, "Describe brevemente el motivo").max(280, "Máximo 280 caracteres").transform((s) => s.trim()),
+          proposal: vehicleChangeProposalSchema,
+        }),
+      ]);
       const data = schema.parse(req.body);
-      const created = await genFebStorage.createAccountChangeRequest({
-        userId: String(req.user.id),
-        field: data.field,
-        reason: data.reason,
-      });
+      if (data.field === "vehicle") {
+        const provider = await genFebStorage.getProviderByUserId(String(req.user.id));
+        if (!provider) {
+          return res.status(403).json({ message: "Solo para asociados con perfil de proveedor." });
+        }
+        const categories = await genFebStorage.getCategories();
+        if (!isGoVehicleProvider(provider, categories)) {
+          return res.status(403).json({
+            message: "Solo conductores taxi, delivery o marketplace pueden solicitar cambio de vehículo.",
+          });
+        }
+        const cat = categories.find((c) => c.id === data.proposal.categoryId);
+        const slug = String((cat as { slug?: string } | undefined)?.slug ?? "");
+        if (!isMobilityGoDriverVehicleCategorySlug(slug)) {
+          return res.status(400).json({ message: "La categoría debe ser taxi, delivery o marketplace." });
+        }
+      }
+      const created = await genFebStorage.createAccountChangeRequest(
+        data.field === "vehicle"
+          ? {
+              userId: String(req.user.id),
+              field: "vehicle",
+              reason: data.reason,
+              proposal: data.proposal,
+            }
+          : {
+              userId: String(req.user.id),
+              field: data.field,
+              reason: data.reason,
+            }
+      );
+      const applicantUser = (await genFebStorage.getUserById(String(req.user.id), true)) as Record<string, unknown> | null;
+      const rid = Number((created as { id?: unknown }).id);
+      if (Number.isFinite(rid) && rid > 0) {
+        void notifyFullAdminsPendingAccountChangeRequest({
+          requestId: rid,
+          applicantUserId: String(req.user.id),
+          applicantUser: applicantUser ?? undefined,
+          field: data.field === "vehicle" ? "vehicle" : data.field,
+        });
+      }
       return res.status(201).json({ request: created });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Error de validación", errors: error.errors });
       }
+      const msg = error instanceof Error ? error.message : "Error";
+      const code = msg.includes("Ya tienes") ? 409 : 500;
+      if (code === 409) return res.status(409).json({ message: msg });
       console.error("Error creating account change request:", error);
       return res.status(500).json({ message: "Error interno del servidor" });
     }

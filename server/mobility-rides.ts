@@ -28,7 +28,12 @@ import {
   RIDER_DRIVER_NOT_AVAILABLE_MESSAGE,
 } from "@shared/mobility-negotiation";
 import { driverIsBusyCrossModule, registerMobilityDriverBusy } from "./driver-busy-cross-module";
+import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import crypto from "crypto";
+
+/** Primer mensaje del hilo al crear la conversación del viaje (sin mencionar precio por chat aún). */
+const MOBILITY_RIDE_CHAT_OPENING =
+  "Chat iniciado. Podéis usar este chat para coordinar ajustes del viaje cuando lo necesiten.";
 
 export type TaxiVehicleKind = "moto" | "auto" | "pet_car" | "camioneta";
 export type TaxiPaymentMethod = "cash" | "bank_transfer";
@@ -109,6 +114,8 @@ type RideRecord = {
   offerExpiresAt: number | null;
   /** Driver indicó que ya está buscando al cliente (paso previo a iniciar viaje). */
   driverSearchingClient?: boolean;
+  /** Una sola notificación push + mensaje de chat cuando el conductor cruza el umbral cerca del punto de recogida. */
+  riderNotifiedDriverNearPickup?: boolean;
   /** Evita doble asiento contable al completar */
   financialsSettled?: boolean;
   /** Última vez que un driver rechazó/expiró esta oferta (para re-ofertar luego). */
@@ -174,6 +181,24 @@ function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: numb
   const x =
     Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+}
+
+const DRIVER_NEAR_PICKUP_RADIUS_M = 400;
+
+async function appendMobilityRideSystemMessage(conversationId: number | null | undefined, content: string): Promise<void> {
+  const cid = conversationId == null ? NaN : Number(conversationId);
+  if (!Number.isFinite(cid)) return;
+  try {
+    await genFebStorage.createMessage({
+      conversationId: cid,
+      senderId: CHAT_SYSTEM_SENDER_ID,
+      content,
+      type: "system",
+      status: "sent",
+    });
+  } catch (e) {
+    console.error("[mobility] appendMobilityRideSystemMessage", e);
+  }
 }
 
 function freshDriversForVehicle(taxiKind: TaxiVehicleKind): DriverPresence[] {
@@ -975,10 +1000,9 @@ export function registerMobilityRideRoutes(app: Express) {
         ride.conversationId = conversationId;
         await genFebStorage.createMessage({
           conversationId,
-          senderId: driverId,
-          content:
-            "Chat iniciado. Aquí pueden acordar el precio final del servicio. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
-          type: "text",
+          senderId: CHAT_SYSTEM_SENDER_ID,
+          content: MOBILITY_RIDE_CHAT_OPENING,
+          type: "system",
           status: "sent",
         });
       } catch (ce) {
@@ -1087,10 +1111,9 @@ export function registerMobilityRideRoutes(app: Express) {
         // Mensaje inicial: asegura que el chat aparezca aunque nadie escriba.
         await genFebStorage.createMessage({
           conversationId,
-          senderId: driverUserId,
-          content:
-            "Chat iniciado. Aquí pueden acordar el precio final del servicio. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
-          type: "text",
+          senderId: CHAT_SYSTEM_SENDER_ID,
+          content: MOBILITY_RIDE_CHAT_OPENING,
+          type: "system",
           status: "sent",
         });
       } catch (ce) {
@@ -1266,10 +1289,9 @@ export function registerMobilityRideRoutes(app: Express) {
         ride.conversationId = conversationId;
         await genFebStorage.createMessage({
           conversationId,
-          senderId: driverId,
-          content:
-            "Chat iniciado. Aquí pueden acordar el precio final del servicio. Si deseas, puedes proponer un mejor precio y coordinar detalles por este chat.",
-          type: "text",
+          senderId: CHAT_SYSTEM_SENDER_ID,
+          content: MOBILITY_RIDE_CHAT_OPENING,
+          type: "system",
           status: "sent",
         });
       } catch {}
@@ -1367,9 +1389,9 @@ export function registerMobilityRideRoutes(app: Express) {
         try {
           await genFebStorage.createMessage({
             conversationId: ride.conversationId,
-            senderId: driverUserId,
-            content: "Viaje iniciado. Ya puedes chatear con tu conductor/cliente en cualquier momento.",
-            type: "text",
+            senderId: CHAT_SYSTEM_SENDER_ID,
+            content: "Viaje iniciado. Podéis seguir coordinando por este chat durante el trayecto.",
+            type: "system",
             status: "sent",
           });
         } catch (me) {
@@ -1405,6 +1427,9 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
       if (ride.driverUserId !== driverUserId) return res.status(403).json({ message: "Sin acceso" });
       if (ride.status !== "matched") return res.status(409).json({ message: "No se puede buscar en este estado" });
+      if (ride.driverSearchingClient) {
+        return res.json({ ok: true, rideId, alreadySearching: true });
+      }
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
@@ -1412,15 +1437,16 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.driverSearchingClient = true;
       io.to(`user:${ride.riderUserId}`).emit("cargo:ride:driver_searching", { rideId });
       io.to(`user:${driverUserId}`).emit("cargo:ride:driver_searching", { rideId });
+      void appendMobilityRideSystemMessage(
+        ride.conversationId,
+        "El conductor inició la búsqueda para coordinar contigo el punto de encuentro.",
+      );
       try {
-        const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
-          void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Servicio de taxi",
-            body: "Tu conductor ya está coordinando la recogida.",
-            data: { url: "/go/taxi", type: "cargo_driver_searching", rideId },
-          });
-        }
+        void notificationService.sendPushToUser(ride.riderUserId, {
+          title: "Servicio de taxi",
+          body: "Tu conductor inició la búsqueda para llegar hasta ti.",
+          data: { url: "/go/taxi", type: "cargo_driver_searching", rideId },
+        });
       } catch {}
       res.json({ ok: true, rideId });
     } catch (e: any) {
@@ -1635,6 +1661,30 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
       const ride = rides.get(data.rideId);
       if (!ride || ride.driverUserId !== user.id || (ride.status !== "matched" && ride.status !== "in_progress"))
         return;
+      const lat = Number(data.lat);
+      const lon = Number(data.lon);
+      if (
+        ride.status === "matched" &&
+        !ride.riderNotifiedDriverNearPickup &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon)
+      ) {
+        const m = haversineM(ride.start, { lat, lon });
+        if (m <= DRIVER_NEAR_PICKUP_RADIUS_M) {
+          ride.riderNotifiedDriverNearPickup = true;
+          void appendMobilityRideSystemMessage(
+            ride.conversationId,
+            "Tu conductor está muy cerca del punto de encuentro.",
+          );
+          try {
+            void notificationService.sendPushToUser(ride.riderUserId, {
+              title: "Servicio de taxi",
+              body: "Tu conductor está cerca de tu ubicación de recogida.",
+              data: { url: "/go/taxi", type: "cargo_driver_near_pickup", rideId: data.rideId },
+            });
+          } catch {}
+        }
+      }
       io.to(`user:${ride.riderUserId}`).emit("cargo:ride:driver_location", {
         rideId: data.rideId,
         lat: data.lat,

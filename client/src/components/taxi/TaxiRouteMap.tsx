@@ -16,6 +16,7 @@ import { Loader2, Navigation } from "lucide-react";
 import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
 import { useTheme } from "@/contexts/ThemeContext";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
+import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -365,6 +366,7 @@ export function TaxiRouteMap({
                 url={raster.url}
                 maxZoom={raster.maxZoom}
                 {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
+                {...(raster.apiKey ? { apiKey: raster.apiKey } : {})}
               />
               <LeafletMapLayoutFix />
               {syncDefaultView ? <SyncBootstrapView center={defaultCenter} zoom={defaultZoom} /> : null}
@@ -408,6 +410,7 @@ export function TaxiRouteMap({
               ))}
             </MapContainer>
           </div>
+          <GeoapifyMapAttribution />
           {MAP_PERSPECTIVE_CONTROLS_VISIBLE ? (
             <MapPerspectiveControls
               tiltDeg={tiltDeg}

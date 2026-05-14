@@ -12,6 +12,7 @@ import {
 } from "@/lib/notification-filters";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { RATINGS_PENDING_QUERY_KEY } from "@/hooks/use-mango-data";
+import { api } from "@shared/routes";
 
 const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
 const ADMIN_WITHDRAWALS_KEY = "/api/admin/withdrawals";
@@ -328,6 +329,34 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           variant: type === "account_change_request_rejected" ? "destructive" : undefined,
         });
       }
+      if (type === "vehicle_change_request_approved" || type === "vehicle_change_request_rejected") {
+        queryClient.invalidateQueries({ queryKey: ["user"] });
+        queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+        queryClient.invalidateQueries({ queryKey: ["/api/me/provider-vehicle"] });
+        debouncedRefetch(queryClient, ["user"]);
+        debouncedRefetch(queryClient, [api.providers.me.path]);
+        debouncedRefetch(queryClient, ["/api/me/provider-vehicle"]);
+        const title =
+          typeof notification?.title === "string" && notification.title.trim()
+            ? notification.title.trim()
+            : type === "vehicle_change_request_approved"
+              ? "Vehículo actualizado"
+              : "Vehículo: solicitud rechazada";
+        const description =
+          typeof notification?.body === "string" && notification.body.trim()
+            ? notification.body.trim()
+            : notification?.data?.message ?? notification?.data?.data?.message;
+        toast({
+          title,
+          description:
+            typeof description === "string" && description.trim()
+              ? description.trim()
+              : type === "vehicle_change_request_approved"
+                ? "Abre Configuración para ver tu vehículo actualizado."
+                : "Revisa Configuración para el detalle o vuelve a enviar una solicitud.",
+          variant: type === "vehicle_change_request_rejected" ? "destructive" : undefined,
+        });
+      }
       if (type === "verification_result") {
         queryClient.invalidateQueries({ queryKey: ["/api/invoices", "list"] });
         debouncedRefetch(queryClient, ["/api/invoices", "list"]);
@@ -448,16 +477,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         });
       }
       // Otro admin ya procesó el retiro (aprobado o rechazado): actualizar lista Payouts para que desaparezca el usuario
-      const isWithdrawalProcessedByOther = notification?.type === "withdrawal_processed_by_other";
-      if (isWithdrawalProcessedByOther && hasFullAdminRole(userRef.current)) {
-        queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_KEY] });
-        debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_KEY]);
-        const action = notification?.action === "approved" ? "aprobado" : "rechazado";
-        const who = notification?.data?.processedByAdminName ?? "otro administrador";
-        const name = notification?.data?.professionalName ?? "el usuario";
+      const isPendingAccountChange = notification?.type === "pending_account_change_request";
+      if (isPendingAccountChange && hasFullAdminRole(userRef.current)) {
+        queryClient.invalidateQueries({ queryKey: ["admin-account-change-requests-pending"] });
+        debouncedRefetch(queryClient, ["admin-account-change-requests-pending"]);
         toast({
-          title: "Retiro ya procesado",
-          description: `El retiro de ${name} fue ${action} por ${who}. Ya no aparece en Solicitudes de Retiro.`,
+          title: "Nueva petición de asociado",
+          description:
+            typeof notification?.message === "string" && notification.message.trim()
+              ? notification.message.trim()
+              : "Hay una solicitud de cambio de datos o vehículo. Revisa Gestión de asociados.",
         });
       }
     });

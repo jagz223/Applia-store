@@ -65,6 +65,8 @@ export type ProviderUpdate = Partial<
     "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate" | "skills" | "isVerified"
   > & {
     subcategoryId?: number | null;
+    /** Módulos Go (taxi / delivery / marketplace) cuando el proveedor opera en Car Go. */
+    goBrands?: string[] | null;
     /** Nivel de preparación (escolaridad, cursos, talleres). Se sincroniza con `coursesCompleted` en Firestore. */
     preparationLevel?: string | null;
     /** Certificaciones y respaldos (títulos, carnés). */
@@ -134,6 +136,14 @@ export interface ICatalogStorage {
     model_year?: number | null;
     is_pet_friendly?: boolean;
   } | null>;
+  /** Documento completo del primer vehículo por userId (para edición / solicitud de cambio). */
+  getPrimaryVehicleFullByUserId(userId: string): Promise<Record<string, unknown> | null>;
+  /** Crea o actualiza el vehículo principal del usuario (mismo criterio que getPrimaryVehicleByUserId). */
+  upsertPrimaryProviderVehicle(input: {
+    providerId: number;
+    userId: string;
+    vehicle: InsertProviderVehicle;
+  }): Promise<{ id: number }>;
   updateProvider(id: number, data: ProviderUpdate): Promise<Provider | undefined>;
   deleteProvider(id: number): Promise<boolean>;
   /**
