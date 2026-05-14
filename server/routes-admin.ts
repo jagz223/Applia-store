@@ -5,6 +5,7 @@
  */
 
 import express, { type Express } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { authenticateJWT } from "./routes-auth";
@@ -46,28 +47,56 @@ async function adminListAllServices() {
   return genFebStorage.getAllServices(undefined, undefined, undefined, undefined, true);
 }
 
+type AdminAuditAction =
+  | "subscription_payment_approved"
+  | "subscription_payment_rejected"
+  | "associate_onboarding_approved"
+  | "associate_onboarding_rejected"
+  | "account_change_request_approved"
+  | "account_change_request_rejected";
+
+/** Cuando no hay Firestore, el historial de auditoría vive en memoria (reinicia al reiniciar el servidor). */
+const ADMIN_AUDIT_MEMORY_MAX = 200;
+const adminAuditMemoryLog: Array<{
+  id: string;
+  action: AdminAuditAction;
+  adminUserId: string;
+  affectedUserId: string;
+  meta: Record<string, unknown> | null;
+  createdAt: Date;
+}> = [];
+
 async function createAdminAuditEvent(args: {
-  action:
-    | "subscription_payment_approved"
-    | "subscription_payment_rejected"
-    | "associate_onboarding_approved"
-    | "associate_onboarding_rejected"
-    | "account_change_request_approved"
-    | "account_change_request_rejected";
+  action: AdminAuditAction;
   adminUserId: string;
   affectedUserId: string;
   meta?: Record<string, unknown>;
 }) {
+  const meta = args.meta ?? null;
+  const createdAt = new Date();
   try {
     const db = getFirestore();
-    if (!db) return;
-    await db.collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG).add({
+    if (db) {
+      await db.collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG).add({
+        action: args.action,
+        adminUserId: args.adminUserId,
+        affectedUserId: args.affectedUserId,
+        meta,
+        createdAt,
+      });
+      return;
+    }
+    adminAuditMemoryLog.unshift({
+      id: `m_${randomUUID()}`,
       action: args.action,
       adminUserId: args.adminUserId,
       affectedUserId: args.affectedUserId,
-      meta: args.meta ?? null,
-      createdAt: new Date(),
+      meta,
+      createdAt,
     });
+    while (adminAuditMemoryLog.length > ADMIN_AUDIT_MEMORY_MAX) {
+      adminAuditMemoryLog.pop();
+    }
   } catch (e) {
     console.error("[admin-audit] Error:", e);
   }
@@ -514,13 +543,24 @@ export function registerAdminRoutes(app: Express): void {
       const limRaw = Number(req.query?.limit ?? 50);
       const limit = Number.isFinite(limRaw) ? Math.max(1, Math.min(200, limRaw)) : 50;
       const db = getFirestore();
-      if (!db) return res.json({ items: [], total: 0 });
-      const snap = await db
-        .collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG)
-        .orderBy("createdAt", "desc")
-        .limit(limit)
-        .get();
-      const rawItems = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      let rawItems: any[];
+      if (db) {
+        const snap = await db
+          .collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG)
+          .orderBy("createdAt", "desc")
+          .limit(limit)
+          .get();
+        rawItems = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      } else {
+        rawItems = adminAuditMemoryLog.slice(0, limit).map((row) => ({
+          id: row.id,
+          action: row.action,
+          adminUserId: row.adminUserId,
+          affectedUserId: row.affectedUserId,
+          meta: row.meta,
+          createdAt: row.createdAt,
+        }));
+      }
 
       const uniqueAdminIds = Array.from(
         new Set(rawItems.map((it) => String(it.adminUserId ?? "").trim()).filter(Boolean)),

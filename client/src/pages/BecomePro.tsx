@@ -1,4 +1,5 @@
 import { useForm } from "react-hook-form";
+import type { Control, FieldValues, UseFormSetValue } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { insertProviderSchema } from "@shared/schema";
@@ -626,8 +627,8 @@ export default function BecomePro() {
 
               {isGoDriverCategory && (
                 <GoDriverVehicleFormGrid
-                  control={form.control}
-                  setValue={form.setValue}
+                  control={form.control as unknown as Control<FieldValues>}
+                  setValue={form.setValue as unknown as UseFormSetValue<FieldValues>}
                   vehicleType={vehicleType}
                   vehicleBrand={vehicleBrand}
                   vehicleModelWatch={vehicleModelWatch}

@@ -115,13 +115,6 @@ export default function Settings() {
   const isProfessional = (user as { role?: string } | null)?.role === "professional";
   const { data: provider, isLoading: providerLoading, isError: providerError } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
-  const showGoVehicleCard =
-    isProfessional &&
-    !providerLoading &&
-    !providerError &&
-    provider != null &&
-    (isGoVehicleProvider(provider, categories) ||
-      (!providerVehicleLoading && isMeaningfulProviderVehicleRow(providerVehicleRow as Record<string, unknown>)));
 
   const { data: providerVehicleRow, isLoading: providerVehicleLoading } = useQuery({
     queryKey: ["/api/me/provider-vehicle"],
@@ -136,6 +129,14 @@ export default function Settings() {
     },
     enabled: isAuthenticated && isProfessional && provider != null && !providerLoading && !providerError,
   });
+
+  const showGoVehicleCard =
+    isProfessional &&
+    !providerLoading &&
+    !providerError &&
+    provider != null &&
+    (isGoVehicleProvider(provider, categories) ||
+      (!providerVehicleLoading && isMeaningfulProviderVehicleRow(providerVehicleRow as Record<string, unknown>)));
 
   const openVehicleSectionFromNotification = useMemo(() => {
     try {

@@ -34,7 +34,7 @@ export const BECOME_DRIVER_VEHICLE_SECTION_TITLE = "Datos del vehículo";
 export const BECOME_DRIVER_VEHICLE_SECTION_LEAD =
   "Elige bien el tipo de vehículo que vas a usar. Obligatorio para activar taxi y delivery si aún no tienes unidad registrada.";
 
-export const BECOME_DRIVER_VEHICLE_NHTSA_ERROR =
+export const BECOME_DRIVER_VEHICLE_CATALOG_ERROR =
   "No se pudo cargar el catálogo. Comprueba tu conexión e inténtalo de nuevo.";
 
 export const BECOME_DRIVER_SUBMIT_LABEL = "Guardar y activar taxi + delivery";

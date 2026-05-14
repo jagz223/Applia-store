@@ -11,9 +11,10 @@ import {
 import { ServiceListItem } from "@/components/ServiceListItem";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, ArrowLeft, PackageOpen, Plus, Car, Bike, Package } from "lucide-react";
+import { Loader2, ArrowLeft, PackageOpen, Plus, Car, Bike, Package, Settings2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { SETTINGS_VEHICLE_SECTION_QUERY_KEY } from "@shared/settings-notification-urls";
 import { providerHasGoBrand } from "@shared/provider-go";
 import { computeMyServicesCardRows } from "@shared/my-services-display-policy";
 
@@ -59,18 +60,7 @@ export default function MyServices() {
   const goDelivery = providerHasGoBrand(provider as any, "delivery", categories);
   const driverEnrollmentComplete = !!vehicle && goTaxi && goDelivery;
 
-  const pExtra = provider as {
-    profession?: string | null;
-    bio?: string | null;
-    goDriverOfferTitle?: string | null;
-    goDriverOfferDescription?: string | null;
-  } | null;
-
-  const showDriverPreview =
-    !!vehicle ||
-    goTaxi ||
-    goDelivery ||
-    !!(pExtra?.goDriverOfferTitle && String(pExtra.goDriverOfferTitle).trim());
+  const showDriverPreview = !!vehicle || goTaxi || goDelivery;
 
   const showBecomeDriverCta = mobilityGoVisible && !!provider && !driverEnrollmentComplete;
 
@@ -166,30 +156,6 @@ export default function MyServices() {
                   </span>
                 </div>
 
-                {pExtra?.profession ? (
-                  <p>
-                    <span className="text-muted-foreground">Profesión: </span>
-                    <span className="font-medium text-foreground">{pExtra.profession}</span>
-                  </p>
-                ) : null}
-
-                {pExtra?.goDriverOfferTitle ? (
-                  <div>
-                    <p className="text-muted-foreground text-xs uppercase tracking-wide">Oferta</p>
-                    <p className="font-medium text-foreground">{pExtra.goDriverOfferTitle}</p>
-                    {pExtra.goDriverOfferDescription ? (
-                      <p className="mt-1 line-clamp-4 text-muted-foreground">{pExtra.goDriverOfferDescription}</p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {pExtra?.bio ? (
-                  <p className="line-clamp-3 text-muted-foreground">
-                    <span className="font-medium text-foreground">Biografía: </span>
-                    {pExtra.bio}
-                  </p>
-                ) : null}
-
                 {vehicle ? (
                   <div className="rounded-lg border border-border/60 bg-background/60 p-3">
                     <p className="text-xs font-medium text-muted-foreground mb-2">Vehículo</p>
@@ -216,6 +182,14 @@ export default function MyServices() {
                 )}
 
                 <div className="flex flex-wrap gap-2 pt-1">
+                  {vehicle ? (
+                    <Button variant="outline" size="sm" className="gap-2" asChild>
+                      <Link href={`/settings?${SETTINGS_VEHICLE_SECTION_QUERY_KEY}=1`}>
+                        <Settings2 className="h-4 w-4" />
+                        Cambiar vehículo
+                      </Link>
+                    </Button>
+                  ) : null}
                   <Button variant="outline" size="sm" asChild>
                     <Link href="/go/taxi/driver">Panel taxi</Link>
                   </Button>

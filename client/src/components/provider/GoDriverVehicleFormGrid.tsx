@@ -188,7 +188,7 @@ export function GoDriverVehicleFormGrid({
             <FormItem>
               <FormLabel>Año del vehículo</FormLabel>
               <FormDescription className="text-xs">
-                Depende de marca y modelo (NHTSA). Escribe para filtrar entre los años disponibles.
+                Depende de la marca y el modelo que elijas. Escribe para filtrar entre los años disponibles.
               </FormDescription>
               <FormControl>
                 <VehicleSearchCombobox

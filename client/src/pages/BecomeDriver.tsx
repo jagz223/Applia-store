@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
+import type { Control, FieldValues, UseFormSetValue } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, Redirect, useLocation } from "wouter";
@@ -36,7 +37,7 @@ import {
   BECOME_DRIVER_OFFER_KIND_DESCRIPTION,
   BECOME_DRIVER_VEHICLE_SECTION_LEAD,
   BECOME_DRIVER_VEHICLE_SECTION_TITLE,
-  BECOME_DRIVER_VEHICLE_NHTSA_ERROR,
+  BECOME_DRIVER_VEHICLE_CATALOG_ERROR,
   BECOME_DRIVER_SUBMIT_LABEL,
   BECOME_DRIVER_VEHICLE_ALREADY_TITLE,
   BECOME_DRIVER_VEHICLE_ALREADY_LEAD,
@@ -279,8 +280,8 @@ function BecomeDriverFormBody({
                 </FormItem>
 
                 <GoDriverVehicleFormGrid
-                  control={form.control}
-                  setValue={form.setValue}
+                  control={form.control as unknown as Control<FieldValues>}
+                  setValue={form.setValue as unknown as UseFormSetValue<FieldValues>}
                   vehicleType={vehicleType}
                   vehicleBrand={vehicleBrand}
                   vehicleModelWatch={vehicleModelWatch}
@@ -296,7 +297,7 @@ function BecomeDriverFormBody({
                   yearOptionsStrings={yearOptionsStrings}
                   sectionTitle={BECOME_DRIVER_VEHICLE_SECTION_TITLE}
                   sectionLead={BECOME_DRIVER_VEHICLE_SECTION_LEAD}
-                  nhtsaErrorMessage={BECOME_DRIVER_VEHICLE_NHTSA_ERROR}
+                  nhtsaErrorMessage={BECOME_DRIVER_VEHICLE_CATALOG_ERROR}
                 />
               </div>
             )}
