@@ -34,7 +34,16 @@ export const insertProviderVehicleSchema = z
     passenger_seats: z.number().int().min(1).max(60).optional().nullable(),
     /** ISO date string (YYYY-MM-DD) when mandatory insurance expires, if applicable. */
     insurance_expires_at: z.string().trim().max(32).optional().nullable(),
-    mileage_km: z.number().int().min(0).max(2_000_000).optional().nullable(),
+    /** Odometer; empty string from forms is treated as unset (null). */
+    mileage_km: z.preprocess(
+      (val) => {
+        if (val === "" || val === null || val === undefined) return null;
+        if (typeof val === "number") return Number.isFinite(val) ? val : null;
+        const n = Number(String(val).trim());
+        return Number.isFinite(n) ? n : null;
+      },
+      z.number().int().min(0).max(2_000_000).nullable().optional()
+    ),
     /** Optional notes (vehicle condition, accessories, etc.). */
     service_notes: z.string().trim().max(500).optional().nullable(),
   })

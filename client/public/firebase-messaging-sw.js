@@ -38,6 +38,7 @@ self.addEventListener("push", function (event) {
   const tagId =
     (data && (data.bookingId || data.messageId || data.transferId || data.conversationId)) || String(Date.now());
   const tag = `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
+  const isPanic = String((data && data.type) || "").toLowerCase() === "go_panic";
 
   event.waitUntil(
     self.registration
@@ -47,6 +48,13 @@ self.addEventListener("push", function (event) {
         tag: tag,
         renotify: true,
         data: { url: url },
+        ...(isPanic
+          ? {
+              requireInteraction: true,
+              vibrate: [300, 200, 300, 200, 300, 200, 500],
+              silent: false,
+            }
+          : {}),
       })
       .catch(function () {})
   );

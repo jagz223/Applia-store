@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
 import { io, Socket } from "socket.io-client";
 import { useQueryClient } from "@tanstack/react-query";
+import { navigate } from "wouter/use-browser-location";
 import { useAuth } from "./use-auth";
 import { hasFullAdminRole } from "@/lib/auth-utils";
 import { useToast } from "@/hooks/use-toast";
@@ -488,6 +489,46 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
               ? notification.message.trim()
               : "Hay una solicitud de cambio de datos o vehículo. Revisa Gestión de asociados.",
         });
+      }
+      const isGoPanic = notification?.type === "go_panic";
+      if (isGoPanic && hasFullAdminRole(userRef.current)) {
+        const panicId =
+          notification?.id != null ? String(notification.id) : `admin-${notification?.type ?? Date.now().toString()}`;
+        const d = (notification?.data ?? {}) as Record<string, unknown>;
+        const det = typeof d.details === "string" ? d.details.trim() : "";
+        const handle = toast({
+          title: "Botón de pánico (Genfeb Go)",
+          description: det.length > 0 ? det : "Un usuario activó el botón de pánico durante un viaje o envío. Toca para ver el detalle completo.",
+          variant: "destructive",
+          duration: 30_000,
+          className: "cursor-pointer",
+          onClick: (e) => {
+            const el = e.target as HTMLElement | null;
+            if (el?.closest?.("[toast-close]")) return;
+            setNotifications((prev) =>
+              prev.map((n) => (String(n.id) === panicId ? { ...n, read: true } : n))
+            );
+            const numId = Number(panicId);
+            if (Number.isFinite(numId)) {
+              const token = localStorage.getItem("token");
+              if (token) {
+                fetch(`/api/notifications/${numId}/read`, {
+                  method: "PATCH",
+                  headers: { Authorization: `Bearer ${token}` },
+                }).catch(() => {});
+              }
+            }
+            handle.dismiss();
+            navigate(`/notifications?detail=${encodeURIComponent(panicId)}`);
+          },
+        });
+        try {
+          if (typeof navigator !== "undefined" && "vibrate" in navigator && typeof navigator.vibrate === "function") {
+            navigator.vibrate([400, 200, 400, 200, 400]);
+          }
+        } catch {
+          /* ignore */
+        }
       }
     });
 

@@ -11,10 +11,12 @@ import {
 import { ServiceListItem } from "@/components/ServiceListItem";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, ArrowLeft, PackageOpen, Plus, Car, Bike, Package } from "lucide-react";
+import { Loader2, ArrowLeft, PackageOpen, Plus, Car, Bike, Package, Settings2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { SETTINGS_VEHICLE_SECTION_QUERY_KEY } from "@shared/settings-notification-urls";
 import { providerHasGoBrand } from "@shared/provider-go";
+import { computeMyServicesCardRows } from "@shared/my-services-display-policy";
 
 const VEHICLE_TYPE_LABEL: Record<string, string> = {
   motorcycle: "Moto",
@@ -58,24 +60,14 @@ export default function MyServices() {
   const goDelivery = providerHasGoBrand(provider as any, "delivery", categories);
   const driverEnrollmentComplete = !!vehicle && goTaxi && goDelivery;
 
-  const pExtra = provider as {
-    profession?: string | null;
-    bio?: string | null;
-    goDriverOfferTitle?: string | null;
-    goDriverOfferDescription?: string | null;
-  } | null;
-
-  const showDriverPreview =
-    !!vehicle ||
-    goTaxi ||
-    goDelivery ||
-    !!(pExtra?.goDriverOfferTitle && String(pExtra.goDriverOfferTitle).trim());
+  const showDriverPreview = !!vehicle || goTaxi || goDelivery;
 
   const showBecomeDriverCta = mobilityGoVisible && !!provider && !driverEnrollmentComplete;
 
-  const sortedServices = useMemo(() => {
-    return [...services].sort((a, b) => (a.title || "").localeCompare(b.title || "", "es"));
-  }, [services]);
+  const { rows: cardRows, allServicesWereGoCatalogOnly } = useMemo(
+    () => computeMyServicesCardRows({ services, showDriverPreview }),
+    [services, showDriverPreview],
+  );
 
   if (!authLoading && !isAuthenticated) {
     return <Redirect to="/login" />;
@@ -164,30 +156,6 @@ export default function MyServices() {
                   </span>
                 </div>
 
-                {pExtra?.profession ? (
-                  <p>
-                    <span className="text-muted-foreground">Profesión: </span>
-                    <span className="font-medium text-foreground">{pExtra.profession}</span>
-                  </p>
-                ) : null}
-
-                {pExtra?.goDriverOfferTitle ? (
-                  <div>
-                    <p className="text-muted-foreground text-xs uppercase tracking-wide">Oferta</p>
-                    <p className="font-medium text-foreground">{pExtra.goDriverOfferTitle}</p>
-                    {pExtra.goDriverOfferDescription ? (
-                      <p className="mt-1 line-clamp-4 text-muted-foreground">{pExtra.goDriverOfferDescription}</p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {pExtra?.bio ? (
-                  <p className="line-clamp-3 text-muted-foreground">
-                    <span className="font-medium text-foreground">Biografía: </span>
-                    {pExtra.bio}
-                  </p>
-                ) : null}
-
                 {vehicle ? (
                   <div className="rounded-lg border border-border/60 bg-background/60 p-3">
                     <p className="text-xs font-medium text-muted-foreground mb-2">Vehículo</p>
@@ -214,6 +182,14 @@ export default function MyServices() {
                 )}
 
                 <div className="flex flex-wrap gap-2 pt-1">
+                  {vehicle ? (
+                    <Button variant="outline" size="sm" className="gap-2" asChild>
+                      <Link href={`/settings?${SETTINGS_VEHICLE_SECTION_QUERY_KEY}=1`}>
+                        <Settings2 className="h-4 w-4" />
+                        Cambiar vehículo
+                      </Link>
+                    </Button>
+                  ) : null}
                   <Button variant="outline" size="sm" asChild>
                     <Link href="/go/taxi/driver">Panel taxi</Link>
                   </Button>
@@ -237,7 +213,7 @@ export default function MyServices() {
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
             <p className="text-muted-foreground">Cargando tus servicios…</p>
           </div>
-        ) : sortedServices.length === 0 ? (
+        ) : services.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -264,13 +240,26 @@ export default function MyServices() {
               ) : null}
             </div>
           </motion.div>
+        ) : allServicesWereGoCatalogOnly ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-dashed border-border/80 bg-muted/20 px-4 py-10 text-center"
+          >
+            <p className="mx-auto max-w-lg text-sm text-muted-foreground leading-relaxed">
+              Los servicios de <span className="font-medium text-foreground">taxi, envíos y marketplace</span> no se
+              listan aquí: los ves en la vista previa de conductor. Cuando agregues un{" "}
+              <span className="font-medium text-foreground">servicio de otra categoría</span> (por ejemplo mantenimiento
+              o técnicos), aparecerá en esta lista para editarlo o abrir la ficha pública.
+            </p>
+          </motion.div>
         ) : (
           <>
             <p className="mb-6 text-muted-foreground">
-              {sortedServices.length} servicio{sortedServices.length === 1 ? "" : "s"}
+              {cardRows.length} servicio{cardRows.length === 1 ? "" : "s"}
             </p>
             <div className="flex flex-col gap-4">
-              {sortedServices.map((service, index) => (
+              {cardRows.map((service, index) => (
                 <motion.div
                   key={service.id}
                   initial={{ opacity: 0, y: 12 }}

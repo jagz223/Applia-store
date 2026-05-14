@@ -37,6 +37,7 @@ import { TaxiVehicleSearchModal } from "@/components/taxi/TaxiVehicleSearchModal
 import { CamionetaVehicleIcon } from "@/components/taxi/CamionetaVehicleIcon";
 import type { TaxiPaymentMethod, TaxiVehicleKind, TaxiVehicleModalStep } from "@/components/taxi/TaxiVehicleSearchModal";
 import type { GeoJsonObject } from "geojson";
+import { GoPanicFloatingButton } from "@/components/go/GoPanicFloatingButton";
 import { useGoChat } from "@/contexts/GoChatContext";
 import { addHiddenConversationId } from "@/lib/hidden-conversations";
 import { purgeConversationCache } from "@/hooks/use-chat";
@@ -2557,7 +2558,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         <Button
           type="button"
           className={cn(
-            "fixed bottom-[calc(5.75rem+env(safe-area-inset-bottom,0px))] right-3 z-[200] h-12 w-12 rounded-full p-0",
+            /* Encima del botón Pánico (GoPanicFloatingButton): 4.75rem + h-14 (3.5rem) + hueco */
+            "fixed bottom-[calc(8.625rem+env(safe-area-inset-bottom,0px))] right-3 z-[200] h-12 w-12 rounded-full p-0 md:bottom-[calc(5.125rem)]",
             "bg-primary text-primary-foreground shadow-xl ring-2 ring-primary/35",
             "hover:bg-primary/90 active:scale-[0.97]"
           )}
@@ -2681,6 +2683,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           </div>
         </DialogContent>
       </Dialog>
+
+      <GoPanicFloatingButton
+        rideId={activeRideId}
+        goModule={isPackGoClient ? "delivery" : "taxi"}
+        visible={riderTripInProgress}
+        perspective="rider"
+        serviceLabel={isPackGoClient ? "envío" : "viaje"}
+        onOfferCancelAfterSuccess={openCancelServiceDialog}
+      />
     </div>
   );
 }

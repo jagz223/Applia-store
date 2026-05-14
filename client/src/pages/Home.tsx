@@ -319,7 +319,7 @@ export default function HomePage() {
     { value: "10,000+", label: "Usuarios Activos" },
     { value: "2,500+", label: "Asociados" },
     { value: "50,000+", label: "Servicios Realizados" },
-    { value: "4.9", label: "Calificación Promedio" },
+    { value: "5", label: "Calificación Promedio" },
   ];
 
   const containerVariants = {
@@ -524,7 +524,7 @@ export default function HomePage() {
                       <div className="rounded-xl bg-amber-100 p-2 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
                         <Star className="h-5 w-5 fill-current" aria-hidden />
                       </div>
-                      <span className="font-bold text-foreground">4.9/5 Estrellas</span>
+                      <span className="font-bold text-foreground">5/5 Estrellas</span>
                     </div>
                     <p className="text-sm text-muted-foreground">
                       Calificación promedio de nuestros profesionales.

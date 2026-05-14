@@ -49,6 +49,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { GoChatProvider, useGoChat } from "@/contexts/GoChatContext";
 import { GoDriverUiProvider } from "@/contexts/GoDriverUiContext";
+import { GoPanicFloatingButton } from "@/components/go/GoPanicFloatingButton";
 import { GoChatDrawer } from "@/components/go/GoChatDrawer";
 import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
 import { useSocket } from "@/hooks/use-socket";
@@ -1577,7 +1578,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               type="button"
               variant="ghost"
               className={cn(
-                "fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] right-3 z-[120] flex h-12 min-h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-white/95 p-0 shadow-none",
+                /* Encima del botón Pánico: mismo cálculo que TaxiRide (GoPanicFloatingButton + h-14 + gap) */
+                "fixed bottom-[calc(8.625rem+env(safe-area-inset-bottom,0px))] right-3 z-[200] flex h-12 min-h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-white/95 p-0 shadow-none md:bottom-[calc(5.125rem)]",
                 "bg-emerald-600 text-white shadow-[0_6px_20px_-2px_rgba(5,150,105,0.55),0_2px_8px_rgba(15,118,110,0.35)]",
                 "hover:bg-emerald-700 hover:text-white hover:shadow-lg",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
@@ -1898,6 +1900,15 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           </div>
         </DialogContent>
       </Dialog>
+
+      <GoPanicFloatingButton
+        rideId={activeRideId}
+        goModule={goSlug === "pack" ? "delivery" : "taxi"}
+        visible={activeRideStarted}
+        perspective="driver"
+        serviceLabel={goSlug === "pack" ? "envío" : "viaje"}
+        onOfferCancelAfterSuccess={() => setCancelServiceOpen(true)}
+      />
     </div>
   );
 }

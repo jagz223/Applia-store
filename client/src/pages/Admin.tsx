@@ -1110,6 +1110,37 @@ function AdminCategoriesTab() {
   );
 }
 
+/** Título en español para una fila del historial de auditoría admin (resumen / pestaña overview). */
+function adminAuditEventTitle(it: { action: string; meta?: unknown }): string {
+  const metaObj = it.meta && typeof it.meta === "object" ? (it.meta as Record<string, unknown>) : null;
+  const field = String(metaObj?.field ?? "").trim();
+
+  if (it.action === "account_change_request_approved" || it.action === "account_change_request_rejected") {
+    const verb = it.action === "account_change_request_approved" ? "aprobado" : "rechazado";
+    if (field === "vehicle") {
+      return `Cambio de datos de vehículo: ${verb}`;
+    }
+    const cuentaCampo =
+      field === "email"
+        ? "correo"
+        : field === "name"
+          ? "nombre"
+          : field === "phone"
+            ? "teléfono"
+            : "";
+    if (cuentaCampo) {
+      return `Cambio de datos de cuenta (${cuentaCampo}): ${verb}`;
+    }
+    return `Cambio de datos de cuenta: ${verb}`;
+  }
+
+  if (it.action === "subscription_payment_approved") return "Pago mensual aprobado";
+  if (it.action === "subscription_payment_rejected") return "Pago mensual rechazado";
+  if (it.action === "associate_onboarding_approved") return "Nuevo asociado aprobado";
+  if (it.action === "associate_onboarding_rejected") return "Nuevo asociado rechazado";
+  return it.action;
+}
+
 /** Resumen legible para admins de una propuesta `field: vehicle`. */
 function formatVehicleChangeProposalSummary(
   proposal: unknown,
@@ -1646,6 +1677,7 @@ export default function AdminPanel() {
       patchWithAuth(`/api/admin/account-change-requests/${args.id}`, { action: args.action, reason: args.reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-account-change-requests-pending"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-audit-log"] });
       toast({ title: "Actualizado", description: "La petición fue procesada correctamente." });
     },
     onError: (err: Error) => {
@@ -1667,6 +1699,7 @@ export default function AdminPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-verifying-status-pending"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-audit-log"] });
       toast({
         title: "Actualizado",
         description: "El estado de verificación se actualizó correctamente.",
@@ -2239,7 +2272,8 @@ export default function AdminPanel() {
                         <div className="min-w-0">
                           <p className="font-medium">Historial de auditoría</p>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Registro de acciones sensibles: fecha, admin, acción y usuario afectado.
+                            Registro de acciones sensibles (pagos, altas de asociados, cambios de datos de cuenta o de
+                            vehículo): fecha, admin, acción y usuario afectado.
                           </p>
                         </div>
                       </div>
@@ -2288,20 +2322,7 @@ export default function AdminPanel() {
                             const dateLabel = Number.isNaN(d.getTime())
                               ? "—"
                               : d.toLocaleString("es-EC", { dateStyle: "medium", timeStyle: "short" });
-                            const actionLabel =
-                              it.action === "subscription_payment_approved"
-                                ? "Pago mensual aprobado"
-                                : it.action === "subscription_payment_rejected"
-                                  ? "Pago mensual rechazado"
-                                  : it.action === "associate_onboarding_approved"
-                                    ? "Nuevo asociado aprobado"
-                                    : it.action === "associate_onboarding_rejected"
-                                      ? "Nuevo asociado rechazado"
-                                      : it.action === "account_change_request_approved"
-                                        ? "Cambio de datos aprobado"
-                                        : it.action === "account_change_request_rejected"
-                                          ? "Cambio de datos rechazado"
-                                          : it.action;
+                            const actionLabel = adminAuditEventTitle(it);
                             return (
                               <div key={it.id} className="rounded-lg border bg-background p-3 text-sm">
                                 <p className="font-medium">{actionLabel}</p>
@@ -2567,7 +2588,9 @@ export default function AdminPanel() {
               <Card className="min-w-0">
                 <CardHeader>
                   <CardTitle>Servicios (marcas)</CardTitle>
-                  <CardDescription>Activa o desactiva marcas como Man Go o Fix Go. Solo admin.</CardDescription>
+                  <CardDescription>
+                    Activa o desactiva qué marcas de servicios se muestran en la app. Solo administración.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {serviceBrandsLoading ? (

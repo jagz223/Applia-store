@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { insertProviderVehicleSchema, type VehicleType } from "@shared/vehicle-schema";
-import { getCategoryCanonicalName, isMobilityGoDriverVehicleCategorySlug, MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
+import { isMobilityGoDriverVehicleCategorySlug, MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
 import { useCategories, useCurrentProvider } from "@/hooks/use-mango-data";
 import { useNhtsaMakes, useNhtsaModelsForMake, useNhtsaYearsForMakeModel } from "@/hooks/use-nhtsa-vpic";
 import { VehicleSearchCombobox } from "@/components/vehicle/VehicleSearchCombobox";
@@ -21,7 +21,6 @@ import {
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -303,75 +302,12 @@ export function ProviderVehicleChangeRequestDialog({ open, onOpenChange, vehicle
         <DialogHeader>
           <DialogTitle>Solicitar cambio de vehículo</DialogTitle>
           <DialogDescription>
-            Igual que el cambio de datos de cuenta, esto requiere aprobación del equipo. Completa categoría (taxi,
-            delivery o marketplace), tipo de unidad y datos del vehículo; cuando se apruebe, se actualizará tu perfil.
+            La solicitud requiere aprobación del equipo. Ajusta el tipo de oferta (subcategoría) y los datos del
+            vehículo; cuando se apruebe, se actualizará tu perfil.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <FormField
-              control={form.control}
-              name="categoryId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Categoría principal (taxi / delivery / marketplace)</FormLabel>
-                  <Select
-                    onValueChange={(v) => field.onChange(Number(v))}
-                    value={field.value ? String(field.value) : ""}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {goCategories.map((c) => (
-                        <SelectItem key={c.id} value={String(c.id)}>
-                          {getCategoryCanonicalName(c)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {isTransport ? (
-              <FormField
-                control={form.control}
-                name="alsoOtherGo"
-                render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
-                    <div className="space-y-0.5">
-                      <FormLabel>También ofrecer {getCategoryCanonicalName({ slug: "delivery" })}</FormLabel>
-                      <FormDescription className="text-xs">Opcional: ambos módulos en una sola solicitud.</FormDescription>
-                    </div>
-                    <FormControl>
-                      <input type="checkbox" className="h-4 w-4" checked={field.value} onChange={(e) => field.onChange(e.target.checked)} />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            ) : null}
-            {isDelivery ? (
-              <FormField
-                control={form.control}
-                name="alsoOtherGo"
-                render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
-                    <div className="space-y-0.5">
-                      <FormLabel>También ofrecer {getCategoryCanonicalName({ slug: "transport" })}</FormLabel>
-                      <FormDescription className="text-xs">Opcional: taxi y delivery con el mismo perfil.</FormDescription>
-                    </div>
-                    <FormControl>
-                      <input type="checkbox" className="h-4 w-4" checked={field.value} onChange={(e) => field.onChange(e.target.checked)} />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            ) : null}
-
             {(isTransport || isDelivery || isMarketplace) && (
               <FormItem>
                 <FormLabel>Tipo de oferta (subcategoría)</FormLabel>

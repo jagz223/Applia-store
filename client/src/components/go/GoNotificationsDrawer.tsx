@@ -7,10 +7,14 @@ import { cn } from "@/lib/utils";
 import { useSocket } from "@/hooks/use-socket";
 import { useGoNotifications } from "@/contexts/GoNotificationsContext";
 
-function getNotificationHref(notification: { type: string; data?: any }): string | null {
+function getNotificationHref(notification: { id?: string; type: string; data?: any }): string | null {
   const data = notification.data ?? {};
   const url = data?.url ?? data?.data?.url;
   if (typeof url === "string" && url.trim()) return url.startsWith("/") ? url : `/${url}`;
+
+  if (notification.type === "admin" && data?.type === "go_panic" && notification.id) {
+    return `/notifications?detail=${encodeURIComponent(String(notification.id))}`;
+  }
 
   const subtype = data?.type ?? data?.data?.type;
   if (typeof subtype === "string" && subtype.startsWith("cargo_")) return "/go/taxi";
@@ -28,6 +32,7 @@ function getNotificationHref(notification: { type: string; data?: any }): string
 function getTitle(notification: { type: string; data?: any }): string {
   const data = notification.data ?? {};
   if (notification.type === "message") return "Nuevo mensaje";
+  if (notification.type === "admin" && data?.type === "go_panic") return "Pánico Genfeb Go";
   if (notification.type === "admin") return "Aviso del administrador";
   if (notification.type === "booking") return "Actualización de reserva";
   if (notification.type === "verification_result") return "Resultado de verificación";
@@ -39,6 +44,12 @@ function getTitle(notification: { type: string; data?: any }): string {
 
 function getDescription(notification: { type: string; data?: any }): string | null {
   const data = notification.data ?? {};
+  if (data?.type === "go_panic") {
+    const nested = data?.data ?? {};
+    const det = typeof data?.details === "string" ? data.details : typeof nested.details === "string" ? nested.details : "";
+    const t = det.trim();
+    return t.length > 0 ? (t.length > 120 ? `${t.slice(0, 120)}…` : t) : "Toca para ver el detalle completo.";
+  }
   const body = data?.body ?? data?.data?.body;
   if (typeof body === "string" && body.trim()) return body.trim();
   const msg = data?.message ?? data?.data?.message;

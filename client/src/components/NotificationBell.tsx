@@ -10,7 +10,7 @@ import { useConversations } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
 
 /** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificaci?n (con highlight para resaltar el elemento). */
-function getNotificationPath(notification: { type: string; data?: any }): string {
+function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
   const data = notification.data ?? {};
   switch (notification.type) {
     case "message":
@@ -90,6 +90,9 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       }
       if (data.type === "withdrawal_processed_by_other") {
         return "/admin?tab=payouts";
+      }
+      if (data.type === "go_panic" && notification.id) {
+        return `/notifications?detail=${encodeURIComponent(String(notification.id))}`;
       }
       // Notificaciones admin antiguas/genéricas: por defecto deben abrir el panel admin.
       return "/admin?tab=overview";
@@ -366,6 +369,12 @@ export function NotificationBell() {
     if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
       return data?.message ?? "El retiro fue procesado por otro administrador. Revisa Solicitudes de Retiro.";
     }
+    if (type === "admin" && data?.type === "go_panic") {
+      const nested = data?.data ?? {};
+      const det = typeof data?.details === "string" ? data.details : typeof nested.details === "string" ? nested.details : "";
+      const t = det.trim();
+      return t.length > 0 ? (t.length > 160 ? `${t.slice(0, 160)}…` : t) : "Alerta de pánico en Genfeb Go. Toca para ver el detalle completo.";
+    }
     if (type === "verification_result" || type === "verification_welcome") {
       return data?.message ?? (data as any)?.data?.message ?? "Tu estado de verificación ha sido actualizado.";
     }
@@ -400,6 +409,7 @@ export function NotificationBell() {
     if (type === "admin" && data?.type === "recharge_pending") return "Nueva solicitud de recarga";
     if (type === "admin" && data?.type === "withdrawal_requested") return "Nueva solicitud de retiro";
     if (type === "admin" && data?.type === "pending_account_change_request") return "Nueva petición de asociado";
+    if (type === "admin" && data?.type === "go_panic") return "Pánico Genfeb Go";
     if (type === "admin" && data?.type === "withdrawal_processed_by_other") {
       return data?.action === "rejected" ? "Retiro rechazado por otro admin" : "Retiro aprobado por otro admin";
     }

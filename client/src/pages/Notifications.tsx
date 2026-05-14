@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, Link } from "wouter";
+import { useLocation, Link, useSearch } from "wouter";
+import { navigate } from "wouter/use-browser-location";
 import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield, ShieldCheck, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocket } from "@/hooks/use-socket";
 import { useConversations } from "@/hooks/use-chat";
@@ -11,7 +19,7 @@ import { serviceBookingPaymentLabel } from "@shared/booking-payment";
 
 const PAGE_SIZE = 10;
 
-function getNotificationPath(notification: { type: string; data?: any }): string {
+function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
   const data = notification.data ?? {};
   switch (notification.type) {
     case "message":
@@ -90,6 +98,9 @@ function getNotificationPath(notification: { type: string; data?: any }): string
       if (data.type === "pending_account_change_request") {
         const u = data.url ?? data.data?.url;
         return typeof u === "string" && u.startsWith("/") ? u : "/admin?tab=overview";
+      }
+      if (data.type === "go_panic" && notification.id) {
+        return `/notifications?detail=${encodeURIComponent(String(notification.id))}`;
       }
       // Notificaciones admin antiguas/genéricas: por defecto deben abrir el panel admin.
       return "/admin?tab=overview";
@@ -220,6 +231,7 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
     if (d.type === "withdrawal_processed_by_other") {
       return d.action === "rejected" ? "Retiro rechazado por otro admin" : "Retiro aprobado por otro admin";
     }
+    if (d.type === "go_panic") return "Pánico Genfeb Go";
     return "Notificación del administrador";
   }
 
@@ -360,6 +372,12 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
       if (typeof d.data?.message === "string") return d.data.message;
       return "El retiro fue procesado por otro administrador. Revisa Solicitudes de Retiro.";
     }
+    if (d.type === "go_panic") {
+      const nested = d.data ?? {};
+      const det = typeof d.details === "string" ? d.details : typeof nested.details === "string" ? nested.details : "";
+      const t = det.trim();
+      return t.length > 0 ? (t.length > 200 ? `${t.slice(0, 200)}…` : t) : "Toca la fila para abrir el detalle completo de la alerta.";
+    }
   }
 
   if (type === "admin_verification_request") {
@@ -389,6 +407,62 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
   return null;
 }
 
+function GoPanicDetailView({ packet }: { packet: Record<string, unknown> | null | undefined }) {
+  const nested = (packet?.data as Record<string, unknown> | undefined) ?? {};
+  const details =
+    typeof nested.details === "string"
+      ? nested.details
+      : typeof packet?.details === "string"
+        ? (packet.details as string)
+        : "";
+  const rideId = nested.rideId ?? packet?.rideId;
+  const moduleLabel = nested.module ?? packet?.module;
+  const pressedBy = nested.pressedBy ?? packet?.pressedBy;
+  const rows: { label: string; value: string }[] = [];
+  if (rideId != null && String(rideId).trim()) rows.push({ label: "ID viaje", value: String(rideId) });
+  if (moduleLabel != null && String(moduleLabel).trim()) rows.push({ label: "Servicio", value: String(moduleLabel) });
+  if (pressedBy === "rider" || pressedBy === "driver") {
+    rows.push({ label: "Quién pulsó", value: pressedBy === "rider" ? "Cliente / pasajero" : "Conductor" });
+  }
+  const extra: [string, unknown][] = [
+    ["Cliente (nombre)", nested.riderName],
+    ["Cliente (tel.)", nested.riderPhone],
+    ["Cliente (correo)", nested.riderEmail],
+    ["Conductor (nombre)", nested.driverName],
+    ["Conductor (tel.)", nested.driverPhone],
+  ];
+  for (const [label, val] of extra) {
+    if (typeof val === "string" && val.trim()) rows.push({ label, value: val.trim() });
+  }
+  return (
+    <div className="space-y-4">
+      {rows.length > 0 ? (
+        <dl className="grid gap-2 text-sm">
+          {rows.map((r) => (
+            <div
+              key={r.label}
+              className="grid grid-cols-[minmax(0,8.5rem)_1fr] gap-2 border-b border-border/60 pb-2 last:border-0"
+            >
+              <dt className="text-muted-foreground">{r.label}</dt>
+              <dd className="min-w-0 break-words font-medium text-foreground">{r.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {details.trim() ? (
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Detalle completo</p>
+          <pre className="max-h-[min(52vh,420px)] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-4 text-sm leading-relaxed text-foreground">
+            {details}
+          </pre>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">No hay texto de detalle en esta alerta.</p>
+      )}
+    </div>
+  );
+}
+
 export default function Notifications() {
   const { isAuthenticated } = useAuth();
   const { notifications, markNotificationAsRead, clearNotifications } = useSocket();
@@ -412,6 +486,21 @@ export default function Notifications() {
 
   const [page, setPage] = useState(1);
   const [unreadOnly, setUnreadOnly] = useState(false);
+
+  const search = useSearch();
+  const detailId = useMemo(() => {
+    const raw = (search ?? "").replace(/^\?/, "");
+    return new URLSearchParams(raw).get("detail");
+  }, [search]);
+
+  const detailNotification = useMemo(
+    () => (detailId ? notifications.find((n) => String(n.id) === detailId) : undefined),
+    [detailId, notifications]
+  );
+
+  const closeDetailModal = () => {
+    navigate("/notifications", { replace: true });
+  };
 
   const filtered = useMemo(() => (unreadOnly ? notifications.filter((n) => !n.read) : notifications), [notifications, unreadOnly]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -558,6 +647,30 @@ export default function Notifications() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={detailId != null} onOpenChange={(open) => { if (!open) closeDetailModal(); }}>
+        <DialogContent className="max-w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {detailNotification?.data?.type === "go_panic" ? "Pánico Genfeb Go" : "Detalle de la notificación"}
+            </DialogTitle>
+            <DialogDescription className="sr-only">Contenido íntegro de la alerta seleccionada.</DialogDescription>
+          </DialogHeader>
+          {detailNotification ? (
+            detailNotification.data?.type === "go_panic" ? (
+              <GoPanicDetailView packet={detailNotification.data as Record<string, unknown>} />
+            ) : (
+              <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed">
+                {JSON.stringify(detailNotification.data, null, 2)}
+              </pre>
+            )
+          ) : detailId ? (
+            <p className="text-sm text-muted-foreground">
+              No encontramos esta notificación en la sesión actual. Puede que la lista se haya renovado; revisa de nuevo la campana o espera una nueva alerta.
+            </p>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

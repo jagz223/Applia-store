@@ -49,6 +49,16 @@ const GO_VEHICLE_TYPE_LABELS: Record<string, string> = {
   truck: "Camión",
 };
 
+function isMeaningfulProviderVehicleRow(row: Record<string, unknown> | null | undefined): boolean {
+  if (!row) return false;
+  return Boolean(
+    (row.license_plate && String(row.license_plate).trim()) ||
+      (row.brand && String(row.brand).trim()) ||
+      (row.model && String(row.model).trim()) ||
+      (row.vehicle_type && String(row.vehicle_type).trim())
+  );
+}
+
 const profileSchema = z.object({
   email: z.string().email("Correo inválido").optional().or(z.literal("")),
   name: z.string().min(2, "Mínimo 2 caracteres").max(100).optional().or(z.literal("")),
@@ -105,12 +115,6 @@ export default function Settings() {
   const isProfessional = (user as { role?: string } | null)?.role === "professional";
   const { data: provider, isLoading: providerLoading, isError: providerError } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
-  const showGoVehicleCard =
-    isProfessional &&
-    !providerLoading &&
-    !providerError &&
-    provider != null &&
-    isGoVehicleProvider(provider, categories);
 
   const { data: providerVehicleRow, isLoading: providerVehicleLoading } = useQuery({
     queryKey: ["/api/me/provider-vehicle"],
@@ -123,8 +127,16 @@ export default function Settings() {
       if (!res.ok) return null;
       return res.json() as Promise<Record<string, unknown> | null>;
     },
-    enabled: isAuthenticated && showGoVehicleCard,
+    enabled: isAuthenticated && isProfessional && provider != null && !providerLoading && !providerError,
   });
+
+  const showGoVehicleCard =
+    isProfessional &&
+    !providerLoading &&
+    !providerError &&
+    provider != null &&
+    (isGoVehicleProvider(provider, categories) ||
+      (!providerVehicleLoading && isMeaningfulProviderVehicleRow(providerVehicleRow as Record<string, unknown>)));
 
   const openVehicleSectionFromNotification = useMemo(() => {
     try {
