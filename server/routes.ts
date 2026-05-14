@@ -31,7 +31,7 @@ import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
-import { MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
+import { MOBILITY_GO_PROVIDER_SLUGS, filterCategoriesExcludedFromPublicApi } from "@shared/default-categories";
 import { categorySlugFromProvider, getSubscriptionFeesByCategorySlug, subscriptionMonthlyUsdForCategorySlug } from "./subscription-fees";
 import {
   validateAssignableServiceCategory,
@@ -438,7 +438,7 @@ export async function registerRoutes(
   // Catálogo público: registrar ANTES de GenFeb para que /api/provider-categories/availability y /api/services coincidan
   app.get(api.categories.list.path, async (_req, res) => {
     const categories = await catalogService.getCategoriesForPublicCatalog();
-    res.json(categories);
+    res.json(filterCategoriesExcludedFromPublicApi(categories));
   });
   app.get("/api/subcategories", async (req, res) => {
     const categoryId = req.query.categoryId != null ? Number(req.query.categoryId) : undefined;
