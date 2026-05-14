@@ -24,6 +24,19 @@ export function effectiveHiddenCategorySlugs(apiHidden: string[] | undefined | n
 /** Car / Shop / Pack Go tienen vistas propias (Go); no deben mezclarse en el catálogo general de Explorar. */
 export const MOBILITY_GO_PROVIDER_SLUGS = ["transport", "marketplace", "delivery"] as const;
 
+/**
+ * Slugs que no se devuelven en `GET /api/categories` (lista pública: home, explorar, categorías, registro asociado).
+ * Así se evita duplicar “CarGo” (taxi + delivery) aunque existan ambos documentos en Firestore o el admin muestre delivery.
+ */
+export const CATEGORY_SLUGS_EXCLUDED_FROM_PUBLIC_API = ["delivery"] as const;
+
+export function filterCategoriesExcludedFromPublicApi<T extends { slug?: string | null }>(
+  categories: readonly T[]
+): T[] {
+  const excluded = new Set(CATEGORY_SLUGS_EXCLUDED_FROM_PUBLIC_API.map((s) => s.toLowerCase()));
+  return categories.filter((c) => !excluded.has(String(c.slug ?? "").trim().toLowerCase()));
+}
+
 export const CATEGORY_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   technical: "Servicios Técnicos",
   professional: "Servicios Profesionales",
