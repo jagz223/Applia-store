@@ -18,7 +18,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useCategories, useCategoryVisibility, useCurrentProvider, useSubcategories } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
-import { providerHasGoBrand } from "@shared/provider-go";
 import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
 import { cn } from "@/lib/utils";
 import { hasAdminRole } from "@/lib/auth-utils";
@@ -40,7 +39,6 @@ import {
   ChevronRight,
   Car,
   Store,
-  Package,
   X,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -51,9 +49,9 @@ import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 
 type HomeServiceCategory = {
   name: string;
-  slug: "technical" | "professional" | "maintenance" | "transport" | "marketplace" | "delivery";
+  slug: "technical" | "professional" | "maintenance" | "transport" | "marketplace";
   icon: LucideIcon;
-  countKey: "fixGo" | "proGo" | "manGo" | "carGo" | "shopGo" | "packGo";
+  countKey: "fixGo" | "proGo" | "manGo" | "carGo" | "shopGo";
   color: string;
   href: string;
 };
@@ -93,7 +91,6 @@ export default function HomePage() {
   const mobilityAllowed = {
     transport: !hiddenSlugs.has("transport"),
     marketplace: !hiddenSlugs.has("marketplace"),
-    delivery: !hiddenSlugs.has("delivery"),
   };
 
   // Flat list: all subcategories + mobility cards (same size)
@@ -112,7 +109,7 @@ export default function HomePage() {
           key: `sub-${(sub as any).id}`,
           name: (sub as any).name,
           icon: def?.icon ?? "HelpCircle",
-          parentName: (cat as any).name,
+          parentName: getCategoryDisplayName(cat as any),
           href: `/explore?providerCategoryId=${(cat as any).id}&subcategoryId=${(sub as any).id}`,
         });
       }
@@ -121,13 +118,9 @@ export default function HomePage() {
       const cat = categories.find((c: any) => c.slug === "transport");
       items.push({ key: "transport", name: (cat as any)?.name ?? "Servicios de transporte", icon: "Car", parentName: "Conductores disponibles", href: "/go/taxi" });
     }
-    if (mobilityAllowed.delivery) {
-      const cat = categories.find((c: any) => c.slug === "delivery");
-      items.push({ key: "delivery", name: (cat as any)?.name ?? "Delivery", icon: "Package", parentName: "Conductores disponibles", href: "/go/delivery" });
-    }
     return items;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [technicalSubs, professionalSubs, maintenanceSubs, categories, mobilityAllowed.transport, mobilityAllowed.delivery]);
+  }, [technicalSubs, professionalSubs, maintenanceSubs, categories, mobilityAllowed.transport]);
 
   const homePopularSubcategoriesLimit = 12;
   const { data: monthlyPopularSubcategories } = useQuery({
@@ -152,7 +145,7 @@ export default function HomePage() {
     return m;
   }, [monthlyPopularSubcategories]);
 
-  /** Tarjetas de subcategoría primero por reservas del mes; luego taxi/delivery y el resto. */
+  /** Tarjetas de subcategoría primero por reservas del mes; luego taxi y el resto. */
   const displayHomeServiceItems = useMemo(() => {
     const subs = allHomeServiceItems.filter((i) => i.key.startsWith("sub-"));
     const other = allHomeServiceItems.filter((i) => !i.key.startsWith("sub-"));
@@ -185,11 +178,10 @@ export default function HomePage() {
     }
   }, [monthlyPopularSubcategories?.monthKey]);
 
-  const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace || mobilityAllowed.delivery;
+  const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace;
   const isCarGoDriver = useMemo(() => !!(providerProfile && isCarGoProvider(providerProfile, categories)), [providerProfile, categories]);
   const [goQuickOpen, setGoQuickOpen] = useState(false);
   const [associateIntroOpen, setAssociateIntroOpen] = useState(false);
-  const [goDriverPickOpen, setGoDriverPickOpen] = useState(false);
 
   const heroAssociateKind = useMemo(() => {
     if (isAuthenticated && providerProfileLoading) return "loading" as const;
@@ -198,16 +190,13 @@ export default function HomePage() {
 
     const hasProvider = !!providerProfile;
     const isCargoBrand = hasProvider && isCarGoProvider(providerProfile, categories);
-    const isPackBrand = hasProvider && providerHasGoBrand(providerProfile, "delivery", categories);
 
     if (!hasProvider) return "intro_become" as const;
 
-    if (isCargoBrand && isPackBrand) return "go_both" as const;
     if (isCargoBrand) return "go_cargo" as const;
-    if (isPackBrand) return "go_pack" as const;
 
     return "professional_panel" as const;
-  }, [isAuthenticated, providerProfileLoading, providerProfile, categories]);
+  }, [isAuthenticated, providerProfileLoading, providerProfile, categories, user]);
 
   const becomeHref = showBecomePro ? "/become-pro" : "/register";
   const { data: homeCounts, isLoading: homeCountsLoading, isError: homeCountsError } = useQuery({
@@ -322,19 +311,9 @@ export default function HomePage() {
         href: "/go/shop",
       });
     }
-    if (mobilityAllowed.delivery) {
-      all.push({
-        name: getCategoryDisplayName({ slug: "delivery" }),
-        slug: "delivery",
-        icon: Package,
-        countKey: "packGo",
-        color: "text-primary",
-        href: "/go/delivery",
-      });
-    }
 
     return all;
-  }, [categories, mobilityAllowed.delivery, mobilityAllowed.marketplace, mobilityAllowed.transport]);
+  }, [categories, mobilityAllowed.marketplace, mobilityAllowed.transport]);
 
   const stats = [
     { value: "10,000+", label: "Usuarios Activos" },
@@ -478,27 +457,7 @@ export default function HomePage() {
                       Ir a vista Taxi
                     </Button>
                   </Link>
-                ) : heroAssociateKind === "go_pack" ? (
-                  <Link href="/go/delivery/driver" className="w-full sm:w-auto">
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
-                    >
-                      Ir a vista Delivery
-                    </Button>
-                  </Link>
-                ) : (
-                  <Button
-                    type="button"
-                    size="lg"
-                    variant="outline"
-                    className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
-                    onClick={() => setGoDriverPickOpen(true)}
-                  >
-                    Ir a Taxi / Delivery
-                  </Button>
-                )}
+                ) : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-6 pt-4 font-marketing text-sm text-muted-foreground">
@@ -668,17 +627,19 @@ export default function HomePage() {
                       <div className="p-2.5 rounded-xl bg-primary/10 text-primary group-hover:scale-110 transition-transform">
                         <CategoryIcon name={item.icon} className="w-5 h-5 sm:w-6 sm:h-6" />
                       </div>
-                      <div>
+                      <div className="min-w-0 w-full">
                         <p className="text-xs sm:text-sm font-semibold leading-tight">{item.name}</p>
-                        <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
-                          {item.parentName}
-                          {monthlyBookingCount != null && monthlyBookingCount > 0 ? (
-                            <span className="block text-secondary tabular-nums font-medium">
-                              {monthlyBookingCount} reserva{monthlyBookingCount === 1 ? "" : "s"} confirmada
-                              {monthlyBookingCount === 1 ? "" : "s"} o completada{monthlyBookingCount === 1 ? "" : "s"} este mes
-                            </span>
-                          ) : null}
-                        </p>
+                        {item.parentName ? (
+                          <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+                            {item.parentName}
+                          </p>
+                        ) : null}
+                        {monthlyBookingCount != null && monthlyBookingCount > 0 ? (
+                          <p className="text-[10px] sm:text-xs text-secondary tabular-nums font-medium mt-0.5 leading-snug">
+                            {monthlyBookingCount} reserva{monthlyBookingCount === 1 ? "" : "s"} confirmada
+                            {monthlyBookingCount === 1 ? "" : "s"} o completada{monthlyBookingCount === 1 ? "" : "s"} este mes
+                          </p>
+                        ) : null}
                       </div>
                     </CardContent>
                   </Card>
@@ -857,51 +818,6 @@ export default function HomePage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={goDriverPickOpen} onOpenChange={setGoDriverPickOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Vista conductores Go</DialogTitle>
-            <DialogDescription>
-              Tienes Taxi y Delivery en tu perfil. Elige el panel de conductor al que quieres entrar.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 pt-1">
-            {mobilityAllowed.transport ? (
-              <Button
-                type="button"
-                className="w-full justify-start gap-2"
-                onClick={() => {
-                  setGoDriverPickOpen(false);
-                  setLocation("/go/taxi/driver");
-                }}
-              >
-                <Car className="h-4 w-4 shrink-0" aria-hidden />
-                Taxi (conducir)
-              </Button>
-            ) : null}
-            {mobilityAllowed.delivery ? (
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full justify-start gap-2"
-                onClick={() => {
-                  setGoDriverPickOpen(false);
-                  setLocation("/go/delivery/driver");
-                }}
-              >
-                <Package className="h-4 w-4 shrink-0" aria-hidden />
-                Delivery (conductor)
-              </Button>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setGoDriverPickOpen(false)}>
-              Cerrar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Botón flotante hacia módulos Go: solo conductores con categoría Car Go. */}
       {isCarGoDriver && anyMobilityAllowed && typeof document !== "undefined"
         ? createPortal(
@@ -921,7 +837,7 @@ export default function HomePage() {
                         </Button>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Taxi (conducir), Pedidos y Delivery.
+                        Taxi (conducir) y pedidos en tienda cuando estén activos.
                       </p>
                       <div className="mt-3 grid gap-2">
                         {mobilityAllowed.transport ? (
@@ -946,18 +862,6 @@ export default function HomePage() {
                           }}
                         >
                           <Store className="h-4 w-4" /> Pedidos
-                        </Button>
-                        ) : null}
-                        {mobilityAllowed.delivery ? (
-                        <Button
-                          className="w-full justify-start gap-2 rounded-xl"
-                          variant="secondary"
-                          onClick={() => {
-                            setGoQuickOpen(false);
-                            setLocation("/go/delivery/driver");
-                          }}
-                        >
-                          <Package className="h-4 w-4" /> Delivery
                         </Button>
                         ) : null}
                       </div>

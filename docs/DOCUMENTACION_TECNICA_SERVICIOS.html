@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GenFeb — Documentación técnica de servicios y stack</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --border: #2d3a4d;
+      --text: #e8eef5;
+      --muted: #9aa8bc;
+      --accent: #3d9cf0;
+      --ok: #34c759;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      font-size: 15px;
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 2rem 1.5rem;
+      background: linear-gradient(180deg, #152028 0%, var(--bg) 100%);
+    }
+    header h1 { margin: 0 0 0.5rem; font-size: 1.65rem; font-weight: 700; }
+    header p { margin: 0; color: var(--muted); max-width: 56rem; }
+    main { max-width: 56rem; margin: 0 auto; padding: 1.5rem; }
+    section {
+      margin-bottom: 2.25rem;
+      padding: 1.25rem 1.5rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    h2 {
+      margin: 0 0 1rem;
+      font-size: 1.2rem;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+    h3 { margin: 1.25rem 0 0.5rem; font-size: 1.05rem; color: #c5d4e8; }
+    ul { margin: 0.35rem 0 0.75rem; padding-left: 1.25rem; }
+    li { margin: 0.35rem 0; }
+    .muted { color: var(--muted); font-size: 0.92rem; }
+    .note {
+      margin-top: 0.75rem;
+      padding: 0.75rem 1rem;
+      border-left: 4px solid var(--ok);
+      background: rgba(52, 199, 89, 0.08);
+      border-radius: 0 8px 8px 0;
+      font-size: 0.95rem;
+    }
+    pre.tree {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      color: #c9d1d9;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      margin-top: 0.5rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.65rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #243044; color: #dbe7f5; }
+    code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.88em; color: #7ec8ff; }
+    footer {
+      text-align: center;
+      padding: 2rem 1rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+      border-top: 1px solid var(--border);
+    }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>GenFeb — Documentación técnica (stack, APIs y arquitectura)</h1>
+    <p>
+      Documento orientado a equipos técnicos: lenguajes en front y back, frameworks y su relación con el lenguaje,
+      APIs externas integradas y visión de arquitectura del monorepositorio.
+    </p>
+  </header>
+
+  <main>
+    <section id="resumen">
+      <h2>Resumen ejecutivo</h2>
+      <p>
+        <strong>GenFeb</strong> es una plataforma web de servicios y reservas. El núcleo de la aplicación está escrito en
+        <strong>TypeScript</strong>: un cliente <strong>React</strong> empaquetado con <strong>Vite</strong> y un servidor
+        <strong>Node.js</strong> con <strong>Express</strong>. La base de datos documentada para este stack es
+        <strong>Firebase</strong> en modo <strong>NoSQL</strong> (<strong>Cloud Firestore</strong>), junto con Auth y
+        notificaciones (FCM) según configuración. Complementamos con mapas y rutas vía APIs públicas y de terceros.
+      </p>
+      <p class="muted">
+        Este HTML vive en <code>docs/DOCUMENTACION_TECNICA_SERVICIOS.html</code> y complementa al <code>README.md</code> raíz.
+      </p>
+    </section>
+
+    <section id="lenguajes">
+      <h2>Lenguajes utilizados</h2>
+
+      <h3>Front-end (web)</h3>
+      <p class="muted">
+        El front-end corre en el navegador como una SPA hecha con <strong>React</strong>. El código fuente se escribe principalmente en
+        <strong>TypeScript</strong> (TSX/JSX) y en desarrollo se sirve con <strong>Vite</strong> (dev server con HMR); en producción Vite
+        genera el bundle optimizado en <strong>JavaScript/CSS</strong> que se entrega como archivos estáticos.
+      </p>
+      <ul>
+        <li><strong>TypeScript</strong> — lenguaje principal del código de la app (tipado estático sobre JavaScript).</li>
+        <li><strong>JavaScript</strong> — resultado de compilación y ecosistema Node/npm; parte del tooling y dependencias.</li>
+        <li><strong>JSX / TSX</strong> — sintaxis de componentes React en archivos <code>.tsx</code> (TypeScript + XML-like).</li>
+        <li><strong>HTML</strong> — plantilla de entrada (<code>client/index.html</code>) y fragmentos en documentación.</li>
+        <li><strong>CSS</strong> — estilos en cascada; en el proyecto predominan utilidades que compilan a CSS.</li>
+        <li><strong>React</strong> — biblioteca de UI con la que se construyen pantallas y componentes (código en TS/JS + JSX/TSX).</li>
+        <li><strong>Vite</strong> — herramienta de desarrollo y empaquetado del front-end (config y plugins en TypeScript/JavaScript).</li>
+        <li><strong>Tailwind CSS</strong> — framework de estilos utility-first; se escribe como clases en TSX y genera CSS.</li>
+      </ul>
+
+      <h3>Back-end y scripts (servidor)</h3>
+      <p class="muted">
+        El back-end corre sobre <strong>Node.js</strong>. El código fuente se escribe principalmente en <strong>TypeScript</strong>
+        y se ejecuta en desarrollo con <strong>tsx</strong>; en producción el arranque usa el bundle <strong>JavaScript</strong>
+        (<code>dist/index.cjs</code>) generado al compilar.
+      </p>
+      <ul>
+        <li><strong>Node.js</strong> — motor de ejecución (runtime) del servidor: APIs HTTP, WebSockets, acceso a archivos y red. Versión recomendada según <code>README.md</code> del repo (p. ej. 18+).</li>
+        <li><strong>TypeScript</strong> — lenguaje en el que está escrito casi todo el código del servidor: rutas REST (<code>server/</code>), integraciones, sockets, servicios y scripts de mantenimiento (<code>script/</code>).</li>
+        <li><strong>JavaScript (ECMAScript)</strong> — lenguaje que Node ejecuta tras la compilación del servidor; también usado por dependencias npm y por el archivo de salida de producción.</li>
+        <li><strong>JSON</strong> — formato habitual de cuerpos y respuestas en las APIs REST (<code>application/json</code>).</li>
+        <li><strong>Express</strong> — framework HTTP sobre Node (no es un lenguaje aparte: la app se escribe en TypeScript/JavaScript usando su API).</li>
+        <li><strong>Socket.IO</strong> — capa de tiempo real sobre Node (mismo ecosistema TS/JS que el resto del servidor).</li>
+      </ul>
+
+      <h3>Base de datos y datos</h3>
+      <ul>
+        <li>
+          <strong>Firebase (NoSQL)</strong> — almacenamiento principal en <strong>Cloud Firestore</strong> (documentos y
+          colecciones, sin modelo relacional SQL en esta capa). El cliente usa el SDK <code>firebase</code>; el servidor puede
+          usar <code>firebase-admin</code> y/o <code>@google-cloud/firestore</code> según el módulo.
+        </li>
+      </ul>
+
+      <h3>Compartido</h3>
+      <ul>
+        <li><strong>TypeScript</strong> — tipos, flags y utilidades en <code>shared/</code> consumidas por cliente y servidor.</li>
+      </ul>
+
+      <h3>Android (TWA / capa nativa ligera)</h3>
+      <ul>
+        <li><strong>Java</strong> — proyecto Gradle bajo <code>app/src/main/java/...</code> (Trusted Web Activity u orientación similar).</li>
+        <li><strong>Groovy / Kotlin DSL</strong> — scripts de build Gradle (<code>build.gradle</code>, <code>settings.gradle</code>).</li>
+      </ul>
+
+      <h3>Documentación y otros</h3>
+      <ul>
+        <li><strong>Markdown</strong> — <code>README.md</code>, comparativas, notas en repo.</li>
+        <li><strong>HTML</strong> — este documento y otros en <code>docs/</code> o <code>client/public/</code>.</li>
+      </ul>
+    </section>
+
+    <section id="frameworks">
+      <h2>Frameworks, librerías y herramientas (y su lenguaje)</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Qué es</th>
+            <th>Lenguaje / ecosistema</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>React</strong></td>
+            <td>Biblioteca de interfaz de usuario (componentes, estado, virtual DOM).</td>
+            <td>Se usa con <strong>TypeScript</strong> (archivos <code>.tsx</code>). El lenguaje de implementación es TypeScript/JavaScript.</td>
+          </tr>
+          <tr>
+            <td><strong>Vite</strong></td>
+            <td>
+              Herramienta de <em>build</em> (empaquetado) y servidor de desarrollo (HMR). Orquesta el proyecto front-end;
+              con <code>@vitejs/plugin-react</code> compila JSX/TSX de React.
+            </td>
+            <td>
+              Vite está implementado en <strong>TypeScript/JavaScript</strong> y se usa para desarrollar y construir el
+              <strong>front-end</strong>. <strong>No es un “framework de React”</strong>: React es la biblioteca de UI;
+              Vite es el motor de empaquetado y dev server del lado del tooling.
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Express</strong></td>
+            <td>Framework HTTP minimalista para APIs y middleware.</td>
+            <td><strong>JavaScript / TypeScript</strong> sobre Node.js (<code>server/</code>).</td>
+          </tr>
+          <tr>
+            <td><strong>Firebase SDK / Admin</strong></td>
+            <td>Cliente y servidor para Auth, Firestore (NoSQL), Cloud Messaging, etc.</td>
+            <td><strong>TypeScript/JavaScript</strong> (APIs del SDK de Google/Firebase).</td>
+          </tr>
+          <tr>
+            <td><strong>Socket.IO</strong></td>
+            <td>Comunicación en tiempo real (WebSocket con fallback).</td>
+            <td>Cliente y servidor en <strong>TypeScript/JavaScript</strong>.</td>
+          </tr>
+          <tr>
+            <td><strong>Wouter</strong></td>
+            <td>Enrutador ligero para React.</td>
+            <td><strong>TypeScript/JavaScript</strong>.</td>
+          </tr>
+          <tr>
+            <td><strong>TanStack Query</strong></td>
+            <td>Caché y fetching de datos en el cliente.</td>
+            <td><strong>TypeScript/JavaScript</strong>.</td>
+          </tr>
+          <tr>
+            <td><strong>shadcn/ui + Radix</strong></td>
+            <td>Componentes accesibles y sistema de diseño.</td>
+            <td><strong>TypeScript/React</strong>.</td>
+          </tr>
+          <tr>
+            <td><strong>Tailwind CSS</strong></td>
+            <td>Framework CSS utility-first.</td>
+            <td>Configuración y clases en <strong>CSS/HTML</strong> vía plantillas TSX.</td>
+          </tr>
+          <tr>
+            <td><strong>Leaflet + react-leaflet</strong></td>
+            <td>Mapas interactivos en el cliente.</td>
+            <td><strong>JavaScript/TypeScript</strong>.</td>
+          </tr>
+          <tr>
+            <td><strong>Zod</strong></td>
+            <td>Validación de esquemas (API y formularios).</td>
+            <td><strong>TypeScript/JavaScript</strong>.</td>
+          </tr>
+          <tr>
+            <td><strong>Passport</strong> / <strong>openid-client</strong></td>
+            <td>Autenticación (local, OAuth/OIDC según configuración).</td>
+            <td><strong>JavaScript/TypeScript</strong> en Node.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <strong>Nota sobre Vite y React:</strong> en documentación informal a veces se dice “stack Vite + React”.
+        Lo correcto es: <strong>React</strong> es la biblioteca de interfaz (lenguaje: TypeScript/JS con JSX);
+        <strong>Vite</strong> es la herramienta que compila y sirve ese código en desarrollo y producción (lenguaje del proyecto Vite: TS/JS).
+      </div>
+    </section>
+
+    <section id="apis">
+      <h2>APIs y servicios externos (integraciones)</h2>
+      <p class="muted">Lista basada en dependencias y rutas del repositorio; algunas requieren variables de entorno o están detrás de nuestro propio API.</p>
+
+      <h3>Mapas, geocodificación y rutas</h3>
+      <ul>
+        <li><strong>Google Maps Platform</strong> — Geocoding, Places, Distance Matrix, etc. (<code>client/src/lib/google-maps.ts</code>).</li>
+        <li><strong>OpenStreetMap Nominatim</strong> — geocodificación / búsqueda de lugares (<code>server/routes-maps.ts</code>).</li>
+        <li><strong>OSRM / instancias de routing OSM</strong> — cálculo de rutas (p. ej. <code>routing.openstreetmap.de</code>, <code>router.project-osrm.org</code>).</li>
+        <li><strong>OpenRouteService</strong> — direcciones alternativas si hay API key configurada (<code>api.openrouteservice.org</code>).</li>
+      </ul>
+
+      <h3>Identidad, datos en la nube y notificaciones</h3>
+      <ul>
+        <li><strong>Firebase</strong> — cliente (<code>firebase</code>) y admin (<code>firebase-admin</code>): Auth, Firestore, Cloud Messaging (push), según configuración.</li>
+        <li><strong>Google Cloud Firestore</strong> — SDK <code>@google-cloud/firestore</code> donde aplique.</li>
+      </ul>
+
+      <h3>Vehículos y datos públicos</h3>
+      <ul>
+        <li><strong>NHTSA vPIC API</strong> — marcas/modelos de vehículos (EE. UU., sin API key) — <code>client/src/lib/nhtsa-vpic.ts</code>.</li>
+      </ul>
+
+      <h3>Autenticación / plataforma</h3>
+      <ul>
+        <li><strong>Replit OIDC</strong> — integración opcional (<code>server/replit_integrations/auth/replitAuth.ts</code>, issuer Replit).</li>
+      </ul>
+
+      <h3>Contenido remoto</h3>
+      <ul>
+        <li><strong>Unsplash u otras URLs HTTPS</strong> — imágenes de ejemplo en seeds/catálogo (<code>server/storage-genfeb.ts</code>, etc.).</li>
+      </ul>
+    </section>
+
+    <section id="arquitectura">
+      <h2>Arquitectura y estructura del proyecto</h2>
+
+      <h3>Patrón general</h3>
+      <ul>
+        <li><strong>Monorepositorio</strong> con tres capas lógicas: <code>client/</code> (SPA React), <code>server/</code> (API + estáticos en prod), <code>shared/</code> (código común).</li>
+        <li><strong>API REST</strong> bajo prefijos como <code>/api/...</code> definidos en Express (<code>server/routes.ts</code> y módulos registrados).</li>
+        <li><strong>Tiempo real</strong> con Socket.IO para eventos de viajes, presencia de conductores, etc.</li>
+        <li><strong>Capa de datos</strong>: <strong>Firebase Firestore (NoSQL)</strong> como almacenamiento documental; Auth y FCM según necesidad.</li>
+        <li><strong>Autenticación</strong>: sesiones y/o JWT según flujos; integraciones con Firebase Auth donde corresponda.</li>
+      </ul>
+
+      <h3>Diagrama lógico (texto)</h3>
+      <pre class="tree">
+┌─────────────────────────────────────────────────────────────────┐
+│  Navegador (React + Vite build)                                  │
+│  TanStack Query, Wouter, shadcn/ui, Tailwind, Leaflet, Socket.IO-client │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ HTTPS / WS
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Node.js — Express                                               │
+│  Rutas API, middleware, Socket.IO server, PDF (pdfkit/pdfmake) │
+└──────┬──────────────────┬──────────────────┬───────────────────┘
+       │                  │                  │
+       ▼                  ▼                  ▼
+  Cloud Firestore    Firebase Admin     APIs externas
+  (datos NoSQL)      (Auth, FCM, …)     (Maps, OSRM/Nominatim, vPIC, …)
+      </pre>
+
+      <h3>Árbol de carpetas (resumido)</h3>
+      <pre class="tree">
+genfeb/
+├── client/                 # Front-end React + Vite + Tailwind
+│   ├── index.html
+│   ├── public/             # Estáticos (PWA, offline, etc.)
+│   └── src/
+│       ├── components/     # UI reutilizable
+│       ├── pages/          # Pantallas / rutas Wouter
+│       ├── hooks/          # Hooks React y datos
+│       └── lib/            # Utilidades cliente
+├── server/                 # Back-end Express + TypeScript
+│   ├── index.ts            # Entrada del servidor
+│   ├── routes*.ts          # API modularizada
+│   ├── services/           # Lógica de dominio
+│   ├── db / storage*       # Persistencia y adaptadores
+│   └── …
+├── shared/                 # TypeScript compartido (tipos, flags, utilidades)
+├── script/                 # Scripts TS (build, seeds, migraciones auxiliares)
+├── app/                    # Android (Java + Gradle) — TWA / envoltorio
+├── docs/                   # HTML y documentación adicional
+├── vite.config.ts          # Configuración Vite (front-end)
+└── package.json            # Dependencias y scripts npm
+      </pre>
+    </section>
+
+    <section id="scripts">
+      <h2>Scripts npm relevantes</h2>
+      <ul>
+        <li><code>npm run dev</code> — servidor en desarrollo (<code>tsx server/index.ts</code>).</li>
+        <li><code>npm run build</code> — construye cliente (Vite) y servidor.</li>
+        <li><code>npm run start</code> — arranque en producción (<code>node dist/index.cjs</code>).</li>
+        <li><code>npm run check</code> — verificación TypeScript (<code>tsc</code>).</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    GenFeb — documento generado como referencia técnica. Última revisión de stack según <code>package.json</code> y estructura del repo.
+  </footer>
+</body>
+</html>

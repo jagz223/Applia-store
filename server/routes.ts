@@ -7,6 +7,7 @@ import { insertProviderSchema, insertServiceSchema, professionalBioFieldSchema }
 import { providerSkillsSchema } from "@shared/skills-schema";
 import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
 import { isCarGoProvider } from "@shared/provider-car-go";
+import { providerHasGoBrand } from "@shared/provider-go";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
@@ -32,6 +33,11 @@ import { notificationService } from "./services/notification.service";
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
 import { MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
 import { categorySlugFromProvider, getSubscriptionFeesByCategorySlug, subscriptionMonthlyUsdForCategorySlug } from "./subscription-fees";
+import {
+  validateAssignableServiceCategory,
+  providerHasServiceInCategory,
+  validateSubcategoryBelongsToCategory,
+} from "./service-category-validation";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -66,6 +72,95 @@ export async function registerRoutes(
       res.json(v ?? null);
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  const enrollGoDriverBodySchema = z.object({
+    profession: z.string().trim().min(2).max(200),
+    bio: professionalBioFieldSchema,
+    serviceTitle: z.string().trim().min(2).max(500),
+    serviceDescription: z.string().trim().min(50).max(5000),
+    vehicle: z.any().optional(),
+  });
+
+  /** Habilita módulos taxi + delivery (Go) y datos de conductor para un proveedor ya existente. */
+  app.post("/api/me/go-driver", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) {
+        return res.status(403).json({ message: "Primero debes tener perfil de asociado." });
+      }
+      const body = enrollGoDriverBodySchema.parse(req.body);
+      const pid = (provider as { id: number }).id;
+      const categories = await catalogService.getCategories();
+      const existingV = await genFebStorage.getPrimaryVehicleByProviderId(pid);
+
+      if (!existingV) {
+        if (body.vehicle == null) {
+          return res.status(400).json({ message: "Debes registrar los datos del vehículo para conducir." });
+        }
+        const parsedVehicle = insertProviderVehicleSchema.safeParse(body.vehicle);
+        if (!parsedVehicle.success) {
+          return res.status(400).json({
+            message: "Datos de vehículo inválidos o incompletos.",
+            issues: parsedVehicle.error.flatten(),
+          });
+        }
+        await genFebStorage.createProviderVehicle({
+          providerId: pid,
+          userId,
+          vehicle: parsedVehicle.data,
+        });
+      }
+
+      const ALLOWED = new Set(["transport", "delivery", "marketplace"]);
+      const rawBrands = (provider as { goBrands?: unknown }).goBrands;
+      const current = Array.isArray(rawBrands)
+        ? rawBrands.map((s: unknown) => String(s).trim().toLowerCase()).filter(Boolean)
+        : [];
+      const extra: string[] = [];
+      const cid = (provider as { categoryId?: number | null }).categoryId;
+      if (cid != null && !Number.isNaN(Number(cid))) {
+        const row = categories.find((c) => Number(c.id) === Number(cid));
+        const sl = String((row as { slug?: string } | undefined)?.slug ?? "")
+          .trim()
+          .toLowerCase();
+        if (sl && ALLOWED.has(sl)) extra.push(sl);
+      }
+      const direct = String((provider as { category?: string | null }).category ?? "")
+        .trim()
+        .toLowerCase();
+      if (direct && ALLOWED.has(direct)) extra.push(direct);
+      const merged = Array.from(new Set([...current, ...extra, "transport", "delivery"])).filter((b) =>
+        ALLOWED.has(b)
+      );
+
+      await catalogService.updateProvider(pid, {
+        goBrands: merged,
+        profession: body.profession,
+        bio: body.bio,
+        goDriverOfferTitle: body.serviceTitle,
+        goDriverOfferDescription: body.serviceDescription,
+      });
+
+      const hasTransport = providerHasGoBrand({ ...provider, goBrands: merged }, "transport", categories);
+      const hasDelivery = providerHasGoBrand({ ...provider, goBrands: merged }, "delivery", categories);
+      const vAfter = existingV ?? (await genFebStorage.getPrimaryVehicleByProviderId(pid));
+
+      return res.json({
+        ok: true,
+        goBrands: merged,
+        hasPrimaryVehicle: !!vAfter,
+        hasTransport,
+        hasDelivery,
+      });
+    } catch (e: any) {
+      if (e?.name === "ZodError") {
+        return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      }
+      return res.status(500).json({ message: e?.message ?? "Error" });
     }
   });
 
@@ -475,18 +570,38 @@ export async function registerRoutes(
       if (!provider) return res.status(403).json({ message: "Solo proveedores pueden crear servicios" });
       const allServices = await catalogService.getAllServices();
       const existingForProvider = allServices.filter((s: { providerId: number }) => s.providerId === provider.id);
-      if (existingForProvider.length >= 1) {
-        return res.status(400).json({ message: "Solo puedes tener un servicio. Edítalo desde Mis servicios." });
-      }
       const data = createServiceBodySchema.parse(req.body);
-      const resolvedCategoryId = data.categoryId ?? (provider as { categoryId?: number }).categoryId;
-      if (resolvedCategoryId == null || Number.isNaN(Number(resolvedCategoryId)) || Number(resolvedCategoryId) < 1) {
-        return res.status(400).json({ message: "categoryId es requerido (categoría del perfil de proveedor)" });
+      const categories = await catalogService.getCategories();
+      const resolvedCategoryId = Number(
+        data.categoryId ?? (provider as { categoryId?: number }).categoryId ?? 0
+      );
+      if (!Number.isFinite(resolvedCategoryId) || resolvedCategoryId < 1) {
+        return res.status(400).json({ message: "Selecciona una categoría válida para el servicio." });
       }
+      const chosenCategory = categories.find((c) => c.id === resolvedCategoryId);
+      const catCheck = validateAssignableServiceCategory(chosenCategory);
+      if (!catCheck.ok) return res.status(400).json({ message: catCheck.message });
+      if (
+        providerHasServiceInCategory(
+          existingForProvider.map((s: { id: number; categoryId: number }) => ({ id: s.id, categoryId: s.categoryId })),
+          resolvedCategoryId
+        )
+      ) {
+        return res.status(400).json({
+          message: "Ya tienes un servicio en esa categoría. Elige otra categoría o edita el servicio existente.",
+        });
+      }
+      const subCheck = await validateSubcategoryBelongsToCategory(
+        catalogService,
+        data.subcategoryId,
+        resolvedCategoryId
+      );
+      if (!subCheck.ok) return res.status(400).json({ message: subCheck.message });
+
       const service = await catalogService.createService({
         ...data,
         providerId: provider.id,
-        categoryId: Number(resolvedCategoryId),
+        categoryId: resolvedCategoryId,
         title: data.title,
         description: data.description ?? "",
         price: data.price ?? "0",
@@ -514,8 +629,57 @@ export async function registerRoutes(
       const isOwner = provider && service.providerId === provider.id;
       if (!isOwner && !isAdmin) return res.status(403).json({ message: "Solo el dueño del servicio o un admin puede editarlo" });
       const data = updateServiceBodySchema.parse(req.body);
-      
-      const updatePayload = { ...data, lastEditedAt: new Date() };
+
+      const prevCategoryId = Number((service as { categoryId: number }).categoryId);
+      const categoryIsChanging =
+        data.categoryId !== undefined && Number(data.categoryId) !== prevCategoryId;
+      const nextCategoryId =
+        data.categoryId !== undefined ? Number(data.categoryId) : prevCategoryId;
+
+      let nextSubcategoryId: number | null | undefined;
+      if (data.subcategoryId !== undefined) {
+        nextSubcategoryId = data.subcategoryId;
+      } else if (categoryIsChanging) {
+        nextSubcategoryId = null;
+      } else {
+        nextSubcategoryId = (service as { subcategoryId?: number | null }).subcategoryId ?? null;
+      }
+
+      if (data.categoryId !== undefined) {
+        const categories = await catalogService.getCategories();
+        const chosen = categories.find((c) => c.id === nextCategoryId);
+        const catCheck = validateAssignableServiceCategory(chosen);
+        if (!catCheck.ok) return res.status(400).json({ message: catCheck.message });
+        const allServices = await catalogService.getAllServices();
+        const mine = allServices.filter((s: { providerId: number }) => s.providerId === service.providerId);
+        if (
+          providerHasServiceInCategory(
+            mine.map((s: { id: number; categoryId: number }) => ({ id: s.id, categoryId: s.categoryId })),
+            nextCategoryId,
+            id
+          )
+        ) {
+          return res.status(400).json({
+            message: "Ya tienes otro servicio en esa categoría.",
+          });
+        }
+      }
+
+      const subCheck = await validateSubcategoryBelongsToCategory(
+        catalogService,
+        nextSubcategoryId,
+        nextCategoryId
+      );
+      if (!subCheck.ok) return res.status(400).json({ message: subCheck.message });
+
+      const updatePayload = {
+        ...data,
+        ...(data.categoryId !== undefined ? { categoryId: nextCategoryId } : {}),
+        ...(data.subcategoryId !== undefined || categoryIsChanging
+          ? { subcategoryId: nextSubcategoryId ?? null }
+          : {}),
+        lastEditedAt: new Date(),
+      };
       const updated = await catalogService.updateService(id, updatePayload as any);
       if (!updated) return res.status(404).json({ message: "Service not found" });
       return res.json(updated);
@@ -617,6 +781,7 @@ export async function registerRoutes(
     preparationLevel: z.string().trim().max(8000).optional(),
     coursesCompleted: z.string().trim().max(8000).optional(),
     certifications: z.string().trim().max(8000).optional(),
+    goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).optional(),
   });
 
   app.post(api.providers.create.path, authenticateJWT, async (req: any, res) => {

@@ -3,7 +3,7 @@ import { useRoute, Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useService, useUpdateService, useCurrentProvider, useUpdateProvider } from "@/hooks/use-mango-data";
+import { useService, useUpdateService, useCurrentProvider, useUpdateProvider, useCategories, useMyServices, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, ArrowLeft, Sparkles } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, ArrowLeft, Sparkles, Tag } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,10 +37,14 @@ import {
   resolveCertificationsText,
   resolvePreparationLevel,
 } from "@shared/provider-preparation";
+import { getCategoryDisplayName, effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 
-function buildEditServiceSchema(isTrade: boolean) {
+function buildEditServiceSchema(categories: { id: number; slug?: string }[]) {
   return z
     .object({
+      categoryId: z.number().int().positive(),
+      subcategoryId: z.number().int().positive().optional().nullable(),
       title: z.string().min(1, "El nombre es obligatorio").max(500),
       description: z.string().max(5000).optional(),
       price: z.string().min(1, "El precio es obligatorio"),
@@ -50,7 +55,8 @@ function buildEditServiceSchema(isTrade: boolean) {
       certifications: z.string().optional(),
     })
     .superRefine((vals, ctx) => {
-      if (!isTrade) return;
+      const slug = String(categories.find((c) => c.id === vals.categoryId)?.slug ?? "");
+      if (!isTradeListingCategorySlug(slug)) return;
       const p = (vals.preparationLevel ?? "").trim();
       if (p.length < 10) {
         ctx.addIssue({
@@ -79,18 +85,37 @@ export default function EditService() {
 
   const isBlocked = false;
 
-  const categorySlug = useMemo(
-    () => String((service?.category as { slug?: string } | undefined)?.slug ?? ""),
-    [service?.category]
+  const { data: categories = [] } = useCategories();
+  const { data: myServices = [] } = useMyServices({ enabled: !!service && !!user });
+  const { data: visibility } = useCategoryVisibility();
+  const hiddenSlugs = useMemo(
+    () => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)),
+    [visibility]
   );
-  const isTrade = isTradeListingCategorySlug(categorySlug);
-  const isProfessional = isProfessionalListingCategorySlug(categorySlug);
 
-  const editServiceSchema = useMemo(() => buildEditServiceSchema(isTrade), [isTrade]);
+  const assignableCategories = useMemo(() => {
+    return categories.filter((c) => {
+      const slug = String((c as { slug?: string }).slug ?? "");
+      return isCatalogAssignableServiceCategorySlug(slug) && !hiddenSlugs.has(slug);
+    });
+  }, [categories, hiddenSlugs]);
+
+  const selectableCategoriesForService = useMemo(() => {
+    if (!service) return [];
+    if (isAdmin) return assignableCategories;
+    const usedOthers = new Set(
+      myServices.filter((s) => s.id !== service.id).map((s) => Number((s as { categoryId: number }).categoryId))
+    );
+    return assignableCategories.filter((c) => Number(c.id) === Number(service.categoryId) || !usedOthers.has(Number(c.id)));
+  }, [assignableCategories, myServices, service, isAdmin]);
+
+  const editServiceSchema = useMemo(() => buildEditServiceSchema(categories), [categories]);
 
   const form = useForm<EditServiceForm>({
     resolver: zodResolver(editServiceSchema),
     defaultValues: {
+      categoryId: 0,
+      subcategoryId: null,
       title: "",
       description: "",
       price: "0",
@@ -102,6 +127,19 @@ export default function EditService() {
     },
   });
 
+  const watchedCategoryId = form.watch("categoryId");
+  const activeCategorySlug = useMemo(() => {
+    const cid = watchedCategoryId || (service as { categoryId?: number } | undefined)?.categoryId;
+    const c = categories.find((x) => Number(x.id) === Number(cid));
+    return String((c as { slug?: string } | undefined)?.slug ?? "");
+  }, [watchedCategoryId, service, categories]);
+  const isTrade = isTradeListingCategorySlug(activeCategorySlug);
+  const isProfessional = isProfessionalListingCategorySlug(activeCategorySlug);
+
+  const { data: subcategories = [] } = useSubcategories(
+    watchedCategoryId && watchedCategoryId > 0 ? watchedCategoryId : undefined
+  );
+
   useEffect(() => {
     if (!service) return;
     const p = service.provider as {
@@ -112,6 +150,8 @@ export default function EditService() {
       certifications?: string | null;
     } | undefined;
     form.reset({
+      categoryId: Number((service as { categoryId: number }).categoryId),
+      subcategoryId: (service as { subcategoryId?: number | null }).subcategoryId ?? null,
       title: service.title ?? "",
       description: service.description ?? "",
       price: String(service.price ?? "0"),
@@ -129,19 +169,22 @@ export default function EditService() {
     const vals = form.getValues();
     const providerId = service?.provider && "id" in service.provider ? (service.provider as { id: number }).id : undefined;
     if (providerId == null) return;
+    const slug = String(categories.find((c) => c.id === vals.categoryId)?.slug ?? "");
+    const trade = isTradeListingCategorySlug(slug);
+    const professionalListing = isProfessionalListingCategorySlug(slug);
     try {
       await updateProvider.mutateAsync({
         providerId,
         data: {
           bio: vals.professionalBio.trim(),
           skills: vals.skills,
-          ...(isTrade
+          ...(trade
             ? {
                 preparationLevel: (vals.preparationLevel ?? "").trim(),
                 certifications: (vals.certifications ?? "").trim(),
               }
             : {}),
-          ...(!isTrade && isProfessional ? { certifications: (vals.certifications ?? "").trim() } : {}),
+          ...(!trade && professionalListing ? { certifications: (vals.certifications ?? "").trim() } : {}),
         },
       });
       await updateService.mutateAsync({
@@ -149,6 +192,8 @@ export default function EditService() {
         description: vals.description ?? "",
         price: vals.price,
         imageUrl: vals.imageUrl || undefined,
+        categoryId: vals.categoryId,
+        subcategoryId: vals.subcategoryId ?? null,
       });
       setLocation(`/service/${id}`);
     } catch {
@@ -260,6 +305,75 @@ export default function EditService() {
                   </FormItem>
                 )}
               />
+
+              <FormField
+                control={form.control}
+                name="categoryId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      <Tag className="h-4 w-4 shrink-0" aria-hidden />
+                      Categoría del servicio
+                    </FormLabel>
+                    <Select
+                      onValueChange={(v) => {
+                        field.onChange(Number(v));
+                        form.setValue("subcategoryId", null);
+                      }}
+                      value={String(field.value)}
+                      disabled={selectableCategoriesForService.length <= 1}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Categoría" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {selectableCategoriesForService.map((cat) => (
+                          <SelectItem key={String(cat.id)} value={String(cat.id)}>
+                            {getCategoryDisplayName(cat as any)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Puedes mover el servicio a otra categoría de catálogo si no tienes ya otro servicio en esa categoría.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {subcategories.length > 0 ? (
+                <FormField
+                  control={form.control}
+                  name="subcategoryId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Subcategoría (opcional)</FormLabel>
+                      <Select
+                        onValueChange={(v) => field.onChange(v === "none" || !v ? null : Number(v))}
+                        value={field.value != null ? String(field.value) : "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Subcategoría" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">Ninguna</SelectItem>
+                          {subcategories.map((sub) => (
+                            <SelectItem key={String(sub.id)} value={String(sub.id)}>
+                              {sub.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : null}
 
               <FormField
                 control={form.control}

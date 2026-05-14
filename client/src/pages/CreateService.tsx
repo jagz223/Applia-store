@@ -1,8 +1,15 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertServiceSchema } from "@shared/schema";
-import { type InsertService } from "@shared/schema";
-import { useCreateService, useCurrentProvider, useCategories, useSubcategories } from "@/hooks/use-mango-data";
+import { z } from "zod";
+import {
+  useCreateService,
+  useCurrentProvider,
+  useCategories,
+  useSubcategories,
+  useMyServices,
+  useCategoryVisibility,
+} from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -11,13 +18,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Tag } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useMemo } from "react";
-import { getCategoryDisplayName } from "@shared/default-categories";
+import { getCategoryDisplayName, effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 import {
   SERVICE_DESCRIPTION_INLINE_HINT,
   ServiceDescriptionInfoButton,
 } from "@/components/ServiceDescriptionHints";
+
+const createServiceFormSchema = insertServiceSchema.extend({
+  subcategoryId: z.number().int().positive().optional().nullable(),
+});
+
+type CreateServiceFormValues = z.infer<typeof createServiceFormSchema>;
 
 export default function CreateService() {
   const { user, isLoading: authLoading } = useAuth();
@@ -25,11 +39,20 @@ export default function CreateService() {
   /** Proveedor: primero del usuario (auth/me); si no, de la API dedicada (por si auth/me no trajo provider en caché). */
   const provider = user?.provider ?? providerFromApi ?? null;
   const { data: categories } = useCategories();
+  const { data: visibility } = useCategoryVisibility();
+  const hiddenSlugs = useMemo(
+    () => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)),
+    [visibility]
+  );
+  const shouldFetchMyServices =
+    !!user &&
+    (!!provider || !!(user as { provider?: unknown }).provider || (user as { role?: string }).role === "professional");
+  const { data: myServices = [] } = useMyServices({ enabled: shouldFetchMyServices && !authLoading });
   const createService = useCreateService();
   const [, setLocation] = useLocation();
 
-  const form = useForm<InsertService & { subcategoryId?: number | null }>({
-    resolver: zodResolver(insertServiceSchema),
+  const form = useForm<CreateServiceFormValues>({
+    resolver: zodResolver(createServiceFormSchema),
     defaultValues: {
       providerId: 0,
       categoryId: 0,
@@ -38,7 +61,7 @@ export default function CreateService() {
       description: "",
       price: "0",
       imageUrl: "",
-      isActive: true
+      isActive: true,
     },
   });
 
@@ -54,20 +77,58 @@ export default function CreateService() {
     return null;
   }, [categories, providerCategoryId, providerCategorySlug]);
 
-  const resolvedCategoryId = providerCategory?.id ?? providerCategoryId;
-  const { data: subcategories = [] } = useSubcategories(resolvedCategoryId ?? undefined);
+  const resolvedProviderCategoryId = providerCategory?.id ?? providerCategoryId;
+
+  const assignableCategories = useMemo(() => {
+    return (categories ?? []).filter((c) => {
+      const slug = String((c as { slug?: string }).slug ?? "");
+      return isCatalogAssignableServiceCategorySlug(slug) && !hiddenSlugs.has(slug);
+    });
+  }, [categories, hiddenSlugs]);
+
+  const usedCategoryIds = useMemo(
+    () => new Set(myServices.map((s) => Number((s as { categoryId: number }).categoryId)).filter((n) => !Number.isNaN(n))),
+    [myServices]
+  );
+
+  const availableCategories = useMemo(() => {
+    return assignableCategories.filter((c) => !usedCategoryIds.has(Number(c.id)));
+  }, [assignableCategories, usedCategoryIds]);
+
+  const defaultCategoryId = useMemo(() => {
+    if (availableCategories.length === 0) return null;
+    const prefer = resolvedProviderCategoryId != null ? Number(resolvedProviderCategoryId) : NaN;
+    const match = availableCategories.find((c) => Number(c.id) === prefer);
+    return match ? Number(match.id) : Number(availableCategories[0].id);
+  }, [availableCategories, resolvedProviderCategoryId]);
+
+  const categoryIdValue = form.watch("categoryId");
+  const { data: subcategories = [] } = useSubcategories(
+    categoryIdValue != null && categoryIdValue > 0 ? categoryIdValue : undefined
+  );
 
   useEffect(() => {
     if (provider) {
       form.setValue("providerId", provider.id);
-      if (resolvedCategoryId != null && !Number.isNaN(Number(resolvedCategoryId))) {
-        form.setValue("categoryId", Number(resolvedCategoryId));
-      }
     }
-  }, [provider, resolvedCategoryId, form]);
+  }, [provider, form]);
+
+  useEffect(() => {
+    if (defaultCategoryId != null && !Number.isNaN(defaultCategoryId)) {
+      form.setValue("categoryId", defaultCategoryId);
+    }
+  }, [defaultCategoryId, form]);
+
+  useEffect(() => {
+    form.setValue("subcategoryId", undefined);
+  }, [categoryIdValue, form]);
 
   if (authLoading || (user?.role === "professional" && !user?.provider && providerApiLoading)) {
-    return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin" /></div>;
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="animate-spin" />
+      </div>
+    );
   }
 
   if (!user) {
@@ -97,13 +158,33 @@ export default function CreateService() {
     );
   }
 
-  function onSubmit(data: InsertService & { subcategoryId?: number | null }) {
-    // No mostramos foto del servicio en la UI; guardamos vacío para no depender de assets.
+  function onSubmit(data: CreateServiceFormValues) {
     data.imageUrl = "";
     const payload = { ...data, subcategoryId: data.subcategoryId ?? undefined };
     createService.mutate(payload, {
-      onSuccess: () => setLocation("/dashboard"),
+      onSuccess: () => setLocation("/my-services"),
     });
+  }
+
+  if (availableCategories.length === 0) {
+    return (
+      <div className="container max-w-2xl py-12 px-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>No puedes crear más servicios de catálogo</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-muted-foreground">
+            <p>
+              Ya tienes un servicio publicado en cada categoría disponible (técnicos, profesionales y mantenimiento), o
+              no hay categorías activas en la plataforma.
+            </p>
+            <Button variant="outline" asChild>
+              <Link href="/my-services">Volver a Mis servicios</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -115,7 +196,6 @@ export default function CreateService() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              
               <FormField
                 control={form.control}
                 name="title"
@@ -133,23 +213,41 @@ export default function CreateService() {
               <FormField
                 control={form.control}
                 name="categoryId"
-                render={() => (
+                render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Categoría</FormLabel>
-                    <FormControl>
-                      <div className="flex h-10 w-full items-center gap-2 rounded-md border border-input bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                        <Tag className="h-4 w-4 shrink-0" />
-                        <span>
-                          {providerCategory ? getCategoryDisplayName(providerCategory) : "Categoría de tu perfil de proveedor"}
-                        </span>
-                      </div>
-                    </FormControl>
+                    <FormLabel>Categoría del servicio</FormLabel>
+                    <Select
+                      onValueChange={(v) => field.onChange(Number(v))}
+                      value={String(field.value)}
+                      disabled={availableCategories.length <= 1}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona categoría" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {availableCategories.map((cat) => (
+                          <SelectItem key={String(cat.id)} value={String(cat.id)}>
+                            {getCategoryDisplayName(cat as any)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Solo se muestran categorías de catálogo que aún no usas en otro servicio propio. Tu perfil de
+                      asociado sigue en{" "}
+                      <span className="font-medium text-foreground">
+                        {providerCategory ? getCategoryDisplayName(providerCategory) : "tu categoría de registro"}
+                      </span>
+                      ; este servicio puede publicarse en otra categoría si está libre.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
-              {subcategories.length > 0 && (
+              {subcategories.length > 0 ? (
                 <FormField
                   control={form.control}
                   name="subcategoryId"
@@ -178,7 +276,7 @@ export default function CreateService() {
                     </FormItem>
                   )}
                 />
-              )}
+              ) : null}
 
               <FormField
                 control={form.control}
@@ -203,11 +301,6 @@ export default function CreateService() {
                   </FormItem>
                 )}
               />
-
-              {/*
-                Deshabilitado: no se configura foto del servicio.
-                La foto que se muestra es únicamente la del asociado en el círculo.
-              */}
 
               <Button type="submit" className="w-full" disabled={createService.isPending}>
                 {createService.isPending ? "Creando..." : "Crear servicio"}
