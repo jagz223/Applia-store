@@ -542,7 +542,7 @@ export async function registerRoutes(
   // Catálogo público: registrar ANTES de GenFeb para que /api/provider-categories/availability y /api/services coincidan
   app.get(api.categories.list.path, async (_req, res) => {
     const categories = await catalogService.getCategoriesForPublicCatalog();
-    res.json(categories);
+    res.json(filterCategoriesExcludedFromPublicApi(categories));
   });
   app.get("/api/subcategories", async (req, res) => {
     const categoryId = req.query.categoryId != null ? Number(req.query.categoryId) : undefined;
