@@ -5,10 +5,26 @@
 
 import type { ICatalogStorage, ProviderUpdate, ServiceUpdate } from "../storage-contracts";
 import type { IStorage } from "../storage-genfeb";
+import type { Category, InsertProvider, InsertService } from "@shared/schema";
 import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
-import type { InsertProvider, InsertService } from "@shared/schema";
 import { excludeLegacySubcategoryCategoryDocuments } from "@shared/catalog-category-utils";
 import { computeListingPublished } from "@shared/professional-listing-subscription";
+import { DEFAULT_CATEGORIES, filterCategoriesExcludedFromPublicApi } from "@shared/default-categories";
+
+const CANONICAL_CATEGORY_SLUGS = new Set(
+  DEFAULT_CATEGORIES.map((c) => String(c.slug ?? "").trim().toLowerCase()).filter(Boolean),
+);
+
+function canonicalCategoriesFallback(): Category[] {
+  return DEFAULT_CATEGORIES.map((c, i) => ({
+    id: i + 1,
+    name: c.name,
+    slug: c.slug,
+    type: c.type,
+    icon: c.icon,
+    imageUrl: c.imageUrl ?? null,
+  })) as Category[];
+}
 
 export class CatalogService {
   constructor(private readonly storage: IStorage) {}
@@ -17,10 +33,15 @@ export class CatalogService {
     return this.storage.getCategories();
   }
 
-  /** Lista para UI pública: sin documentos legacy que duplican slugs de subcategorías (legal, financial, etc.). */
-  async getCategoriesForPublicCatalog() {
-    const all = await this.storage.getCategories();
-    return excludeLegacySubcategoryCategoryDocuments(all);
+  /** Lista para UI pública: sin documentos legacy; sin `delivery` en API pública; fallback si no hay slugs canónicos (dev / datos viejos). */
+  async getCategoriesForPublicCatalog(): Promise<Category[]> {
+    const all = excludeLegacySubcategoryCategoryDocuments(await this.storage.getCategories());
+    const filtered = filterCategoriesExcludedFromPublicApi(all);
+    const hasCanonical = filtered.some((c) =>
+      CANONICAL_CATEGORY_SLUGS.has(String((c as { slug?: string | null }).slug ?? "").trim().toLowerCase()),
+    );
+    if (hasCanonical) return filtered;
+    return filterCategoriesExcludedFromPublicApi(canonicalCategoriesFallback());
   }
 
   async updateCategory(id: number, data: import("@shared/schema").Category) {

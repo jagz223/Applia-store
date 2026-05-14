@@ -32,7 +32,7 @@ import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
 import { ensureGoPanicAllowed, markGoPanicSent, notifyGoPanicAdmins } from "./mobility-panic-notify";
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
-import { MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
+import { filterCategoriesExcludedFromPublicApi, MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
 import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
 import { categorySlugFromProvider, getSubscriptionFeesByCategorySlug, subscriptionMonthlyUsdForCategorySlug } from "./subscription-fees";
 import {
