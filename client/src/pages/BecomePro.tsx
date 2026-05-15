@@ -33,7 +33,15 @@ import {
   ServiceDescriptionInfoButton,
 } from "@/components/ServiceDescriptionHints";
 import { CertificationsVisibilityHint } from "@/components/service/CertificationsVisibilityHint";
-import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs, getCategoryCanonicalName } from "@shared/default-categories";
+import {
+  DEFAULT_CATEGORIES,
+  effectiveHiddenCategorySlugs,
+  getCategoryDisplayName,
+  isRetiredProviderCategorySlug,
+  MAN_GO_CATEGORY_SLUG,
+  normalizeProviderCategorySlug,
+} from "@shared/default-categories";
+import { isTradeListingCategorySlug } from "@shared/provider-preparation";
 import {
   GO_DRIVER_OFFER_KIND_LABELS,
   goOfferKindToVehicleType,
@@ -118,8 +126,7 @@ function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
       const slug = categories.find((c) => c.id === data.categoryId)?.slug;
       if (slug === "transport" || slug === "delivery" || slug === "marketplace") return;
 
-      const needsSub =
-        slug === "technical" || slug === "maintenance" || slug === "professional";
+      const needsSub = slug === MAN_GO_CATEGORY_SLUG || slug === "professional";
       if (needsSub && (data.subcategoryId == null || Number(data.subcategoryId) <= 0)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -128,7 +135,7 @@ function buildBecomeProSchema(categories: { id: number; slug?: string }[]) {
         });
       }
 
-      const isTrade = slug === "technical" || slug === "maintenance";
+      const isTrade = isTradeListingCategorySlug(slug);
       if (isTrade) {
         const prep = (data.preparationLevel ?? "").trim();
         if (prep.length < 10) {
@@ -179,8 +186,13 @@ export default function BecomePro() {
   const providerCategories = useMemo(
     () =>
       categories.filter((c) => {
-        const slug = (c as { slug?: string }).slug;
-        return slug && PROVIDER_CATEGORY_SLUGS.has(slug) && !hiddenSlugs.has(slug);
+        const slug = normalizeProviderCategorySlug((c as { slug?: string }).slug);
+        return (
+          slug &&
+          PROVIDER_CATEGORY_SLUGS.has(slug) &&
+          !hiddenSlugs.has(slug) &&
+          !isRetiredProviderCategorySlug(slug)
+        );
       }),
     [categories, hiddenSlugs]
   );
@@ -211,21 +223,17 @@ export default function BecomePro() {
   const { data: subcategories = [] } = useSubcategories(selectedCategoryId);
 
   const selectedCategorySlug =
-    selectedCategoryId != null ? categories.find((c) => c.id === selectedCategoryId)?.slug : undefined;
+    selectedCategoryId != null
+      ? normalizeProviderCategorySlug(categories.find((c) => c.id === selectedCategoryId)?.slug)
+      : undefined;
   const isCarGo = selectedCategorySlug === "transport";
   const isPackGo = selectedCategorySlug === "delivery";
   const isShopGo = selectedCategorySlug === "marketplace";
   const isGoDriverCategory = isCarGo || isPackGo || isShopGo;
-  const isTradeCategory = selectedCategorySlug === "technical" || selectedCategorySlug === "maintenance";
+  const isTradeCategory = isTradeListingCategorySlug(selectedCategorySlug);
   const isProfessionalCategory = selectedCategorySlug === "professional";
-  const isFocusCatalogCategory =
-    selectedCategorySlug === "professional" ||
-    selectedCategorySlug === "technical" ||
-    selectedCategorySlug === "maintenance";
-  const needsSubcategory =
-    selectedCategorySlug === "technical" ||
-    selectedCategorySlug === "maintenance" ||
-    selectedCategorySlug === "professional";
+  const isFocusCatalogCategory = isProfessionalCategory || isTradeCategory;
+  const needsSubcategory = isTradeCategory || isProfessionalCategory;
   const goOfferKind = useMemo(() => {
     if (!isGoDriverCategory) return "carro" as const;
     return vehicleTypeToGoOfferKind(vehicleType);
@@ -259,11 +267,8 @@ export default function BecomePro() {
     if (selectedCategorySlug === "professional") {
       return "Para profesionales (abogados, contadores, psicólogos, asesores): describe tu oferta con un título claro, qué incluye y tu enfoque de trabajo.";
     }
-    if (selectedCategorySlug === "technical") {
-      return "Para servicios técnicos (computación, electrónica, redes): aclara qué reparas/instalas, el alcance del trabajo y tus habilidades clave.";
-    }
-    if (selectedCategorySlug === "maintenance") {
-      return "Para mantenimiento (refrigeración, plomería, electricidad, aires): detalla el servicio, qué incluye y tu experiencia práctica.";
+    if (selectedCategorySlug === MAN_GO_CATEGORY_SLUG) {
+      return "Para Man Go (técnicos, mantenimiento, oficios): detalla qué reparas o instalas, el alcance del trabajo y tu experiencia práctica.";
     }
     return null;
   }, [isFocusCatalogCategory, selectedCategorySlug]);
@@ -366,7 +371,7 @@ export default function BecomePro() {
 
   if (!isAuthenticated) {
     return (
-      <div className="container max-w-md py-20 text-center">
+      <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <h1 className="text-2xl font-bold mb-4">Inicia sesión</h1>
         <p className="mb-6 text-muted-foreground">Necesitas una cuenta para registrarte como proveedor.</p>
         <a href={api.auth.replit.login.path}>
@@ -398,7 +403,7 @@ export default function BecomePro() {
     const { vehicle: _vehicleForm, preparationLevel: prepRaw, certifications: certsRaw, ...rest } = data;
     void _vehicleForm;
 
-    const isTrade = slug === "technical" || slug === "maintenance";
+    const isTrade = slug === MAN_GO_CATEGORY_SLUG;
     const prepTrim = (prepRaw ?? "").trim();
     const certsTrim = (certsRaw ?? "").trim();
 
@@ -484,15 +489,15 @@ export default function BecomePro() {
   }
 
   return (
-    <div className="container max-w-2xl py-12 px-4">
+    <div className="container mx-auto max-w-2xl w-full px-4 py-12">
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-display font-bold text-primary mb-2">
           {isCarGo
-            ? `Registro · ${getCategoryCanonicalName({ slug: "transport" })}`
+            ? `Registro · ${getCategoryDisplayName({ slug: "transport" })}`
             : isPackGo
-              ? `Registro · ${getCategoryCanonicalName({ slug: "delivery" })}`
+              ? `Registro · ${getCategoryDisplayName({ slug: "delivery" })}`
               : isShopGo
-                ? `Registro · ${getCategoryCanonicalName({ slug: "marketplace" })}`
+                ? `Registro · ${getCategoryDisplayName({ slug: "marketplace" })}`
                 : "Datos de proveedor"}
         </h1>
         <p className="text-muted-foreground">
@@ -559,7 +564,7 @@ export default function BecomePro() {
                           ?.filter((cat) => cat.id != null)
                           .map((cat) => (
                             <SelectItem key={String(cat.id)} value={String(cat.id)}>
-                              {getCategoryCanonicalName(cat)}
+                              {getCategoryDisplayName(cat)}
                             </SelectItem>
                           ))}
                       </SelectContent>
@@ -726,19 +731,21 @@ export default function BecomePro() {
 
               {!isGoDriverCategory && isFocusCatalogCategory && (
                 <>
-                  <FormField
-                    control={form.control}
-                    name="profession"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Profesión / Título</FormLabel>
-                        <FormControl>
-                          <Input placeholder={contextualPlaceholders.profession} {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {isProfessionalCategory ? (
+                    <FormField
+                      control={form.control}
+                      name="profession"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Profesión / Título</FormLabel>
+                          <FormControl>
+                            <Input placeholder={contextualPlaceholders.profession} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : null}
 
                   <FormField
                     control={form.control}

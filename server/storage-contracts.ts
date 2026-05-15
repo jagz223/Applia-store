@@ -67,6 +67,11 @@ export type ProviderUpdate = Partial<
     subcategoryId?: number | null;
     /** Módulos Go (taxi / delivery / marketplace) cuando el proveedor opera en Car Go. */
     goBrands?: string[] | null;
+    /** Categorías adicionales (p. ej. Pro Go + conductor: principal Man Go, secundaria transport). */
+    secondCategoryId?: number | null;
+    thirdCategoryId?: number | null;
+    /** Slug de categoría al registrarse; define tarifa de suscripción mensual (no cambia al sumar Go). */
+    subscriptionCategorySlug?: string | null;
     /** Nivel de preparación (escolaridad, cursos, talleres). Se sincroniza con `coursesCompleted` en Firestore. */
     preparationLevel?: string | null;
     /** Certificaciones y respaldos (títulos, carnés). */
@@ -167,7 +172,7 @@ export interface ICatalogStorage {
   createService(service: InsertService): Promise<Service>;
   updateService(id: number, data: ServiceUpdate): Promise<Service | undefined>;
   deleteService(id: number): Promise<boolean>;
-  seedCategories(): Promise<void>;
+  seedCategories(): Promise<{ created: string[] }>;
 }
 
 /** Contrato para reservas (bookings). */

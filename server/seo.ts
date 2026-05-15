@@ -41,7 +41,7 @@ function escapeXml(s: string): string {
  * Sin huella SHA-256 correcta del keystore de firma, Chrome usa Custom Tabs (barra con URL y X), no TWA a pantalla completa.
  * En producción: TWA_SHA256_FINGERPRINTS (coma-separado, formato keytool con :).
  * Opcional: TWA_PACKAGE_NAME (default com.genfeb.www.twa si coincide con tu Android).
- * Obtener huella: keytool -list -v -keystore android.keystore
+ * Obtener huella: keytool -list -v -keystore <tu-keystore-de-firma-android>
  *
  * El archivo debe responder en el MISMO origen que abre la app (p. ej. si launchUrl es https://genfeb.com,
  * comprobar https://genfeb.com/.well-known/assetlinks.json con 200 y JSON; un 301 solo hacia www puede romper el apex).

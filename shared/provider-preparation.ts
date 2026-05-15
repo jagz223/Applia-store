@@ -2,11 +2,13 @@
  * Campos de preparación del asociado (Firestore): `preparationLevel` es el nombre canónico;
  * `coursesCompleted` se mantiene por compatibilidad con datos antiguos.
  */
-export const TRADE_LISTING_CATEGORY_SLUGS = new Set<string>(["technical", "maintenance"]);
+import { MAN_GO_CATEGORY_SLUG, normalizeProviderCategorySlug } from "./default-categories";
+
+export const TRADE_LISTING_CATEGORY_SLUGS = new Set<string>([MAN_GO_CATEGORY_SLUG]);
 
 export const PROFESSIONAL_CATEGORY_SLUG = "professional";
 
-/** Las tres categorías de catálogo donde pueden publicarse credenciales (preparación y/o certificaciones). */
+/** Las categorías de catálogo donde pueden publicarse credenciales (preparación y/o certificaciones). */
 export const CATALOG_CREDENTIAL_CATEGORY_SLUGS = new Set<string>([
   PROFESSIONAL_CATEGORY_SLUG,
   ...TRADE_LISTING_CATEGORY_SLUGS,
@@ -14,7 +16,7 @@ export const CATALOG_CREDENTIAL_CATEGORY_SLUGS = new Set<string>([
 
 export function isCatalogCredentialCategorySlug(slug: string | null | undefined): boolean {
   if (!slug) return false;
-  return CATALOG_CREDENTIAL_CATEGORY_SLUGS.has(String(slug).trim());
+  return CATALOG_CREDENTIAL_CATEGORY_SLUGS.has(normalizeProviderCategorySlug(slug));
 }
 
 export function resolvePreparationLevel(
@@ -35,10 +37,10 @@ export function resolveCertificationsText(
 
 export function isTradeListingCategorySlug(slug: string | null | undefined): boolean {
   if (!slug) return false;
-  return TRADE_LISTING_CATEGORY_SLUGS.has(String(slug).trim());
+  return TRADE_LISTING_CATEGORY_SLUGS.has(normalizeProviderCategorySlug(slug));
 }
 
 export function isProfessionalListingCategorySlug(slug: string | null | undefined): boolean {
   if (!slug) return false;
-  return String(slug).trim() === PROFESSIONAL_CATEGORY_SLUG;
+  return normalizeProviderCategorySlug(slug) === PROFESSIONAL_CATEGORY_SLUG;
 }

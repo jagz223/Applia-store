@@ -34,6 +34,7 @@ import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { isFullAdmin } from "@shared/roles";
 import { resolveCertificationsText, resolvePreparationLevel } from "@shared/provider-preparation";
 import { mergeProviderWithServiceListingProfile } from "@shared/service-listing-profile";
+import { serviceBelongsToBrand } from "@shared/service-belongs-to-brand";
 import type { ProfessionalVerification, ProfessionalVerificationState } from "@shared/professional-verification";
 import type { VerifyingStatus } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
@@ -467,13 +468,34 @@ class FirestoreStorageImpl implements IStorage {
       } as Category;
     });
 
+    const { isRetiredProviderCategorySlug } = await import("@shared/default-categories");
     return rows.filter((c) => {
       const id = typeof c.id === "number" ? c.id : Number((c as { id?: unknown }).id);
       if (!Number.isFinite(id) || id < 1) return false;
       const slug = String((c as { slug?: unknown }).slug ?? "").trim();
+      if (isRetiredProviderCategorySlug(slug)) return false;
       const name = String((c as { name?: unknown }).name ?? "").trim();
       return slug.length > 0 && name.length > 0;
     });
+  }
+
+  /**
+   * Elimina documentos de categorías retiradas (p. ej. `maintenance` legacy).
+   * Se ejecuta al arranque para que no reaparezcan en admin ni en listados.
+   */
+  async purgeRetiredCategoryDocuments(): Promise<{ removed: string[] }> {
+    if (!this.db) return { removed: [] };
+    const { isRetiredProviderCategorySlug } = await import("@shared/default-categories");
+    const coll = this.db.collection(FIRESTORE_COLLECTIONS.CATEGORIES);
+    const snapshot = await coll.get();
+    const removed: string[] = [];
+    for (const doc of snapshot.docs) {
+      const slug = String(doc.data()?.slug ?? "").trim();
+      if (!isRetiredProviderCategorySlug(slug)) continue;
+      await doc.ref.delete();
+      removed.push(`${slug}#${doc.id}`);
+    }
+    return { removed };
   }
 
   async updateCategory(id: number, data: Partial<Category>): Promise<Category | undefined> {
@@ -585,7 +607,23 @@ class FirestoreStorageImpl implements IStorage {
     } else if (category && !profession && categoryId == null) {
       query = coll.where("category", "==", category);
     } else if (categoryId != null && !Number.isNaN(Number(categoryId))) {
-      query = coll.where("categoryId", "==", Number(categoryId));
+      const cid = Number(categoryId);
+      const [snapPrimary, snapSecond, snapThird] = await Promise.all([
+        coll.where("categoryId", "==", cid).get(),
+        coll.where("secondCategoryId", "==", cid).get(),
+        coll.where("thirdCategoryId", "==", cid).get(),
+      ]);
+      const byId = new Map<string, Provider>();
+      for (const snap of [snapPrimary, snapSecond, snapThird]) {
+        snap.docs.forEach((doc) => {
+          byId.set(doc.id, { id: parseInt(doc.id, 10), ...doc.data() } as Provider);
+        });
+      }
+      let list = [...byId.values()];
+      if (profession) {
+        list = list.filter((p) => p.profession === profession);
+      }
+      return list;
     }
     const snapshot = await query.get();
     let list = snapshot.docs.map(doc => ({ id: parseInt(doc.id), ...doc.data() } as Provider));
@@ -715,6 +753,10 @@ class FirestoreStorageImpl implements IStorage {
       category: provider.category ?? null,
       subcategoryId: (provider as { subcategoryId?: number | null }).subcategoryId ?? null,
       goBrands: (provider as any).goBrands ?? null,
+      secondCategoryId: (provider as { secondCategoryId?: number | null }).secondCategoryId ?? null,
+      thirdCategoryId: (provider as { thirdCategoryId?: number | null }).thirdCategoryId ?? null,
+      subscriptionCategorySlug:
+        (provider as { subscriptionCategorySlug?: string | null }).subscriptionCategorySlug ?? null,
       preparationLevel: prepRaw,
       coursesCompleted: prepRaw,
       certifications: (provider as { certifications?: string | null }).certifications ?? null,
@@ -977,14 +1019,9 @@ class FirestoreStorageImpl implements IStorage {
     }
 
     if (providerCategoryId != null && !Number.isNaN(providerCategoryId)) {
-      servicesWithProviders = servicesWithProviders.filter((s) => {
-        const p = s.provider as { categoryId?: number; category?: string } | undefined;
-        if (p?.categoryId != null && Number(p.categoryId) === providerCategoryId) return true;
-        const cat = allCategories.find((c) => Number(c.id) === providerCategoryId);
-        const slug = cat?.slug != null ? String(cat.slug).trim() : "";
-        if (slug && typeof p?.category === "string" && p.category.trim() === slug) return true;
-        return false;
-      });
+      servicesWithProviders = servicesWithProviders.filter((s) =>
+        serviceBelongsToBrand(s, providerCategoryId, allCategories),
+      );
     }
     if (subcategoryId != null && !Number.isNaN(subcategoryId)) {
       servicesWithProviders = servicesWithProviders.filter((s) => {
@@ -3031,9 +3068,9 @@ class FirestoreStorageImpl implements IStorage {
   async updateReviewStats(_targetId: string, _targetType: string): Promise<void> {}
 
   // ============ SEED ============
-  async seedCategories(): Promise<void> {
-    if (!this.db) return;
-    const { DEFAULT_CATEGORIES } = await import("@shared/default-categories");
+  async seedCategories(): Promise<{ created: string[] }> {
+    if (!this.db) return { created: [] };
+    const { DEFAULT_CATEGORIES, isRetiredProviderCategorySlug } = await import("@shared/default-categories");
     const coll = this.db.collection(FIRESTORE_COLLECTIONS.CATEGORIES);
     const snapshot = await coll.get();
     const bySlug = new Set(snapshot.docs.map((d) => (d.data().slug as string) ?? ""));
@@ -3042,7 +3079,9 @@ class FirestoreStorageImpl implements IStorage {
       const n = parseInt(d.id, 10);
       if (!Number.isNaN(n)) maxId = Math.max(maxId, n);
     });
+    const created: string[] = [];
     for (const cat of DEFAULT_CATEGORIES) {
+      if (isRetiredProviderCategorySlug(cat.slug)) continue;
       if (bySlug.has(cat.slug)) continue;
       maxId += 1;
       await coll.doc(String(maxId)).set({
@@ -3053,7 +3092,9 @@ class FirestoreStorageImpl implements IStorage {
         icon: cat.icon,
         imageUrl: cat.imageUrl ?? null,
       });
+      created.push(cat.slug);
     }
+    return { created };
   }
 
   // ============ ESTADOS DE RESERVA ============

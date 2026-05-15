@@ -8,6 +8,9 @@ import { providerSkillsSchema } from "@shared/skills-schema";
 import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { providerHasGoBrand } from "@shared/provider-go";
+import { serviceListingCategorySlug } from "@shared/service-belongs-to-brand";
+import { buildGoDriverEnrollmentCategoryPatch } from "@shared/provider-category-membership";
+import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
@@ -34,12 +37,20 @@ import { ensureGoPanicAllowed, markGoPanicSent, notifyGoPanicAdmins } from "./mo
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
 import { filterCategoriesExcludedFromPublicApi, MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
 import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
-import { categorySlugFromProvider, getSubscriptionFeesByCategorySlug, subscriptionMonthlyUsdForCategorySlug } from "./subscription-fees";
+import {
+  getSubscriptionFeesByCategorySlug,
+  subscriptionCategorySlugFromProvider,
+  subscriptionMonthlyUsdForCategorySlug,
+} from "./subscription-fees";
 import {
   validateAssignableServiceCategory,
-  providerHasServiceInCategory,
-  validateSubcategoryBelongsToCategory,
+  providerHasDuplicateCatalogService,
+  validateCatalogServiceSubcategoryForCategory,
 } from "./service-category-validation";
+import {
+  canDeleteCatalogService,
+  isPrimaryProviderCatalogService,
+} from "@shared/provider-primary-catalog-service";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -243,11 +254,19 @@ export async function registerRoutes(
         ALLOWED.has(b)
       );
 
+      const categoryPatch = buildGoDriverEnrollmentCategoryPatch(
+        provider as Parameters<typeof buildGoDriverEnrollmentCategoryPatch>[0],
+        categories,
+      );
+
       await catalogService.updateProvider(pid, {
         goBrands: merged,
         goDriverOfferTitle: serviceTitle,
         goDriverOfferDescription: serviceDescription,
+        ...categoryPatch,
       });
+
+      await catalogService.syncProviderCategorySlotsFromServices(pid);
 
       const hasTransport = providerHasGoBrand({ ...provider, goBrands: merged }, "transport", categories);
       const hasDelivery = providerHasGoBrand({ ...provider, goBrands: merged }, "delivery", categories);
@@ -455,7 +474,8 @@ export async function registerRoutes(
 
       const body = patchProfessionalVerificationPaymentBody.parse(req.body);
       const feesBySlug = await getSubscriptionFeesByCategorySlug();
-      const catSlug = categorySlugFromProvider(provider as any, []);
+      const categoriesForSub = await catalogService.getCategories();
+      const catSlug = subscriptionCategorySlugFromProvider(provider as any, categoriesForSub);
       const monthlyUsd = subscriptionMonthlyUsdForCategorySlug(feesBySlug, catSlug);
       const updated = await genFebStorage.upsertProfessionalVerificationPayment(userId, {
         transferReceiptCode: body.transferReceiptCode,
@@ -595,23 +615,14 @@ export async function registerRoutes(
 
     let list = await catalogService.getAllServices(categoryId, search, providerCategoryId, subcategoryId);
 
-    /** Vista general (Explorar “Todos”, sin categoría explícita): no mezclar conductores/comercios/delivery Go. */
+    /** Vista general: ocultar fichas Go por categoría del servicio, no por categoría principal del proveedor (perfiles mixtos Pro Go + conductor). */
     const isGeneralCatalogExplore = categoryId == null && providerCategoryId == null;
     if (isGeneralCatalogExplore && list?.length) {
       const mobilitySlugs = new Set(MOBILITY_GO_PROVIDER_SLUGS.map((s) => String(s).toLowerCase()));
       const cats = await catalogService.getCategoriesForPublicCatalog();
       list = list.filter((s: any) => {
-        const p = s?.provider as { category?: string; categoryId?: number } | undefined;
-        if (!p) return true;
-        const fromField =
-          typeof p.category === "string" ? p.category.trim().toLowerCase() : "";
-        if (mobilitySlugs.has(fromField)) return false;
-        if (p.categoryId != null && !Number.isNaN(Number(p.categoryId))) {
-          const cat = cats.find((c: { id?: number }) => Number(c.id) === Number(p.categoryId));
-          const slug = (cat as { slug?: string } | undefined)?.slug;
-          const sl = slug != null ? String(slug).trim().toLowerCase() : "";
-          if (mobilitySlugs.has(sl)) return false;
-        }
+        const serviceSlug = serviceListingCategorySlug(s, cats);
+        if (serviceSlug && mobilitySlugs.has(serviceSlug)) return false;
         return true;
       });
     }
@@ -700,19 +711,27 @@ export async function registerRoutes(
       const catCheck = validateAssignableServiceCategory(chosenCategory);
       if (!catCheck.ok) return res.status(400).json({ message: catCheck.message });
       if (
-        providerHasServiceInCategory(
-          existingForProvider.map((s: { id: number; categoryId: number }) => ({ id: s.id, categoryId: s.categoryId })),
-          resolvedCategoryId
+        providerHasDuplicateCatalogService(
+          existingForProvider.map((s: { id: number; categoryId: number; subcategoryId?: number | null }) => ({
+            id: s.id,
+            categoryId: s.categoryId,
+            subcategoryId: (s as { subcategoryId?: number | null }).subcategoryId,
+          })),
+          resolvedCategoryId,
+          data.subcategoryId,
+          categories,
         )
       ) {
         return res.status(400).json({
-          message: "Ya tienes un servicio en esa categoría. Elige otra categoría o edita el servicio existente.",
+          message:
+            "Ya tienes un servicio publicado con esa misma subcategoría. Elige otra especialidad o edita la ficha existente.",
         });
       }
-      const subCheck = await validateSubcategoryBelongsToCategory(
+      const subCheck = await validateCatalogServiceSubcategoryForCategory(
         catalogService,
         data.subcategoryId,
-        resolvedCategoryId
+        resolvedCategoryId,
+        categories,
       );
       if (!subCheck.ok) return res.status(400).json({ message: subCheck.message });
 
@@ -727,6 +746,8 @@ export async function registerRoutes(
         isActive: data.isActive ?? true,
         subcategoryId: data.subcategoryId ?? undefined,
       } as any);
+      await catalogService.ensureProviderCategoryMembership(provider.id, resolvedCategoryId);
+      await catalogService.syncProviderCategorySlotsFromServices(provider.id);
       return res.status(201).json(service);
     } catch (e: any) {
       if (e.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
@@ -748,9 +769,27 @@ export async function registerRoutes(
       if (!isOwner && !isAdmin) return res.status(403).json({ message: "Solo el dueño del servicio o un admin puede editarlo" });
       const data = updateServiceBodySchema.parse(req.body);
 
+      const categories = await catalogService.getCategories();
+      const allServices = await catalogService.getAllServices();
+      const providerServices = provider
+        ? allServices.filter((s: { providerId: number }) => s.providerId === provider.id)
+        : [];
+
       const prevCategoryId = Number((service as { categoryId: number }).categoryId);
       const categoryIsChanging =
         data.categoryId !== undefined && Number(data.categoryId) !== prevCategoryId;
+
+      if (
+        !isAdmin &&
+        provider &&
+        categoryIsChanging &&
+        isPrimaryProviderCatalogService(id, providerServices, (provider as { categoryId?: number }).categoryId)
+      ) {
+        return res.status(403).json({
+          message:
+            "La categoría de tu primer servicio queda fija desde el registro. Puedes cambiar la subcategoría o agregar otro servicio en otra marca.",
+        });
+      }
       const nextCategoryId =
         data.categoryId !== undefined ? Number(data.categoryId) : prevCategoryId;
 
@@ -764,34 +803,39 @@ export async function registerRoutes(
       }
 
       if (data.categoryId !== undefined) {
-        const categories = await catalogService.getCategories();
         const chosen = categories.find((c) => c.id === nextCategoryId);
         const catCheck = validateAssignableServiceCategory(chosen);
         if (!catCheck.ok) return res.status(400).json({ message: catCheck.message });
-        const allServices = await catalogService.getAllServices();
-        const mine = allServices.filter((s: { providerId: number }) => s.providerId === service.providerId);
+        const mine = providerServices;
         if (
-          providerHasServiceInCategory(
-            mine.map((s: { id: number; categoryId: number }) => ({ id: s.id, categoryId: s.categoryId })),
+          providerHasDuplicateCatalogService(
+            mine.map((s: { id: number; categoryId: number; subcategoryId?: number | null }) => ({
+              id: s.id,
+              categoryId: s.categoryId,
+              subcategoryId: (s as { subcategoryId?: number | null }).subcategoryId,
+            })),
             nextCategoryId,
-            id
+            nextSubcategoryId,
+            categories,
+            id,
           )
         ) {
           return res.status(400).json({
-            message: "Ya tienes otro servicio en esa categoría.",
+            message: "Ya tienes otro servicio con esa misma subcategoría.",
           });
         }
       }
 
-      const subCheck = await validateSubcategoryBelongsToCategory(
+      const subCheck = await validateCatalogServiceSubcategoryForCategory(
         catalogService,
         nextSubcategoryId,
-        nextCategoryId
+        nextCategoryId,
+        categories,
       );
       if (!subCheck.ok) return res.status(400).json({ message: subCheck.message });
 
       if (data.isActive !== undefined && !isAdmin) {
-        const categoriesForVisibility = await catalogService.getCategories();
+        const categoriesForVisibility = categories;
         const catForVisibility = categoriesForVisibility.find((c) => c.id === nextCategoryId);
         const slugForVisibility = String(catForVisibility?.slug ?? "").trim().toLowerCase();
         if (isSelfServiceCatalogActiveToggleDisallowedForCategorySlug(slugForVisibility)) {
@@ -812,6 +856,10 @@ export async function registerRoutes(
       };
       const updated = await catalogService.updateService(id, updatePayload as any);
       if (!updated) return res.status(404).json({ message: "Service not found" });
+      if (provider && categoryIsChanging) {
+        await catalogService.ensureProviderCategoryMembership(provider.id, nextCategoryId);
+        await catalogService.syncProviderCategorySlotsFromServices(provider.id);
+      }
       return res.json(updated);
     } catch (e: any) {
       if (e.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
@@ -831,7 +879,20 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       const isOwner = provider && service.providerId === provider.id;
       if (!isOwner && !isAdmin) return res.status(403).json({ message: "Solo el dueño del servicio o un admin puede eliminarlo" });
+      if (provider && !isAdmin) {
+        const allServices = await catalogService.getAllServices();
+        const providerServices = allServices.filter((s: { providerId: number }) => s.providerId === provider.id);
+        if (!canDeleteCatalogService(id, providerServices, (provider as { categoryId?: number }).categoryId)) {
+          return res.status(403).json({
+            message:
+              "No puedes eliminar tu primer servicio (el de registro). Puedes eliminar los servicios adicionales que hayas creado.",
+          });
+        }
+      }
       const ok = await catalogService.deleteService(id);
+      if (ok && provider) {
+        await catalogService.syncProviderCategorySlotsFromServices(provider.id);
+      }
       if (!ok) return res.status(404).json({ message: "Service not found" });
       return res.status(204).send();
     } catch (e: any) {
@@ -975,11 +1036,17 @@ export async function registerRoutes(
       const certifications =
         typeof certificationsRaw === "string" && certificationsRaw.trim() !== "" ? certificationsRaw.trim() : undefined;
 
+      const signupCategorySlug = String(catForSignup?.slug ?? providerInsert.category ?? "").trim().toLowerCase();
+      const subscriptionCategorySlug = isCatalogAssignableServiceCategorySlug(signupCategorySlug)
+        ? signupCategorySlug
+        : null;
+
       const provider = await catalogService.createProvider({
         userId,
         categoryId: providerInsert.categoryId ?? undefined,
         category: providerInsert.category ?? null,
         subcategoryId: providerInsert.subcategoryId ?? undefined,
+        ...(subscriptionCategorySlug ? { subscriptionCategorySlug } : {}),
         ...(isGoDriverCategory
           ? {
               goBrands: Array.isArray(goBrands)
@@ -1050,6 +1117,8 @@ export async function registerRoutes(
           vehicle: parsedVehicle.data,
         });
       }
+
+      await catalogService.syncProviderCategorySlotsFromServices((provider as { id: number }).id);
 
       return res.status(201).json(provider);
     } catch (e: any) {
@@ -1152,9 +1221,6 @@ export async function registerRoutes(
       throw e;
     }
   });
-
-  /** Semillas iniciales de categorías (idempotente) */
-  await catalogService.seedCategories();
 
   return httpServer;
 }

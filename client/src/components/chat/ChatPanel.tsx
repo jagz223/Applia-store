@@ -34,6 +34,7 @@ import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { CHAT_BOOKING_COORDINATION_HINT } from "@/lib/chat-booking-ui-copy";
+import { storeEditServiceReturnPath } from "@/lib/edit-service-return-path";
 import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSocket } from "@/hooks/use-socket";
@@ -283,7 +284,12 @@ export function ChatPanel({
             className="border-primary/40 bg-background font-semibold shadow-sm"
             asChild
           >
-            <Link href={`/edit-service/${serviceIdForContext}`}>Editar mi servicio</Link>
+            <Link
+              href={`/edit-service/${serviceIdForContext}`}
+              onClick={() => storeEditServiceReturnPath()}
+            >
+              Editar mi servicio
+            </Link>
           </Button>
         ) : null}
       </>

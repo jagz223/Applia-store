@@ -2,7 +2,9 @@
  * Categorías de catálogo (Explorar) en las que un asociado puede publicar una ficha de servicio.
  * Excluye movilidad / Go (taxi, marketplace, delivery): esas líneas tienen flujos propios.
  */
-export const CATALOG_ASSIGNABLE_SERVICE_CATEGORY_SLUGS = ["technical", "professional", "maintenance"] as const;
+import { MAN_GO_CATEGORY_SLUG } from "./default-categories";
+
+export const CATALOG_ASSIGNABLE_SERVICE_CATEGORY_SLUGS = [MAN_GO_CATEGORY_SLUG, "professional"] as const;
 
 export type CatalogAssignableServiceCategorySlug = (typeof CATALOG_ASSIGNABLE_SERVICE_CATEGORY_SLUGS)[number];
 

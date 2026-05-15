@@ -38,6 +38,7 @@ import { CamionetaVehicleIcon } from "@/components/taxi/CamionetaVehicleIcon";
 import type { TaxiPaymentMethod, TaxiVehicleKind, TaxiVehicleModalStep } from "@/components/taxi/TaxiVehicleSearchModal";
 import type { GeoJsonObject } from "geojson";
 import { GoPanicFloatingButton } from "@/components/go/GoPanicFloatingButton";
+import { GoRideRatingDialog, goSlugToRatingModule } from "@/components/go/GoRideRatingDialog";
 import { useGoChat } from "@/contexts/GoChatContext";
 import { addHiddenConversationId } from "@/lib/hidden-conversations";
 import { purgeConversationCache } from "@/hooks/use-chat";
@@ -46,9 +47,10 @@ import { usePlatformMobilityFares, usePlatformPackFares } from "@/hooks/use-mang
 import { useSocket, useSocketChat } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { goOffsetAboveBottomNav, goViewportClasses, useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
-import { MOBILITY_UI, mobilityServiceLabel } from "@shared/mobility-ui-labels";
+import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 import { RIDER_DRIVER_NOT_AVAILABLE_MESSAGE } from "@shared/mobility-negotiation";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
@@ -446,23 +448,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   }, [matchedDriverInfo]);
 
   /** Evita montar dos mapas Leaflet en Car Go (móvil vs escritorio). */
-  const [isMdUp, setIsMdUp] = useState(() =>
-    typeof window !== "undefined" ? window.matchMedia("(min-width: 768px)").matches : false
-  );
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
-    const fn = () => setIsMdUp(mq.matches);
-    fn();
-    mq.addEventListener("change", fn);
-    return () => mq.removeEventListener("change", fn);
-  }, []);
+  const isGoCompact = useGoCompactViewport();
 
   /** Pantalla completa extra solo en escritorio; en móvil el mapa ya llena el área útil. */
-  const showMapFullscreen = mapFullscreen && isGoClient && isMdUp;
+  const showMapFullscreen = mapFullscreen && isGoClient && !isGoCompact;
 
   useEffect(() => {
-    if (isGoClient && !isMdUp && mapFullscreen) setMapFullscreen(false);
-  }, [isGoClient, isMdUp, mapFullscreen]);
+    if (isGoClient && isGoCompact && mapFullscreen) setMapFullscreen(false);
+  }, [isGoClient, isGoCompact, mapFullscreen]);
 
   const debounceStart = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounceEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -553,6 +546,34 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       /* ignore */
     }
   }, [isGoClient, riderDraftKey, goSlug]);
+
+  const resetRiderPlanningView = useCallback(() => {
+    setStart(null);
+    setEnd(null);
+    setStartInput("");
+    setEndInput("");
+    setSuggestStart([]);
+    setSuggestEnd([]);
+    setRouteGeometry(null);
+    setRouteMeta(null);
+    setRouteError(null);
+    setMapTarget("start");
+    setSelectedVehicle(null);
+    setTaxiPaymentMethod(null);
+    setVehicleModalStep("pick");
+    setVehiclePickerOpen(false);
+    setRideIsNegotiated(false);
+    setClientHaggleUsd(0);
+    setDriverToPickupGeometry(null);
+    setDriverToPickupMeta(null);
+    setDriverEtaLoading(false);
+    setRidePanelCollapsed(false);
+    try {
+      sessionStorage.removeItem(riderDraftKey);
+    } catch {
+      /* ignore */
+    }
+  }, [riderDraftKey]);
 
   useEffect(() => {
     activeRideIdRef.current = activeRideId;
@@ -645,6 +666,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         return;
       }
       applyCarGoRideEnded();
+      resetRiderPlanningView();
       toast({ title: "Servicio cancelado", description: "Puedes pedir otro viaje cuando quieras." });
       setCancelServiceDialogOpen(false);
     } catch {
@@ -652,7 +674,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     } finally {
       setCancelServiceBusy(false);
     }
-  }, [applyCarGoRideEnded, toast, rideApiBase]);
+  }, [applyCarGoRideEnded, resetRiderPlanningView, toast, rideApiBase]);
 
   const loadDriverEtaRoute = useCallback(async (driverPos: { lat: number; lon: number }, target: Place) => {
     setDriverEtaLoading(true);
@@ -1165,6 +1187,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       setNegotiationOffersOpen(false);
       setNegotiationOffers([]);
       applyCarGoRideEnded();
+      resetRiderPlanningView();
       if (p.cancelledBy === "driver") {
         toast({
           title: isPackGoClient ? "El repartidor canceló" : "El conductor canceló",
@@ -1236,6 +1259,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     goSlug,
     user?.id,
     isPackGoClient,
+    resetRiderPlanningView,
   ]);
 
   // Contraofertas desactivadas: no hay limpieza.
@@ -1257,13 +1281,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       if (!res.ok) throw new Error(data.message || "No se pudo enviar la calificación");
       setRateDialogOpen(false);
       rateTargetRef.current = null;
+      resetRiderPlanningView();
       toast({ title: "¡Gracias!", description: "Calificación enviada." });
     } catch (e) {
       toast({ title: "No se pudo enviar", description: e instanceof Error ? e.message : "Intenta de nuevo", variant: "destructive" });
     } finally {
       setRateBusy(false);
     }
-  }, [rateStars, toast, goSlug]);
+  }, [rateStars, toast, goSlug, resetRiderPlanningView]);
 
   useEffect(() => {
     if (!riderTripInProgress || !assignedDriverPos || !end) return;
@@ -1576,26 +1601,28 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     <div
       className={cn(
         "bg-gradient-to-b from-muted/30 to-background",
-        isGoClient ? "flex min-h-0 min-w-0 flex-1 flex-col max-md:overflow-hidden max-md:pb-0 md:pb-12" : "min-h-screen pb-12"
+        isGoClient
+          ? "flex min-h-0 min-w-0 max-h-full flex-1 flex-col max-lg:h-full max-lg:min-h-0 max-lg:overflow-hidden max-lg:pb-0 lg:pb-12"
+          : "min-h-screen pb-12"
       )}
     >
       <div
         className={cn(
           "container mx-auto max-w-4xl px-4 pt-6",
           isGoClient &&
-            "flex min-h-0 min-w-0 flex-1 flex-col max-md:overflow-hidden max-md:max-w-none max-md:px-3 max-md:pb-0 max-md:pt-2 md:max-w-[min(1320px,96vw)] md:px-6 lg:px-8"
+            "flex h-0 min-h-0 min-w-0 flex-1 flex-col max-lg:max-w-none max-lg:overflow-hidden max-lg:p-0 lg:max-w-[min(1320px,96vw)] lg:px-6 lg:pt-6 lg:pb-0"
         )}
       >
         <Button
           variant="ghost"
-          className={cn("mb-4 -ml-2 gap-2", isGoClient && "hidden md:inline-flex")}
+          className={cn("mb-4 -ml-2 gap-2", isGoClient && "hidden lg:inline-flex")}
           onClick={goBack}
         >
           <ArrowLeft className="h-4 w-4" />
           {fromCategories ? "Volver a categorías" : "Volver a Explorar"}
         </Button>
 
-        <div className={cn("mb-6", isGoClient && "hidden md:block")}>
+        <div className={cn("mb-6", isGoClient && "hidden lg:block")}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <h1 className="text-3xl font-display font-bold text-foreground">
@@ -1617,23 +1644,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         </div>
 
         {/* Go / Car: móvil — mapa llena main (sin scroll); overlay encima. */}
-        {isGoClient && !isMdUp && (
-          <div className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden md:hidden max-md:h-[calc(100vh-8.25rem)] max-md:h-[calc(100svh-8.25rem)] max-md:min-h-[calc(100vh-8.25rem)] max-md:min-h-[calc(100svh-8.25rem)]">
-            {/* Botón flotante: volver (siempre visible, no pegado a inputs) */}
-            {!vehiclePickerOpen && !matchedDriverInfo ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="icon"
-                className="pointer-events-auto absolute left-3 top-3 z-30 h-10 w-10 overflow-hidden rounded-full border border-border/60 bg-background/90 p-0 shadow-md backdrop-blur-sm"
-                onClick={goBack}
-                aria-label={fromCategories ? "Volver a categorías" : "Volver a Explorar"}
-              >
-                <span className="flex h-full w-full items-center justify-center rounded-full bg-background p-1 ring-1 ring-border">
-                  <img src="/genfeb-logo-new.png" alt="" className="h-full w-full object-contain" />
-                </span>
-              </Button>
-            ) : null}
+        {isGoClient && isGoCompact && (
+          <div className={cn(goViewportClasses.mapStage, "w-full lg:hidden")}>
             <div className="pointer-events-auto absolute inset-0 z-0 overflow-hidden bg-muted/30">
               {/* Wallet/Recargar ahora viven en `GoBottomNav` (barra inferior). */}
               <TaxiRouteMap
@@ -1655,7 +1667,10 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full"
               />
               {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
-                <div className="absolute bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-1/2 z-[55] flex max-w-[min(100%-2rem,280px)] -translate-x-1/2 items-center gap-2 rounded-full border bg-background/92 px-3 py-2 text-xs shadow-md backdrop-blur-sm">
+                <div
+                  style={{ bottom: goOffsetAboveBottomNav() }}
+                  className="absolute left-1/2 z-[55] flex max-w-[min(100%-2rem,280px)] -translate-x-1/2 items-center gap-2 rounded-full border bg-background/92 px-3 py-2 text-xs shadow-md backdrop-blur-sm"
+                >
                   <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
                   {driverEtaLoading && matchedDriverInfo
                     ? "Calculando llegada del driver…"
@@ -1671,12 +1686,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 {/* Panel flotante: sin “caja” de fondo; solo cards internas. */}
                 <div
                   className={cn(
-                    "pointer-events-none flex min-h-0 flex-1 flex-col px-2",
+                    "pointer-events-none flex min-h-0 flex-1 flex-col pr-2",
+                    goViewportClasses.shellFabOverlayInsetLeft,
                     matchedDriverInfo
-                      ? // Sin botón flotante (logo): no dejar hueco alto; sólo notch/safe-area
+                      ? // Panel sin botones flotantes arriba: solo safe-area/notch.
                         "pt-[max(0.35rem,env(safe-area-inset-top))]"
-                      : // Botón logo arriba-izquierda: reserva para no pisar inputs/cards
-                        "pt-14"
+                      : // Hueco solo para FAB «Inicio» del shell (logo); ordenar puntos pegados arriba.
+                        "pt-[max(0.35rem,calc(env(safe-area-inset-top)+2.875rem))]"
                   )}
                 >
                   <div className="pointer-events-auto max-h-[min(60vh,520px)] overflow-visible bg-transparent shadow-none ring-0">
@@ -1684,85 +1700,89 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                       <div className="space-y-2">
                 {!matchedDriverInfo ? (
                   <>
-                    <div className="rounded-xl border border-border bg-card p-2 shadow-lg">
-                      <div className="space-y-2">
-                        {/* Origen arriba */}
-                        <div className="space-y-1">
-                          <Label
-                            htmlFor="taxi-start-mobile"
-                            className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground"
-                          >
-                            <MapPin className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-500" />
-                            {goSlug === "pack" ? "Retiro" : "Origen"}
-                          </Label>
-                          <div className="relative">
-                            <Input
-                              id="taxi-start-mobile"
-                              placeholder="Buscar o tocar mapa"
-                              value={startInput}
-                              onFocus={() => setMapTarget("start")}
-                              onChange={(e) => onStartInput(e.target.value)}
-                              autoComplete="off"
-                              className={cn(
-                                "h-8 rounded-lg border-border bg-muted/90 py-1.5 text-sm text-foreground placeholder:text-muted-foreground dark:bg-muted/70",
-                                mapTarget === "start" && "ring-2 ring-green-600/35 dark:ring-green-500/40"
-                              )}
-                            />
-                            {suggestStart.length > 0 && (
-                              <ul className="absolute top-full z-[2000] mt-1 max-h-48 w-full overflow-auto rounded-xl border bg-popover text-sm shadow-md">
-                                {suggestStart.map((h, i) => (
-                                  <li key={`m-${h.lat}-${h.lon}-${i}`}>
-                                    <button
-                                      type="button"
-                                      className="w-full px-3 py-2 text-left hover:bg-muted"
-                                      onClick={() => pickSuggestion("start", h)}
-                                    >
-                                      {h.label}
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
+                    <div className="rounded-2xl border border-border/90 bg-card/96 shadow-xl ring-1 ring-black/[0.04] backdrop-blur-md dark:bg-card/92 dark:ring-white/10">
+                      <div className="flex gap-2.5 px-3 py-2 sm:gap-3 sm:py-2.5">
+                        <div className="flex shrink-0 flex-col items-center py-2" aria-hidden>
+                          <span className="size-2.5 rounded-full bg-green-600 shadow-sm ring-4 ring-green-600/18 dark:bg-green-500 dark:ring-green-500/22" />
+                          <span className="my-1 w-[2px] flex-1 min-h-[2.25rem] rounded-full bg-border/95" />
+                          <span className="size-2.5 rounded-full bg-red-600 shadow-sm ring-4 ring-red-600/18 dark:bg-red-500 dark:ring-red-500/22" />
                         </div>
-
-                        {/* Destino abajo */}
-                        <div className="space-y-1">
-                          <Label
-                            htmlFor="taxi-end-mobile"
-                            className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground"
-                          >
-                            <MapPin className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-500" />
-                            {goSlug === "pack" ? "Entrega" : "Destino"}
-                          </Label>
-                          <div className="relative">
-                            <Input
-                              id="taxi-end-mobile"
-                              placeholder="Buscar o tocar mapa"
-                              value={endInput}
-                              onFocus={() => setMapTarget("end")}
-                              onChange={(e) => onEndInput(e.target.value)}
-                              autoComplete="off"
-                              className={cn(
-                                "h-8 rounded-lg border-border bg-muted/90 py-1.5 text-sm text-foreground placeholder:text-muted-foreground dark:bg-muted/70",
-                                mapTarget === "end" && "ring-2 ring-red-600/35 dark:ring-red-500/40"
+                        <div className="min-w-0 flex-1 space-y-2.5">
+                          <div className="space-y-1">
+                            <Label
+                              htmlFor="taxi-start-mobile"
+                              className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                            >
+                              <MapPin className="h-3 w-3 shrink-0 text-green-600 dark:text-green-500" aria-hidden />
+                              {goSlug === "pack" ? "Retiro" : "Origen"}
+                            </Label>
+                            <div className="relative">
+                              <Input
+                                id="taxi-start-mobile"
+                                placeholder="Buscar o tocar mapa"
+                                value={startInput}
+                                onFocus={() => setMapTarget("start")}
+                                onChange={(e) => onStartInput(e.target.value)}
+                                autoComplete="off"
+                                className={cn(
+                                  "h-9 rounded-xl border-border bg-muted/90 py-2 text-[13px] text-foreground placeholder:text-muted-foreground dark:bg-muted/70",
+                                  mapTarget === "start" && "ring-2 ring-green-600/35 dark:ring-green-500/45"
+                                )}
+                              />
+                              {suggestStart.length > 0 && (
+                                <ul className="absolute top-full z-[2000] mt-1 max-h-48 w-full overflow-auto rounded-xl border bg-popover text-sm shadow-md">
+                                  {suggestStart.map((h, i) => (
+                                    <li key={`m-${h.lat}-${h.lon}-${i}`}>
+                                      <button
+                                        type="button"
+                                        className="w-full px-3 py-2 text-left hover:bg-muted"
+                                        onClick={() => pickSuggestion("start", h)}
+                                      >
+                                        {h.label}
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
                               )}
-                            />
-                            {suggestEnd.length > 0 && (
-                              <ul className="absolute top-full z-[2000] mt-1 max-h-48 w-full overflow-auto rounded-xl border bg-popover text-sm shadow-md">
-                                {suggestEnd.map((h, i) => (
-                                  <li key={`m-${h.lat}-${h.lon}-${i}`}>
-                                    <button
-                                      type="button"
-                                      className="w-full px-3 py-2 text-left hover:bg-muted"
-                                      onClick={() => pickSuggestion("end", h)}
-                                    >
-                                      {h.label}
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
+                            </div>
+                          </div>
+                          <div className="space-y-1 border-t border-border/60 pt-2.5">
+                            <Label
+                              htmlFor="taxi-end-mobile"
+                              className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                            >
+                              <MapPin className="h-3 w-3 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+                              {goSlug === "pack" ? "Entrega" : "Destino"}
+                            </Label>
+                            <div className="relative">
+                              <Input
+                                id="taxi-end-mobile"
+                                placeholder="Buscar o tocar mapa"
+                                value={endInput}
+                                onFocus={() => setMapTarget("end")}
+                                onChange={(e) => onEndInput(e.target.value)}
+                                autoComplete="off"
+                                className={cn(
+                                  "h-9 rounded-xl border-border bg-muted/90 py-2 text-[13px] text-foreground placeholder:text-muted-foreground dark:bg-muted/70",
+                                  mapTarget === "end" && "ring-2 ring-red-600/35 dark:ring-red-500/45"
+                                )}
+                              />
+                              {suggestEnd.length > 0 && (
+                                <ul className="absolute top-full z-[2000] mt-1 max-h-48 w-full overflow-auto rounded-xl border bg-popover text-sm shadow-md">
+                                  {suggestEnd.map((h, i) => (
+                                    <li key={`m-${h.lat}-${h.lon}-${i}`}>
+                                      <button
+                                        type="button"
+                                        className="w-full px-3 py-2 text-left hover:bg-muted"
+                                        onClick={() => pickSuggestion("end", h)}
+                                      >
+                                        {h.label}
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2001,10 +2021,10 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           </div>
         )}
 
-        {(!isGoClient || isMdUp) && (
+        {(!isGoClient || !isGoCompact) && (
         <div
           className={cn(
-            isGoClient && isMdUp
+            isGoClient && !isGoCompact
               ? // Dos columnas: strech vertical para que Leaflet reciba alto real (fullscreen + height 100%).
                 "grid min-h-0 w-full flex-1 grid-cols-1 gap-8 md:min-h-[min(640px,calc(100dvh-12rem))] md:[grid-template-columns:minmax(340px,420px)_minmax(0,1fr)] md:gap-x-10 md:gap-y-0 md:items-stretch [grid-template-rows:minmax(0,auto)]"
               : null
@@ -2013,14 +2033,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           <div
             className={cn(
               "space-y-5 rounded-2xl border border-border bg-card p-4 shadow-sm md:p-6",
-              isGoClient && isMdUp
+              isGoClient && !isGoCompact
                 ? "min-h-0 w-full md:max-h-[min(880px,calc(100svh-10rem))] md:flex md:flex-col md:overflow-y-auto md:[scrollbar-width:thin]"
                 : null
             )}
           >
           {/* Se elimina la franja superior de pasos (1→2). */}
 
-          {isGoClient && isMdUp && (
+          {isGoClient && !isGoCompact && (
             <div className="flex w-full gap-2" role="group" aria-label="Elegir qué punto editar en el mapa">
               <Button
                 type="button"
@@ -2159,7 +2179,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           )}
 
           {/* En Car Go escritorio el mapa vive en la columna derecha; aquí no renderizamos un “placeholder” */}
-          {!(isGoClient && isMdUp) ? (
+          {!(isGoClient && !isGoCompact) ? (
             <div
               className={cn(
                 "relative z-[1] rounded-xl ring-2 ring-offset-2 ring-offset-background transition-shadow",
@@ -2395,7 +2415,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           </AnimatePresence>
           </div>
 
-          {isGoClient && isMdUp ? (
+          {isGoClient && !isGoCompact ? (
             <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-muted/10 shadow-sm md:min-h-[min(480px,calc(100dvh-14rem))] md:h-full">
               <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
                 <TaxiRouteMap
@@ -2558,11 +2578,12 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         <Button
           type="button"
           className={cn(
-            /* Encima del botón Pánico (GoPanicFloatingButton): 4.75rem + h-14 (3.5rem) + hueco */
-            "fixed bottom-[calc(8.625rem+env(safe-area-inset-bottom,0px))] right-3 z-[200] h-12 w-12 rounded-full p-0 md:bottom-[calc(5.125rem)]",
+            "fixed right-3 z-[200] h-12 w-12 rounded-full p-0",
+            !isGoCompact && "bottom-[calc(8.625rem+env(safe-area-inset-bottom,0px))] md:bottom-[calc(5.125rem)]",
             "bg-primary text-primary-foreground shadow-xl ring-2 ring-primary/35",
             "hover:bg-primary/90 active:scale-[0.97]"
           )}
+          style={isGoCompact ? { bottom: goOffsetAboveBottomNav("1.5rem") } : undefined}
           onClick={() => setRidePanelCollapsed(false)}
           aria-label="Mostrar panel del servicio"
         >
@@ -2626,63 +2647,16 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         </DialogContent>
       </Dialog>
 
-      <Dialog open={rateDialogOpen} onOpenChange={() => { /* bloqueado */ }}>
-        <DialogContent
-          hideClose
-          className="border-primary/20 bg-gradient-to-b from-primary/[0.07] via-background to-background sm:max-w-md"
-          onPointerDownOutside={(e) => e.preventDefault()}
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <DialogHeader className="space-y-3 text-center sm:text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 ring-2 ring-emerald-500/30">
-              <CheckCircle2 className="h-7 w-7 text-emerald-600 dark:text-emerald-400" aria-hidden />
-            </div>
-            <DialogTitle className="text-balance text-lg font-semibold leading-snug sm:text-xl">
-              {isPackGoClient ? "Tu repartidor ha terminado el envío" : "Tu conductor ha terminado el viaje"}
-            </DialogTitle>
-            <DialogDescription asChild>
-              <div className="space-y-1 text-balance text-sm leading-relaxed text-muted-foreground">
-                <p className="text-foreground/90">¿Estás conforme con el trato?</p>
-                <p>
-                  Calificá con las estrellas a{" "}
-                  <span className="font-semibold text-foreground">
-                    {rateTargetRef.current?.targetName ?? `tu ${uiWords.driver}`}
-                  </span>
-                  . Tu opinión ayuda a mejorar {mobilityServiceLabel(isPackGoClient ? "pack" : "cargo")}.
-                </p>
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5">
-            <div className="rounded-xl border border-border/80 bg-card/90 px-2 py-5 shadow-sm sm:px-3">
-              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Tu calificación
-              </p>
-              <div className="flex items-center justify-center gap-1 sm:gap-2">
-                {[1, 2, 3, 4, 5].map((v) => {
-                  const active = v <= rateStars;
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      className="rounded-lg p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-1.5"
-                      onClick={() => setRateStars(v)}
-                      aria-label={`${v} estrellas`}
-                    >
-                      <Star
-                        className={`h-9 w-9 sm:h-8 sm:w-8 ${active ? "fill-amber-500 text-amber-500" : "text-muted-foreground/70"}`}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <Button className="w-full" onClick={() => void submitRideRating()} disabled={rateBusy}>
-              {rateBusy ? "Enviando…" : "Enviar calificación"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <GoRideRatingDialog
+        open={rateDialogOpen}
+        module={goSlugToRatingModule(goSlug)}
+        perspective="rider"
+        targetName={rateTargetRef.current?.targetName ?? `Tu ${uiWords.driver}`}
+        stars={rateStars}
+        onStarsChange={setRateStars}
+        onSubmit={() => void submitRideRating()}
+        isSubmitting={rateBusy}
+      />
 
       <GoPanicFloatingButton
         rideId={activeRideId}

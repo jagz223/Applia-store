@@ -17,7 +17,6 @@ import { Badge } from "@/components/ui/badge";
 import { useUpdateBookingStatus, useConfirmBookingByClient } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { toDate } from "@/lib/date-utils";
-import { chatApi } from "@/lib/chat-api";
 
 type BookingRow = {
   id: number;
@@ -56,10 +55,6 @@ function getToken() {
   } catch {
     return null;
   }
-}
-
-function statusLabel(status: string): string {
-  return STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
 }
 
 export function ChatClientBookingModal({
@@ -105,17 +100,12 @@ export function ChatClientBookingModal({
     }
   }, [open]);
 
-  const sendStatusNoticeToChat = async (id: number, newStatus: string) => {
+  const refreshChatAfterStatusChange = () => {
     const cid = conversationId != null ? Number(conversationId) : NaN;
     if (!Number.isFinite(cid) || cid <= 0) return;
-    const text = `La reserva #${id} pasó al estado «${statusLabel(newStatus)}».`;
-    try {
-      await chatApi.sendMessage({ conversationId: cid, content: text, type: "system" });
-      void queryClient.invalidateQueries({ queryKey: ["chat", "conversations"] });
-      void queryClient.invalidateQueries({ queryKey: ["chat", "messages", cid] });
-    } catch (e) {
-      console.error("[ChatClientBookingModal] No se pudo enviar el aviso al chat:", e);
-    }
+    void queryClient.invalidateQueries({ queryKey: ["chat", "conversations"] });
+    void queryClient.invalidateQueries({ queryKey: ["chat", "messages", cid] });
+    void queryClient.refetchQueries({ queryKey: ["chat", "messages", cid] });
   };
 
   const executeStatusUpdate = (id: number, status: string, onApplied?: () => void) => {
@@ -124,11 +114,7 @@ export function ChatClientBookingModal({
       {
         onSuccess: async () => {
           onApplied?.();
-          try {
-            await sendStatusNoticeToChat(id, status);
-          } catch {
-            /* sendStatusNoticeToChat ya registra errores */
-          }
+          refreshChatAfterStatusChange();
         },
       },
     );

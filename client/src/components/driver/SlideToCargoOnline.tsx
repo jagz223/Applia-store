@@ -15,7 +15,6 @@ type Props = {
   className?: string;
   disabled?: boolean;
   style?: React.CSSProperties;
-  slideNeedsExtraPush?: boolean;
 };
 
 /**
@@ -29,7 +28,6 @@ export function SlideToCargoOnline({
   className,
   disabled = false,
   style,
-  slideNeedsExtraPush = false,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [maxX, setMaxX] = useState(0);
@@ -151,7 +149,7 @@ export function SlideToCargoOnline({
                 : "Completa verificación y registra tu vehículo para recibir viajes"
               : label}
         </p>
-        <div style={{ paddingBottom: slideNeedsExtraPush ? "10px" : "55px" }}>
+        <div>
           <button
             type="button"
             aria-label={

@@ -50,6 +50,7 @@ import {
   type WithdrawalHistoryStatus,
   type WithdrawalHistoryItem,
   useAdminCategories,
+  ADMIN_CATEGORIES_QUERY_KEY,
   useSubcategories,
   useUpdateCategory,
   useCreateSubcategory,
@@ -73,6 +74,11 @@ import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
 import { AnimatePresence, motion } from "framer-motion";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName, CATEGORY_DISPLAY_NAMES } from "@shared/default-categories";
+import {
+  SUBSCRIPTION_FEE_ADMIN_SLUGS,
+  subscriptionFeeAdminHint,
+  subscriptionFeeAdminLabel,
+} from "@shared/subscription-category-fees";
 import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 import { firstAvailableSubcategoryIcon } from "@shared/subcategory-lucide-picklist";
 import { SubcategoryIconPicker } from "@/components/admin/SubcategoryIconPicker";
@@ -206,6 +212,29 @@ async function patchWithAuth(url: string, body: unknown) {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function postWithAuth(url: string, body?: unknown) {
+  const token = localStorage.getItem("token");
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let message = await res.text();
+    try {
+      const parsed = JSON.parse(message) as { message?: string };
+      if (parsed.message) message = parsed.message;
+    } catch {
+      /* texto plano */
+    }
+    throw new Error(message || "Error en la solicitud");
+  }
   return res.json();
 }
 
@@ -878,7 +907,6 @@ function AdminCategoriesTab() {
                       if (parentBrand) subSlugToBrand[sub.slug] = parentBrand;
                     }
                     const brandColors: Record<string, string> = {
-                      "Fix Go": "bg-blue-500/15 text-blue-400 border-blue-500/30",
                       "Man Go": "bg-orange-500/15 text-orange-400 border-orange-500/30",
                       "Pro Go": "bg-purple-500/15 text-purple-400 border-purple-500/30",
                       "Delivery": "bg-green-500/15 text-green-400 border-green-500/30",
@@ -1550,6 +1578,26 @@ export default function AdminPanel() {
     staleTime: 10_000,
   });
   const brandProviders: AdminBrandProviderRow[] = brandProvidersData?.providers ?? [];
+
+  const seedBaseCategoriesMutation = useMutation({
+    mutationFn: () => postWithAuth("/api/admin/catalog/seed-categories"),
+    onSuccess: (data: { message?: string; created?: string[] }) => {
+      queryClient.invalidateQueries({ queryKey: ADMIN_CATEGORIES_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ["/api/categories"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-service-brands"] });
+      toast({
+        title: "Categorías sincronizadas",
+        description: data.message ?? "Sincronización completada.",
+      });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Error",
+        description: err.message || "No se pudieron sincronizar las categorías base.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const toggleBrandMutation = useMutation({
     mutationFn: async (args: { categoryId: number; isActive: boolean }) =>
@@ -2586,11 +2634,34 @@ export default function AdminPanel() {
           <TabsContent value="services">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card className="min-w-0">
-                <CardHeader>
-                  <CardTitle>Servicios (marcas)</CardTitle>
-                  <CardDescription>
-                    Activa o desactiva qué marcas de servicios se muestran en la app. Solo administración.
-                  </CardDescription>
+                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-1.5"
+                  >
+                    <CardTitle>Servicios (marcas)</CardTitle>
+                    <CardDescription>
+                      Activa o desactiva qué marcas de servicios se muestran en la app. Solo administración.
+                    </CardDescription>
+                  </motion.div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={seedBaseCategoriesMutation.isPending}
+                    onClick={() => seedBaseCategoriesMutation.mutate()}
+                  >
+                    {seedBaseCategoriesMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Sincronizando…
+                      </>
+                    ) : (
+                      "Sincronizar categorías base"
+                    )}
+                  </Button>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {serviceBrandsLoading ? (
@@ -3947,16 +4018,17 @@ export default function AdminPanel() {
                   ) : (
                     <>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        {adminCategoriesRaw
-                          .filter((c: any) => typeof c?.slug === "string" && String(c.slug).trim().length > 0)
-                          .map((c: any) => {
-                            const slug = String(c.slug);
-                            const label = CATEGORY_DISPLAY_NAMES?.[slug] ?? getCategoryDisplayName(c) ?? String(c?.name ?? slug);
+                        {SUBSCRIPTION_FEE_ADMIN_SLUGS.map((slug) => {
+                            const label = subscriptionFeeAdminLabel(slug);
+                            const hint = subscriptionFeeAdminHint(slug);
                             const v = subscriptionFeesDraft?.[slug];
                             return (
                               <div key={slug} className="rounded-xl border border-border bg-muted/20 p-4">
                                 <p className="font-semibold text-foreground">{label}</p>
                                 <p className="mt-0.5 text-xs text-muted-foreground">Slug: {slug}</p>
+                                {hint ? (
+                                  <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+                                ) : null}
                                 <div className="mt-3 space-y-1">
                                   <Label>Mensualidad (USD)</Label>
                                   <Input
@@ -3992,10 +4064,7 @@ export default function AdminPanel() {
                                 | Record<string, number>
                                 | undefined;
                               const feesBySlug: Record<string, number> = {};
-                              for (const c of adminCategoriesRaw.filter(
-                                (x: any) => typeof x?.slug === "string" && String(x.slug).trim().length > 0
-                              )) {
-                                const sl = String(c.slug);
+                              for (const sl of SUBSCRIPTION_FEE_ADMIN_SLUGS) {
                                 const raw = subscriptionFeesDraft[sl];
                                 const n = coerceUsdDraftValueToNumber(raw);
                                 feesBySlug[sl] = n !== undefined

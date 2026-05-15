@@ -3,16 +3,29 @@ import { useRoute, Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useService, useUpdateService, useCurrentProvider, useCategories, useMyServices, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
+import {
+  useService,
+  useUpdateService,
+  useDeleteService,
+  useCurrentProvider,
+  useCategories,
+  useMyServices,
+  useCategoryVisibility,
+  useSubcategories,
+} from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
+import {
+  consumeEditServiceReturnPath,
+  editServiceReturnLabel,
+} from "@/lib/edit-service-return-path";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, ArrowLeft, Sparkles, Tag } from "lucide-react";
+import { Loader2, ArrowLeft, Sparkles, Tag, Trash2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,7 +52,12 @@ import {
 } from "@shared/provider-preparation";
 import { getCategoryDisplayName, effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
-
+import { createServiceRequiresSubcategory } from "@shared/create-service-catalog-context";
+import {
+  canChangeCatalogServiceCategory,
+  canDeleteCatalogService,
+  isPrimaryProviderCatalogService,
+} from "@shared/provider-primary-catalog-service";
 function buildEditServiceSchema(categories: { id: number; slug?: string }[]) {
   return z
     .object({
@@ -56,6 +74,16 @@ function buildEditServiceSchema(categories: { id: number; slug?: string }[]) {
     })
     .superRefine((vals, ctx) => {
       const slug = String(categories.find((c) => c.id === vals.categoryId)?.slug ?? "");
+      if (createServiceRequiresSubcategory(slug)) {
+        const subId = vals.subcategoryId != null ? Number(vals.subcategoryId) : NaN;
+        if (!Number.isFinite(subId) || subId <= 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Selecciona una subcategoría.",
+            path: ["subcategoryId"],
+          });
+        }
+      }
       if (!isTradeListingCategorySlug(slug)) return;
       const p = (vals.preparationLevel ?? "").trim();
       if (p.length < 10) {
@@ -74,11 +102,15 @@ export default function EditService() {
   const [, params] = useRoute("/edit-service/:id");
   const [, setLocation] = useLocation();
   const id = parseInt(params?.id || "0", 10);
+  const [returnPath] = useState(() => consumeEditServiceReturnPath(`/service/${id}`));
+  const returnLabel = editServiceReturnLabel(returnPath);
   const { data: service, isLoading: serviceLoading } = useService(id);
   const { data: provider, isLoading: providerLoading } = useCurrentProvider();
   const { user } = useAuth();
   const updateService = useUpdateService(id);
+  const deleteService = useDeleteService();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const isAdmin = hasAdminRole(user);
 
@@ -99,14 +131,29 @@ export default function EditService() {
     });
   }, [categories, hiddenSlugs]);
 
+  const registrationCategoryId = provider ? Number((provider as { categoryId?: number }).categoryId) : undefined;
+
+  const isPrimaryCatalogService = useMemo(() => {
+    if (!service || !provider) return false;
+    return isPrimaryProviderCatalogService(id, myServices, registrationCategoryId);
+  }, [service, provider, id, myServices, registrationCategoryId]);
+
+  const categoryChangeAllowed = isAdmin || (service && provider && canChangeCatalogServiceCategory(id, myServices, registrationCategoryId));
+
   const selectableCategoriesForService = useMemo(() => {
     if (!service) return [];
     if (isAdmin) return assignableCategories;
+    if (isPrimaryCatalogService) {
+      return assignableCategories.filter((c) => Number(c.id) === Number(service.categoryId));
+    }
     const usedOthers = new Set(
       myServices.filter((s) => s.id !== service.id).map((s) => Number((s as { categoryId: number }).categoryId))
     );
     return assignableCategories.filter((c) => Number(c.id) === Number(service.categoryId) || !usedOthers.has(Number(c.id)));
-  }, [assignableCategories, myServices, service, isAdmin]);
+  }, [assignableCategories, myServices, service, isAdmin, isPrimaryCatalogService]);
+
+  const canDeleteThisService =
+    !isAdmin && service && provider && canDeleteCatalogService(id, myServices, registrationCategoryId);
 
   const editServiceSchema = useMemo(() => buildEditServiceSchema(categories), [categories]);
 
@@ -134,6 +181,7 @@ export default function EditService() {
   }, [watchedCategoryId, service, categories]);
   const isTrade = isTradeListingCategorySlug(activeCategorySlug);
   const isProfessional = isProfessionalListingCategorySlug(activeCategorySlug);
+  const subcategoryRequired = createServiceRequiresSubcategory(activeCategorySlug);
 
   const { data: subcategories = [] } = useSubcategories(
     watchedCategoryId && watchedCategoryId > 0 ? watchedCategoryId : undefined
@@ -200,7 +248,7 @@ export default function EditService() {
           : {}),
         ...(!trade && professionalListing ? { listingCertifications: (vals.certifications ?? "").trim() } : {}),
       });
-      setLocation(`/service/${id}`);
+      setLocation(returnPath);
     } catch {
       // Toasts desde mutaciones
     }
@@ -224,7 +272,7 @@ export default function EditService() {
 
   if (!user) {
     return (
-      <div className="container max-w-md py-20 text-center">
+      <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <p className="text-muted-foreground mb-4">Inicia sesión para editar servicios.</p>
         <Button asChild>
           <Link href="/login">Iniciar sesión</Link>
@@ -235,21 +283,21 @@ export default function EditService() {
 
   if (!isOwner && !hasAdminRole(user)) {
     return (
-      <div className="container max-w-md py-20 text-center">
+      <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <p className="text-muted-foreground mb-4">Solo el dueño del servicio o un administrador puede editarlo.</p>
         <Button asChild variant="outline">
-          <Link href={`/service/${id}`}>Volver al servicio</Link>
+          <Link href={returnPath}>{returnLabel}</Link>
         </Button>
       </div>
     );
   }
 
   return (
-    <div className="container max-w-2xl py-12 px-4">
+    <div className="container mx-auto max-w-2xl w-full px-4 py-12">
       <Button variant="ghost" className="mb-4 gap-2 -ml-2" asChild>
-        <Link href={`/service/${id}`}>
+        <Link href={returnPath}>
           <ArrowLeft className="h-4 w-4" />
-          Volver al servicio
+          {returnLabel}
         </Link>
       </Button>
       <div className="mb-8 text-center">
@@ -326,7 +374,7 @@ export default function EditService() {
                         form.setValue("subcategoryId", null);
                       }}
                       value={String(field.value)}
-                      disabled={selectableCategoriesForService.length <= 1}
+                      disabled={!categoryChangeAllowed || selectableCategoriesForService.length <= 1}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -342,7 +390,9 @@ export default function EditService() {
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      Puedes mover el servicio a otra categoría de catálogo si no tienes ya otro servicio en esa categoría.
+                      {isPrimaryCatalogService
+                        ? "Esta es tu ficha de registro: la categoría (Man Go o Pro Go) quedó fija al crear tu cuenta."
+                        : "Puedes cambiar entre Man Go y Pro Go si aún no tienes otro servicio en esa categoría."}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -355,18 +405,18 @@ export default function EditService() {
                   name="subcategoryId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Subcategoría (opcional)</FormLabel>
+                      <FormLabel>Subcategoría</FormLabel>
                       <Select
-                        onValueChange={(v) => field.onChange(v === "none" || !v ? null : Number(v))}
-                        value={field.value != null ? String(field.value) : "none"}
+                        onValueChange={(v) => field.onChange(v && v !== "none" ? Number(v) : undefined)}
+                        value={field.value != null ? String(field.value) : undefined}
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Subcategoría" />
+                            <SelectValue placeholder="Selecciona una subcategoría" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="none">Ninguna</SelectItem>
+                          {!subcategoryRequired ? <SelectItem value="none">Ninguna</SelectItem> : null}
                           {subcategories.map((sub) => (
                             <SelectItem key={String(sub.id)} value={String(sub.id)}>
                               {sub.name}
@@ -500,6 +550,29 @@ export default function EditService() {
                 )}
               />
 
+              {canDeleteThisService ? (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+                  <p className="text-sm font-medium text-foreground">Eliminar este servicio adicional</p>
+                  <p className="text-xs text-muted-foreground">
+                    Solo puedes borrar servicios extra. Tu ficha principal de registro no se puede eliminar desde aquí.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="gap-2"
+                    disabled={deleteService.isPending}
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    {deleteService.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                    Eliminar servicio
+                  </Button>
+                </div>
+              ) : null}
+
               <Button
                 type="submit"
                 className="w-full text-lg h-12"
@@ -531,6 +604,34 @@ export default function EditService() {
             <AlertDialogCancel>Volver a revisar</AlertDialogCancel>
             <AlertDialogAction onClick={handleSaveConfirmed} className="bg-primary text-primary-foreground hover:bg-primary/90">
               Sí, guardar cambios
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar este servicio?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se quitará del catálogo. Tu ficha principal de registro no se verá afectada. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                try {
+                  await deleteService.mutateAsync(id);
+                  setDeleteOpen(false);
+                  setLocation("/my-services");
+                } catch {
+                  /* toast en el hook */
+                }
+              }}
+            >
+              Sí, eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

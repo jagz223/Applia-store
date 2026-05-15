@@ -23,7 +23,12 @@ import { getPackFares, setPackFares } from "./pack-fares";
 import { getSubscriptionFeesByCategorySlug, setSubscriptionFeesByCategorySlug } from "./subscription-fees";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
-import { DEFAULT_CATEGORIES, getCategoryDisplayName, isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categories";
+import {
+  DEFAULT_CATEGORIES,
+  getCategoryDisplayName,
+  isMobilityGoDriverVehicleCategorySlug,
+  isRetiredProviderCategorySlug,
+} from "@shared/default-categories";
 import { SETTINGS_URL_AFTER_VEHICLE_CHANGE_RESOLVED } from "@shared/settings-notification-urls";
 import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
 import {
@@ -41,6 +46,8 @@ import {
 } from "@shared/professional-listing-subscription";
 import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
 import { vehicleChangeProposalSchema } from "@shared/vehicle-change-proposal";
+import { serviceBelongsToBrand } from "@shared/service-belongs-to-brand";
+import { buildMobilityCategoryApprovalPatch } from "@shared/provider-category-membership";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
@@ -100,24 +107,6 @@ async function createAdminAuditEvent(args: {
   } catch (e) {
     console.error("[admin-audit] Error:", e);
   }
-}
-
-/**
- * Misma noción de "marca" que Explore (`providerCategoryId`): cuenta un servicio en la marca
- * si la categoría del servicio o la del proveedor coincide (evita que perfiles con categoryId desalineado no aparezcan en admin).
- */
-function serviceBelongsToBrand(
-  s: { categoryId?: unknown; provider?: { categoryId?: unknown; category?: unknown } | undefined },
-  brandCategoryId: number,
-  categories: Array<{ id?: unknown; slug?: unknown }>
-): boolean {
-  if (Number(s?.categoryId) === brandCategoryId) return true;
-  const p = s?.provider;
-  if (!p) return false;
-  if (p.categoryId != null && Number(p.categoryId) === brandCategoryId) return true;
-  const slug = categories.find((c) => Number(c?.id) === brandCategoryId)?.slug;
-  if (slug != null && typeof p.category === "string" && p.category.trim() === String(slug)) return true;
-  return false;
 }
 
 const updateUserSchema = z.object({
@@ -807,12 +796,18 @@ export function registerAdminRoutes(app: Express): void {
           const categories = await catalogService.getCategories();
           const cat = categories.find((c) => c.id === parsedVehicleProposal!.categoryId);
           const slug = String((cat as { slug?: string })?.slug ?? "");
+          const mobilityPatch = buildMobilityCategoryApprovalPatch(
+            provider as Parameters<typeof buildMobilityCategoryApprovalPatch>[0],
+            parsedVehicleProposal.categoryId,
+            slug,
+            categories,
+          );
           await catalogService.updateProvider((provider as { id: number }).id, {
-            categoryId: parsedVehicleProposal.categoryId,
-            category: slug,
+            ...mobilityPatch,
             subcategoryId: parsedVehicleProposal.subcategoryId ?? null,
             goBrands: parsedVehicleProposal.goBrands,
           } as any);
+          await catalogService.syncProviderCategorySlotsFromServices((provider as { id: number }).id);
           await genFebStorage.upsertPrimaryProviderVehicle({
             providerId: (provider as { id: number }).id,
             userId,
@@ -1359,10 +1354,15 @@ export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/service-brands", authenticateJWT, requireFullAdmin, async (_req, res) => {
     try {
       const [categories, services] = await Promise.all([genFebStorage.getCategories(), adminListAllServices()]);
-      const brandSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
+      const brandSlugs = new Set(
+        DEFAULT_CATEGORIES.map((c) => c.slug).filter((s) => !isRetiredProviderCategorySlug(s)),
+      );
       const hiddenSlugs = new Set(await getHiddenCategorySlugs());
       const brands = (categories ?? [])
-        .filter((c: any) => brandSlugs.has(String(c?.slug ?? "")))
+        .filter((c: any) => {
+          const slug = String(c?.slug ?? "");
+          return brandSlugs.has(slug) && !isRetiredProviderCategorySlug(slug);
+        })
         .map((c: any) => {
           const catId = Number(c.id);
           const svc = (services ?? [])
@@ -1388,6 +1388,27 @@ export function registerAdminRoutes(app: Express): void {
     } catch (e) {
       console.error("Error listing service brands:", e);
       return res.status(500).json({ message: "Error al listar marcas de servicios" });
+    }
+  });
+
+  /**
+   * POST /api/admin/catalog/seed-categories
+   * Crea en Firestore solo las categorías base que falten (no recrea slugs retirados como `maintenance`).
+   */
+  app.post("/api/admin/catalog/seed-categories", authenticateJWT, requireFullAdmin, async (_req, res) => {
+    try {
+      const result = await catalogService.seedCategories();
+      return res.status(200).json({
+        ok: true,
+        created: result.created,
+        message:
+          result.created.length > 0
+            ? `Se crearon ${result.created.length} categoría(s): ${result.created.join(", ")}`
+            : "No faltaba ninguna categoría base por crear.",
+      });
+    } catch (e) {
+      console.error("Error seeding categories:", e);
+      return res.status(500).json({ message: "Error al sincronizar categorías base" });
     }
   });
 

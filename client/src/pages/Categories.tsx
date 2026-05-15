@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useCategories, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
-import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
+import { effectiveHiddenCategorySlugs, getCategoryDisplayName, MAN_GO_CATEGORY_SLUG } from "@shared/default-categories";
 import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,14 +22,12 @@ export default function Categories() {
 
   const getCat = (slug: string) => categories.find((c: any) => c.slug === slug);
 
-  const technicalCat = getCat("technical");
+  const manGoCat = getCat(MAN_GO_CATEGORY_SLUG);
   const professionalCat = getCat("professional");
-  const maintenanceCat = getCat("maintenance");
   const transportCat = getCat("transport");
 
-  const { data: technicalSubs = [] } = useSubcategories((technicalCat as any)?.id ?? null);
+  const { data: manGoSubs = [] } = useSubcategories((manGoCat as any)?.id ?? null);
   const { data: professionalSubs = [] } = useSubcategories((professionalCat as any)?.id ?? null);
-  const { data: maintenanceSubs = [] } = useSubcategories((maintenanceCat as any)?.id ?? null);
 
   const { data: monthlyPopularSubcategories } = useQuery({
     queryKey: [api.categories.monthlyPopularSubcategories.path, CATEGORIES_POPULAR_SUB_LIMIT],
@@ -57,9 +55,8 @@ export default function Categories() {
     const items: { key: string; name: string; icon: string; parentName: string; href: string }[] = [];
 
     for (const { cat, subs } of [
-      { cat: technicalCat, subs: technicalSubs },
+      { cat: manGoCat, subs: manGoSubs },
       { cat: professionalCat, subs: professionalSubs },
-      { cat: maintenanceCat, subs: maintenanceSubs },
     ]) {
       if (!cat) continue;
       const catId = (cat as any).id;
@@ -76,28 +73,19 @@ export default function Categories() {
       }
     }
 
-    // Mobility cards (same size)
     if (transportCat && !hiddenSlugs.has("transport")) {
-      items.push({ key: "transport", name: (transportCat as any).name, icon: "Car", parentName: "Conductores disponibles", href: "/go/taxi" });
+      items.push({
+        key: "transport",
+        name: (transportCat as any).name,
+        icon: "Car",
+        parentName: "Conductores disponibles",
+        href: "/go/taxi",
+      });
     }
 
     return items;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [technicalSubs, professionalSubs, maintenanceSubs, technicalCat, professionalCat, maintenanceCat, transportCat, hiddenSlugs]);
-
-  const popularMonthLabel = useMemo(() => {
-    const key = monthlyPopularSubcategories?.monthKey;
-    if (!key || !/^\d{4}-\d{2}$/.test(key)) return null;
-    const [y, m] = key.split("-").map((x) => Number(x));
-    if (!y || !m) return null;
-    try {
-      return new Intl.DateTimeFormat("es-EC", { month: "long", year: "numeric", timeZone: "UTC" }).format(
-        new Date(Date.UTC(y, m - 1, 4))
-      );
-    } catch {
-      return key;
-    }
-  }, [monthlyPopularSubcategories?.monthKey]);
+  }, [manGoSubs, professionalSubs, manGoCat, professionalCat, transportCat, hiddenSlugs]);
 
   const displayItems = useMemo(() => {
     const subs = allItems.filter((i) => i.key.startsWith("sub-"));
@@ -118,17 +106,20 @@ export default function Categories() {
   }, [allItems, monthlyPopularSubcategories]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gradient-to-b from-muted/30 to-background"
+    >
       <section className="container mx-auto px-4 py-10 max-w-7xl">
-        <div className="text-center mb-8">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center mb-8"
+        >
           <h2 className="text-2xl font-display font-bold text-foreground mb-2">Servicios por categoría</h2>
           <p className="text-muted-foreground text-sm">Haz clic en un servicio para explorar</p>
-          {popularMonthLabel && (monthlyPopularSubcategories?.items?.length ?? 0) > 0 ? (
-            <p className="text-xs sm:text-sm text-secondary font-medium max-w-2xl mx-auto mt-2">
-              Orden por demanda: subcategorías con más reservas confirmadas o completadas en {popularMonthLabel}.
-            </p>
-          ) : null}
-        </div>
+        </motion.div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {displayItems.map((item, index) => {
             const subcategoryIdForStats = item.key.startsWith("sub-")
@@ -138,40 +129,53 @@ export default function Categories() {
               ? popularityBySubcategoryId.get(subcategoryIdForStats)
               : undefined;
             return (
-            <motion.div
-              key={item.key}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-            >
-              <Link href={item.href}>
-                <Card className="cursor-pointer group hover:border-primary/50 transition-all duration-300 h-full">
-                  <CardContent className="p-3 sm:p-5 text-center flex flex-col items-center gap-2 h-full justify-center min-h-[110px]">
-                    <div className="p-2.5 rounded-xl bg-primary/10 text-primary group-hover:scale-110 transition-transform">
-                      <CategoryIcon name={item.icon} className="w-5 h-5 sm:w-6 sm:h-6" />
-                    </div>
-                    <div className="min-w-0 w-full">
-                      <p className="text-xs sm:text-sm font-semibold leading-tight">{item.name}</p>
-                      {item.parentName ? (
-                        <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">
-                          {item.parentName}
-                        </p>
-                      ) : null}
-                      {monthlyBookingCount != null && monthlyBookingCount > 0 ? (
-                        <p className="text-[10px] sm:text-xs text-secondary tabular-nums font-medium mt-0.5 leading-snug">
-                          {monthlyBookingCount} reserva{monthlyBookingCount === 1 ? "" : "s"} confirmada
-                          {monthlyBookingCount === 1 ? "" : "s"} o completada{monthlyBookingCount === 1 ? "" : "s"} este mes
-                        </p>
-                      ) : null}
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            </motion.div>
+              <motion.div
+                key={item.key}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.05 }}
+              >
+                <Link href={item.href}>
+                  <Card className="cursor-pointer group hover:border-primary/50 transition-all duration-300 h-full">
+                    <CardContent className="p-3 sm:p-5 text-center flex flex-col items-center gap-2 h-full justify-center min-h-[110px]">
+                      <motion.div
+                        whileHover={{ scale: 1.05 }}
+                        className="p-2.5 rounded-xl bg-primary/10 text-primary group-hover:scale-110 transition-transform"
+                      >
+                        <CategoryIcon name={item.icon} className="w-5 h-5 sm:w-6 sm:h-6" />
+                      </motion.div>
+                      <motion.div className="min-w-0 w-full" whileHover={{ scale: 1.02 }}>
+                        <p className="text-xs sm:text-sm font-semibold leading-tight">{item.name}</p>
+                        {item.parentName ? (
+                          <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+                            {item.parentName}
+                          </p>
+                        ) : null}
+                        {monthlyBookingCount != null && monthlyBookingCount > 0 ? (
+                          <p className="text-[10px] sm:text-xs text-secondary tabular-nums font-medium mt-0.5 leading-snug">
+                            {monthlyBookingCount} reserva{monthlyBookingCount === 1 ? "" : "s"} confirmada
+                            {monthlyBookingCount === 1 ? "" : "s"} o completada{monthlyBookingCount === 1 ? "" : "s"} este mes
+                          </p>
+                        ) : null}
+                      </motion.div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              </motion.div>
             );
           })}
         </div>
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="mt-10 text-center"
+        >
+          <Link href="/explore">
+            <span className="text-primary font-medium hover:underline">Ver todos los servicios en Explorar</span>
+          </Link>
+        </motion.div>
       </section>
-    </div>
+    </motion.div>
   );
 }

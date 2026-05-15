@@ -2,7 +2,11 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useExploreCategoryDisplayName } from "@/contexts/ExploreCategoryContext";
 import { useCategories, useCategoryVisibility, useServices, useSubcategories } from "@/hooks/use-mango-data";
-import { DEFAULT_CATEGORIES, effectiveHiddenCategorySlugs } from "@shared/default-categories";
+import {
+  DEFAULT_CATEGORIES,
+  effectiveHiddenCategorySlugs,
+  isRetiredProviderCategorySlug,
+} from "@shared/default-categories";
 import { ServiceListItem } from "@/components/ServiceListItem";
 import { Input } from "@/components/ui/input";
 import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp, Bookmark } from "lucide-react";
@@ -12,7 +16,9 @@ import { Badge } from "@/components/ui/badge";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { motion } from "framer-motion";
 
-const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
+const providerSlugs = new Set(
+  DEFAULT_CATEGORIES.map((c) => c.slug).filter((s) => !isRetiredProviderCategorySlug(s)),
+);
 
 export default function Explore() {
   const [, setLocation] = useLocation();

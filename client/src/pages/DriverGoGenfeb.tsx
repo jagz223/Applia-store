@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED, FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
@@ -21,7 +21,7 @@ import {
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider, useWallet } from "@/hooks/use-mango-data";
-import { MOBILITY_UI, mobilityServiceLabel } from "@shared/mobility-ui-labels";
+import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 import {
   NEGOTIATION_OFFER_REMOVED_REASON_RIDER_REJECTED,
   NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN,
@@ -49,6 +49,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { GoChatProvider, useGoChat } from "@/contexts/GoChatContext";
 import { GoDriverUiProvider } from "@/contexts/GoDriverUiContext";
+import { GoRideRatingDialog, goSlugToRatingModule } from "@/components/go/GoRideRatingDialog";
 import { GoPanicFloatingButton } from "@/components/go/GoPanicFloatingButton";
 import { GoChatDrawer } from "@/components/go/GoChatDrawer";
 import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
@@ -69,6 +70,7 @@ import {
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { GoDriverNegotiationBoardPanel } from "@/components/go/GoDriverNegotiationBoardPanel";
+import { goOffsetAboveBottomNav, goViewportClasses, useGoCompactViewport } from "@/lib/go-viewport-layout";
 
 function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const R = 6371000;
@@ -164,8 +166,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const incomingOffer = goDriverUi?.currentOffer?.offer ?? null;
   const incomingModule = goDriverUi?.currentOffer?.module ?? null;
   const incomingOpen = incomingOffer != null;
-  /** Modal grande solo para ofertas clásicas (precio estándar / cola). El regateo va al tablero (sheet). */
-  const classicOfferModalOpen = incomingOpen && !!incomingOffer && !incomingOffer.isNegotiated;
   const [respondBusy, setRespondBusy] = useState(false);
   const [negotiationBoardOpen, setNegotiationBoardOpen] = useState(false);
   /** Tras enviar oferta de regateo: recordatorio compacto hasta match / retiro / servicio activo. */
@@ -207,6 +207,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const [rateStars, setRateStars] = useState(5);
   const [rateBusy, setRateBusy] = useState(false);
   const rateTargetRef = useRef<{ rideId: string; targetName: string } | null>(null);
+  /** Modal grande solo para ofertas clásicas (precio estándar / cola). El regateo va al tablero (sheet). */
+  const classicOfferModalOpen =
+    incomingOpen && !!incomingOffer && !incomingOffer.isNegotiated && !rateDialogOpen;
   const [activeRideStarted, setActiveRideStarted] = useState(false);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
@@ -224,16 +227,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const geoPosRef = useRef(geoPos);
   geoPosRef.current = geoPos;
 
-  const [isMdUp, setIsMdUp] = useState(() =>
-    typeof window !== "undefined" ? window.matchMedia("(min-width: 768px)").matches : false
-  );
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
-    const fn = () => setIsMdUp(mq.matches);
-    fn();
-    mq.addEventListener("change", fn);
-    return () => mq.removeEventListener("change", fn);
-  }, []);
+  const isGoCompact = useGoCompactViewport();
 
   const { data: providerVehicle } = useQuery({
     queryKey: ["/api/me/provider-vehicle"],
@@ -256,36 +250,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const hasVehicle = !!providerVehicle?.vehicle_type;
   const canReceive = !!provider?.isVerified && (goSlug === "pack" ? isPackGoDriver || isCarGoDriver : isCarGoDriver) && hasVehicle;
 
-  // Ajuste dinámico: si el deslizador NO está dentro del 30% inferior del viewport,
-  // aplicamos un padding-bottom grande para empujarlo hacia abajo.
   const slideDockRef = useRef<HTMLDivElement>(null);
-  const [slideNeedsExtraPush, setSlideNeedsExtraPush] = useState(false);
-
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = slideDockRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const vh = window.innerHeight || 0;
-      if (vh <= 0) return;
-      const bottomZoneTop = vh * 0.7; // inicio del 30% inferior
-      // Si el deslizador está por encima de esa zona, necesitamos empujarlo hacia abajo.
-      const shouldPush = rect.top < bottomZoneTop;
-      setSlideNeedsExtraPush(shouldPush);
-    };
-
-    // Medir al montar y cuando cambie el layout (ráfaga de frames para transiciones).
-    const raf1 = requestAnimationFrame(() => {
-      measure();
-      requestAnimationFrame(measure);
-    });
-
-    window.addEventListener("resize", measure);
-    return () => {
-      cancelAnimationFrame(raf1);
-      window.removeEventListener("resize", measure);
-    };
-  }, [activeRideOffer, receiving, canReceive, isMdUp]);
 
   useEffect(() => {
     setReceivingCargo(loadGoReceiving("cargo"));
@@ -628,6 +593,14 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         rateTargetRef.current = { rideId: p.rideId, targetName: snap.rider?.name ?? "Cliente" };
         setRateStars(5);
         setRateDialogOpen(true);
+      } else if (canReceive && providerVehicle?.vehicle_type) {
+        if (goSlug === "pack") {
+          setReceivingPack(true);
+          saveGoReceiving("pack", true);
+        } else {
+          setReceivingCargo(true);
+          saveGoReceiving("cargo", true);
+        }
       }
       clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       setActiveRideId(null);
@@ -688,7 +661,19 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       socket.off(`${rideSocketPrefix}completed`, onCompleted);
       socket.off(`${rideSocketPrefix}cancelled`, onCancelled);
     };
-  }, [socket, toast, resetChat, activeConversationId, queryClient, rideSocketPrefix, goDriverUi, goSlug, user?.id]);
+  }, [
+    socket,
+    toast,
+    resetChat,
+    activeConversationId,
+    queryClient,
+    rideSocketPrefix,
+    goDriverUi,
+    goSlug,
+    user?.id,
+    canReceive,
+    providerVehicle?.vehicle_type,
+  ]);
 
   const submitRideRating = useCallback(async () => {
     const tgt = rateTargetRef.current;
@@ -706,13 +691,22 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       if (!res.ok) throw new Error(data.message || "No se pudo enviar la calificación");
       setRateDialogOpen(false);
       rateTargetRef.current = null;
+      if (canReceive && providerVehicle?.vehicle_type) {
+        if (goSlug === "pack") {
+          setReceivingPack(true);
+          saveGoReceiving("pack", true);
+        } else {
+          setReceivingCargo(true);
+          saveGoReceiving("cargo", true);
+        }
+      }
       toast({ title: "¡Gracias!", description: "Calificación enviada." });
     } catch (e) {
       toast({ title: "No se pudo enviar", description: e instanceof Error ? e.message : "Intenta de nuevo", variant: "destructive" });
     } finally {
       setRateBusy(false);
     }
-  }, [rateStars, toast, rideApiBase]);
+  }, [rateStars, toast, rideApiBase, canReceive, providerVehicle?.vehicle_type, goSlug]);
 
   useEffect(() => {
     if (!socket) return;
@@ -1236,7 +1230,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             saveGoReceiving("cargo", n);
           }}
           disabled={!canReceive}
-          slideNeedsExtraPush={slideNeedsExtraPush}
           goSlug="cargo"
           className="border-border/70 bg-background/90 shadow-lg ring-1 ring-black/10 backdrop-blur-md dark:ring-white/10"
         />
@@ -1249,7 +1242,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             saveGoReceiving("pack", n);
           }}
           disabled={!canReceive}
-          slideNeedsExtraPush={slideNeedsExtraPush}
           goSlug="pack"
           className="border-border/70 bg-background/90 shadow-lg ring-1 ring-black/10 backdrop-blur-md dark:ring-white/10"
         />
@@ -1259,7 +1251,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 
   /** En escritorio el panel sigue visible aunque se haya ocultado en móvil (evita vista vacía). */
   const showRidePanel =
-    !!activeRideOffer && (!activeRidePanelCollapsed || isMdUp);
+    !!activeRideOffer && (!activeRidePanelCollapsed || !isGoCompact);
 
   const activeServicePanel = showRidePanel ? (
     <div className="rounded-2xl border border-border/70 bg-background/92 px-3 py-3 text-[11px] shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10">
@@ -1387,6 +1379,19 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           </div>
         </div>
       ) : null}
+      {activeRideStarted && activeRideId ? (
+        <div className="mt-2">
+          <GoPanicFloatingButton
+            variant="embedded"
+            rideId={activeRideId}
+            goModule={goSlug === "pack" ? "delivery" : "taxi"}
+            visible
+            perspective="driver"
+            serviceLabel={goSlug === "pack" ? "envío" : "viaje"}
+            onOfferCancelAfterSuccess={() => setCancelServiceOpen(true)}
+          />
+        </div>
+      ) : null}
       <Button
         type="button"
         variant="outline"
@@ -1409,7 +1414,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             saveGoReceiving("cargo", n);
           }}
           disabled={!canReceive}
-          slideNeedsExtraPush={false}
           goSlug="cargo"
           className="border-border/60 bg-background/95 shadow-md ring-1 ring-black/[0.06] dark:bg-card/95 dark:ring-white/10"
         />
@@ -1421,7 +1425,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             saveGoReceiving("pack", n);
           }}
           disabled={!canReceive}
-          slideNeedsExtraPush={false}
           goSlug="pack"
           className="border-border/60 bg-background/95 shadow-md ring-1 ring-black/[0.06] dark:bg-card/95 dark:ring-white/10"
         />
@@ -1488,14 +1491,15 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     <div
       className={cn(
         "flex min-h-0 flex-1 flex-col bg-gradient-to-b from-muted/25 to-background pb-6",
-        "max-md:h-full max-md:min-h-0 max-md:overflow-hidden max-md:pb-0"
+        "max-lg:h-full max-lg:min-h-0 max-lg:overflow-hidden max-lg:pb-0"
       )}
     >
       {/* Móvil: mapa llena el área de main (entre cabecera shell y barra inferior), sin scroll ni “doble capa”. */}
-      {!isMdUp && (
+      {isGoCompact && (
         <div
           className={cn(
-            "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-[box-shadow] duration-300 md:hidden max-md:h-[calc(100vh-8.25rem)] max-md:h-[calc(100svh-8.25rem)] max-md:min-h-[calc(100vh-8.25rem)] max-md:min-h-[calc(100svh-8.25rem)]",
+            goViewportClasses.mapStage,
+            "transition-[box-shadow] duration-300 lg:hidden",
             receiving && canReceive && "shadow-[inset_0_0_0_2px_rgba(16,185,129,0.35)]"
           )}
         >
@@ -1512,8 +1516,13 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               routeRenderKey={serviceRouteRenderKey}
             />
           </div>
-          <div className="relative z-30 flex min-h-0 flex-1 flex-col pointer-events-none" >
-            <div className="pointer-events-auto shrink-0 space-y-1.5 px-3 pt-2">
+          <div className="relative z-30 flex shrink-0 flex-col pointer-events-none">
+            <div
+              className={cn(
+                "pointer-events-auto space-y-1.5 pt-2 pr-3",
+                goViewportClasses.shellFabOverlayInsetLeft,
+              )}
+            >
               {driverNegotiationBubble}
               {receiving && canReceive ? (
                 <div className="rounded-lg border border-emerald-500/45 bg-background/88 p-1.5 shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:bg-emerald-500/10 dark:ring-white/10 sm:rounded-xl sm:p-2">
@@ -1555,12 +1564,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               )}
             </div>
           </div>
-          {/* Controles anclados encima de la barra inferior (sin tapar el mapa). */}
-          <div style={{ paddingBottom: slideNeedsExtraPush ? "10vmin" : "27vmin" }}>
-            <div className="pointer-events-none absolute inset-x-0 bottom-16 z-40 px-3 pb-[calc(env(safe-area-inset-bottom,0px))]">
-              <div ref={slideDockRef} className="pointer-events-auto pt-2">
-                {activeRideOffer ? activeServicePanel : controlsBlockMobile}
-              </div>
+          <div className={goViewportClasses.mapControlsDock}>
+            <div ref={slideDockRef} className="pointer-events-auto">
+              {activeRideOffer ? activeServicePanel : controlsBlockMobile}
             </div>
           </div>
           <DriverTripHistorySheet
@@ -1578,13 +1584,14 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               type="button"
               variant="ghost"
               className={cn(
-                /* Encima del botón Pánico: mismo cálculo que TaxiRide (GoPanicFloatingButton + h-14 + gap) */
-                "fixed bottom-[calc(8.625rem+env(safe-area-inset-bottom,0px))] right-3 z-[200] flex h-12 min-h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-white/95 p-0 shadow-none md:bottom-[calc(5.125rem)]",
+                /* Encima de la barra inferior (SOS queda a la izquierda) */
+                "fixed right-3 z-[200] flex h-12 min-h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-white/95 p-0 shadow-none md:bottom-[calc(5.125rem)]",
                 "bg-emerald-600 text-white shadow-[0_6px_20px_-2px_rgba(5,150,105,0.55),0_2px_8px_rgba(15,118,110,0.35)]",
                 "hover:bg-emerald-700 hover:text-white hover:shadow-lg",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
                 "[&_svg]:pointer-events-none [&_svg]:!h-6 [&_svg]:!w-6 [&_svg]:shrink-0",
               )}
+              style={{ bottom: goOffsetAboveBottomNav("1.5rem") }}
               onClick={() => setActiveRidePanelCollapsed(false)}
               aria-label="Mostrar panel del servicio"
             >
@@ -1841,74 +1848,17 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         </DialogContent>
       </Dialog>
 
-      <Dialog open={rateDialogOpen} onOpenChange={() => { /* bloqueado */ }}>
-        <DialogContent
-          hideClose
-          className="border-primary/20 bg-gradient-to-b from-primary/[0.07] via-background to-background sm:max-w-md"
-          onPointerDownOutside={(e) => e.preventDefault()}
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <DialogHeader className="space-y-3 text-center sm:text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 ring-2 ring-emerald-500/30">
-              <CheckCircle2 className="h-7 w-7 text-emerald-600 dark:text-emerald-400" aria-hidden />
-            </div>
-            <DialogTitle className="text-balance text-lg font-semibold leading-snug sm:text-xl">
-              {goSlug === "pack" ? "El envío ha terminado" : "El viaje ha terminado"}
-            </DialogTitle>
-            <DialogDescription asChild>
-              <div className="space-y-1 text-balance text-sm leading-relaxed text-muted-foreground">
-                <p className="text-foreground/90">
-                  {goSlug === "pack"
-                    ? "¿Estás conforme con el trato del cliente y la coordinación del paquete?"
-                    : "¿Estás conforme con el trato de tu pasajero?"}
-                </p>
-                <p>
-                  Calificá con las estrellas a{" "}
-                  <span className="font-semibold text-foreground">{rateTargetRef.current?.targetName ?? "tu cliente"}</span>{" "}
-                  para {mobilityServiceLabel(goSlug)}.
-                </p>
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5">
-            <div className="rounded-xl border border-border/80 bg-card/90 px-2 py-5 shadow-sm sm:px-3">
-              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Tu calificación
-              </p>
-              <div className="flex items-center justify-center gap-1 sm:gap-2">
-                {[1, 2, 3, 4, 5].map((v) => {
-                  const active = v <= rateStars;
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      className="rounded-lg p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-1.5"
-                      onClick={() => setRateStars(v)}
-                      aria-label={`${v} estrellas`}
-                    >
-                      <Star
-                        className={`h-9 w-9 sm:h-8 sm:w-8 ${active ? "fill-amber-500 text-amber-500" : "text-muted-foreground/70"}`}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <Button className="w-full" onClick={() => void submitRideRating()} disabled={rateBusy}>
-              {rateBusy ? "Enviando…" : "Enviar calificación"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <GoPanicFloatingButton
-        rideId={activeRideId}
-        goModule={goSlug === "pack" ? "delivery" : "taxi"}
-        visible={activeRideStarted}
+      <GoRideRatingDialog
+        open={rateDialogOpen}
+        module={goSlugToRatingModule(goSlug)}
         perspective="driver"
-        serviceLabel={goSlug === "pack" ? "envío" : "viaje"}
-        onOfferCancelAfterSuccess={() => setCancelServiceOpen(true)}
+        targetName={rateTargetRef.current?.targetName ?? "Tu cliente"}
+        stars={rateStars}
+        onStarsChange={setRateStars}
+        onSubmit={() => void submitRideRating()}
+        isSubmitting={rateBusy}
       />
+
     </div>
   );
 }

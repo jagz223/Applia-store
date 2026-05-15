@@ -1,15 +1,24 @@
 /**
  * Seeder de subcategorías por defecto.
- * Crea en Firestore las subcategorías definidas en shared/default-subcategories.
- * Cada subcategoría tiene un campo categoryId que referencia a la categoría a la que pertenece.
+ * Crea en Firestore las subcategorías de shared/default-subcategories.
+ * Siempre asocia al padre canónico (Man Go = `technical`; nunca recrea bajo `maintenance`).
+ * Repara documentos legacy que sigan con categorySlug/categoryId de `maintenance`.
+ *
  * Ejecutar: npm run seed:subcategories
- * Requiere que las categorías existan (ejecutar antes npm run seed:categories).
+ * Requiere categorías base: npm run seed:categories
  */
 import "dotenv/config";
 import { getFirestore, initializeFirebase, FIRESTORE_COLLECTIONS } from "../server/firebase-admin";
-import { DEFAULT_SUBCATEGORIES } from "../shared/default-subcategories";
+import {
+  DEFAULT_SUBCATEGORIES,
+  getSubcategoryParentCategorySlug,
+} from "../shared/default-subcategories";
+import {
+  isRetiredProviderCategorySlug,
+  MAN_GO_CATEGORY_SLUG,
+} from "../shared/default-categories";
 
-const COUNTERS_DOC = "_counters";
+type ExistingSub = { data: Record<string, unknown>; docId: string };
 
 async function main() {
   const ok = initializeFirebase();
@@ -27,17 +36,26 @@ async function main() {
   const categoriesColl = db.collection(FIRESTORE_COLLECTIONS.CATEGORIES);
   const subCategoriesColl = db.collection(FIRESTORE_COLLECTIONS.SUB_CATEGORIES);
 
-  // Resolver slug de categoría → id
   const categoriesSnap = await categoriesColl.get();
   const categoryIdBySlug = new Map<string, number>();
   categoriesSnap.docs.forEach((doc) => {
     const data = doc.data();
     const id = typeof data?.id === "number" ? data.id : parseInt(String(doc.id), 10);
-    const slug = (data?.slug as string) ?? "";
+    const slug = String(data?.slug ?? "").trim().toLowerCase();
     if (slug && !Number.isNaN(id)) categoryIdBySlug.set(slug, id);
   });
 
-  // Obtener siguiente ID para sub_categories (contador o max existente)
+  const maintenanceCategoryId = categoryIdBySlug.get("maintenance");
+  const technicalCategoryId = categoryIdBySlug.get(MAN_GO_CATEGORY_SLUG);
+  if (maintenanceCategoryId != null) {
+    console.log(
+      "  ℹ Documento legacy categories/maintenance (id %s). El catálogo enlaza solo a '%s' (id %s).",
+      maintenanceCategoryId,
+      MAN_GO_CATEGORY_SLUG,
+      technicalCategoryId ?? "?",
+    );
+  }
+
   let nextId = 1;
   const subSnap = await subCategoriesColl.get();
   subSnap.docs.forEach((doc) => {
@@ -45,20 +63,52 @@ async function main() {
     if (!Number.isNaN(id)) nextId = Math.max(nextId, id + 1);
   });
 
-  const existingBySlug = new Set(
-    subSnap.docs.map((d) => (d.data()?.slug as string) ?? "").filter(Boolean)
-  );
+  const existingBySlug = new Map<string, ExistingSub>();
+  subSnap.docs.forEach((d) => {
+    const slug = String(d.data()?.slug ?? "").trim();
+    if (slug) existingBySlug.set(slug, { data: d.data() as Record<string, unknown>, docId: d.id });
+  });
 
   let created = 0;
+  let repaired = 0;
+
   for (const sub of DEFAULT_SUBCATEGORIES) {
-    if (existingBySlug.has(sub.slug)) {
-      console.log("  —", sub.slug, "(ya existe)");
+    const parentSlug = getSubcategoryParentCategorySlug(sub.categorySlug);
+    if (isRetiredProviderCategorySlug(sub.categorySlug) && parentSlug !== MAN_GO_CATEGORY_SLUG) {
+      console.log("  —", sub.slug, `(categoría padre retirada '${sub.categorySlug}', omitida)`);
       continue;
     }
 
-    const categoryId = categoryIdBySlug.get(sub.categorySlug);
+    const categoryId = categoryIdBySlug.get(parentSlug);
     if (categoryId == null) {
-      console.warn("  ⚠ Categoría con slug '%s' no encontrada. Ejecuta npm run seed:categories. Omitiendo subcategoría '%s'.", sub.categorySlug, sub.slug);
+      console.warn(
+        "  ⚠ Categoría '%s' no encontrada. Ejecuta npm run seed:categories. Omitiendo '%s'.",
+        parentSlug,
+        sub.slug,
+      );
+      continue;
+    }
+
+    const existing = existingBySlug.get(sub.slug);
+    if (existing) {
+      const currentId = Number(existing.data.categoryId ?? existing.data.categoria);
+      const currentSlug = String(existing.data.categorySlug ?? "").trim().toLowerCase();
+      const underMaintenance =
+        currentSlug === "maintenance" ||
+        (maintenanceCategoryId != null && currentId === maintenanceCategoryId);
+      const wrongParent = underMaintenance || currentId !== categoryId || currentSlug !== parentSlug;
+
+      if (wrongParent) {
+        await subCategoriesColl.doc(existing.docId).update({
+          categoryId,
+          categoria: categoryId,
+          categorySlug: parentSlug,
+        });
+        console.log("  ↻", sub.slug, "→ categoría", parentSlug, "(id", categoryId, ")");
+        repaired++;
+      } else {
+        console.log("  —", sub.slug, "(ya existe, padre correcto)");
+      }
       continue;
     }
 
@@ -69,14 +119,14 @@ async function main() {
       slug: sub.slug,
       categoria: categoryId,
       categoryId,
-      categorySlug: sub.categorySlug,
+      categorySlug: parentSlug,
       icon: sub.icon ?? null,
     });
-    console.log("  ✓", sub.slug, "→ id", id, "(categoría id", categoryId, ")");
+    console.log("  ✓", sub.slug, "→ id", id, "(categoría", parentSlug, "id", categoryId, ")");
     created++;
   }
 
-  console.log("\n✅ Subcategorías listas. Creadas:", created);
+  console.log("\n✅ Subcategorías listas. Creadas:", created, "· Reparadas:", repaired);
 }
 
 main().catch((err) => {

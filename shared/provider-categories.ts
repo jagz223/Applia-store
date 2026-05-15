@@ -4,14 +4,14 @@
  * Usado para validación en API y en front (registro/edición).
  */
 import { z } from "zod";
+import { isRetiredProviderCategorySlug, normalizeProviderCategorySlug } from "./default-categories";
 
 export const PROVIDER_CATEGORY_CODES = [
-  "technical",      // Servicios Técnicos → Ingeniero Civil
-  "professional",   // Servicios Profesionales (subcategorías: legales, consultoría financiera)
-  "maintenance",    // Mantenimiento
-  "delivery",       // Delivery
-  "marketplace",    // Marketplace
-  "transport",      // Servicios de transporte (Taxi)
+  "technical",
+  "professional",
+  "delivery",
+  "marketplace",
+  "transport",
 ] as const;
 
 export type ProviderCategoryCode = (typeof PROVIDER_CATEGORY_CODES)[number];
@@ -22,9 +22,8 @@ export const PROVIDER_CATEGORIES: ReadonlyArray<{
   label: string;
   professionLabel?: string;
 }> = [
-  { code: "technical", label: "Servicios Técnicos", professionLabel: "Ingeniero Civil" },
+  { code: "technical", label: "Man Go", professionLabel: "Ingeniero Civil" },
   { code: "professional", label: "Servicios Profesionales" },
-  { code: "maintenance", label: "Mantenimiento" },
   { code: "delivery", label: "Delivery" },
   { code: "marketplace", label: "Marketplace" },
   { code: "transport", label: "Servicios de transporte (Taxi)" },
@@ -47,5 +46,7 @@ export const SUB_PROVIDER_CATEGORIES: ReadonlyArray<{
 export const providerCategorySchema = z.enum(PROVIDER_CATEGORY_CODES);
 
 export function isValidProviderCategory(value: string): value is ProviderCategoryCode {
-  return PROVIDER_CATEGORY_CODES.includes(value as ProviderCategoryCode);
+  const normalized = normalizeProviderCategorySlug(value);
+  if (isRetiredProviderCategorySlug(normalized)) return false;
+  return PROVIDER_CATEGORY_CODES.includes(normalized as ProviderCategoryCode);
 }

@@ -43,7 +43,8 @@ import { BookingsCatalogServicesPanel } from "@/components/professional/Bookings
 import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
 import { useAuth } from "@/hooks/use-auth";
 import { isCarGoProvider } from "@shared/provider-car-go";
-import { useCategories } from "@/hooks/use-mango-data";
+import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
+import { useCategories, useWallet } from "@/hooks/use-mango-data";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { loadTripLog } from "@/lib/cargo-driver-storage";
@@ -1031,7 +1032,8 @@ function InvoicesTabContent() {
 const DASHBOARD_TABS = ["overview", "bookings", "invoices"] as const;
 
 function ProfessionalDashboardInner() {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const { data: walletData } = useWallet({ enabled: isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED });
   const { data: providerProfile, isLoading: providerProfileLoading } = useCurrentProvider();
   const { data: verifyingStatus } = useVerifyingStatusMe(Boolean(providerProfile));
   const { data: professionalVerification } = useProfessionalVerification(Boolean(providerProfile));
@@ -1188,28 +1190,22 @@ function ProfessionalDashboardInner() {
     [bookingsSafe],
   );
 
-  const providerUserId = (providerProfile as any)?.userId as string | undefined;
-  const { data: reviewStats } = useQuery({
-    queryKey: ["/api/reviews/stats/provider", providerUserId],
-    enabled: !!providerUserId,
-    retry: false,
-    queryFn: async () => {
-      const res = await fetch(`/api/reviews/stats/provider/${encodeURIComponent(providerUserId!)}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { message?: string }).message ?? "No se pudieron cargar las estadísticas de reseñas");
-      }
-      return res.json() as Promise<{
-        averageRating?: number;
-        totalReviews?: number;
-        distribution?: Record<string, number>;
-      }>;
-    },
-  });
-
-  const ratingAverage = Number(reviewStats?.averageRating ?? 0);
-  const ratingTotalReviews = Number(reviewStats?.totalReviews ?? 0);
-  const ratingDistribution = reviewStats?.distribution ?? { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  /** Misma fuente que la barra de navegación (reservas / wallet), no el sistema legacy de `reviews`. */
+  const ratingAverage = FEATURE_WALLET_RECHARGE_UI_ENABLED
+    ? typeof (walletData as { rating?: number } | undefined)?.rating === "number"
+      ? (walletData as { rating: number }).rating
+      : user != null && typeof (user as { rating?: unknown }).rating === "number"
+        ? (user as unknown as { rating: number }).rating
+        : 5
+    : user != null && typeof (user as { rating?: unknown }).rating === "number"
+      ? (user as unknown as { rating: number }).rating
+      : 5;
+  const ratingTotalReviews = Number(
+    (user as { ratingCount?: number } | null)?.ratingCount ??
+      (providerProfile as { user?: { ratingCount?: number } } | null | undefined)?.user?.ratingCount ??
+      0,
+  );
+  const ratingDistribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
   const ratingStarsTotal = ratingTotalReviews || 0;
 
   // Panel del asociado (Mi actividad): ocultar secciones específicas por UI.
@@ -1341,7 +1337,9 @@ function ProfessionalDashboardInner() {
                   <span className="font-display text-3xl font-bold tabular-nums">{ratingAverage.toFixed(1)}</span>
                   <Star className="h-6 w-6 fill-amber-400 text-amber-500" aria-hidden />
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">{ratingTotalReviews} reseñas</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {ratingTotalReviews} {ratingTotalReviews === 1 ? "valoración" : "valoraciones"}
+                </p>
               </CardContent>
             </Card>
           </div>

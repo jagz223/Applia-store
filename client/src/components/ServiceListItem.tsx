@@ -8,17 +8,23 @@ import {
   resolvePreparationLevel,
 } from "@shared/provider-preparation";
 import { Link } from "wouter";
-import { Star, ArrowRight, User, Pencil } from "lucide-react";
+import { Star, ArrowRight, User, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { useProviderCompletedCount } from "@/hooks/use-mango-data";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
+import { setEditServiceReturnPath } from "@/lib/edit-service-return-path";
 
 interface ServiceListItemProps {
   service: ServiceWithProvider;
   /** Listado del asociado: lápiz (editar) y flecha (ver ficha), sin envolver toda la tarjeta en un solo enlace. */
   ownerToolbar?: boolean;
+  /** Servicios adicionales (no la ficha de registro): mostrar eliminar. */
+  canDelete?: boolean;
+  onDelete?: () => void;
+  /** Ruta al pulsar «Volver» en editar (p. ej. /my-services). */
+  editReturnTo?: string;
 }
 
 function getProviderName(service: ServiceWithProvider) {
@@ -30,7 +36,13 @@ function getProviderName(service: ServiceWithProvider) {
   return name || u.name || "Asociado";
 }
 
-export function ServiceListItem({ service, ownerToolbar = false }: ServiceListItemProps) {
+export function ServiceListItem({
+  service,
+  ownerToolbar = false,
+  canDelete = false,
+  onDelete,
+  editReturnTo,
+}: ServiceListItemProps) {
   const categoryName = getCategoryDisplayName(service.category) || "Servicio";
   const providerUser = (service.provider as any)?.user as
     | { profileImageUrl?: string | null; rating?: number | string; ratingCount?: number | string }
@@ -139,6 +151,22 @@ export function ServiceListItem({ service, ownerToolbar = false }: ServiceListIt
               {headerBlock}
             </Link>
             <div className="flex shrink-0 items-center gap-1 self-center">
+              {canDelete && onDelete ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDelete();
+                  }}
+                  aria-label="Eliminar servicio"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"
@@ -146,7 +174,13 @@ export function ServiceListItem({ service, ownerToolbar = false }: ServiceListIt
                 className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10"
                 asChild
               >
-                <Link href={`/edit-service/${service.id}`} aria-label="Editar servicio">
+                <Link
+                  href={`/edit-service/${service.id}`}
+                  aria-label="Editar servicio"
+                  onClick={() =>
+                    setEditServiceReturnPath(editReturnTo ?? `/service/${service.id}`)
+                  }
+                >
                   <Pencil className="h-5 w-5" />
                 </Link>
               </Button>

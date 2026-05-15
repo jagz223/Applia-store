@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, Redirect, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -7,6 +7,7 @@ import {
   useCurrentProvider,
   useMyServices,
   useProviderVehicle,
+  useDeleteService,
 } from "@/hooks/use-mango-data";
 import { ServiceListItem } from "@/components/ServiceListItem";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,17 @@ import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { SETTINGS_VEHICLE_SECTION_QUERY_KEY } from "@shared/settings-notification-urls";
 import { providerHasGoBrand } from "@shared/provider-go";
 import { computeMyServicesCardRows } from "@shared/my-services-display-policy";
+import { canDeleteCatalogService } from "@shared/provider-primary-catalog-service";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const VEHICLE_TYPE_LABEL: Record<string, string> = {
   motorcycle: "Moto",
@@ -68,6 +80,10 @@ export default function MyServices() {
     () => computeMyServicesCardRows({ services, showDriverPreview }),
     [services, showDriverPreview],
   );
+
+  const registrationCategoryId = provider ? Number((provider as { categoryId?: number }).categoryId) : undefined;
+  const deleteService = useDeleteService();
+  const [deleteServiceId, setDeleteServiceId] = useState<number | null>(null);
 
   if (!authLoading && !isAuthenticated) {
     return <Redirect to="/login" />;
@@ -266,13 +282,48 @@ export default function MyServices() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.03 }}
                 >
-                  <ServiceListItem service={service} ownerToolbar />
+                  <ServiceListItem
+                    service={service}
+                    ownerToolbar
+                    editReturnTo="/my-services"
+                    canDelete={canDeleteCatalogService(service.id, services, registrationCategoryId)}
+                    onDelete={() => setDeleteServiceId(service.id)}
+                  />
                 </motion.div>
               ))}
             </div>
           </>
         )}
       </div>
+
+      <AlertDialog open={deleteServiceId != null} onOpenChange={(open) => !open && setDeleteServiceId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar este servicio?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se quitará del catálogo. Tu ficha principal de registro no se elimina. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteService.isPending}
+              onClick={async () => {
+                if (deleteServiceId == null) return;
+                try {
+                  await deleteService.mutateAsync(deleteServiceId);
+                  setDeleteServiceId(null);
+                } catch {
+                  /* toast en hook */
+                }
+              }}
+            >
+              Sí, eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

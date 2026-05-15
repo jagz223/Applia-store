@@ -13,6 +13,7 @@ import {
   usePlatformSubscriptionFees,
 } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
+import { MAN_GO_CATEGORY_SLUG, normalizeProviderCategorySlug } from "@shared/default-categories";
 import { uploadProfessionalCredential, uploadVerificationIdImage } from "@/lib/firebase-client";
 import { ArrowLeft, ExternalLink, FileText, Loader2, Lock, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -112,7 +113,10 @@ export default function VerifyProfessional() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const credentialInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadingCredential, setUploadingCredential] = useState(false);
+  const [credentialUploadMeta, setCredentialUploadMeta] = useState<{ fileName: string; mimeType: string } | null>(null);
 
   const { data: currentProvider } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
@@ -139,6 +143,49 @@ export default function VerifyProfessional() {
     const v = map && categorySlug ? Number(map[categorySlug]) : NaN;
     return Number.isFinite(v) ? v : 15;
   }, [subscriptionFees, categorySlug]);
+
+  const providerCategorySlug = normalizeProviderCategorySlug(categorySlug);
+  const isManGo = providerCategorySlug === MAN_GO_CATEGORY_SLUG;
+
+  const credentialCopy = useMemo(() => {
+    if (isCarGo) {
+      return {
+        stepLabel: "Licencia de conducir",
+        cardTitle: "Licencia de conducir",
+        description:
+          "Sube una foto o PDF legible de tu licencia de conducir vigente (anverso y reverso en un solo archivo si aplica). Es requerida para operar en servicios de movilidad.",
+        uploadName: "Licencia de conducir",
+        toastTitle: "Licencia de conducir enviada",
+        sentHint: "Licencia enviada. Puedes reemplazarla si lo necesitas.",
+        previewLabel: "Vista previa de la licencia de conducir",
+        step2Noun: "licencia",
+      };
+    }
+    if (isManGo) {
+      return {
+        stepLabel: "Documento o certificación de curso",
+        cardTitle: "Documento o certificación de curso",
+        description:
+          "Sube un documento o certificación de curso, taller o capacitación técnica que avale tu oficio (carné habilitado, constancia, etc.). Es requerido para la verificación.",
+        uploadName: "Certificación de curso",
+        toastTitle: "Documento enviado",
+        sentHint: "Documento enviado. Puedes reemplazarlo si lo necesitas.",
+        previewLabel: "Vista previa del documento o certificación",
+        step2Noun: "documento o certificación de curso",
+      };
+    }
+    return {
+      stepLabel: "Documento profesional",
+      cardTitle: "Documento profesional",
+      description:
+        "Sube un certificado, título universitario o documento que avale tu profesión. Es requerido para la verificación.",
+      uploadName: "Documento profesional",
+      toastTitle: "Documento profesional enviado",
+      sentHint: "Documento enviado. Puedes reemplazarlo si lo necesitas.",
+      previewLabel: "Vista previa del documento profesional",
+      step2Noun: "documento profesional",
+    };
+  }, [isCarGo, isManGo]);
 
   useEffect(() => {
     ensureDefaultVerifyReturnPath();
@@ -173,6 +220,31 @@ export default function VerifyProfessional() {
     hasPayment,
   ]);
 
+  const paymentUnlockReminder = useMemo(() => {
+    if (isRenewalSimple) return null;
+    if (!hasImage) {
+      return {
+        headline: "Paso 1 de 3 · Documento de identidad",
+        detail: isCarGo
+          ? "Primero subí tu documento de identidad en la tarjeta de arriba. Después podrás subir la licencia y, al final, el pago."
+          : isManGo
+            ? "Primero subí tu documento de identidad en la tarjeta de arriba. Después podrás subir tu documento o certificación de curso y, al final, el pago."
+            : "Primero subí tu documento de identidad en la tarjeta de arriba. Después podrás subir tu documento profesional y, al final, el pago.",
+      };
+    }
+    if (!hasCredential) {
+      return {
+        headline: `Paso 2 de 3 · ${credentialCopy.stepLabel}`,
+        detail: `Ya tenés la identidad. Subí tu ${credentialCopy.step2Noun} en la segunda tarjeta. El botón de pago se habilita cuando ambos documentos estén listos.`,
+      };
+    }
+    return {
+      headline: "Paso 3 de 3 · Cuota",
+      detail:
+        "Documentación completa. Continuá al pago para registrar la cuota; el equipo revisará todo junto.",
+    };
+  }, [isRenewalSimple, hasImage, hasCredential, isCarGo, isManGo, credentialCopy]);
+
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -193,9 +265,6 @@ export default function VerifyProfessional() {
     }
   };
 
-  const credentialInputRef = useRef<HTMLInputElement>(null);
-  const [uploadingCredential, setUploadingCredential] = useState(false);
-  const [credentialUploadMeta, setCredentialUploadMeta] = useState<{ fileName: string; mimeType: string } | null>(null);
   const handleCredentialFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -205,13 +274,13 @@ export default function VerifyProfessional() {
       const url = await uploadProfessionalCredential(user.id, file);
       await patchCredential.mutateAsync({
         professionalCredentialUrl: url,
-        name: isCarGo ? "Licencia de conducir" : file.name,
+        name: isCarGo || isManGo ? credentialCopy.uploadName : file.name,
         mimeType: file.type,
         size: file.size,
       });
       setCredentialUploadMeta({ fileName: file.name, mimeType: file.type });
       toast({
-        title: isCarGo ? "Licencia de conducir enviada" : "Documento profesional enviado",
+        title: credentialCopy.toastTitle,
         description: isCarGo
           ? "Se guardó en Mis documentos. Cuando también registres el pago, el equipo podrá revisar todo junto."
           : "Se guardó en Mis documentos. Cuando completes identificación, este documento y el pago, el equipo revisará tu solicitud.",
@@ -269,30 +338,6 @@ export default function VerifyProfessional() {
     transactionVerifiedState === "verified";
 
   const canContinueToPayment = isRenewalSimple || (hasImage && hasCredential);
-
-  const credentialStepLabel = isCarGo ? "Licencia de conducir" : "Documento profesional";
-
-  const paymentUnlockReminder = useMemo(() => {
-    if (isRenewalSimple) return null;
-    if (!hasImage) {
-      return {
-        headline: "Paso 1 de 3 · Documento de identidad",
-        detail:
-          "Primero subí tu documento de identidad en la tarjeta de arriba. Después podrás subir la licencia o el documento profesional, y al final el pago.",
-      };
-    }
-    if (!hasCredential) {
-      return {
-        headline: `Paso 2 de 3 · ${credentialStepLabel}`,
-        detail: `Ya tenés la identidad. Subí tu ${isCarGo ? "licencia" : "documento profesional"} en la segunda tarjeta. El botón de pago se habilita cuando ambos documentos estén listos.`,
-      };
-    }
-    return {
-      headline: "Paso 3 de 3 · Cuota",
-      detail:
-        "Documentación completa. Continuá al pago para registrar la cuota; el equipo revisará todo junto.",
-    };
-  }, [isRenewalSimple, hasImage, hasCredential, isCarGo]);
 
   return (
     <div className="container max-w-xl py-8 sm:py-12 px-4">
@@ -374,12 +419,8 @@ export default function VerifyProfessional() {
           <CardHeader>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <CardTitle className="text-lg">{isCarGo ? "Licencia de conducir" : "Documento profesional"}</CardTitle>
-                <CardDescription>
-                  {isCarGo
-                    ? "Sube una foto o PDF legible de tu licencia de conducir vigente (anverso y reverso en un solo archivo si aplica). Es requerida para operar en servicios de movilidad."
-                    : "Sube un certificado, título universitario o documento que avale tu profesión. Es requerido para la verificación."}
-                </CardDescription>
+                <CardTitle className="text-lg">{credentialCopy.cardTitle}</CardTitle>
+                <CardDescription>{credentialCopy.description}</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -399,7 +440,7 @@ export default function VerifyProfessional() {
             ) : null}
             {hasCredential ? (
               <p className="text-sm text-muted-foreground mb-3">
-                {isCarGo ? "Licencia enviada. Puedes reemplazarla si lo necesitas." : "Documento enviado. Puedes reemplazarlo si lo necesitas."}
+                {credentialCopy.sentHint}
               </p>
             ) : hasImage ? (
               <p className="text-sm text-muted-foreground mb-3">
@@ -411,7 +452,7 @@ export default function VerifyProfessional() {
                 url={verification.professionalCredentialUrl}
                 mimeHint={credentialUploadMeta?.mimeType}
                 fileNameHint={credentialUploadMeta?.fileName}
-                label={isCarGo ? "Vista previa de la licencia de conducir" : "Vista previa del documento profesional"}
+                label={credentialCopy.previewLabel}
               />
             ) : null}
             <Button
@@ -478,7 +519,7 @@ export default function VerifyProfessional() {
                         hasCredential ? "line-through opacity-75" : !hasImage ? "opacity-55" : "font-medium"
                       }
                     >
-                      {credentialStepLabel} {hasCredential ? "(listo)" : "(pendiente)"}
+                      {credentialCopy.stepLabel} {hasCredential ? "(listo)" : "(pendiente)"}
                     </span>
                   </li>
                   <li
