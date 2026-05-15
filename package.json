@@ -14,6 +14,8 @@
     "seed:categories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-categories.ts",
     "seed:subcategories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-subcategories.ts",
     "migrate:provider-categories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/migrate-provider-categories.ts",
+    "migrate:subcategories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/migrate-subcategories-category.ts",
+    "sync:provider-category-slots": "cross-env NODE_OPTIONS=--use-system-ca tsx script/sync-provider-category-slots.ts",
     "remove:legal-financial-categories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/remove-legal-financial-categories.ts",
     "seed:roles": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-roles.ts",
     "seed:users": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-users.ts",

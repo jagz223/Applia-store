@@ -85,7 +85,16 @@ app.use((req, res, next) => {
   initializeFirebase();
   // Todo el almacenamiento en Firestore cuando Firebase está configurado (sin híbrido)
   if (isFirebaseConfigured()) {
-    setGenFebStorage(getFirestoreStorage());
+    const firestoreStorage = getFirestoreStorage();
+    setGenFebStorage(firestoreStorage);
+    try {
+      const purged = await firestoreStorage.purgeRetiredCategoryDocuments();
+      if (purged.removed.length > 0) {
+        log(`Categorías retiradas eliminadas de Firestore: ${purged.removed.join(", ")}`);
+      }
+    } catch (e) {
+      console.warn("[startup] No se pudieron purgar categorías retiradas:", e);
+    }
     const projectId = process.env.FIREBASE_PROJECT_ID || "(no set)";
     log(`Firestore en uso: proyecto "${projectId}" (cuenta: ${process.env.FIREBASE_CLIENT_EMAIL || "?"})`);
   } else {

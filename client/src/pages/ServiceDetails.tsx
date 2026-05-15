@@ -1,6 +1,7 @@
 import { useRoute, Link, useLocation } from "wouter";
 import { useService, useCreateBooking, useCurrentProvider, useBookings, useProviderCompletedCount } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
+import { setEditServiceReturnPath } from "@/lib/edit-service-return-path";
 import {
   Loader2,
   Star,
@@ -405,7 +406,11 @@ export default function ServiceDetails() {
                   className="h-11 w-full rounded-lg border-border bg-card font-medium text-foreground shadow-sm hover:bg-muted/60 [&_svg]:text-muted-foreground"
                   asChild
                 >
-                  <Link href={`/edit-service/${id}`} className="gap-2">
+                  <Link
+                    href={`/edit-service/${id}`}
+                    className="gap-2"
+                    onClick={() => setEditServiceReturnPath(`/service/${id}`)}
+                  >
                     <Pencil className="h-4 w-4" />
                     Editar servicio
                   </Link>

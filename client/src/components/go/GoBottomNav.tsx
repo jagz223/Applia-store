@@ -18,6 +18,7 @@ import { loadGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { QuickSettingsPanel } from "@/components/settings/QuickSettingsPanel";
+import { GO_COMPACT_MAX_WIDTH_PX, goViewportBottomNavWrapperClass } from "@/lib/go-viewport-layout";
 
 type Tab = {
   href: string;
@@ -41,7 +42,12 @@ function tabIsActive(location: string, href: string, hasAction?: boolean): boole
   return location === href || (href.length > 1 && location.startsWith(`${href}/`));
 }
 
-export function GoBottomNav() {
+type GoBottomNavProps = {
+  /** En vistas mapa móvil: anclar como último hijo flex del shell (sin sticky ni scroll). */
+  pinToViewportBottom?: boolean;
+};
+
+export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   const [location, setLocation] = useLocation();
   const { user, isAuthenticated } = useAuth();
   const { openChat, chatBadge } = useGoChat();
@@ -69,10 +75,12 @@ export function GoBottomNav() {
 
   /** En escritorio: barra compacta centrada tipo “dock”, sin estirar 6 ítems a todo el ancho. */
   const [desktopNav, setDesktopNav] = useState(() =>
-    typeof window !== "undefined" ? window.matchMedia("(min-width: 768px)").matches : false
+    typeof window !== "undefined"
+      ? window.matchMedia(`(min-width: ${GO_COMPACT_MAX_WIDTH_PX + 1}px)`).matches
+      : false
   );
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
+    const mq = window.matchMedia(`(min-width: ${GO_COMPACT_MAX_WIDTH_PX + 1}px)`);
     const fn = () => setDesktopNav(mq.matches);
     fn();
     mq.addEventListener("change", fn);
@@ -171,10 +179,12 @@ export function GoBottomNav() {
               label: "Regateo",
               icon: <Tags className="h-5 w-5" aria-hidden />,
               onClick: () => goDriverUi.openNegotiationBoard(),
-              disabled: !canUseDriverNegotiationBoard,
+              disabled: !canUseDriverNegotiationBoard || !!activeDriverService,
               nativeTitle: !canUseDriverNegotiationBoard
                 ? "Verifica tu perfil profesional para ver el tablero de regateo (taxi y delivery)."
-                : undefined,
+                : activeDriverService
+                  ? "Tienes un servicio activo (taxi, delivery u oferta enlazada). Finalízalo o cancélalo antes de abrir Regateo."
+                  : undefined,
             }
           : null,
         {
@@ -214,23 +224,20 @@ export function GoBottomNav() {
       toast,
       setLocation,
       canUseDriverNegotiationBoard,
+      activeDriverService,
     ]
   );
 
   return (
     <>
-      <div
-        className={cn(
-          "sticky bottom-0 z-50 shrink-0",
-          desktopNav &&
-            "pointer-events-none md:bg-gradient-to-t md:from-background/85 md:to-transparent md:pb-5 md:pt-4"
-        )}
-      >
+      <div className={goViewportBottomNavWrapperClass(pinToViewportBottom, desktopNav)}>
         <nav
           className={cn(
-            "border-t border-border/90 bg-background/98 shadow-[0_-6px_28px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md supports-[backdrop-filter]:bg-background/92 dark:shadow-[0_-6px_32px_-4px_rgba(0,0,0,0.45)]",
+            !pinToViewportBottom || desktopNav
+              ? "border-t border-border/90 bg-background/98 shadow-[0_-6px_28px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md supports-[backdrop-filter]:bg-background/92 dark:shadow-[0_-6px_32px_-4px_rgba(0,0,0,0.45)]"
+              : "bg-transparent shadow-none",
             desktopNav &&
-              "pointer-events-auto md:mx-auto md:max-h-none md:max-w-[min(760px,calc(100vw-4rem))] md:rounded-2xl md:border md:border-border/65 md:bg-background/95 md:shadow-2xl dark:md:border-white/15"
+              "pointer-events-auto lg:mx-auto lg:max-h-none lg:max-w-[min(760px,calc(100vw-4rem))] lg:rounded-2xl lg:border lg:border-border/65 lg:bg-background/95 lg:shadow-2xl dark:lg:border-white/15"
           )}
         >
         <div

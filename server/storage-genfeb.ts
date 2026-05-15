@@ -1683,7 +1683,9 @@ export class InMemoryStorage implements IStorage {
     return false;
   }
 
-  async seedCategories(): Promise<void> {}
+  async seedCategories(): Promise<{ created: string[] }> {
+    return { created: [] };
+  }
   
   // ==================== ESTADOS DE RESERVA ====================
   

@@ -5,6 +5,7 @@
  */
 import "dotenv/config";
 import { initializeFirebase, getFirestore, FIRESTORE_COLLECTIONS } from "../server/firebase-admin";
+import { normalizeProviderCategorySlug } from "../shared/default-categories";
 
 async function main() {
   const ok = initializeFirebase();
@@ -28,9 +29,11 @@ async function main() {
     if (slug && !Number.isNaN(id)) slugToId.set(slug.trim(), id);
   });
 
-  // Subcategorías legal/financial ahora pertenecen a la categoría professional
   const professionalId = slugToId.get("professional");
-  const legacySlugToCategoryId = (slug: string): number | undefined => {
+
+  /** legal/financial eran categorías legacy; maintenance → technical (Man Go unificado). */
+  const legacySlugToCategoryId = (rawSlug: string): number | undefined => {
+    const slug = normalizeProviderCategorySlug(rawSlug);
     if (slug === "legal" || slug === "financial") return professionalId ?? undefined;
     return slugToId.get(slug);
   };

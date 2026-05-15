@@ -116,14 +116,20 @@ export default function CreateService() {
     });
   }, [categories, hiddenSlugs]);
 
-  const usedCategoryIds = useMemo(
-    () => new Set(myServices.map((s) => Number((s as { categoryId: number }).categoryId)).filter((n) => !Number.isNaN(n))),
-    [myServices],
-  );
+  /** Subcategorías ya usadas por categoría (Man Go / Pro Go permiten varias fichas, una por subcategoría). */
+  const usedSubcategoryIdsByCategory = useMemo(() => {
+    const m = new Map<number, Set<number>>();
+    for (const s of myServices) {
+      const cid = Number((s as { categoryId: number }).categoryId);
+      const sid = Number((s as { subcategoryId?: number | null }).subcategoryId);
+      if (!Number.isFinite(cid) || !Number.isFinite(sid)) continue;
+      if (!m.has(cid)) m.set(cid, new Set());
+      m.get(cid)!.add(sid);
+    }
+    return m;
+  }, [myServices]);
 
-  const availableCategories = useMemo(() => {
-    return assignableCategories.filter((c) => !usedCategoryIds.has(Number(c.id)));
-  }, [assignableCategories, usedCategoryIds]);
+  const availableCategories = useMemo(() => assignableCategories, [assignableCategories]);
 
   const defaultCategoryId = useMemo(() => {
     if (availableCategories.length === 0) return null;
@@ -150,6 +156,13 @@ export default function CreateService() {
     categoryIdValue != null && categoryIdValue > 0 ? categoryIdValue : undefined,
   );
 
+  const selectableSubcategories = useMemo(() => {
+    if (!categoryIdValue || categoryIdValue <= 0) return subcategories;
+    const used = usedSubcategoryIdsByCategory.get(Number(categoryIdValue));
+    if (!used?.size) return subcategories;
+    return subcategories.filter((sub) => !used.has(Number(sub.id)));
+  }, [subcategories, categoryIdValue, usedSubcategoryIdsByCategory]);
+
   useEffect(() => {
     if (provider) {
       form.setValue("providerId", provider.id);
@@ -166,6 +179,10 @@ export default function CreateService() {
     form.setValue("subcategoryId", undefined);
   }, [categoryIdValue, form]);
 
+  useEffect(() => {
+    if (isTrade) form.setValue("profession", "");
+  }, [isTrade, form]);
+
   if (authLoading || (user?.role === "professional" && !user?.provider && providerApiLoading)) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -176,7 +193,7 @@ export default function CreateService() {
 
   if (!user) {
     return (
-      <div className="container max-w-md py-20 text-center">
+      <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <p className="text-muted-foreground mb-4">Inicia sesión para crear servicios.</p>
         <Button asChild>
           <Link href="/login">Iniciar sesión</Link>
@@ -188,7 +205,7 @@ export default function CreateService() {
   if (!provider) {
     const isProfessional = user.role === "professional";
     return (
-      <div className="container max-w-md py-20 text-center">
+      <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <p className="text-muted-foreground mb-4">
           {isProfessional
             ? "Completa tu perfil de proveedor para poder crear servicios."
@@ -235,18 +252,15 @@ export default function CreateService() {
     setLocation("/my-services");
   }
 
-  if (availableCategories.length === 0) {
+  if (assignableCategories.length === 0) {
     return (
-      <div className="container max-w-2xl py-12 px-4">
+      <div className="container mx-auto max-w-2xl w-full px-4 py-12">
         <Card>
           <CardHeader>
-            <CardTitle>No puedes crear más servicios de catálogo</CardTitle>
+            <CardTitle>No hay categorías de catálogo activas</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-muted-foreground">
-            <p>
-              Ya tienes un servicio publicado en cada categoría disponible (técnicos, profesionales y mantenimiento), o
-              no hay categorías activas en la plataforma.
-            </p>
+            <p>No hay categorías Man Go o Pro Go habilitadas en la plataforma en este momento.</p>
             <Button variant="outline" asChild>
               <Link href="/my-services">Volver a Mis servicios</Link>
             </Button>
@@ -256,11 +270,13 @@ export default function CreateService() {
     );
   }
 
-  const subcategoryRequired = needsSubcategory && subcategories.length > 0;
+  const subcategoryRequired = needsSubcategory && selectableSubcategories.length > 0;
+  const allSubsTakenForCategory =
+    needsSubcategory && subcategories.length > 0 && selectableSubcategories.length === 0;
   const submitPending = createService.isPending;
 
   return (
-    <div className="container max-w-2xl py-12 px-4">
+    <div className="container mx-auto max-w-2xl w-full px-4 py-12">
       <Button variant="ghost" className="mb-4 gap-2 -ml-2" asChild>
         <Link href="/my-services">
           <ArrowLeft className="h-4 w-4" aria-hidden />
@@ -271,10 +287,9 @@ export default function CreateService() {
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-display font-bold text-primary mb-2">Nuevo servicio de catálogo</h1>
         <p className="text-muted-foreground">
-          Es el mismo tipo de preguntas que cuando te diste de alta como asociado en esta categoría, pero{" "}
-          <strong className="text-foreground">empiezas en blanco</strong>: no traemos título, años, habilidades ni biografía
-          de tus otras ofertas. Rellena todo pensando solo en <strong className="text-foreground">este</strong> servicio que
-          quieres publicar.
+          Puedes publicar <strong className="text-foreground">varias fichas en Man Go o Pro Go</strong>, una por
+          especialidad (subcategoría distinta). Cada ficha es independiente: título, descripción y datos del oficio. No se
+          reutiliza tu servicio de reparación de PC si ahora ofreces plomería.
         </p>
         <div className="mt-6 rounded-xl border border-border/60 bg-muted/30 p-4 text-left text-sm text-muted-foreground max-w-xl mx-auto">
           {CATALOG_CREATE_SERVICE_ISOLATION_NOTE}
@@ -317,19 +332,16 @@ export default function CreateService() {
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      Solo aparecen categorías de catálogo que aún no usas en otro servicio tuyo. Sigue apareciendo tu
-                      registro principal en{" "}
-                      <span className="font-medium text-foreground">
-                        {providerCategory ? getCategoryDisplayName(providerCategory) : "la categoría en la que te registraste"}
-                      </span>
-                      ; aquí eliges otra línea y el formulario arranca vacío, sin copiar lo de tus otros servicios.
+                      Puedes elegir Man Go o Pro Go. En la misma categoría, agrega otra ficha solo si eliges una{" "}
+                      <strong className="text-foreground">subcategoría distinta</strong> (p. ej. plomería si ya publicaste
+                      computación). Cada ficha tiene formulario propio.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
-              {subcategories.length > 0 ? (
+              {selectableSubcategories.length > 0 ? (
                 <FormField
                   control={form.control}
                   name="subcategoryId"
@@ -360,7 +372,7 @@ export default function CreateService() {
                         </FormControl>
                         <SelectContent>
                           {!subcategoryRequired ? <SelectItem value="none">Ninguna</SelectItem> : null}
-                          {subcategories.map((sub) => (
+                          {selectableSubcategories.map((sub) => (
                             <SelectItem key={String(sub.id)} value={String(sub.id)}>
                               {sub.name}
                             </SelectItem>
@@ -371,6 +383,11 @@ export default function CreateService() {
                     </FormItem>
                   )}
                 />
+              ) : allSubsTakenForCategory ? (
+                <p className="text-sm text-amber-600 dark:text-amber-500">
+                  Ya tienes un servicio publicado en cada subcategoría de esta categoría. Elige otra categoría (p. ej. Pro
+                  Go si solo usaste Man Go) o edita una ficha existente en Mis servicios.
+                </p>
               ) : needsSubcategory ? (
                 <p className="text-sm text-amber-600 dark:text-amber-500">
                   No hay subcategorías cargadas para esta categoría. Si el problema continúa, contacta soporte; no podrás
@@ -462,19 +479,21 @@ export default function CreateService() {
                     </div>
                   ) : null}
 
-                  <FormField
-                    control={form.control}
-                    name="profession"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Profesión / Título</FormLabel>
-                        <FormControl>
-                          <Input placeholder={placeholders.profession} {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {isProfessional ? (
+                    <FormField
+                      control={form.control}
+                      name="profession"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Profesión / Título</FormLabel>
+                          <FormControl>
+                            <Input placeholder={placeholders.profession} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : null}
 
                   <FormField
                     control={form.control}

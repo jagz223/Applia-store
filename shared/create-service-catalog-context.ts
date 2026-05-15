@@ -1,4 +1,5 @@
 import { CATALOG_ASSIGNABLE_SERVICE_CATEGORY_SLUGS } from "./catalog-service-categories";
+import { MAN_GO_CATEGORY_SLUG, normalizeProviderCategorySlug } from "./default-categories";
 import {
   isProfessionalListingCategorySlug,
   isTradeListingCategorySlug,
@@ -16,18 +17,18 @@ export function createServiceCategorySlug(
   const row = categories.find((c) => Number(c.id) === Number(categoryId));
   const raw = row?.slug;
   if (typeof raw !== "string" || !raw.trim()) return undefined;
-  return raw.trim().toLowerCase();
+  return normalizeProviderCategorySlug(raw);
 }
 
 export function isCatalogAssignableSlug(slug: string | undefined): boolean {
-  const s = String(slug ?? "").trim().toLowerCase();
+  const s = normalizeProviderCategorySlug(slug);
   return (CATALOG_ASSIGNABLE_SERVICE_CATEGORY_SLUGS as readonly string[]).includes(s);
 }
 
-/** Las tres categorías de catálogo donde un segundo servicio exige subcategoría (misma regla que Become Pro). */
+/** Categorías de catálogo donde un segundo servicio exige subcategoría (misma regla que Become Pro). */
 export function createServiceRequiresSubcategory(slug: string | undefined): boolean {
-  const s = String(slug ?? "").trim().toLowerCase();
-  return s === "technical" || s === "maintenance" || s === "professional";
+  const s = normalizeProviderCategorySlug(slug);
+  return s === MAN_GO_CATEGORY_SLUG || s === "professional";
 }
 
 export function createServiceIsFocusCatalogSlug(slug: string | undefined): boolean {
@@ -37,14 +38,12 @@ export function createServiceIsFocusCatalogSlug(slug: string | undefined): boole
 export { isTradeListingCategorySlug, isProfessionalListingCategorySlug };
 
 export function getCreateServiceCategoryIntro(slug: string | undefined): string | null {
-  if (slug === "professional") {
+  const s = normalizeProviderCategorySlug(slug);
+  if (s === "professional") {
     return "Para profesionales (abogados, contadores, psicólogos, asesores): describe tu oferta con un título claro, qué incluye y tu enfoque de trabajo.";
   }
-  if (slug === "technical") {
-    return "Para servicios técnicos (computación, electrónica, redes): aclara qué reparas o instalas, el alcance del trabajo y tus habilidades clave.";
-  }
-  if (slug === "maintenance") {
-    return "Para mantenimiento (refrigeración, plomería, electricidad, aires): detalla el servicio, qué incluye y tu experiencia práctica.";
+  if (s === MAN_GO_CATEGORY_SLUG) {
+    return "Para Man Go (técnicos, mantenimiento, oficios): detalla qué reparas o instalas, el alcance del trabajo y tu experiencia práctica.";
   }
   return null;
 }
@@ -58,7 +57,8 @@ export type CreateServiceFormPlaceholders = {
 };
 
 export function getCreateServiceFormPlaceholders(slug: string | undefined): CreateServiceFormPlaceholders {
-  if (slug === "professional") {
+  const s = normalizeProviderCategorySlug(slug);
+  if (s === "professional") {
     return {
       profession: "Ej. Abogado, Contador, Psicólogo",
       serviceTitle: "Ej. Asesoría contable para emprendedores",
@@ -67,21 +67,12 @@ export function getCreateServiceFormPlaceholders(slug: string | undefined): Crea
       bio: "Tu experiencia, tu enfoque (cómo trabajas), qué tipo de casos tomas y qué pueden esperar los clientes. 50–700 caracteres.",
     };
   }
-  if (slug === "technical") {
+  if (s === MAN_GO_CATEGORY_SLUG) {
     return {
-      profession: "Ej. Técnico en computación, Técnico electrónico",
-      serviceTitle: "Ej. Reparación de PC y laptops (diagnóstico + arreglo)",
+      profession: "Ej. Técnico en refrigeración, Plomero, Técnico electrónico",
+      serviceTitle: "Ej. Reparación de PC o mantenimiento de aires acondicionados",
       serviceDescription:
-        "Ej. Qué incluye: diagnóstico, reparación, pruebas, instalación de software, tiempos de entrega, qué NO incluye.",
-      bio: "Tu experiencia en equipos/marcas, cómo trabajas, garantías, tiempos y forma de diagnóstico. 50–700 caracteres.",
-    };
-  }
-  if (slug === "maintenance") {
-    return {
-      profession: "Ej. Técnico en refrigeración, Plomero, Electricista",
-      serviceTitle: "Ej. Mantenimiento preventivo de aires acondicionados",
-      serviceDescription:
-        "Ej. Qué incluye: limpieza, revisión, pruebas, materiales incluidos/no incluidos, duración aproximada.",
+        "Ej. Qué incluye: diagnóstico, reparación, materiales incluidos/no incluidos, duración aproximada.",
       bio: "Tu experiencia, zonas, tipo de trabajos, materiales/herramientas y tu forma de trabajo. 50–700 caracteres.",
     };
   }

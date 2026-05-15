@@ -46,7 +46,7 @@ export interface IStorage {
   getBooking(id: number): Promise<Booking | undefined>;
   createBooking(booking: InsertBooking): Promise<Booking>;
   updateBookingStatus(id: number, status: string): Promise<Booking | undefined>;
-  seedCategories(): Promise<void>;
+  seedCategories(): Promise<{ created: string[] }>;
 }
 
 /**
@@ -216,10 +216,10 @@ export class DatabaseStorage implements IStorage {
    * Inicializa categorías base si la tabla está vacía (idempotente).
    * Útil para ambientes de desarrollo o primeras ejecuciones.
    */
-  async seedCategories(): Promise<void> {
+  async seedCategories(): Promise<{ created: string[] }> {
     const db = await getDb();
     const count = await db.select({ count: categories.id }).from(categories);
-    if (count.length > 0) return;
+    if (count.length > 0) return { created: [] };
 
     await db.insert(categories).values([
       { name: "Plumbing", slug: "plumbing", type: "technical", icon: "Wrench", imageUrl: "https://images.unsplash.com/photo-1585704032915-c3400ca199e7?auto=format&fit=crop&q=80" },
@@ -229,6 +229,7 @@ export class DatabaseStorage implements IStorage {
       { name: "Beauty", slug: "beauty", type: "profession", icon: "Scissors", imageUrl: "https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80" },
       { name: "Moving", slug: "moving", type: "technical", icon: "Truck", imageUrl: "https://images.unsplash.com/photo-1600518464441-9154a4dea21b?auto=format&fit=crop&q=80" },
     ]);
+    return { created: [] };
   }
 }
 
@@ -385,8 +386,8 @@ class MemoryStorage implements IStorage {
     return b;
   }
 
-  async seedCategories(): Promise<void> {
-    if (this._categories.length > 0) return;
+  async seedCategories(): Promise<{ created: string[] }> {
+    if (this._categories.length > 0) return { created: [] };
     const seeds: Omit<Category, "id">[] = [
       { name: "Plumbing", slug: "plumbing", type: "technical", icon: "Wrench", imageUrl: "https://images.unsplash.com/photo-1585704032915-c3400ca199e7?auto=format&fit=crop&q=80" },
       { name: "Electrical", slug: "electrical", type: "technical", icon: "Zap", imageUrl: "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&q=80" },
@@ -396,6 +397,7 @@ class MemoryStorage implements IStorage {
       { name: "Moving", slug: "moving", type: "technical", icon: "Truck", imageUrl: "https://images.unsplash.com/photo-1600518464441-9154a4dea21b?auto=format&fit=crop&q=80" },
     ];
     this._categories = seeds.map((c, i) => ({ id: i + 1, ...c }));
+    return { created: [] };
   }
 }
 

@@ -18,7 +18,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useCategories, useCategoryVisibility, useCurrentProvider, useSubcategories } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
-import { effectiveHiddenCategorySlugs, getCategoryDisplayName } from "@shared/default-categories";
+import {
+  effectiveHiddenCategorySlugs,
+  getCategoryDisplayName,
+  MAN_GO_CATEGORY_SLUG,
+} from "@shared/default-categories";
 import { cn } from "@/lib/utils";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { 
@@ -49,9 +53,9 @@ import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 
 type HomeServiceCategory = {
   name: string;
-  slug: "technical" | "professional" | "maintenance" | "transport" | "marketplace";
+  slug: "technical" | "professional" | "transport" | "marketplace";
   icon: LucideIcon;
-  countKey: "fixGo" | "proGo" | "manGo" | "carGo" | "shopGo";
+  countKey: "proGo" | "manGo" | "carGo" | "shopGo";
   color: string;
   href: string;
 };
@@ -75,18 +79,20 @@ export default function HomePage() {
   const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
 
-  // Subcategories for the 3 service categories
-  const technicalCat = useMemo(() => categories.find((c: any) => c.slug === "technical"), [categories]);
+  const manGoCat = useMemo(
+    () => categories.find((c: any) => c.slug === MAN_GO_CATEGORY_SLUG),
+    [categories],
+  );
   const professionalCat = useMemo(() => categories.find((c: any) => c.slug === "professional"), [categories]);
-  const maintenanceCat = useMemo(() => categories.find((c: any) => c.slug === "maintenance"), [categories]);
-  const { data: technicalSubs = [] } = useSubcategories((technicalCat as any)?.id ?? null);
+  const { data: manGoSubs = [] } = useSubcategories((manGoCat as any)?.id ?? null);
   const { data: professionalSubs = [] } = useSubcategories((professionalCat as any)?.id ?? null);
-  const { data: maintenanceSubs = [] } = useSubcategories((maintenanceCat as any)?.id ?? null);
-  const subsByCategorySlug = useMemo(() => ({
-    technical: technicalSubs,
-    professional: professionalSubs,
-    maintenance: maintenanceSubs,
-  }), [technicalSubs, professionalSubs, maintenanceSubs]);
+  const subsByCategorySlug = useMemo(
+    () => ({
+      technical: manGoSubs,
+      professional: professionalSubs,
+    }),
+    [manGoSubs, professionalSubs],
+  );
 
   const mobilityAllowed = {
     transport: !hiddenSlugs.has("transport"),
@@ -97,9 +103,8 @@ export default function HomePage() {
   const allHomeServiceItems = useMemo(() => {
     const items: { key: string; name: string; icon: string; parentName: string; href: string }[] = [];
     for (const { slug, subs } of [
-      { slug: "technical", subs: technicalSubs },
+      { slug: MAN_GO_CATEGORY_SLUG, subs: manGoSubs },
       { slug: "professional", subs: professionalSubs },
-      { slug: "maintenance", subs: maintenanceSubs },
     ]) {
       const cat = categories.find((c: any) => c.slug === slug);
       if (!cat) continue;
@@ -120,7 +125,7 @@ export default function HomePage() {
     }
     return items;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [technicalSubs, professionalSubs, maintenanceSubs, categories, mobilityAllowed.transport]);
+  }, [manGoSubs, professionalSubs, categories, mobilityAllowed.transport]);
 
   const homePopularSubcategoriesLimit = 12;
   const { data: monthlyPopularSubcategories } = useQuery({
@@ -163,20 +168,6 @@ export default function HomePage() {
     });
     return [...subs, ...other];
   }, [allHomeServiceItems, monthlyPopularSubcategories]);
-
-  const popularMonthLabel = useMemo(() => {
-    const key = monthlyPopularSubcategories?.monthKey;
-    if (!key || !/^\d{4}-\d{2}$/.test(key)) return null;
-    const [y, m] = key.split("-").map((x) => Number(x));
-    if (!y || !m) return null;
-    try {
-      return new Intl.DateTimeFormat("es-EC", { month: "long", year: "numeric", timeZone: "UTC" }).format(
-        new Date(Date.UTC(y, m - 1, 4))
-      );
-    } catch {
-      return key;
-    }
-  }, [monthlyPopularSubcategories?.monthKey]);
 
   const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace;
   const isCarGoDriver = useMemo(() => !!(providerProfile && isCarGoProvider(providerProfile, categories)), [providerProfile, categories]);
@@ -258,7 +249,7 @@ export default function HomePage() {
 
   const serviceCategories = useMemo((): HomeServiceCategory[] => {
     /** Listado filtrado en Explorar por categoría de asociado (incluye todas las subcategorías, p. ej. legal y consultoría). */
-    const exploreHrefForProviderSlug = (slug: "technical" | "professional" | "maintenance") => {
+    const exploreHrefForProviderSlug = (slug: "technical" | "professional") => {
       const cat = categories.find((c) => String((c as { slug?: string }).slug ?? "") === slug);
       const id = cat && typeof (cat as { id?: number }).id === "number" ? (cat as { id: number }).id : null;
       return id != null ? `/explore?providerCategoryId=${id}` : "/explore";
@@ -266,10 +257,10 @@ export default function HomePage() {
 
     const all: HomeServiceCategory[] = [
       {
-        name: getCategoryDisplayName({ slug: "technical" }),
+        name: getCategoryDisplayName({ slug: MAN_GO_CATEGORY_SLUG }),
         slug: "technical",
         icon: Wrench,
-        countKey: "fixGo",
+        countKey: "manGo",
         color: "text-primary",
         href: exploreHrefForProviderSlug("technical"),
       },
@@ -280,14 +271,6 @@ export default function HomePage() {
         countKey: "proGo",
         color: "text-secondary",
         href: exploreHrefForProviderSlug("professional"),
-      },
-      {
-        name: getCategoryDisplayName({ slug: "maintenance" }),
-        slug: "maintenance",
-        icon: Home,
-        countKey: "manGo",
-        color: "text-primary",
-        href: exploreHrefForProviderSlug("maintenance"),
       },
     ];
 
@@ -597,12 +580,6 @@ export default function HomePage() {
             <p className="text-sm sm:text-lg text-muted-foreground max-w-2xl mx-auto">
               Encuentra el asociado perfecto para cualquier necesidad
             </p>
-            {popularMonthLabel && (monthlyPopularSubcategories?.items?.length ?? 0) > 0 ? (
-              <p className="text-xs sm:text-sm text-secondary font-medium max-w-2xl mx-auto mt-2">
-                Ordenadas por demanda real: primero las subcategorías con más reservas confirmadas o completadas en{" "}
-                {popularMonthLabel}.
-              </p>
-            ) : null}
           </motion.div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 max-w-5xl mx-auto">

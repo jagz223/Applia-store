@@ -10,6 +10,10 @@ import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
 import { excludeLegacySubcategoryCategoryDocuments } from "@shared/catalog-category-utils";
 import { computeListingPublished } from "@shared/professional-listing-subscription";
 import { DEFAULT_CATEGORIES, filterCategoriesExcludedFromPublicApi } from "@shared/default-categories";
+import {
+  buildAddProviderCategoryPatch,
+  buildSyncProviderSlotsFromServiceCategoryIds,
+} from "@shared/provider-category-membership";
 
 const CANONICAL_CATEGORY_SLUGS = new Set(
   DEFAULT_CATEGORIES.map((c) => String(c.slug ?? "").trim().toLowerCase()).filter(Boolean),
@@ -84,6 +88,37 @@ export class CatalogService {
     return this.storage.updateProvider(id, data);
   }
 
+  /** Registra una categoría en el proveedor (principal o secundaria) sin pisar Man Go / Pro Go. */
+  async ensureProviderCategoryMembership(providerId: number, categoryId: number): Promise<void> {
+    const provider = await this.storage.getProvider(providerId);
+    if (!provider) return;
+    const categories = await this.storage.getCategories();
+    const patch = buildAddProviderCategoryPatch(provider as Parameters<typeof buildAddProviderCategoryPatch>[0], categoryId, categories);
+    if (patch && Object.keys(patch).length > 0) {
+      await this.storage.updateProvider(providerId, patch as ProviderUpdate);
+    }
+  }
+
+  /** Alinea second/third con las categorías de las fichas del asociado. */
+  async syncProviderCategorySlotsFromServices(providerId: number): Promise<void> {
+    const provider = await this.storage.getProvider(providerId);
+    if (!provider) return;
+    const all = await this.storage.getAllServices(undefined, undefined, undefined, undefined, true);
+    const ids = all
+      .filter((s) => Number((s as { providerId?: number }).providerId) === providerId)
+      .map((s) => Number((s as { categoryId?: number }).categoryId))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const categories = await this.storage.getCategories();
+    const patch = buildSyncProviderSlotsFromServiceCategoryIds(
+      provider as Parameters<typeof buildSyncProviderSlotsFromServiceCategoryIds>[0],
+      ids,
+      categories,
+    );
+    if (patch && Object.keys(patch).length > 0) {
+      await this.storage.updateProvider(providerId, patch as ProviderUpdate);
+    }
+  }
+
   async deleteProvider(id: number) {
     return this.storage.deleteProvider(id);
   }
@@ -114,14 +149,14 @@ export class CatalogService {
     return this.storage.deleteService(id);
   }
 
-  async seedCategories() {
-    return this.storage.seedCategories();
+  async seedCategories(): Promise<{ created: string[] }> {
+    const result = await this.storage.seedCategories();
+    return result ?? { created: [] };
   }
 
   /**
-   * Conteos reales de asociados por marca (Fix Go / Pro Go / Man Go) para la home.
-   * Pro Go = suma de proveedores en subcategorías legal y financial (bajo categoría professional).
-   * Taxi / Pedidos / Delivery = proveedores cuya categoría base coincide con el slug.
+   * Conteos reales de asociados por marca para la home.
+   * Man Go = categoría `technical` (Fix + Man unificados). Pro Go = subcategorías bajo professional.
    */
   async getHomeCategoryAssociateCounts(): Promise<{
     fixGo: number;
@@ -135,7 +170,6 @@ export class CatalogService {
     const bySlug = (slug: string) => categories.find((c) => (c as { slug?: string }).slug === slug);
     const technical = bySlug("technical");
     const professional = bySlug("professional");
-    const maintenance = bySlug("maintenance");
     const transport = bySlug("transport");
     const marketplace = bySlug("marketplace");
     const delivery = bySlug("delivery");
@@ -161,8 +195,10 @@ export class CatalogService {
       return verifiedProviders.filter((p) => (p as { categoryId?: number | null }).categoryId === catId).length;
     };
 
-    const fixGo = countByCategoryId(technical?.id);
-    const manGo = countByCategoryId(maintenance?.id);
+    const manGoCount = countByCategoryId(technical?.id);
+    /** `fixGo` se mantiene como alias legacy de Man Go (`technical`). */
+    const fixGo = manGoCount;
+    const manGo = manGoCount;
     const carGo = countByCategoryId(transport?.id);
     const shopGo = countByCategoryId(marketplace?.id);
     const packGo = countByCategoryId(delivery?.id);

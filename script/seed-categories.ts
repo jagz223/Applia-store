@@ -1,11 +1,13 @@
 /**
  * Seeder de categorías por defecto (unificado: servicios y proveedores).
- * Crea en Firestore las categorías definidas en shared/default-categories si no existen (por slug).
+ * Crea en Firestore las categorías de shared/default-categories si no existen (por slug).
+ * No crea slugs retirados (p. ej. `maintenance`; Man Go unificado en `technical`).
  * Ejecutar: npm run seed:categories
+ * Subcategorías: npm run seed:subcategories
  */
 import "dotenv/config";
 import { initializeFirebase, getFirestore, FIRESTORE_COLLECTIONS } from "../server/firebase-admin";
-import { DEFAULT_CATEGORIES } from "../shared/default-categories";
+import { DEFAULT_CATEGORIES, isRetiredProviderCategorySlug } from "../shared/default-categories";
 
 async function main() {
   const ok = initializeFirebase();
@@ -35,6 +37,10 @@ async function main() {
 
   let created = 0;
   for (const cat of DEFAULT_CATEGORIES) {
+    if (isRetiredProviderCategorySlug(cat.slug)) {
+      console.log("  —", cat.slug, "(retirada, no se crea)");
+      continue;
+    }
     if (existingBySlug.has(cat.slug)) {
       console.log("  —", cat.slug, "(ya existe)");
       continue;
@@ -51,6 +57,14 @@ async function main() {
     });
     console.log("  ✓", cat.slug, "→ id", maxId);
     created++;
+  }
+
+  const maintenanceLegacy = existingBySlug.has("maintenance");
+  if (maintenanceLegacy) {
+    console.log(
+      "\n  ℹ Existe documento legacy slug=maintenance en Firestore. No se borra ni se usa en seed.",
+      "Subcategorías y proveedores deben apuntar a technical (npm run migrate:subcategories / migrate:provider-categories).",
+    );
   }
 
   console.log("\n✅ Categorías listas. Creadas:", created);

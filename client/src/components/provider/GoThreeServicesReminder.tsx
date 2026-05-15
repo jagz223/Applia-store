@@ -1,4 +1,3 @@
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   GO_THREE_SERVICES_REMINDER_LEAD,
   GO_THREE_SERVICES_REMINDER_TITLE,
@@ -8,29 +7,22 @@ import {
   GO_THREE_SERVICE_TAXI,
 } from "@shared/go-three-services-reminder-copy";
 
-function ReminderRow({ label, note }: { label: string; note?: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2">
-      <span className="min-w-0 text-sm font-medium text-foreground">
-        {label}
-        {note ? <span className="ml-1 text-xs font-normal text-muted-foreground">{note}</span> : null}
-      </span>
-      <Checkbox checked disabled className="shrink-0" aria-label={`${label}: siempre activo (recordatorio)`} />
-    </div>
-  );
-}
-
-/** Checkboxes solo informativos: taxi, delivery y marketplace siempre activos en Genfeb Go. */
+/** Qué incluye Car Go al registrarse como conductor (solo informativo). */
 export function GoThreeServicesReminder() {
+  const items = [
+    GO_THREE_SERVICE_TAXI,
+    GO_THREE_SERVICE_DELIVERY,
+    `${GO_THREE_SERVICE_MARKETPLACE} ${GO_THREE_SERVICE_MARKETPLACE_NOTE}`,
+  ];
   return (
-    <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+    <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-2">
       <p className="font-semibold text-foreground">{GO_THREE_SERVICES_REMINDER_TITLE}</p>
-      <p className="text-sm text-muted-foreground leading-relaxed">{GO_THREE_SERVICES_REMINDER_LEAD}</p>
-      <div className="space-y-2">
-        <ReminderRow label={GO_THREE_SERVICE_TAXI} />
-        <ReminderRow label={GO_THREE_SERVICE_DELIVERY} />
-        <ReminderRow label={GO_THREE_SERVICE_MARKETPLACE} note={GO_THREE_SERVICE_MARKETPLACE_NOTE} />
-      </div>
+      <p className="text-sm text-muted-foreground">{GO_THREE_SERVICES_REMINDER_LEAD}</p>
+      <ul className="list-disc list-inside text-sm text-foreground/90 space-y-0.5 pl-0.5">
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
     </div>
   );
 }

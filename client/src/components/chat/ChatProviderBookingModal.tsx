@@ -23,10 +23,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useUpdateBookingStatus, useUpdateBookingSchedule } from "@/hooks/use-mango-data";
+import { storeEditServiceReturnPath } from "@/lib/edit-service-return-path";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocketBookings } from "@/hooks/use-socket";
 import { toDate } from "@/lib/date-utils";
-import { chatApi } from "@/lib/chat-api";
 import { PROVIDER_BOOKING_MODAL_DESCRIPTION } from "@/lib/chat-booking-ui-copy";
 
 type BookingItem = {
@@ -109,17 +109,12 @@ export function ChatProviderBookingModal({ open, onOpenChange, bookingId, conver
     setScheduleDisplay({ date: format(d, "yyyy-MM-dd"), time: format(d, "HH:mm") });
   }, [booking?.id, booking?.date, open]);
 
-  const sendStatusNoticeToChat = async (id: number, newStatus: string) => {
+  const refreshChatAfterStatusChange = () => {
     const cid = conversationId != null ? Number(conversationId) : NaN;
     if (!Number.isFinite(cid) || cid <= 0) return;
-    const text = `La reserva #${id} pasó al estado «${statusLabel(newStatus)}».`;
-    try {
-      await chatApi.sendMessage({ conversationId: cid, content: text, type: "system" });
-      void queryClient.invalidateQueries({ queryKey: ["chat", "conversations"] });
-      void queryClient.invalidateQueries({ queryKey: ["chat", "messages", cid] });
-    } catch (e) {
-      console.error("[ChatProviderBookingModal] No se pudo enviar el aviso al chat:", e);
-    }
+    void queryClient.invalidateQueries({ queryKey: ["chat", "conversations"] });
+    void queryClient.invalidateQueries({ queryKey: ["chat", "messages", cid] });
+    void queryClient.refetchQueries({ queryKey: ["chat", "messages", cid] });
   };
 
   const executeStatusUpdate = (id: number, status: string, onApplied?: () => void) => {
@@ -132,11 +127,7 @@ export function ChatProviderBookingModal({ open, onOpenChange, bookingId, conver
           if (status !== "confirmed" && b?.userId && notifyBookingUpdate) {
             notifyBookingUpdate(b.userId, updated ?? { ...b, status });
           }
-          try {
-            await sendStatusNoticeToChat(id, status);
-          } catch {
-            /* sendStatusNoticeToChat ya registra errores */
-          }
+          refreshChatAfterStatusChange();
           void queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
           void queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
         },
@@ -264,7 +255,12 @@ export function ChatProviderBookingModal({ open, onOpenChange, bookingId, conver
             <Link href={`/service/${booking.serviceId}`}>Ver página del servicio</Link>
           </Button>
           <Button variant="ghost" size="sm" className="text-primary" asChild>
-            <Link href={`/edit-service/${booking.serviceId}`}>Editar ficha del servicio</Link>
+            <Link
+              href={`/edit-service/${booking.serviceId}`}
+              onClick={() => storeEditServiceReturnPath()}
+            >
+              Editar ficha del servicio
+            </Link>
           </Button>
         </div>
 
