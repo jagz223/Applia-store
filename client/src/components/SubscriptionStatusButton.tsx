@@ -18,7 +18,9 @@ import {
   listingSubscriptionDaysRemaining,
 } from "@shared/professional-listing-subscription";
 
-const RENEW_PAYMENT_HREF = "/professional/verify/payment";
+import { prepareRenewalPaymentNavigation, VERIFY_PAYMENT_PATH } from "@/lib/verify-return-path";
+
+const RENEW_PAYMENT_HREF = VERIFY_PAYMENT_PATH;
 
 export function SubscriptionStatusButton(props: { label?: string } & ButtonProps) {
   const { label = "Mi Suscripción", ...btn } = props;
@@ -119,7 +121,7 @@ export function SubscriptionStatusButton(props: { label?: string } & ButtonProps
                 </AlertDialogAction>
               ) : (
                 <AlertDialogAction asChild>
-                  <Link href={RENEW_PAYMENT_HREF}>
+                  <Link href={RENEW_PAYMENT_HREF} onClick={prepareRenewalPaymentNavigation}>
                     <span className="inline-flex items-center">
                       <CreditCard className="h-4 w-4 mr-2" />
                       {state.needsRenew ? "Renovar Suscripción" : "Pagar más meses"}

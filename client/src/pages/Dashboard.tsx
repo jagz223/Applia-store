@@ -48,7 +48,7 @@ const ACTIVATION_VISIBILITY_USD = 15;
 const ACTIVATION_MOVEMENT_LABEL = "Abono por activar servicios visibles";
 
 /**
- * Historial de pago único: cargo de verificación / activación para que tus servicios sean visibles (USD 15).
+ * Historial de pago único: cargo de verificación / activación para que tus servicios sean visibles (cuota mensual).
  */
 function isActivationVisibilityTransfer(t: {
   transferType?: string;

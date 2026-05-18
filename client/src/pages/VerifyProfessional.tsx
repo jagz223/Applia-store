@@ -10,14 +10,18 @@ import {
   useVerifyingStatusMe,
   useCurrentProvider,
   useCategories,
-  usePlatformSubscriptionFees,
 } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { MAN_GO_CATEGORY_SLUG, normalizeProviderCategorySlug } from "@shared/default-categories";
+import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
 import { uploadProfessionalCredential, uploadVerificationIdImage } from "@/lib/firebase-client";
 import { ArrowLeft, ExternalLink, FileText, Loader2, Lock, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { consumeVerifyReturnPath, ensureDefaultVerifyReturnPath } from "@/lib/verify-return-path";
+import {
+  consumeVerifyReturnPath,
+  ensureDefaultVerifyReturnPath,
+  VERIFY_PAYMENT_PATH,
+} from "@/lib/verify-return-path";
 
 type UploadedKind = "image" | "pdf" | "office" | "unknown";
 
@@ -129,7 +133,7 @@ export default function VerifyProfessional() {
   const patchCredential = usePatchProfessionalVerificationCredential();
   const { data: verifyingStatus, isLoading: verifyingStatusLoading } = useVerifyingStatusMe(enabled);
   const isRenewalSimple = (provider as any)?.isVerified === true;
-  const { data: subscriptionFees } = usePlatformSubscriptionFees({ enabled });
+  const { monthlyUsdLabel } = useProviderSubscriptionMonthlyUsd({ enabled });
   const categorySlug = useMemo(() => {
     const direct = typeof (provider as any)?.category === "string" ? String((provider as any).category).trim() : "";
     if (direct) return direct;
@@ -138,12 +142,6 @@ export default function VerifyProfessional() {
     const cat = categories.find((c: any) => Number(c?.id) === id);
     return typeof (cat as any)?.slug === "string" ? String((cat as any).slug).trim() : "";
   }, [provider, categories]);
-  const monthlyUsd = useMemo(() => {
-    const map = (subscriptionFees as any)?.feesBySlug as Record<string, number> | undefined;
-    const v = map && categorySlug ? Number(map[categorySlug]) : NaN;
-    return Number.isFinite(v) ? v : 15;
-  }, [subscriptionFees, categorySlug]);
-
   const providerCategorySlug = normalizeProviderCategorySlug(categorySlug);
   const isManGo = providerCategorySlug === MAN_GO_CATEGORY_SLUG;
 
@@ -196,15 +194,21 @@ export default function VerifyProfessional() {
   const hasPayment =
     Boolean(verification?.transferReceiptCode?.trim()) && Boolean(verification?.transferDate?.trim());
 
-  /** Documento y pago enviados y en revisión: volver a la pantalla previa (el banner sigue hasta que admin verifique). */
+  /** Renovación: no usar pantalla intermedia; ir directo al pago o al panel si ya hay comprobante en revisión. */
   useEffect(() => {
-    if (verLoading || verifyingStatusLoading || !verifyingStatus) return;
-    const txPending = verifyingStatus.transacction_verified === "pending";
-    if (!txPending) return;
-    if (isRenewalSimple) {
+    if (!isRenewalSimple || verLoading || verifyingStatusLoading) return;
+    if (verifyingStatus?.transacction_verified === "pending") {
       setLocation(consumeVerifyReturnPath());
       return;
     }
+    setLocation(VERIFY_PAYMENT_PATH);
+  }, [isRenewalSimple, verLoading, verifyingStatusLoading, verifyingStatus, setLocation]);
+
+  /** Alta inicial: documento y pago en revisión → volver a la pantalla previa. */
+  useEffect(() => {
+    if (isRenewalSimple || verLoading || verifyingStatusLoading || !verifyingStatus) return;
+    const txPending = verifyingStatus.transacction_verified === "pending";
+    if (!txPending) return;
     const idPending = verifyingStatus.identification_verified === "pending";
     if (!idPending) return;
     if (!hasImage || !hasCredential || !hasPayment) return;
@@ -226,22 +230,22 @@ export default function VerifyProfessional() {
       return {
         headline: "Paso 1 de 3 · Documento de identidad",
         detail: isCarGo
-          ? "Primero subí tu documento de identidad en la tarjeta de arriba. Después podrás subir la licencia y, al final, el pago."
+          ? "Primero sube tu documento de identidad en la tarjeta de arriba. Después podrás subir la licencia y, al final, el pago."
           : isManGo
-            ? "Primero subí tu documento de identidad en la tarjeta de arriba. Después podrás subir tu documento o certificación de curso y, al final, el pago."
-            : "Primero subí tu documento de identidad en la tarjeta de arriba. Después podrás subir tu documento profesional y, al final, el pago.",
+            ? "Primero sube tu documento de identidad en la tarjeta de arriba. Después podrás subir tu documento o certificación de curso y, al final, el pago."
+            : "Primero sube tu documento de identidad en la tarjeta de arriba. Después podrás subir tu documento profesional y, al final, el pago.",
       };
     }
     if (!hasCredential) {
       return {
         headline: `Paso 2 de 3 · ${credentialCopy.stepLabel}`,
-        detail: `Ya tenés la identidad. Subí tu ${credentialCopy.step2Noun} en la segunda tarjeta. El botón de pago se habilita cuando ambos documentos estén listos.`,
+        detail: `Ya tienes la identidad. Sube tu ${credentialCopy.step2Noun} en la segunda tarjeta. El botón de pago se habilita cuando ambos documentos estén listos.`,
       };
     }
     return {
       headline: "Paso 3 de 3 · Cuota",
       detail:
-        "Documentación completa. Continuá al pago para registrar la cuota; el equipo revisará todo junto.",
+        "Documentación completa. Continúa al pago para registrar la cuota; el equipo revisará todo junto.",
     };
   }, [isRenewalSimple, hasImage, hasCredential, isCarGo, isManGo, credentialCopy]);
 
@@ -353,7 +357,7 @@ export default function VerifyProfessional() {
       </h1>
       <p className="text-muted-foreground text-sm mb-8">
         {isRenewalSimple
-          ? `Solo necesitas subir el comprobante de tu cuota (${monthlyUsd} USD/mes según tu categoría). No te pediremos documentos nuevamente.`
+          ? `Solo necesitas subir el comprobante de tu cuota (${monthlyUsdLabel}/mes según tu categoría). No te pediremos documentos nuevamente.`
           : isCarGo
             ? "Completa la verificación para que los clientes puedan usar tus servicios de movilidad. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."
             : "Completa ambos pasos. Cuando envíes todo, los datos quedarán bloqueados hasta que el equipo revise tu solicitud."}
@@ -483,8 +487,8 @@ export default function VerifyProfessional() {
                 </CardTitle>
                 <CardDescription>
                   {isCarGo
-                    ? `Es una cuota de USD ${monthlyUsd} por mes de visibilidad en la plataforma (según tu categoría). Con la primera validación podrás operar como asociado; cada mes debés renovar para seguir publicado. Si pagás antes de vencer el período, al validar el comprobante se suma un mes desde tu fecha de vencimiento actual.`
-                    : `Es una cuota de USD ${monthlyUsd} por mes para mantener tu servicio visible en el catálogo (según tu categoría). Con la primera validación quedás publicado; cada mes debés renovar. Si pagás antes de vencer, al validar el comprobante se suma un mes desde tu vencimiento actual (no perdés lo ya pagado).`}
+                    ? `Es una cuota de ${monthlyUsdLabel} por mes de visibilidad en la plataforma (según tu categoría). Con la primera validación podrás operar como asociado; cada mes debes renovar para seguir publicado. Si pagas antes de vencer el período, al validar el comprobante se suma un mes desde tu fecha de vencimiento actual.`
+                    : `Es una cuota de ${monthlyUsdLabel} por mes para mantener tu servicio visible en el catálogo (según tu categoría). Con la primera validación quedas publicado; cada mes debes renovar. Si pagas antes de vencer, al validar el comprobante se suma un mes desde tu vencimiento actual (no pierdes lo ya pagado).`}
                 </CardDescription>
               </div>
               {step2Locked ? <Lock className="h-5 w-5 text-muted-foreground shrink-0" /> : null}

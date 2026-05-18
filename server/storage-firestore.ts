@@ -976,8 +976,15 @@ class FirestoreStorageImpl implements IStorage {
   ): Promise<ServiceWithProvider[]> {
     if (!this.db) return [];
     let query = this.db.collection(FIRESTORE_COLLECTIONS.SERVICES);
-    if (categoryId) {
-      query = query.where("categoryId", "==", categoryId) as any;
+    /** Explore / booking: filtrar por categoría de la ficha, no por marcas del proveedor. */
+    const serviceCategoryFilter =
+      categoryId != null && !Number.isNaN(categoryId)
+        ? categoryId
+        : providerCategoryId != null && !Number.isNaN(providerCategoryId)
+          ? providerCategoryId
+          : null;
+    if (serviceCategoryFilter != null) {
+      query = query.where("categoryId", "==", serviceCategoryFilter) as any;
     }
     const snapshot = await query.get();
     const services = snapshot.docs.map((doc) => ({

@@ -41,3 +41,27 @@ export function subscriptionFeeAdminHint(slug: SubscriptionFeeAdminSlug): string
   if (slug === "transport") return "La misma tarifa aplica a Delivery y Shop Go.";
   return undefined;
 }
+
+export const DEFAULT_SUBSCRIPTION_FEE_USD = 15;
+
+/** Etiqueta de precio para UI: "USD 15", "USD 22.5", etc. */
+export function formatSubscriptionUsdLabel(usd: number): string {
+  const n = Number(usd);
+  if (!Number.isFinite(n) || n < 0) return `USD ${DEFAULT_SUBSCRIPTION_FEE_USD}`;
+  const display = Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+  return `USD ${display}`;
+}
+
+/** USD/mes para un slug de categoría según tarifas de plataforma (fallback 15). */
+export function subscriptionMonthlyUsdForCategorySlug(
+  fees: Record<string, number> | null | undefined,
+  slug: string | null | undefined,
+  defaultUsd: number = DEFAULT_SUBSCRIPTION_FEE_USD,
+): number {
+  const s = subscriptionFeeLookupSlug(slug);
+  if (!s) return defaultUsd;
+  const v = fees?.[s];
+  const n = Number(v);
+  if (!Number.isFinite(n)) return defaultUsd;
+  return Math.max(0, n);
+}

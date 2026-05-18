@@ -24,6 +24,7 @@ import {
   RIDER_DRIVER_NOT_AVAILABLE_MESSAGE,
 } from "@shared/mobility-negotiation";
 import { driverIsBusyCrossModule, registerPackDriverBusy } from "./driver-busy-cross-module";
+import { resolveGoRideRouteQuote } from "./go-ride-route-quote";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import crypto from "crypto";
 
@@ -719,10 +720,19 @@ export function registerPackRideRoutes(app: Express) {
 
       const id = crypto.randomUUID();
       const body = parsed.data;
-      const offerUsd = roundToCents(Math.max(0, safeNumber(body.estimatedUsd, 0)));
-      const suggestedUsd = roundToCents(Math.max(0, safeNumber(body.suggestedUsd, offerUsd)));
-      const priceDiffers = Math.abs(offerUsd - suggestedUsd) > 0.01;
+
+      const routeQuote = await resolveGoRideRouteQuote({
+        start: body.start,
+        end: body.end,
+        vehicleType: body.vehicleType,
+        module: "delivery",
+      });
+
+      const suggestedUsd = roundToCents(routeQuote.suggestedUsd);
+      const clientOfferUsd = roundToCents(Math.max(0, safeNumber(body.estimatedUsd, 0)));
+      const priceDiffers = Math.abs(clientOfferUsd - suggestedUsd) > 0.01;
       const negotiated = !!body.isNegotiated || !!body.offerEdited || priceDiffers;
+      const offerUsd = negotiated ? clientOfferUsd : suggestedUsd;
 
       let candidates = freshDriversForVehicle(body.vehicleType);
       candidates = rankDriversByNearest(body.start, candidates);
@@ -745,11 +755,11 @@ export function registerPackRideRoutes(app: Express) {
         // El TTL 60s aplica a contraofertas, no al “market” del ride.
         marketVisibleUntil: undefined,
         counterOffers: undefined,
-        distanceM: body.distanceM,
-        durationSec: body.durationSec,
+        distanceM: routeQuote.distanceM,
+        durationSec: routeQuote.durationSec,
         start: body.start,
         end: body.end,
-        routeGeometry: (body.routeGeometry ?? null) as GeoJsonObject | null,
+        routeGeometry: (routeQuote.geometry ?? body.routeGeometry ?? null) as GeoJsonObject | null,
         createdAt: Date.now(),
         conversationId: null,
         offeredDriverIds: negotiated ? [] : candidateIds,

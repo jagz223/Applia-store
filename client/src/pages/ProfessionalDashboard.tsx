@@ -59,6 +59,7 @@ import {
   useProfessionalVerification,
 } from "@/hooks/use-mango-data";
 import { listingSubscriptionDaysRemaining } from "@shared/professional-listing-subscription";
+import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
 import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
 import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 import { debouncedRefetch } from "@/lib/refetch-utils";
@@ -786,6 +787,7 @@ function InvoicesTabContent() {
   const { user } = useAuth();
   const [location] = useLocation();
   const autoVerificationPdfDone = useRef(false);
+  const { monthlyUsd, monthlyUsdLabel } = useProviderSubscriptionMonthlyUsd();
 
   const { data: invoiceList, isLoading: invoicesLoading } = useQuery({
     queryKey: ["/api/invoices", "list"],
@@ -809,7 +811,7 @@ function InvoicesTabContent() {
     },
   });
 
-  // Nota: este tab muestra únicamente el pago mensual USD 15 (suscripción).
+  // Nota: este tab muestra únicamente el pago mensual de suscripción de visibilidad.
 
   const verificationRows = useMemo(
     () => (invoiceList ?? []).filter((inv) => inv.type === "verification"),
@@ -878,13 +880,13 @@ function InvoicesTabContent() {
     const reportId = match.reportId ?? match.id;
     if (reportId == null) return;
     const amt =
-      typeof match.amount === "number" ? match.amount : parseFloat(String(match.amount ?? "15"));
+      typeof match.amount === "number" ? match.amount : parseFloat(String(match.amount ?? String(monthlyUsd)));
     void downloadInvoicePdf(
       {
         id: reportId,
         reportId,
         transferType: "verification_fee",
-        amount: Number.isFinite(amt) ? amt : 15,
+        amount: Number.isFinite(amt) ? amt : monthlyUsd,
         description: match.service ?? "Cargo de verificación profesional",
         createdAt: match.date,
         status: match.status,
@@ -903,7 +905,7 @@ function InvoicesTabContent() {
         window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
       }
     });
-  }, [invoiceList, verificationRows, user, location]);
+  }, [invoiceList, verificationRows, user, location, monthlyUsd]);
 
   const userForInvoice = user
     ? {
@@ -919,7 +921,9 @@ function InvoicesTabContent() {
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Historial y descarga en PDF del pago mensual (USD 15) para ser asociado</CardDescription>
+          <CardDescription>
+            Historial y descarga en PDF del pago mensual ({monthlyUsdLabel}) para ser asociado
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
@@ -934,7 +938,9 @@ function InvoicesTabContent() {
       <Card>
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
-          <CardDescription>Historial y descarga en PDF del pago mensual (USD 15) para ser asociado</CardDescription>
+          <CardDescription>
+            Historial y descarga en PDF del pago mensual ({monthlyUsdLabel}) para ser asociado
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
           <FileText className="h-8 w-8 opacity-60" />
@@ -949,18 +955,18 @@ function InvoicesTabContent() {
       <CardHeader>
         <CardTitle>Facturas</CardTitle>
         <CardDescription>
-          Historial y descarga en PDF del pago mensual (USD 15) para ser asociado
+          Historial y descarga en PDF del pago mensual ({monthlyUsdLabel}) para ser asociado
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {verificationRows.length > 0 && (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-foreground">Suscripción mensual (USD 15)</p>
+            <p className="text-sm font-medium text-foreground">Suscripción mensual ({monthlyUsdLabel})</p>
             {verificationRows.map((inv) => {
               const reportKey = inv.reportId ?? inv.id;
               if (reportKey == null) return null;
               const amt =
-                typeof inv.amount === "number" ? inv.amount : parseFloat(String(inv.amount ?? "15"));
+                typeof inv.amount === "number" ? inv.amount : parseFloat(String(inv.amount ?? String(monthlyUsd)));
               const dateStr = parseTransferDate(inv.date)
                 ? format(parseTransferDate(inv.date)!, "dd MMM yyyy HH:mm", { locale: es })
                 : "—";
@@ -990,7 +996,7 @@ function InvoicesTabContent() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0 flex-wrap sm:flex-nowrap">
-                    <p className="font-semibold text-sm">{formatWalletAmount(Number.isFinite(amt) ? amt : 15)}</p>
+                    <p className="font-semibold text-sm">{formatWalletAmount(Number.isFinite(amt) ? amt : monthlyUsd)}</p>
                     <Badge variant={isCompleted ? "default" : isRejected ? "destructive" : "secondary"}>
                       {isCompleted ? "Completado" : isRejected ? "Rechazado" : "Pendiente"}
                     </Badge>
@@ -1004,7 +1010,7 @@ function InvoicesTabContent() {
                             id: reportKey,
                             reportId: reportKey,
                             transferType: "verification_fee",
-                            amount: Number.isFinite(amt) ? amt : 15,
+                            amount: Number.isFinite(amt) ? amt : monthlyUsd,
                             description: inv.service ?? "Cargo de verificación profesional",
                             createdAt: inv.date,
                             status: inv.status,

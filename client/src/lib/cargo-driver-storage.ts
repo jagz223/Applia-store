@@ -55,6 +55,12 @@ export function saveGoReceiving(goSlug: "cargo" | "pack", on: boolean): void {
   }
 }
 
+/** Apaga taxi y delivery en localStorage (p. ej. al perder el socket por reinicio del servidor). */
+export function clearAllGoReceiving(): void {
+  saveGoReceiving("cargo", false);
+  saveGoReceiving("pack", false);
+}
+
 export function loadDriverActiveRideId(): string | null {
   try {
     const v = localStorage.getItem(CARGO_DRIVER_ACTIVE_RIDE_KEY);

@@ -37,6 +37,7 @@ import Register from "@/pages/Register";
 import Admin from "@/pages/Admin";
 import CreateRole from "@/pages/CreateRole";
 import EditUser from "@/pages/EditUser";
+import AdminProviderDetailPage from "@/pages/AdminProviderDetailPage";
 import ProfessionalDashboard from "@/pages/ProfessionalDashboard";
 import PaymentVoucher from "@/pages/PaymentVoucher";
 import Bookings from "@/pages/Bookings";
@@ -90,6 +91,7 @@ function MainRouter() {
       <Route path="/admin" component={Admin} />
       <Route path="/admin/create-role" component={CreateRole} />
       <Route path="/admin/users/:id/edit" component={EditUser} />
+      <Route path="/admin/providers/:providerId" component={AdminProviderDetailPage} />
       <Route path="/professional-dashboard" component={ProfessionalDashboard} />
       {/* wouter: `component` recibe props de ruta; render inline evita mismatch de props */}
       <Route path="/payment-voucher">{() => <PaymentVoucher />}</Route>

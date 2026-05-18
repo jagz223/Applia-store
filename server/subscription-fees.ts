@@ -4,23 +4,29 @@
  */
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
 import type { Category } from "@shared/schema";
-import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 import {
   expandSubscriptionFeesBySlugForStorage,
-  subscriptionFeeLookupSlug,
 } from "@shared/subscription-category-fees";
 import {
-  getProviderCategoryIds,
-  slugForCategoryId,
-  type ProviderCategorySlots,
-} from "@shared/provider-category-membership";
+  subscriptionBillingCategorySlugFromProvider,
+  subscriptionMonthlyUsdForProvider,
+  type ProviderForSubscriptionFee,
+} from "@shared/provider-subscription-fee";
+
+export {
+  DEFAULT_SUBSCRIPTION_FEE_USD,
+  subscriptionMonthlyUsdForCategorySlug,
+} from "@shared/subscription-category-fees";
+export {
+  providerSubscriptionFeeSlugs,
+  subscriptionMonthlyUsdForProvider,
+  subscriptionBillingCategorySlugFromProvider,
+} from "@shared/provider-subscription-fee";
 
 const DOC_ID = "global";
 const TTL_MS = 15_000;
 
 export type SubscriptionFeesBySlug = Record<string, number>;
-
-export const DEFAULT_SUBSCRIPTION_FEE_USD = 15;
 
 let cache: { value: SubscriptionFeesBySlug; at: number } | null = null;
 let memoryOnly: SubscriptionFeesBySlug | null = null;
@@ -76,6 +82,7 @@ export async function setSubscriptionFeesByCategorySlug(next: SubscriptionFeesBy
   return sanitized;
 }
 
+/** @deprecated Usar subscriptionBillingCategorySlugFromProvider */
 export function categorySlugFromProvider(provider: any, categories: Category[] = []): string | null {
   const direct = typeof provider?.category === "string" ? provider.category.trim() : "";
   if (direct) return direct;
@@ -86,36 +93,11 @@ export function categorySlugFromProvider(provider: any, categories: Category[] =
   return slug || null;
 }
 
-/**
- * Slug usado para calcular la mensualidad USD 15 (o tarifa admin por categoría).
- * Por ahora: la categoría con la que se registró (`subscriptionCategorySlug`), sin cambiar si luego es conductor.
- */
+/** Slug de categoría usado para facturar la suscripción (mayor tarifa entre líneas del asociado). */
 export function subscriptionCategorySlugFromProvider(
-  provider: ProviderCategorySlots & { subscriptionCategorySlug?: string | null },
+  provider: ProviderForSubscriptionFee,
   categories: Category[] = [],
+  fees: SubscriptionFeesBySlug = {},
 ): string | null {
-  const stored = String(provider?.subscriptionCategorySlug ?? "").trim();
-  if (stored && isCatalogAssignableServiceCategorySlug(stored)) return stored;
-
-  const primarySlug = slugForCategoryId(Number(provider?.categoryId), categories);
-  if (primarySlug && isCatalogAssignableServiceCategorySlug(primarySlug)) return primarySlug;
-
-  for (const id of getProviderCategoryIds(provider)) {
-    const s = slugForCategoryId(id, categories);
-    if (s && isCatalogAssignableServiceCategorySlug(s)) return s;
-  }
-
-  const legacy = categorySlugFromProvider(provider, categories);
-  if (legacy && isCatalogAssignableServiceCategorySlug(legacy)) return legacy;
-  return legacy;
+  return subscriptionBillingCategorySlugFromProvider(provider, fees, categories);
 }
-
-export function subscriptionMonthlyUsdForCategorySlug(fees: SubscriptionFeesBySlug, slug: string | null | undefined): number {
-  const s = subscriptionFeeLookupSlug(slug);
-  if (!s) return DEFAULT_SUBSCRIPTION_FEE_USD;
-  const v = fees?.[s];
-  const n = Number(v);
-  if (!Number.isFinite(n)) return DEFAULT_SUBSCRIPTION_FEE_USD;
-  return Math.max(0, n);
-}
-
