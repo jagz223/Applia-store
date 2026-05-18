@@ -39,8 +39,7 @@ import { filterCategoriesExcludedFromPublicApi, MOBILITY_GO_PROVIDER_SLUGS } fro
 import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
 import {
   getSubscriptionFeesByCategorySlug,
-  subscriptionCategorySlugFromProvider,
-  subscriptionMonthlyUsdForCategorySlug,
+  subscriptionMonthlyUsdForProvider,
 } from "./subscription-fees";
 import {
   validateAssignableServiceCategory,
@@ -467,16 +466,24 @@ export async function registerRoutes(
         if (!img || !cred) {
           return res.status(400).json({
             message:
-              "Debés subir tu identificación y tu documento profesional (o licencia de conducir) antes de registrar el pago.",
+              "Debes subir tu identificación y tu documento profesional (o licencia de conducir) antes de registrar el pago.",
           });
         }
       }
 
       const body = patchProfessionalVerificationPaymentBody.parse(req.body);
+      const providerId = Number((provider as { id?: number }).id);
+      if (Number.isFinite(providerId) && providerId > 0) {
+        await catalogService.syncProviderCategorySlotsFromServices(providerId);
+      }
+      const providerForFee = (await catalogService.getProviderByUserId(userId)) ?? provider;
       const feesBySlug = await getSubscriptionFeesByCategorySlug();
       const categoriesForSub = await catalogService.getCategories();
-      const catSlug = subscriptionCategorySlugFromProvider(provider as any, categoriesForSub);
-      const monthlyUsd = subscriptionMonthlyUsdForCategorySlug(feesBySlug, catSlug);
+      const monthlyUsd = subscriptionMonthlyUsdForProvider(
+        providerForFee as any,
+        feesBySlug,
+        categoriesForSub,
+      );
       const updated = await genFebStorage.upsertProfessionalVerificationPayment(userId, {
         transferReceiptCode: body.transferReceiptCode,
         transferDate: body.transferDate,

@@ -27,7 +27,6 @@ import {
   usePatchProfessionalVerificationPayment,
   useCurrentProvider,
   useCategories,
-  usePlatformSubscriptionFees,
   useProfessionalVerification,
   VERIFICATION_STATUS_ME,
   PROFESSIONAL_VERIFICATION_ME,
@@ -35,7 +34,12 @@ import {
   type ProfessionalVerificationDto,
 } from "@/hooks/use-mango-data";
 import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
-import { consumeVerifyReturnPath, ensureDefaultVerifyReturnPath } from "@/lib/verify-return-path";
+import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
+import {
+  consumeVerifyReturnPath,
+  ensureDefaultVerifyReturnPath,
+  peekVerifyReturnPath,
+} from "@/lib/verify-return-path";
 import { useToast } from "@/hooks/use-toast";
 import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
 
@@ -46,8 +50,10 @@ export default function VerifyProfessionalPayment() {
   const { isAuthenticated, user } = useAuth();
   const { data: currentProvider } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
-  const { data: subscriptionFees } = usePlatformSubscriptionFees();
   const provider = currentProvider ?? user?.provider;
+  const { monthlyUsd, monthlyUsdLabel } = useProviderSubscriptionMonthlyUsd({
+    enabled: Boolean(isAuthenticated && provider),
+  });
   const isCarGo = useMemo(() => isCarGoProvider(provider ?? undefined, categories), [provider, categories]);
   const isRenewalSimple = Boolean((provider as { isVerified?: boolean } | undefined)?.isVerified);
   const verificationEnabled = Boolean(isAuthenticated && user?.provider);
@@ -63,22 +69,17 @@ export default function VerifyProfessionalPayment() {
   const [transferDate, setTransferDate] = useState<Date | undefined>(undefined);
   const [transferCode, setTransferCode] = useState<string>("");
   const [subscriptionMonths, setSubscriptionMonths] = useState<number>(1);
-  const categorySlug = useMemo(() => {
-    const direct = typeof (provider as any)?.category === "string" ? String((provider as any).category).trim() : "";
-    if (direct) return direct;
-    const id = Number((provider as any)?.categoryId);
-    if (!Number.isFinite(id)) return "";
-    const cat = categories.find((c: any) => Number(c?.id) === id);
-    return typeof (cat as any)?.slug === "string" ? String((cat as any).slug).trim() : "";
-  }, [provider, categories]);
-  const monthlyUsd = useMemo(() => {
-    const map = (subscriptionFees as any)?.feesBySlug as Record<string, number> | undefined;
-    const v = map && categorySlug ? Number(map[categorySlug]) : NaN;
-    return Number.isFinite(v) ? v : DEFAULT_VERIFY_AMOUNT_USD;
-  }, [subscriptionFees, categorySlug]);
   const [copied, setCopied] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const totalUsd = useMemo(() => monthlyUsd * subscriptionMonths, [monthlyUsd, subscriptionMonths]);
+
+  const handleBack = () => {
+    if (isRenewalSimple) {
+      setLocation(peekVerifyReturnPath());
+      return;
+    }
+    setLocation("/professional/verify");
+  };
 
   const isFormValid = useMemo(() => {
     return transferDate != null && transferCode.trim() !== "";
@@ -215,21 +216,25 @@ export default function VerifyProfessionalPayment() {
     <>
       <div className="container max-w-6xl py-8 sm:py-12 px-4">
         <div className="mb-6">
-          <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-primary" asChild>
-            <Link href="/professional/verify">
-              <ArrowLeft className="h-4 w-4" />
-              Volver a pasos
-            </Link>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-2 text-muted-foreground hover:text-primary"
+            onClick={handleBack}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {isRenewalSimple ? "Volver" : "Volver a pasos"}
           </Button>
         </div>
 
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
-            Cuota de visibilidad — {monthlyUsd} USD / mes
+            Cuota de visibilidad — {monthlyUsdLabel}/mes
           </h1>
           <p className="text-muted-foreground mt-1">
-            Transferí el monto indicado y registrá la fecha (solo día) y el código. La cuota se renueva cada mes para
-            seguir publicado en el catálogo; si pagás antes de vencer, al validar el comprobante se suma un mes desde tu
+            Transfiere el monto indicado y registra la fecha (solo día) y el código. La cuota se renueva cada mes para
+            seguir publicado en el catálogo; si pagas antes de vencer, al validar el comprobante se suma un mes desde tu
             vencimiento actual.
             {isCarGo ? (
               <>
@@ -373,7 +378,7 @@ export default function VerifyProfessionalPayment() {
             <DialogTitle>¿Confirmas el pago?</DialogTitle>
             <DialogDescription>
               Solo confirma si ya transferiste {totalUsd} USD con los datos indicados. El equipo validará el comprobante
-              y extenderá tu visibilidad por {subscriptionMonths} mes(es) desde tu vencimiento actual si renovás anticipado.
+              y extenderá tu visibilidad por {subscriptionMonths} mes(es) desde tu vencimiento actual si renuevas anticipado.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

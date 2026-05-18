@@ -47,7 +47,13 @@ import {
 import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
 import { vehicleChangeProposalSchema } from "@shared/vehicle-change-proposal";
 import { serviceBelongsToBrand } from "@shared/service-belongs-to-brand";
+import {
+  buildAdminActiveProviderDirectory,
+  type AdminActiveProviderFlatInput,
+} from "@shared/admin-active-providers-directory";
 import { buildMobilityCategoryApprovalPatch } from "@shared/provider-category-membership";
+import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
+import { listingSubscriptionDaysRemaining } from "@shared/professional-listing-subscription";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
@@ -1259,22 +1265,79 @@ export function registerAdminRoutes(app: Express): void {
 
   /**
    * GET /api/admin/services/active
-   * Staff (admin o Soporte TI): lista todos los servicios activos (isActive !== false) con datos del proveedor/usuario.
-   * Nota: se lee directo de Firestore para no aplicar filtros del catálogo público (p. ej. verificación).
+   * Staff (admin o Soporte TI): asociados con servicios activos, agrupados por proveedor (una fila por persona).
+   * Filtro de marca: Man Go, Pro Go o Go unificado (Car · Delivery · Shop), incluye vehículo y goBrands.
    */
   app.get("/api/admin/services/active", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
     try {
       const role = req.user?.role as string | undefined;
       const hiddenForRole = new Set(await getHiddenCategorySlugsForRole(role));
-      const search = String(req.query.search ?? "").trim().toLowerCase();
-      const brandSlug = String(req.query.brandSlug ?? "").trim();
+      const search = String(req.query.search ?? "").trim();
+      const brandFilterId = String(req.query.brandSlug ?? "").trim();
 
       const db = getFirestore();
       if (!db) {
-        // Sin Firestore, caemos a storage (puede ser vacío en memoria) y filtramos.
         const list = (await adminListAllServices()) ?? [];
+        const categories = (await genFebStorage.getCategories()) ?? [];
         const active = list.filter((s: any) => s?.isActive !== false);
-        return res.status(200).json({ services: active, total: active.length });
+        const providerCache = new Map<number, any>();
+        const userCache = new Map<string, any>();
+        const vehicleCache = new Map<number, boolean>();
+        const flat: AdminActiveProviderFlatInput[] = [];
+
+        for (const s of active) {
+          const providerId = Number(s?.providerId);
+          if (!Number.isFinite(providerId) || providerId <= 0) continue;
+          const provider =
+            providerCache.get(providerId) ?? (await genFebStorage.getProvider(providerId));
+          if (!provider) continue;
+          providerCache.set(providerId, provider);
+
+          const category = (categories as any[]).find((c) => Number(c.id) === Number(s?.categoryId)) ?? null;
+          const slug = String(category?.slug ?? "");
+          if (slug && hiddenForRole.has(slug)) continue;
+
+          const userId = String((provider as any)?.userId ?? "");
+          const user = userId ? (userCache.get(userId) ?? (await genFebStorage.getUserById(userId))) : null;
+          if (userId) userCache.set(userId, user);
+
+          let hasVehicle = vehicleCache.get(providerId);
+          if (hasVehicle === undefined) {
+            const v = await genFebStorage.getPrimaryVehicleByProviderId(providerId);
+            hasVehicle = !!v;
+            vehicleCache.set(providerId, hasVehicle);
+          }
+
+          flat.push({
+            providerId,
+            userId,
+            userName:
+              (user as any)?.name ??
+              [String((user as any)?.firstName ?? ""), String((user as any)?.lastName ?? "")]
+                .filter(Boolean)
+                .join(" ")
+                .trim(),
+            userEmail: (user as any)?.email ?? null,
+            providerVerified: (provider as any)?.isVerified === true,
+            providerProfession: (provider as any)?.profession ?? null,
+            provider: provider as any,
+            hasVehicle,
+            service: {
+              id: Number(s?.id),
+              title: String(s?.title ?? ""),
+              categoryId: Number(s?.categoryId),
+              categorySlug: category?.slug ?? null,
+              categoryDisplayName: category ? getCategoryDisplayName(category) : null,
+            },
+          });
+        }
+
+        const providers = buildAdminActiveProviderDirectory(flat, {
+          search,
+          brandFilterId,
+          categories,
+        });
+        return res.status(200).json({ providers, total: providers.length });
       }
 
       const [categoriesSnap, servicesSnap] = await Promise.all([
@@ -1288,18 +1351,19 @@ export function registerAdminRoutes(app: Express): void {
       const serviceDocs = servicesSnap.docs.map((d) => ({ id: parseInt(d.id, 10), ...d.data() })) as any[];
       const activeServices = serviceDocs.filter((s) => s?.isActive !== false);
 
-      // Cache provider/user para evitar N+1 pesado
       const providerCache = new Map<number, any>();
       const userCache = new Map<string, any>();
+      const vehicleCache = new Map<number, boolean>();
+      const flat: AdminActiveProviderFlatInput[] = [];
 
-      const out: any[] = [];
       for (const s of activeServices) {
         const providerId = Number(s?.providerId);
+        if (!Number.isFinite(providerId) || providerId <= 0) continue;
+
         const provider =
-          Number.isFinite(providerId) && providerId > 0
-            ? (providerCache.get(providerId) ?? (await genFebStorage.getProvider(providerId)))
-            : null;
-        if (provider && Number.isFinite(providerId)) providerCache.set(providerId, provider);
+          providerCache.get(providerId) ?? (await genFebStorage.getProvider(providerId));
+        if (!provider) continue;
+        providerCache.set(providerId, provider);
 
         const userId = String((provider as any)?.userId ?? "");
         const user = userId ? (userCache.get(userId) ?? (await genFebStorage.getUserById(userId))) : null;
@@ -1308,18 +1372,16 @@ export function registerAdminRoutes(app: Express): void {
         const category = catById.get(Number(s?.categoryId)) ?? null;
         const slug = String(category?.slug ?? "");
         if (slug && hiddenForRole.has(slug)) continue;
-        if (brandSlug && slug !== brandSlug) continue;
 
-        out.push({
-          id: Number(s?.id),
-          title: String(s?.title ?? ""),
-          price: s?.price ?? null,
-          categoryId: Number(s?.categoryId),
-          categorySlug: category?.slug ?? null,
-          categoryDisplayName: category ? getCategoryDisplayName(category) : null,
-          providerId: providerId,
-          providerVerified: (provider as any)?.isVerified === true,
-          providerProfession: (provider as any)?.profession ?? null,
+        let hasVehicle = vehicleCache.get(providerId);
+        if (hasVehicle === undefined) {
+          const v = await genFebStorage.getPrimaryVehicleByProviderId(providerId);
+          hasVehicle = !!v;
+          vehicleCache.set(providerId, hasVehicle);
+        }
+
+        flat.push({
+          providerId,
           userId,
           userName:
             (user as any)?.name ??
@@ -1328,18 +1390,26 @@ export function registerAdminRoutes(app: Express): void {
               .join(" ")
               .trim(),
           userEmail: (user as any)?.email ?? null,
+          providerVerified: (provider as any)?.isVerified === true,
+          providerProfession: (provider as any)?.profession ?? null,
+          provider: provider as any,
+          hasVehicle,
+          service: {
+            id: Number(s?.id),
+            title: String(s?.title ?? ""),
+            categoryId: Number(s?.categoryId),
+            categorySlug: category?.slug ?? null,
+            categoryDisplayName: category ? getCategoryDisplayName(category) : null,
+          },
         });
       }
 
-      const filtered = search
-        ? out.filter((row: any) => {
-            const h = `${row.title ?? ""} ${row.userName ?? ""} ${row.userEmail ?? ""}`.toLowerCase();
-            return h.includes(search);
-          })
-        : out;
-
-      filtered.sort((a, b) => String(a.categoryDisplayName ?? "").localeCompare(String(b.categoryDisplayName ?? ""), "es"));
-      return res.status(200).json({ services: filtered, total: filtered.length });
+      const providers = buildAdminActiveProviderDirectory(flat, {
+        search,
+        brandFilterId,
+        categories,
+      });
+      return res.status(200).json({ providers, total: providers.length });
     } catch (e) {
       console.error("Error listing active services (admin):", e);
       return res.status(500).json({ message: "Error al listar servicios activos" });
@@ -1684,6 +1754,346 @@ export function registerAdminRoutes(app: Express): void {
     } catch (e) {
       console.error("Error toggling provider services:", e);
       return res.status(500).json({ message: "Error al actualizar servicios del proveedor" });
+    }
+  });
+
+  const adminProviderDetailUserPatchSchema = z.object({
+    name: z.string().trim().min(1).max(100).optional(),
+    lastName: z.string().trim().min(1).max(100).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().trim().max(50).optional().nullable(),
+    role: z.string().trim().min(1).max(50).optional(),
+  });
+
+  const adminProviderDetailProviderPatchSchema = z.object({
+    profession: z.string().trim().min(1).max(200).optional(),
+    bio: z.string().trim().max(8000).optional(),
+    yearsExperience: z.number().int().min(0).max(80).optional(),
+    hourlyRate: z.string().trim().max(32).optional().nullable(),
+    skills: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
+    isVerified: z.boolean().optional(),
+    categoryId: z.number().int().positive().nullable().optional(),
+    secondCategoryId: z.number().int().positive().nullable().optional(),
+    thirdCategoryId: z.number().int().positive().nullable().optional(),
+    subcategoryId: z.number().int().positive().nullable().optional(),
+    goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).nullable().optional(),
+    preparationLevel: z.string().trim().max(8000).optional().nullable(),
+    certifications: z.string().trim().max(8000).optional().nullable(),
+    subscriptionCategorySlug: z.string().trim().max(80).optional().nullable(),
+    visibilitySubscriptionEndsAt: z.string().trim().max(64).optional().nullable(),
+    extendSubscriptionMonths: z.number().int().min(1).max(12).optional(),
+    goDriverOfferTitle: z.string().trim().max(500).optional().nullable(),
+    goDriverOfferDescription: z.string().trim().max(5000).optional().nullable(),
+  });
+
+  const adminProviderDetailServicePatchSchema = z.object({
+    id: z.number().int().positive(),
+    title: z.string().trim().min(1).max(500).optional(),
+    description: z.string().trim().max(5000).optional(),
+    price: z.string().trim().max(32).optional(),
+    imageUrl: z.string().trim().max(2000).optional(),
+    isActive: z.boolean().optional(),
+    categoryId: z.number().int().positive().optional(),
+    subcategoryId: z.number().int().positive().nullable().optional(),
+    listingBio: z.string().trim().max(8000).optional().nullable(),
+    listingProfession: z.string().trim().max(200).optional().nullable(),
+    listingYearsExperience: z.number().int().min(0).max(80).optional().nullable(),
+    listingSkills: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
+    listingPreparationLevel: z.string().trim().max(8000).optional().nullable(),
+    listingCertifications: z.string().trim().max(8000).optional().nullable(),
+  });
+
+  const adminProviderDetailPatchSchema = z.object({
+    user: adminProviderDetailUserPatchSchema.optional(),
+    provider: adminProviderDetailProviderPatchSchema.optional(),
+    services: z.array(adminProviderDetailServicePatchSchema).optional(),
+    vehicle: z.record(z.string(), z.unknown()).optional().nullable(),
+  });
+
+  function categoryLabelById(categories: Array<{ id: number; slug?: string; name?: string }>, id: unknown): string | null {
+    const n = Number(id);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const c = categories.find((x) => Number(x.id) === n);
+    if (!c) return `Categoría #${n}`;
+    return getCategoryDisplayName(c as { slug?: string; name?: string });
+  }
+
+  /**
+   * GET /api/admin/providers/:providerId/detail
+   * Ficha completa del asociado (usuario, categorías, servicios, vehículo, suscripción).
+   */
+  app.get("/api/admin/providers/:providerId/detail", authenticateJWT, requireStaffFromDb, async (req, res) => {
+    try {
+      const providerId = Number(req.params.providerId);
+      if (!Number.isFinite(providerId) || providerId <= 0) {
+        return res.status(400).json({ message: "providerId inválido" });
+      }
+      const provider = await genFebStorage.getProvider(providerId);
+      if (!provider) return res.status(404).json({ message: "Asociado no encontrado" });
+
+      const userId = String((provider as { userId?: string }).userId ?? "");
+      const rawUser = userId ? await genFebStorage.getUserById(userId) : null;
+      const u = rawUser as Record<string, unknown> | null;
+      const user = u
+        ? {
+            id: userId,
+            name: String(u.name ?? u.firstName ?? ""),
+            lastName: String(u.lastName ?? ""),
+            email: (u.email as string | null) ?? null,
+            phone: (u.phone as string | null) ?? null,
+            role: String(u.role ?? "client"),
+            rating: typeof u.rating === "number" ? u.rating : Number(u.rating) || 5,
+            ratingCount: typeof u.ratingCount === "number" ? u.ratingCount : 0,
+            wallet: typeof u.wallet === "number" ? u.wallet : null,
+          }
+        : null;
+
+      const categories = await genFebStorage.getCategories();
+      const allServices = (await adminListAllServices()) ?? [];
+      const providerServices = allServices.filter((s: any) => Number(s?.providerId) === providerId);
+
+      const catSlugById = (categoryId: unknown): string | null => {
+        const n = Number(categoryId);
+        const c = categories.find((x) => Number(x.id) === n);
+        return (c as { slug?: string })?.slug ?? null;
+      };
+
+      const subNameCache = new Map<number, string>();
+      const subName = async (subId: unknown) => {
+        const n = Number(subId);
+        if (!Number.isFinite(n) || n <= 0) return null;
+        if (subNameCache.has(n)) return subNameCache.get(n) ?? null;
+        const sub = await genFebStorage.getSubcategoryById(n);
+        const name = sub?.name ?? null;
+        if (name) subNameCache.set(n, name);
+        return name;
+      };
+
+      const services = await Promise.all(
+        providerServices.map(async (s: any) => {
+          const subcategoryId = (s as { subcategoryId?: number | null }).subcategoryId ?? null;
+          return {
+            id: Number(s.id),
+            title: String(s.title ?? ""),
+            description: String(s.description ?? ""),
+            price: String(s.price ?? "0"),
+            imageUrl: String(s.imageUrl ?? ""),
+            isActive: s.isActive !== false,
+            categoryId: Number(s.categoryId),
+            categorySlug: catSlugById(s.categoryId),
+            categoryDisplayName: categoryLabelById(categories, s.categoryId),
+            subcategoryId,
+            subcategoryName: await subName(subcategoryId),
+            listingBio: (s as { listingBio?: string | null }).listingBio ?? null,
+            listingProfession: (s as { listingProfession?: string | null }).listingProfession ?? null,
+            listingYearsExperience: (s as { listingYearsExperience?: number | null }).listingYearsExperience ?? null,
+            listingSkills: (s as { listingSkills?: string[] | null }).listingSkills ?? [],
+            listingPreparationLevel: (s as { listingPreparationLevel?: string | null }).listingPreparationLevel ?? null,
+            listingCertifications: (s as { listingCertifications?: string | null }).listingCertifications ?? null,
+          };
+        }),
+      );
+
+      const p = provider as Record<string, unknown>;
+      const visibilityEndsRaw = p.visibilitySubscriptionEndsAt;
+      const visibilityEndsIso =
+        parseVisibilitySubscriptionEndMs(visibilityEndsRaw) != null
+          ? new Date(parseVisibilitySubscriptionEndMs(visibilityEndsRaw)!).toISOString()
+          : null;
+
+      const categorySlots = [
+        { slot: "primary" as const, categoryId: p.categoryId ?? null, subcategoryId: p.subcategoryId ?? null },
+        { slot: "second" as const, categoryId: p.secondCategoryId ?? null, subcategoryId: null },
+        { slot: "third" as const, categoryId: p.thirdCategoryId ?? null, subcategoryId: null },
+      ].map((row) => ({
+        ...row,
+        categoryDisplayName: categoryLabelById(categories, row.categoryId),
+        subcategoryName: row.subcategoryId != null ? null : null,
+      }));
+
+      for (const row of categorySlots) {
+        if (row.slot === "primary" && row.subcategoryId != null) {
+          (row as { subcategoryName: string | null }).subcategoryName = await subName(row.subcategoryId);
+        }
+      }
+
+      const vehicle = userId ? await genFebStorage.getPrimaryVehicleFullByUserId(userId) : null;
+      const bookings = await genFebStorage.getBookingsByProvider(providerId);
+
+      return res.status(200).json({
+        provider: {
+          id: providerId,
+          userId,
+          profession: String(p.profession ?? ""),
+          bio: String(p.bio ?? ""),
+          yearsExperience: Number(p.yearsExperience ?? 0),
+          hourlyRate: p.hourlyRate != null ? String(p.hourlyRate) : null,
+          skills: Array.isArray(p.skills) ? (p.skills as string[]) : [],
+          isVerified: p.isVerified === true,
+          categoryId: p.categoryId ?? null,
+          category: p.category ?? null,
+          secondCategoryId: p.secondCategoryId ?? null,
+          thirdCategoryId: p.thirdCategoryId ?? null,
+          subcategoryId: p.subcategoryId ?? null,
+          subcategory: (provider as { subcategory?: { id: number; name: string } | null }).subcategory ?? null,
+          goBrands: Array.isArray(p.goBrands) ? p.goBrands : [],
+          preparationLevel: String(p.preparationLevel ?? p.coursesCompleted ?? ""),
+          certifications: String(p.certifications ?? ""),
+          subscriptionCategorySlug: (p.subscriptionCategorySlug as string | null) ?? null,
+          visibilitySubscriptionEndsAt: visibilityEndsIso,
+          subscriptionDaysRemaining: visibilityEndsIso ? listingSubscriptionDaysRemaining(visibilityEndsIso) : null,
+          goDriverOfferTitle: (p.goDriverOfferTitle as string | null) ?? null,
+          goDriverOfferDescription: (p.goDriverOfferDescription as string | null) ?? null,
+        },
+        user,
+        categorySlots,
+        services,
+        vehicle,
+        bookingsCount: (bookings ?? []).length,
+        categories: categories.map((c) => ({
+          id: c.id,
+          slug: (c as { slug?: string }).slug ?? "",
+          displayName: getCategoryDisplayName(c as { slug?: string; name?: string }),
+        })),
+      });
+    } catch (e) {
+      console.error("Error fetching provider detail:", e);
+      return res.status(500).json({ message: "Error al cargar el asociado" });
+    }
+  });
+
+  /**
+   * PATCH /api/admin/providers/:providerId/detail
+   * Admin: actualiza usuario, proveedor, servicios y vehículo en una sola operación.
+   */
+  app.patch("/api/admin/providers/:providerId/detail", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const providerId = Number(req.params.providerId);
+      if (!Number.isFinite(providerId) || providerId <= 0) {
+        return res.status(400).json({ message: "providerId inválido" });
+      }
+      const provider = await genFebStorage.getProvider(providerId);
+      if (!provider) return res.status(404).json({ message: "Asociado no encontrado" });
+
+      const parsed = adminProviderDetailPatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+      const body = parsed.data;
+      const userId = String((provider as { userId?: string }).userId ?? "");
+
+      if (body.user && userId) {
+        const userPatch: Record<string, unknown> = {};
+        if (body.user.name !== undefined) userPatch.name = body.user.name;
+        if (body.user.lastName !== undefined) userPatch.lastName = body.user.lastName;
+        if (body.user.email !== undefined) userPatch.email = body.user.email;
+        if (body.user.phone !== undefined) userPatch.phone = body.user.phone;
+        if (body.user.role !== undefined) {
+          userPatch.role = body.user.role;
+          const existingUser = await genFebStorage.getUserById(userId);
+          if (body.user.role === "professional" && (existingUser as { role?: string })?.role !== "professional") {
+            userPatch.acceptedProviderTermsOfUse = false;
+          }
+        }
+        if (Object.keys(userPatch).length > 0) await userService.updateUser(userId, userPatch);
+      }
+
+      if (body.provider) {
+        const provPatch: Record<string, unknown> = {};
+        const p = body.provider;
+        if (p.profession !== undefined) provPatch.profession = p.profession;
+        if (p.bio !== undefined) provPatch.bio = p.bio;
+        if (p.yearsExperience !== undefined) provPatch.yearsExperience = p.yearsExperience;
+        if (p.hourlyRate !== undefined) provPatch.hourlyRate = p.hourlyRate;
+        if (p.skills !== undefined) provPatch.skills = p.skills;
+        if (p.isVerified !== undefined) provPatch.isVerified = p.isVerified;
+        if (p.categoryId !== undefined) provPatch.categoryId = p.categoryId;
+        if (p.secondCategoryId !== undefined) provPatch.secondCategoryId = p.secondCategoryId;
+        if (p.thirdCategoryId !== undefined) provPatch.thirdCategoryId = p.thirdCategoryId;
+        if (p.subcategoryId !== undefined) provPatch.subcategoryId = p.subcategoryId;
+        if (p.goBrands !== undefined) provPatch.goBrands = p.goBrands;
+        if (p.preparationLevel !== undefined) {
+          provPatch.preparationLevel = p.preparationLevel;
+          provPatch.coursesCompleted = p.preparationLevel;
+        }
+        if (p.certifications !== undefined) provPatch.certifications = p.certifications;
+        if (p.subscriptionCategorySlug !== undefined) provPatch.subscriptionCategorySlug = p.subscriptionCategorySlug;
+        if (p.goDriverOfferTitle !== undefined) provPatch.goDriverOfferTitle = p.goDriverOfferTitle;
+        if (p.goDriverOfferDescription !== undefined) provPatch.goDriverOfferDescription = p.goDriverOfferDescription;
+
+        if (p.extendSubscriptionMonths != null) {
+          const prev = (provider as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt;
+          provPatch.visibilitySubscriptionEndsAt = extendVisibilitySubscriptionEndsAtByMonths(
+            prev,
+            p.extendSubscriptionMonths,
+          );
+        } else if (p.visibilitySubscriptionEndsAt !== undefined) {
+          const raw = p.visibilitySubscriptionEndsAt;
+          if (raw == null || String(raw).trim() === "") {
+            provPatch.visibilitySubscriptionEndsAt = null;
+          } else {
+            const ms = parseVisibilitySubscriptionEndMs(raw);
+            if (ms == null) return res.status(400).json({ message: "Fecha de fin de suscripción inválida" });
+            provPatch.visibilitySubscriptionEndsAt = new Date(ms).toISOString();
+          }
+        }
+
+        if (Object.keys(provPatch).length > 0) {
+          await catalogService.updateProvider(providerId, provPatch as any);
+        }
+      }
+
+      if (body.services?.length) {
+        const all = (await adminListAllServices()) ?? [];
+        const ownedIds = new Set(
+          all.filter((s: any) => Number(s?.providerId) === providerId).map((s: any) => Number(s.id)),
+        );
+        for (const svc of body.services) {
+          if (!ownedIds.has(svc.id)) continue;
+          const { id, ...rest } = svc;
+          const patch: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(rest)) {
+            if (v !== undefined) patch[k] = v;
+          }
+          if (Object.keys(patch).length > 0) {
+            patch.lastEditedAt = new Date();
+            await catalogService.updateService(id, patch as any);
+          }
+        }
+        await catalogService.syncProviderCategorySlotsFromServices(providerId);
+      }
+
+      if (body.vehicle !== undefined && userId) {
+        if (body.vehicle === null) {
+          /* no borrar vehículo desde admin por ahora */
+        } else if (Object.keys(body.vehicle).length > 0) {
+          const existingVehicle = (await genFebStorage.getPrimaryVehicleFullByUserId(userId)) ?? {};
+          const fullVehicle = insertProviderVehicleSchema.safeParse({
+            license_plate: "",
+            model_year: new Date().getFullYear(),
+            brand: "",
+            model: "",
+            vehicle_status: "active",
+            vehicle_type: "car",
+            is_pet_friendly: false,
+            ...existingVehicle,
+            ...body.vehicle,
+          });
+          if (!fullVehicle.success) {
+            return res.status(400).json({ message: "Datos de vehículo inválidos", issues: fullVehicle.error.flatten() });
+          }
+          await genFebStorage.upsertPrimaryProviderVehicle({
+            providerId,
+            userId,
+            vehicle: fullVehicle.data,
+          });
+        }
+      }
+
+      return res.status(200).json({ ok: true, providerId });
+    } catch (e) {
+      console.error("Error updating provider detail:", e);
+      return res.status(500).json({ message: "Error al guardar el asociado" });
     }
   });
 

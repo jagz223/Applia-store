@@ -74,6 +74,7 @@ import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
 import { AnimatePresence, motion } from "framer-motion";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName, CATEGORY_DISPLAY_NAMES } from "@shared/default-categories";
+import { ADMIN_PROVIDER_LIST_BRAND_FILTERS } from "@shared/admin-active-providers-directory";
 import {
   SUBSCRIPTION_FEE_ADMIN_SLUGS,
   subscriptionFeeAdminHint,
@@ -258,19 +259,22 @@ type AdminProviderWithServices = {
   verified: boolean;
 };
 
-type AdminActiveServiceRow = {
-  id: number;
-  title: string;
-  price?: unknown;
-  categoryId: number;
-  categorySlug?: string | null;
-  categoryDisplayName?: string | null;
+type AdminActiveProviderRow = {
   providerId: number;
-  providerVerified: boolean;
-  providerProfession?: string | null;
   userId: string;
-  userName?: string;
-  userEmail?: string | null;
+  userName: string;
+  userEmail: string | null;
+  providerVerified: boolean;
+  providerProfession: string | null;
+  hasVehicle: boolean;
+  goBrandLabels: string[];
+  services: Array<{
+    id: number;
+    title: string;
+    categoryId?: number | null;
+    categorySlug?: string | null;
+    categoryDisplayName?: string | null;
+  }>;
 };
 
 type AdminServiceBrand = {
@@ -1509,7 +1513,7 @@ export default function AdminPanel() {
     enabled: hasAdminRole(user) && activeTab === "providers",
     staleTime: 10_000,
   });
-  const activeServicesRows: AdminActiveServiceRow[] = adminActiveServicesData?.services ?? [];
+  const activeProviderRows: AdminActiveProviderRow[] = adminActiveServicesData?.providers ?? [];
 
   const { data: serviceBrandsData, isLoading: serviceBrandsLoading } = useQuery({
     queryKey: ["admin-service-brands"],
@@ -2512,15 +2516,15 @@ export default function AdminPanel() {
           <TabsContent value="providers">
             <Card>
               <CardHeader>
-                <CardTitle>Servicios activos</CardTitle>
-                <CardDescription>Listado global de servicios activos y su usuario/proveedor</CardDescription>
+                <CardTitle>Asociados con servicios activos</CardTitle>
+                <CardDescription>Una fila por asociado; sus fichas activas agrupadas por marca</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                   <div className="sm:col-span-2">
                     <Label>Buscar</Label>
                     <Input
-                      placeholder="Servicio, nombre o correo…"
+                      placeholder="Asociado, servicio o correo…"
                       value={activeServicesSearch}
                       onChange={(e) => {
                         setProvidersPage(1);
@@ -2542,9 +2546,9 @@ export default function AdminPanel() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todas</SelectItem>
-                        {DEFAULT_CATEGORIES.map((c) => (
-                          <SelectItem key={c.slug} value={c.slug}>
-                            {getCategoryDisplayName(c as any)}
+                        {ADMIN_PROVIDER_LIST_BRAND_FILTERS.filter((f) => f.id).map((f) => (
+                          <SelectItem key={f.id} value={f.id}>
+                            {f.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -2552,14 +2556,14 @@ export default function AdminPanel() {
                   </div>
                 </div>
                 {adminActiveServicesLoading ? (
-                  <div className="py-10 text-center text-sm text-muted-foreground">Cargando servicios…</div>
-                ) : activeServicesRows.length === 0 ? (
-                  <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay servicios activos.</div>
+                  <div className="py-10 text-center text-sm text-muted-foreground">Cargando asociados…</div>
+                ) : activeProviderRows.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">No hay asociados que coincidan con el filtro.</div>
                 ) : (
                   <div className="space-y-4">
                     {(() => {
                       const pageSize = USERS_PAGE_SIZE;
-                      const providerList: AdminActiveServiceRow[] = activeServicesRows;
+                      const providerList: AdminActiveProviderRow[] = activeProviderRows;
                       const totalPages = Math.max(1, Math.ceil(providerList.length / pageSize));
                       const safePage = Math.min(totalPages, Math.max(1, providersPage));
                       const start = (safePage - 1) * pageSize;
@@ -2570,25 +2574,53 @@ export default function AdminPanel() {
                         <>
                           <div className="space-y-4">
                             {paged.map((p) => (
-                              <div key={p.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border border-border rounded-lg bg-card">
-                                <div className="flex items-center gap-3 min-w-0">
+                              <div
+                                key={p.providerId}
+                                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border border-border rounded-lg bg-card"
+                              >
+                                <div className="flex items-center gap-3 min-w-0 flex-1">
                                   <Avatar>
-                                    <AvatarFallback>{(p.userName || p.userEmail || "S")[0] ?? "S"}</AvatarFallback>
+                                    <AvatarFallback>{(p.userName || p.userEmail || "A")[0] ?? "A"}</AvatarFallback>
                                   </Avatar>
-                                  <div className="min-w-0">
-                                    <p className="font-medium truncate">{p.title || "Servicio"}</p>
-                                    <p className="text-sm text-gray-500 truncate">{p.categoryDisplayName ?? p.categorySlug ?? "—"}</p>
-                                    <p className="text-xs text-muted-foreground truncate">
-                                      {p.userName || "—"} · {p.userEmail || "—"}
-                                    </p>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-medium truncate">{p.userName || "—"}</p>
+                                    <p className="text-xs text-muted-foreground truncate">{p.userEmail || "—"}</p>
+                                    {p.providerProfession ? (
+                                      <p className="text-xs text-muted-foreground truncate">{p.providerProfession}</p>
+                                    ) : null}
+                                    <div className="flex flex-wrap gap-1.5 mt-2">
+                                      {p.services.map((svc) => (
+                                        <Badge key={svc.id} variant="outline" className="text-xs font-normal max-w-full truncate">
+                                          {svc.categoryDisplayName ? `${svc.categoryDisplayName}: ` : ""}
+                                          {svc.title || "Servicio"}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                    {(p.goBrandLabels.length > 0 || p.hasVehicle) && (
+                                      <p className="text-xs text-muted-foreground mt-1.5">
+                                        Go:{" "}
+                                        {p.goBrandLabels.length > 0
+                                          ? p.goBrandLabels.join(" · ")
+                                          : p.hasVehicle
+                                            ? "Car Go (vehículo registrado)"
+                                            : ""}
+                                      </p>
+                                    )}
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-3 sm:gap-4 justify-between sm:justify-end">
                                   <Badge variant={p.providerVerified ? "default" : "secondary"}>
                                     {p.providerVerified ? "Proveedor verificado" : "Proveedor no verificado"}
                                   </Badge>
+                                  <Button size="sm" variant="default" asChild>
+                                    <Link
+                                      href={`/admin/providers/${p.providerId}?return=${encodeURIComponent("/admin?tab=providers")}`}
+                                    >
+                                      Gestionar asociado
+                                    </Link>
+                                  </Button>
                                   <Button size="sm" variant="outline" asChild>
-                                    <Link href={`/admin/users/${p.userId}/edit`}>Ver perfil</Link>
+                                    <Link href={`/admin/users/${p.userId}/edit`}>Usuario</Link>
                                   </Button>
                                 </div>
                               </div>
@@ -4632,6 +4664,7 @@ export default function AdminPanel() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
       </div>
     </div>
   );

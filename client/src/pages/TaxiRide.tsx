@@ -52,39 +52,29 @@ import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRid
 import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
 import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 import { RIDER_DRIVER_NOT_AVAILABLE_MESSAGE } from "@shared/mobility-negotiation";
+import { fallbackDrivingRoute, haversineM } from "@shared/maps-route-math";
+import {
+  computeMobilitySuggestedByVehicle,
+  computeMobilitySuggestedUsd,
+  computePackSuggestedByVehicle,
+  computePackSuggestedUsd,
+  roundToCents,
+} from "@shared/mobility-fare-quote";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
 
 type Place = { lat: number; lon: number; label: string };
 
-function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
-  const R = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
-  const la1 = (a.lat * Math.PI) / 180;
-  const la2 = (b.lat * Math.PI) / 180;
-  const x = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
-}
-
-function fallbackRouteFor(start: Place, end: Place): { distanceM: number; durationSec: number; geometry: GeoJsonObject } {
-  const distanceM = haversineM(start, end);
-  // Aproximación conservadora: 28 km/h urbano.
-  const durationSec = Math.round(distanceM / (28_000 / 3600));
+function fallbackRouteFor(start: Place, end: Place) {
+  const fb = fallbackDrivingRoute(
+    { lon: start.lon, lat: start.lat },
+    { lon: end.lon, lat: end.lat },
+  );
   return {
-    distanceM,
-    durationSec,
-    geometry: {
-      type: "Feature",
-      properties: { source: "fallback" },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [start.lon, start.lat],
-          [end.lon, end.lat],
-        ],
-      },
-    } as unknown as GeoJsonObject,
+    distanceM: fb.distanceM,
+    durationSec: fb.durationSec,
+    geometry: fb.geometry as unknown as GeoJsonObject,
+    routeSource: "fallback" as const,
   };
 }
 
@@ -99,10 +89,6 @@ function formatDuration(sec: number): string {
   const h = Math.floor(m / 60);
   const rest = m % 60;
   return `${h} h ${rest} min`;
-}
-
-function roundToCents(n: number): number {
-  return Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 }
 
 function formatUsd(n: number): string {
@@ -236,7 +222,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const [reverseLoading, setReverseLoading] = useState(false);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeGeometry, setRouteGeometry] = useState<GeoJsonObject | null>(null);
-  const [routeMeta, setRouteMeta] = useState<{ distanceM: number; durationSec: number } | null>(null);
+  const [routeMeta, setRouteMeta] = useState<{
+    distanceM: number;
+    durationSec: number;
+    routeSource?: "geoapify" | "fallback";
+  } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [vehiclePickerOpen, setVehiclePickerOpen] = useState(false);
   const [ridePanelCollapsed, setRidePanelCollapsed] = useState(false);
@@ -273,85 +263,34 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
   const suggestedUsdByVehicle = useMemo(() => {
     if (!routeMeta) return {};
-    const km = Math.max(0, (routeMeta.distanceM ?? 0) / 1000);
-    const hour = new Date().getHours();
-    const isNight = hour >= 19 || hour < 6;
-
-    const out: Record<TaxiVehicleKind, number> = {} as any;
-
+    const distanceM = routeMeta.distanceM ?? 0;
     if (isPackGoClient) {
-      const fares = (packFaresDto as any)?.fares as
-        | { moto?: { baseUsd: number; perKmUsd: number }; auto?: { baseUsd: number; perKmUsd: number }; camioneta?: { baseUsd: number; perKmUsd: number } }
-        | undefined;
-      if (fares?.moto) out.moto = roundToCents(Math.max(0, Number(fares.moto.baseUsd) + km * Number(fares.moto.perKmUsd)));
-      if (fares?.auto) out.auto = roundToCents(Math.max(0, Number(fares.auto.baseUsd) + km * Number(fares.auto.perKmUsd)));
-      // En Pack (Delivery) no hay pet_car, lo dejamos calculado como auto por compatibilidad.
-      if (fares?.auto) out.pet_car = out.auto;
-      if (fares?.camioneta)
-        out.camioneta = roundToCents(Math.max(0, Number(fares.camioneta.baseUsd) + km * Number(fares.camioneta.perKmUsd)));
-      return out;
+      const fares = (packFaresDto as any)?.fares;
+      if (!fares) return {};
+      return computePackSuggestedByVehicle(fares, distanceM) as Record<TaxiVehicleKind, number>;
     }
-
-    const fares = (mobilityFaresDto as any)?.fares as
-      | {
-          moto?: { baseUsd: number; perKmUsd: number };
-          auto?: { baseDayUsd: number; baseNightUsd: number; perKmUsd: number; petExtraUsd: number };
-          camioneta?: { baseUsd: number; perKmUsd: number; petExtraUsd: number };
-        }
-      | undefined;
-
-    if (fares?.moto) out.moto = roundToCents(Math.max(0, Number(fares.moto.baseUsd) + km * Number(fares.moto.perKmUsd)));
-    if (fares?.auto) {
-      const base = isNight ? Number(fares.auto.baseNightUsd) : Number(fares.auto.baseDayUsd);
-      out.auto = roundToCents(Math.max(0, base + km * Number(fares.auto.perKmUsd)));
-      out.pet_car = roundToCents(Math.max(0, base + km * Number(fares.auto.perKmUsd) + Number(fares.auto.petExtraUsd)));
-    }
-    if (fares?.camioneta) {
-      out.camioneta = roundToCents(
-        Math.max(0, Number(fares.camioneta.baseUsd) + km * Number(fares.camioneta.perKmUsd))
-      );
-    }
-
-    return out;
-  }, [routeMeta, isPackGoClient, packFaresDto, mobilityFaresDto]);
+    const fares = (mobilityFaresDto as any)?.fares;
+    if (!fares) return {};
+    return computeMobilitySuggestedByVehicle(fares, distanceM, { petEnabled }) as Record<TaxiVehicleKind, number>;
+  }, [routeMeta, isPackGoClient, packFaresDto, mobilityFaresDto, petEnabled]);
 
   const suggestedUsd = useMemo(() => {
     if (!routeMeta || !selectedVehicle) return null;
-    const km = Math.max(0, (routeMeta.distanceM ?? 0) / 1000);
+    const distanceM = routeMeta.distanceM ?? 0;
     if (isPackGoClient) {
-      const fares = (packFaresDto as any)?.fares as
-        | { moto?: { baseUsd: number; perKmUsd: number }; auto?: { baseUsd: number; perKmUsd: number }; camioneta?: { baseUsd: number; perKmUsd: number } }
-        | undefined;
-      const f = selectedVehicle === "camioneta" ? fares?.camioneta : selectedVehicle === "auto" ? fares?.auto : fares?.moto;
-      if (!f) return null;
-      return roundToCents(Math.max(0, Number(f.baseUsd) + km * Number(f.perKmUsd)));
+      const fares = (packFaresDto as any)?.fares;
+      if (!fares) return null;
+      const vt =
+        selectedVehicle === "camioneta"
+          ? "camioneta"
+          : selectedVehicle === "auto" || selectedVehicle === "pet_car"
+            ? "auto"
+            : "moto";
+      return computePackSuggestedUsd(fares, vt, distanceM);
     }
-    const fares = (mobilityFaresDto as any)?.fares as
-      | {
-          moto?: { baseUsd: number; perKmUsd: number };
-          auto?: { baseDayUsd: number; baseNightUsd: number; perKmUsd: number; petExtraUsd: number };
-          camioneta?: { baseUsd: number; perKmUsd: number; petExtraUsd: number };
-        }
-      | undefined;
-    const hour = new Date().getHours();
-    const isNight = hour >= 19 || hour < 6;
-    if (selectedVehicle === "moto") {
-      const f = fares?.moto;
-      if (!f) return null;
-      return roundToCents(Math.max(0, Number(f.baseUsd) + km * Number(f.perKmUsd)));
-    }
-    if (selectedVehicle === "camioneta") {
-      const f = fares?.camioneta;
-      if (!f) return null;
-      const extra = petEnabled ? Number(f.petExtraUsd) : 0;
-      return roundToCents(Math.max(0, Number(f.baseUsd) + km * Number(f.perKmUsd) + extra));
-    }
-    // auto / pet_car => auto + extra
-    const f = fares?.auto;
-    if (!f) return null;
-    const base = isNight ? Number(f.baseNightUsd) : Number(f.baseDayUsd);
-    const extra = petEnabled ? Number(f.petExtraUsd) : 0;
-    return roundToCents(Math.max(0, base + km * Number(f.perKmUsd) + extra));
+    const fares = (mobilityFaresDto as any)?.fares;
+    if (!fares) return null;
+    return computeMobilitySuggestedUsd(fares, selectedVehicle, distanceM, { petEnabled });
   }, [routeMeta, selectedVehicle, isPackGoClient, packFaresDto, mobilityFaresDto, petEnabled]);
 
   // Negociación (ajustar oferta +/-) desactivada por ahora: usamos siempre la referencia sugerida.
@@ -1457,8 +1396,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     try {
       const res = await fetch(`/api/maps/reverse?lat=${lat}&lon=${lon}`);
       if (!res.ok) throw new Error();
-      const data = (await res.json()) as { label: string; lat: number; lon: number };
-      return { lat: data.lat, lon: data.lon, label: data.label } as Place;
+      const data = (await res.json()) as { label: string };
+      return { lat, lon, label: data.label?.trim() || `${lat.toFixed(5)}, ${lon.toFixed(5)}` } as Place;
     } catch {
       return {
         lat,
@@ -1497,11 +1436,22 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       const url = `/api/maps/route?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
       const res = await fetch(url);
       const body = (await res.json().catch(() => null)) as
-        | { distanceM?: number; durationSec?: number; geometry?: GeoJsonObject | null; message?: string }
+        | {
+            distanceM?: number;
+            durationSec?: number;
+            geometry?: GeoJsonObject | null;
+            message?: string;
+            source?: "geoapify" | "fallback";
+            fallback?: boolean;
+          }
         | null;
       if (!res.ok || !body || typeof body.distanceM !== "number") {
         const fallback = fallbackRouteFor(start, end);
-        setRouteMeta({ distanceM: fallback.distanceM, durationSec: fallback.durationSec });
+        setRouteMeta({
+          distanceM: fallback.distanceM,
+          durationSec: fallback.durationSec,
+          routeSource: "fallback",
+        });
         setRouteGeometry(fallback.geometry);
         setRouteError(body?.message ?? "Ruta aproximada (sin motor de rutas).");
         // Reintento rápido: el backend de rutas a veces falla tras recargar.
@@ -1509,19 +1459,39 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           if (start && end) void fetch(url).then(async (r) => {
             const b = (await r.json().catch(() => null)) as any;
             if (!r.ok || !b || typeof b.distanceM !== "number") return;
-            setRouteMeta({ distanceM: b.distanceM, durationSec: b.durationSec ?? 0 });
+            const src = b.source === "geoapify" ? "geoapify" : "fallback";
+            setRouteMeta({
+              distanceM: b.distanceM,
+              durationSec: b.durationSec ?? 0,
+              routeSource: src,
+            });
             setRouteGeometry(b.geometry ?? null);
-            setRouteError(null);
+            setRouteError(src === "fallback" ? "Ruta estimada en línea recta." : null);
           }).catch(() => {});
         }, 800);
         return;
       }
       const data = body;
-      setRouteMeta({ distanceM: data.distanceM!, durationSec: data.durationSec ?? 0 });
+      const routeSource =
+        data.source === "geoapify" || (!data.fallback && data.source !== "fallback")
+          ? "geoapify"
+          : "fallback";
+      setRouteMeta({
+        distanceM: data.distanceM!,
+        durationSec: data.durationSec ?? 0,
+        routeSource,
+      });
       setRouteGeometry(data.geometry ?? null);
+      if (routeSource === "fallback") {
+        setRouteError("Ruta estimada en línea recta (mapas no disponibles).");
+      }
     } catch {
       const fallback = fallbackRouteFor(start, end);
-      setRouteMeta({ distanceM: fallback.distanceM, durationSec: fallback.durationSec });
+      setRouteMeta({
+        distanceM: fallback.distanceM,
+        durationSec: fallback.durationSec,
+        routeSource: "fallback",
+      });
       setRouteGeometry(fallback.geometry);
       setRouteError("Ruta aproximada (sin conexión al motor de rutas).");
     } finally {
@@ -1797,17 +1767,21 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   </p>
                 )}
 
-                {routeMeta && !routeError && (
+                {routeMeta ? (
                   <div className="mt-2 rounded-xl border border-border bg-card px-3 py-2 text-[11px] shadow-md">
-                    <p className="font-semibold text-foreground">Ruta estimada</p>
+                    <p className="font-semibold text-foreground">
+                      {routeMeta.routeSource === "fallback" ? "Ruta estimada (aprox.)" : "Ruta por carretera"}
+                    </p>
                     <p className="mt-0.5 text-muted-foreground">
                       <span className="font-medium text-foreground">{formatKm(routeMeta.distanceM)}</span>
                       {" · "}
                       <span className="font-medium text-foreground">{formatDuration(routeMeta.durationSec)}</span>
                     </p>
+                    {routeError ? (
+                      <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">{routeError}</p>
+                    ) : null}
                   </div>
-                )}
-                {routeError && <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{routeError}</p>}
+                ) : null}
 
                 {matchedDriverInfo && !ridePanelCollapsed && (
                   <div className="rounded-2xl border border-emerald-500/40 bg-card px-3 py-3 text-[11px] shadow-md dark:border-emerald-500/35 dark:bg-emerald-950/40">

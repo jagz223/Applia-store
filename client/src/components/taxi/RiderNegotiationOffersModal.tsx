@@ -1,7 +1,10 @@
 import { createPortal } from "react-dom";
-import { Check, Loader2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+const OFFERS_PAGE_SIZE = 3;
 
 export type RiderNegotiationOfferRow = {
   driverUserId: string;
@@ -64,8 +67,29 @@ export function RiderNegotiationOffersModal({
   onCancelSearch,
   cancelSearchLabel = "Cancelar búsqueda",
 }: Props) {
+  const [page, setPage] = useState(0);
+
+  const totalPages = Math.max(1, Math.ceil(offers.length / OFFERS_PAGE_SIZE));
+
+  const pageOffers = useMemo(() => {
+    const start = page * OFFERS_PAGE_SIZE;
+    return offers.slice(start, start + OFFERS_PAGE_SIZE);
+  }, [offers, page]);
+
+  useEffect(() => {
+    if (!open) {
+      setPage(0);
+      return;
+    }
+    setPage((p) => Math.min(p, Math.max(0, totalPages - 1)));
+  }, [open, offers.length, totalPages]);
+
   if (!open || !rideId) return null;
   if (typeof document === "undefined") return null;
+
+  const showPagination = offers.length > OFFERS_PAGE_SIZE;
+  const rangeStart = offers.length === 0 ? 0 : page * OFFERS_PAGE_SIZE + 1;
+  const rangeEnd = Math.min((page + 1) * OFFERS_PAGE_SIZE, offers.length);
 
   return createPortal(
     <div
@@ -81,17 +105,18 @@ export function RiderNegotiationOffersModal({
             Ofertas de conductores
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Elige una oferta o descarta las que no te convengan. La lista se actualiza en vivo.
+            Elige una oferta o descarta las que no te convengan.
+            {showPagination ? ` Mostramos ${OFFERS_PAGE_SIZE} por página.` : " La lista se actualiza en vivo."}
           </p>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-2 py-2 [-webkit-overflow-scrolling:touch]">
           {offers.length === 0 ? (
             <p className="px-2 py-8 text-center text-sm text-muted-foreground">
               Aún no hay ofertas. Espera unos segundos…
             </p>
           ) : (
             <ul className="space-y-2">
-              {offers.map((o) => {
+              {pageOffers.map((o) => {
                 const busy = busyDriverId === o.driverUserId;
                 return (
                   <li
@@ -176,6 +201,44 @@ export function RiderNegotiationOffersModal({
             </ul>
           )}
         </div>
+        {showPagination ? (
+          <div
+            className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-muted/20 px-3 py-2"
+            role="navigation"
+            aria-label="Paginación de ofertas"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1 px-2.5"
+              disabled={page <= 0 || busyDriverId != null}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+              Anterior
+            </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {rangeStart}–{rangeEnd}
+              </span>{" "}
+              de {offers.length}
+              <span className="mx-1 text-border">·</span>
+              Pág. {page + 1}/{totalPages}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1 px-2.5"
+              disabled={page >= totalPages - 1 || busyDriverId != null}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            >
+              Siguiente
+              <ChevronRight className="h-4 w-4" aria-hidden />
+            </Button>
+          </div>
+        ) : null}
         <div className="shrink-0 border-t border-border bg-background px-3 py-3">
           <Button
             type="button"

@@ -80,8 +80,12 @@ export function SingleLocationPicker({
     try {
       const res = await fetch(`/api/maps/reverse?lat=${lat}&lon=${lon}`);
       if (!res.ok) throw new Error();
-      const data = (await res.json()) as { label: string; lat: number; lon: number };
-      return { lat: data.lat, lon: data.lon, label: data.label } as PickedLocation;
+      const data = (await res.json()) as { label: string };
+      return {
+        lat,
+        lon,
+        label: data.label?.trim() || `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
+      } as PickedLocation;
     } catch {
       return { lat, lon, label: `${lat.toFixed(5)}, ${lon.toFixed(5)}` };
     } finally {

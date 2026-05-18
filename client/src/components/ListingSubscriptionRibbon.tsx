@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { AlertTriangle, CalendarClock, X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useCurrentProvider } from "@/hooks/use-mango-data";
+import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,11 +29,12 @@ import {
   urgentListingDriverDetail,
   urgentListingDriverDetailShort,
 } from "@/components/listing-subscription-ribbon-copy";
+import { prepareRenewalPaymentNavigation, VERIFY_PAYMENT_PATH } from "@/lib/verify-return-path";
 
 const ribbonPad = "px-2.5 py-1.5 sm:px-4 sm:py-2.5";
 const ribbonText = "text-xs font-semibold leading-snug sm:text-sm";
 
-const RENEW_PAYMENT_HREF = "/professional/verify/payment";
+const RENEW_PAYMENT_HREF = VERIFY_PAYMENT_PATH;
 
 function safeUserIdForPrefs(userId: unknown): string {
   const s = String(userId ?? "").trim();
@@ -48,11 +50,12 @@ type ProviderMe = {
 };
 
 /**
- * Franja / modal para la cuota mensual USD 15: contador, aviso ~10 días, vencido = CTA renovar.
+ * Franja / modal para la cuota mensual de visibilidad: contador, aviso ~10 días, vencido = CTA renovar.
  */
 export function ListingSubscriptionRibbon() {
   const { isAuthenticated, user } = useAuth();
   const { data: provider } = useCurrentProvider();
+  const { monthlyUsdLabel } = useProviderSubscriptionMonthlyUsd({ enabled: isAuthenticated });
   const { toast } = useToast();
   const [reminderOpen, setReminderOpen] = useState(false);
   const [actionModalOpen, setActionModalOpen] = useState(false);
@@ -118,13 +121,13 @@ export function ListingSubscriptionRibbon() {
       setReminderOpen(true);
       toast({
         title: "Renovación de visibilidad",
-        description: `Te quedan ${state.days} día(s). Renová la cuota mensual (USD 15) para seguir publicado.`,
+        description: `Te quedan ${state.days} día(s). Renueva la cuota mensual (${monthlyUsdLabel}) para seguir publicado.`,
         duration: 10_000,
       });
     } catch {
       /* ignore */
     }
-  }, [state?.urgent, state?.days, remindedKey, toast]);
+  }, [state?.urgent, state?.days, remindedKey, toast, monthlyUsdLabel]);
 
   useEffect(() => {
     if (!state || remindedKey == null) return;
@@ -157,8 +160,8 @@ export function ListingSubscriptionRibbon() {
   if (softHidden && !(state.expired || state.critical)) return null;
 
   if (state.expired || state.critical) {
-    const expiredCopy = expiredListingBannerCopy();
-    const criticalCopy = criticalListingBannerCopy(state.days, state.endLabel);
+    const expiredCopy = expiredListingBannerCopy(monthlyUsdLabel);
+    const criticalCopy = criticalListingBannerCopy(state.days, state.endLabel, monthlyUsdLabel);
     return (
       <>
         {state.expired ? (
@@ -177,7 +180,9 @@ export function ListingSubscriptionRibbon() {
                 asChild
                 className="h-8 shrink-0 touch-manipulation self-stretch text-xs sm:h-9 sm:self-center sm:text-sm"
               >
-                <Link href={RENEW_PAYMENT_HREF}>Renovar pago</Link>
+                <Link href={RENEW_PAYMENT_HREF} onClick={prepareRenewalPaymentNavigation}>
+                  Renovar pago
+                </Link>
               </Button>
             </div>
           </div>
@@ -200,28 +205,31 @@ export function ListingSubscriptionRibbon() {
                 asChild
                 className="h-8 shrink-0 touch-manipulation self-stretch border border-amber-600/35 text-xs sm:h-9 sm:self-center sm:text-sm"
               >
-                <Link href={RENEW_PAYMENT_HREF}>Renovar ahora</Link>
+                <Link href={RENEW_PAYMENT_HREF} onClick={prepareRenewalPaymentNavigation}>
+                  Renovar ahora
+                </Link>
               </Button>
             </div>
           </div>
         )}
 
         <AlertDialog open={actionModalOpen} onOpenChange={setActionModalOpen}>
-          <AlertDialogContent>
+          <AlertDialogContent overlayClassName="bg-black/75 backdrop-blur-sm">
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {state.expired ? "Visibilidad vencida" : "Renová hoy para no perder visibilidad"}
+                {state.expired ? "Visibilidad vencida" : "Renueva hoy para no perder visibilidad"}
               </AlertDialogTitle>
               <AlertDialogDescription className="text-left leading-relaxed">
                 {state.expired ? (
                   <>
-                    Tu publicación en el catálogo está <strong>inactiva</strong> porque venció la cuota mensual (USD 15).
-                    Subí el comprobante y, al validarlo, volverás a estar visible.
+                    Tu publicación en el catálogo está <strong>inactiva</strong> porque venció la cuota mensual (
+                    {monthlyUsdLabel}).
+                    Envía el comprobante y, al validarlo, volverás a estar visible.
                   </>
                 ) : (
                   <>
                     Quedan <strong>{state.days}</strong> día(s) para que expire tu visibilidad (hasta {state.endLabel}).
-                    Subí el comprobante de USD 15 para que el equipo lo valide.
+                    Envía el comprobante de {monthlyUsdLabel} para que el equipo lo valide.
                   </>
                 )}
               </AlertDialogDescription>
@@ -229,7 +237,13 @@ export function ListingSubscriptionRibbon() {
             <AlertDialogFooter>
               <AlertDialogCancel onClick={dismissActionModal}>Ahora no</AlertDialogCancel>
               <AlertDialogAction asChild>
-                <Link href={RENEW_PAYMENT_HREF} onClick={() => dismissActionModal()}>
+                <Link
+                  href={RENEW_PAYMENT_HREF}
+                  onClick={() => {
+                    prepareRenewalPaymentNavigation();
+                    dismissActionModal();
+                  }}
+                >
                   Ir a renovar
                 </Link>
               </AlertDialogAction>
@@ -243,7 +257,9 @@ export function ListingSubscriptionRibbon() {
   if (state.urgent) {
     const urgentHeadline = urgentListingBannerHeadline(state.days, state.endLabel);
     const detailLong = context.isDriver ? urgentListingDriverDetail : urgentListingDefaultDetail;
-    const detailShort = context.isDriver ? urgentListingDriverDetailShort : urgentListingDefaultDetailShort;
+    const detailShort = context.isDriver
+      ? urgentListingDriverDetailShort(monthlyUsdLabel)
+      : urgentListingDefaultDetailShort(monthlyUsdLabel);
     return (
       <>
         <div className={`border-b border-amber-500/40 bg-amber-500/14 ${ribbonPad}`}>
@@ -268,7 +284,9 @@ export function ListingSubscriptionRibbon() {
                 className="h-8 touch-manipulation border border-amber-600/35 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
                 asChild
               >
-                <Link href={RENEW_PAYMENT_HREF}>Ir a renovar</Link>
+                <Link href={RENEW_PAYMENT_HREF} onClick={prepareRenewalPaymentNavigation}>
+                  Ir a renovar
+                </Link>
               </Button>
               <Button
                 size="sm"
@@ -284,19 +302,25 @@ export function ListingSubscriptionRibbon() {
         </div>
 
         <AlertDialog open={reminderOpen} onOpenChange={setReminderOpen}>
-          <AlertDialogContent>
+          <AlertDialogContent overlayClassName="bg-black/75 backdrop-blur-sm">
             <AlertDialogHeader>
-              <AlertDialogTitle>Renovación mensual · USD 15</AlertDialogTitle>
+              <AlertDialogTitle>Renovación mensual · {monthlyUsdLabel}</AlertDialogTitle>
               <AlertDialogDescription className="text-left leading-relaxed">
                 Quedan <strong>{state.days}</strong> día(s) para que expire tu visibilidad en el catálogo. Envía el comprobante
                 de renovación desde la pantalla de pago; cuando un administrador lo valide, se extenderá un mes desde tu
-                vencimiento actual (si renovás antes, no perdés tiempo ya pagado).
+                vencimiento actual (si renuevas antes, no pierdes tiempo ya pagado).
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel onClick={dismissReminder}>Entendido</AlertDialogCancel>
               <AlertDialogAction asChild>
-                <Link href={RENEW_PAYMENT_HREF} onClick={() => dismissReminder()}>
+                <Link
+                  href={RENEW_PAYMENT_HREF}
+                  onClick={() => {
+                    prepareRenewalPaymentNavigation();
+                    dismissReminder();
+                  }}
+                >
                   Ir a pantalla de pago
                 </Link>
               </AlertDialogAction>
@@ -332,6 +356,7 @@ export function ListingSubscriptionRibbon() {
         </span>
         <Link
           href={RENEW_PAYMENT_HREF}
+          onClick={prepareRenewalPaymentNavigation}
           className="text-primary underline-offset-4 hover:underline font-medium whitespace-nowrap"
         >
           Renovar anticipado

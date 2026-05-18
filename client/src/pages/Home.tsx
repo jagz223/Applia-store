@@ -324,7 +324,7 @@ export default function HomePage() {
     <div className="relative flex flex-col min-h-screen overflow-x-hidden">
       
       {/* HERO SECTION — mismas fuentes / gradiente / fondo que service-hub */}
-      <section className="relative overflow-hidden pt-8 pb-16 md:pt-14 md:pb-24">
+      <section className="relative isolate overflow-hidden pt-8 pb-16 md:pt-14 md:pb-24">
         <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/5 via-background to-secondary/5" />
         <div className="pointer-events-none absolute top-20 right-10 -z-10 h-[400px] w-[400px] rounded-full bg-primary/20 blur-[120px]" />
         <div className="pointer-events-none absolute bottom-20 left-10 -z-10 h-[300px] w-[300px] rounded-full bg-secondary/20 blur-[100px]" />
@@ -462,7 +462,7 @@ export default function HomePage() {
               transition={{ duration: 0.65, delay: 0.15 }}
               className="relative mx-auto hidden w-full max-w-xl md:mx-0 md:block md:max-w-none"
             >
-              <div className="relative z-10 grid grid-cols-2 gap-5">
+              <div className="relative z-0 grid grid-cols-2 gap-5">
                 <div className="space-y-5 translate-y-10">
                   <motion.div
                     whileHover={{ rotate: 0, scale: 1.02 }}

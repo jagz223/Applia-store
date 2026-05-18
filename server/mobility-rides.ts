@@ -28,6 +28,7 @@ import {
   RIDER_DRIVER_NOT_AVAILABLE_MESSAGE,
 } from "@shared/mobility-negotiation";
 import { driverIsBusyCrossModule, registerMobilityDriverBusy } from "./driver-busy-cross-module";
+import { resolveGoRideRouteQuote } from "./go-ride-route-quote";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import crypto from "crypto";
 
@@ -769,13 +770,22 @@ export function registerMobilityRideRoutes(app: Express) {
         return res.status(400).json({ message: "Método de pago no permitido para este servicio." });
       }
 
+      const routeQuote = await resolveGoRideRouteQuote({
+        start: body.start,
+        end: body.end,
+        vehicleType: body.vehicleType,
+        module: "taxi",
+        petEnabled: !!body.petEnabled,
+      });
+
       let candidates = freshDriversForVehicle(body.vehicleType);
       candidates = rankDriversByNearest(body.start, candidates);
 
-      const offerUsd = roundToCents(Math.max(0, safeNumber(body.estimatedUsd, 0)));
-      const suggestedUsd = roundToCents(Math.max(0, safeNumber(body.suggestedUsd, offerUsd)));
-      const priceDiffers = Math.abs(offerUsd - suggestedUsd) > 0.01;
+      const suggestedUsd = roundToCents(routeQuote.suggestedUsd);
+      const clientOfferUsd = roundToCents(Math.max(0, safeNumber(body.estimatedUsd, 0)));
+      const priceDiffers = Math.abs(clientOfferUsd - suggestedUsd) > 0.01;
       const negotiated = !!body.isNegotiated || !!body.offerEdited || priceDiffers;
+      const offerUsd = negotiated ? clientOfferUsd : suggestedUsd;
 
       const id = crypto.randomUUID();
       const ride: RideRecord = {
@@ -795,11 +805,11 @@ export function registerMobilityRideRoutes(app: Express) {
         // El TTL 60s aplica a contraofertas, no al “market” del ride.
         marketVisibleUntil: undefined,
         counterOffers: undefined,
-        distanceM: body.distanceM,
-        durationSec: body.durationSec,
+        distanceM: routeQuote.distanceM,
+        durationSec: routeQuote.durationSec,
         start: body.start,
         end: body.end,
-        routeGeometry: body.routeGeometry ?? null,
+        routeGeometry: routeQuote.geometry ?? body.routeGeometry ?? null,
         petEnabled: !!body.petEnabled,
         createdAt: Date.now(),
         conversationId: null,
