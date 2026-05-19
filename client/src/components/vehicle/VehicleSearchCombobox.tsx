@@ -86,6 +86,7 @@ export function VehicleSearchCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
+        layer="modal"
         className="w-[var(--radix-popover-trigger-width)] min-w-[min(100vw-2rem,22rem)] p-0"
         align="start"
       >

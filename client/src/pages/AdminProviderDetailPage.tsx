@@ -15,12 +15,18 @@ function resolveReturnHref(): string {
   return q;
 }
 
+function resolveInitialDocumentsOpen(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("docs") === "1";
+}
+
 export default function AdminProviderDetailPage() {
   const [, params] = useRoute("/admin/providers/:providerId");
   const [, setLocation] = useLocation();
   const { user, isLoading: authLoading } = useAuth();
   const providerId = parseInt(params?.providerId ?? "0", 10);
   const returnHref = resolveReturnHref();
+  const initialDocumentsOpen = resolveInitialDocumentsOpen();
 
   useEffect(() => {
     if (authLoading) return;
@@ -55,6 +61,7 @@ export default function AdminProviderDetailPage() {
       providerId={providerId}
       canEdit={hasFullAdminRole(user)}
       returnHref={returnHref}
+      initialDocumentsOpen={initialDocumentsOpen}
     />
   );
 }

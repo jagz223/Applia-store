@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, ExternalLink, FileText } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, FileText, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +45,8 @@ type Props = {
   revieweeName: string;
   slides: AdminVerificationSlide[];
   initialIndex: number;
+  /** Mientras se obtienen URLs del backend (p. ej. desde listado de asociados). */
+  loading?: boolean;
 };
 
 export function AdminVerificationDocumentDialog({
@@ -54,6 +56,7 @@ export function AdminVerificationDocumentDialog({
   revieweeName,
   slides,
   initialIndex,
+  loading = false,
 }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
   const slide = slides[activeIndex];
@@ -81,7 +84,7 @@ export function AdminVerificationDocumentDialog({
     return () => window.clearTimeout(t);
   }, [open, kind, src, activeIndex]);
 
-  const showSlideNav = slides.length > 1;
+  const showSlideNav = !loading && slides.length > 1;
 
   const goToPrevSlide = () => {
     if (slides.length <= 1) return;
@@ -109,7 +112,12 @@ export function AdminVerificationDocumentDialog({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, slides.length]);
 
-  const viewerBody = !src ? (
+  const viewerBody = loading ? (
+    <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 px-4 py-10 text-sm text-muted-foreground">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
+      Cargando documentos…
+    </div>
+  ) : !src ? (
     <div className="flex min-h-[200px] items-center justify-center rounded-md border border-zinc-200 bg-white px-4 py-10 text-center text-sm text-zinc-600 shadow-sm">
       No hay archivo para este ítem.
     </div>
@@ -155,14 +163,12 @@ export function AdminVerificationDocumentDialog({
     </div>
   );
 
-  const overlayClass =
-    "fixed inset-0 z-50 bg-black/45 backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        overlayClassName={overlayClass}
-        className="flex max-h-[min(92vh,100vh)] max-h-[min(92vh,100svh)] w-[min(94vw,32rem)] max-w-[min(94vw,32rem)] flex-col gap-0 overflow-hidden border-border bg-card p-0 text-foreground shadow-2xl !top-[min(5vh,1.5rem)] !translate-y-0 sm:w-[min(94vw,34rem)] sm:max-w-[min(94vw,34rem)]"
+        layer="elevated"
+        overlayClassName="bg-black/45 backdrop-blur-xl"
+        className="flex max-h-[min(92vh,100svh)] w-[min(94vw,32rem)] max-w-[min(94vw,32rem)] flex-col gap-0 overflow-hidden border-border bg-card p-0 text-foreground shadow-2xl sm:w-[min(94vw,34rem)] sm:max-w-[min(94vw,34rem)]"
       >
         <DialogHeader className="shrink-0 space-y-1.5 border-b border-border bg-card px-5 py-3 text-left sm:py-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Documentos de</p>

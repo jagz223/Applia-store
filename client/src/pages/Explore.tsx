@@ -204,7 +204,7 @@ export default function Explore() {
     <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
       {/* Vista cuando hay categoría seleccionada: encabezado centrado en la categoría */}
       {hasCategorySelected ? (
-        <div className="border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-background/90 dark:bg-background/92 shadow-sm transition-shadow duration-300">
+        <div className="border-b border-border/50 sticky top-16 z-30 backdrop-blur-xl bg-background/90 dark:bg-background/92 shadow-sm transition-shadow duration-300">
           <div className={`container mx-auto px-4 max-w-7xl ${filtersPanelExpanded ? "py-6" : "py-3"}`}>
             <Button
               variant="ghost"
@@ -308,7 +308,7 @@ export default function Explore() {
         </div>
       ) : (
         /* Vista sin categoría: Explorar Servicios con filtros */
-        <div className="border-b border-border/50 sticky top-16 z-40 backdrop-blur-xl bg-background/90 dark:bg-background/92 shadow-sm transition-shadow duration-300">
+        <div className="border-b border-border/50 sticky top-16 z-30 backdrop-blur-xl bg-background/90 dark:bg-background/92 shadow-sm transition-shadow duration-300">
           <div className={`container mx-auto px-4 max-w-7xl ${filtersPanelExpanded ? "py-6" : "py-3"}`}>
             <div className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_min(22rem,100%)] lg:items-center lg:gap-6">
               <div className="min-w-0">

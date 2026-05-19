@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+﻿import { useState, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -61,7 +61,8 @@ import {
 import { listingSubscriptionDaysRemaining } from "@shared/professional-listing-subscription";
 import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
 import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
-import { downloadInvoicePdf, getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
+import { getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
+import { SubscriptionInvoicesPanel } from "@/components/subscription/SubscriptionInvoicesPanel";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
@@ -781,259 +782,6 @@ function ProviderBookingsTab({ highlightedBookingId = null }: { highlightedBooki
   );
 }
 
-function InvoicesTabContent() {
-  const [page, setPage] = useState(1);
-  const [pulseReportId, setPulseReportId] = useState<number | null>(null);
-  const { user } = useAuth();
-  const [location] = useLocation();
-  const autoVerificationPdfDone = useRef(false);
-  const { monthlyUsd, monthlyUsdLabel } = useProviderSubscriptionMonthlyUsd();
-
-  const { data: invoiceList, isLoading: invoicesLoading } = useQuery({
-    queryKey: ["/api/invoices", "list"],
-    queryFn: async () => {
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const res = await fetch("/api/invoices", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error("No se pudieron cargar las facturas");
-      return res.json() as Promise<
-        Array<{
-          id?: number;
-          reportId?: number;
-          type: string;
-          service?: string;
-          amount?: number | string;
-          status?: string;
-          date?: string | null;
-        }>
-      >;
-    },
-  });
-
-  // Nota: este tab muestra únicamente el pago mensual de suscripción de visibilidad.
-
-  const verificationRows = useMemo(
-    () => (invoiceList ?? []).filter((inv) => inv.type === "verification"),
-    [invoiceList],
-  );
-
-  const isLoading = invoicesLoading;
-
-  useEffect(() => {
-    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-    if (params.get("verificationInvoice") !== "1") {
-      setPulseReportId(null);
-      return;
-    }
-    const rid = params.get("reportId");
-    if (rid != null && rid !== "") {
-      const n = Number(rid);
-      if (!Number.isNaN(n)) {
-        setPulseReportId(n);
-        return;
-      }
-    }
-  }, [location]);
-
-  useEffect(() => {
-    if (pulseReportId != null) return;
-    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-    if (params.get("verificationInvoice") !== "1") return;
-    const completed = verificationRows.find((r) => r.status === "completed");
-    const id = completed?.reportId ?? completed?.id;
-    if (id != null) setPulseReportId(Number(id));
-  }, [verificationRows, pulseReportId, location]);
-
-  useEffect(() => {
-    if (pulseReportId == null) return;
-    let cancelled = false;
-    let attempts = 0;
-    const attemptScroll = () => {
-      if (cancelled) return;
-      attempts += 1;
-      const el = document.querySelector(`[data-verification-report="${pulseReportId}"]`) as HTMLElement | null;
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        return;
-      }
-      if (attempts < 25) window.setTimeout(attemptScroll, 120);
-    };
-    window.setTimeout(attemptScroll, 100);
-    return () => {
-      cancelled = true;
-    };
-  }, [pulseReportId, location, verificationRows.length]);
-
-  useEffect(() => {
-    if (!invoiceList || !user || autoVerificationPdfDone.current) return;
-    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-    if (params.get("verificationInvoice") !== "1") return;
-    const ridParam = params.get("reportId");
-    const match = verificationRows.find(
-      (r) =>
-        r.status === "completed" &&
-        (ridParam == null || ridParam === "" || String(r.reportId ?? r.id) === ridParam),
-    );
-    if (!match) return;
-    autoVerificationPdfDone.current = true;
-    const reportId = match.reportId ?? match.id;
-    if (reportId == null) return;
-    const amt =
-      typeof match.amount === "number" ? match.amount : parseFloat(String(match.amount ?? String(monthlyUsd)));
-    void downloadInvoicePdf(
-      {
-        id: reportId,
-        reportId,
-        transferType: "verification_fee",
-        amount: Number.isFinite(amt) ? amt : monthlyUsd,
-        description: match.service ?? "Cargo de verificación profesional",
-        createdAt: match.date,
-        status: match.status,
-      },
-      {
-        firstName: user.firstName,
-        lastName: user.lastName,
-        name: (user as { name?: string }).name,
-        email: user.email,
-      },
-    ).then(() => {
-      params.delete("verificationInvoice");
-      params.delete("reportId");
-      const qs = params.toString();
-      if (typeof window !== "undefined") {
-        window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
-      }
-    });
-  }, [invoiceList, verificationRows, user, location, monthlyUsd]);
-
-  const userForInvoice = user
-    ? {
-        firstName: user.firstName,
-        lastName: user.lastName,
-        name: (user as { name?: string }).name,
-        email: user.email,
-      }
-    : null;
-
-  if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Facturas</CardTitle>
-          <CardDescription>
-            Historial y descarga en PDF del pago mensual ({monthlyUsdLabel}) para ser asociado
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-          <p className="text-sm">Cargando facturas…</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (verificationRows.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Facturas</CardTitle>
-          <CardDescription>
-            Historial y descarga en PDF del pago mensual ({monthlyUsdLabel}) para ser asociado
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
-          <FileText className="h-8 w-8 opacity-60" />
-          <p className="text-sm">Aún no tienes pagos de suscripción registrados.</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Facturas</CardTitle>
-        <CardDescription>
-          Historial y descarga en PDF del pago mensual ({monthlyUsdLabel}) para ser asociado
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {verificationRows.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-foreground">Suscripción mensual ({monthlyUsdLabel})</p>
-            {verificationRows.map((inv) => {
-              const reportKey = inv.reportId ?? inv.id;
-              if (reportKey == null) return null;
-              const amt =
-                typeof inv.amount === "number" ? inv.amount : parseFloat(String(inv.amount ?? String(monthlyUsd)));
-              const dateStr = parseTransferDate(inv.date)
-                ? format(parseTransferDate(inv.date)!, "dd MMM yyyy HH:mm", { locale: es })
-                : "—";
-              const st = inv.status ?? "";
-              const isCompleted = st === "completed";
-              const isRejected = st === "rejected";
-              const highlight = pulseReportId != null && Number(reportKey) === pulseReportId;
-              return (
-                <div
-                  key={`ver-${reportKey}`}
-                  data-verification-report={reportKey}
-                  className={cn(
-                    "flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border border-border rounded-lg bg-card",
-                    highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
-                  )}
-                >
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <ShieldCheck className="w-4 h-4 text-primary" />
-                    </div>
-                    <div className="min-w-0 space-y-1">
-                      <p className="font-medium text-sm">{getTransferTypeLabel("verification_fee")}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {inv.service ?? "Cargo de verificación profesional"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{dateStr}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0 flex-wrap sm:flex-nowrap">
-                    <p className="font-semibold text-sm">{formatWalletAmount(Number.isFinite(amt) ? amt : monthlyUsd)}</p>
-                    <Badge variant={isCompleted ? "default" : isRejected ? "destructive" : "secondary"}>
-                      {isCompleted ? "Completado" : isRejected ? "Rechazado" : "Pendiente"}
-                    </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        userForInvoice &&
-                        downloadInvoicePdf(
-                          {
-                            id: reportKey,
-                            reportId: reportKey,
-                            transferType: "verification_fee",
-                            amount: Number.isFinite(amt) ? amt : monthlyUsd,
-                            description: inv.service ?? "Cargo de verificación profesional",
-                            createdAt: inv.date,
-                            status: inv.status,
-                          },
-                          userForInvoice,
-                        )
-                      }
-                      disabled={!userForInvoice || !isCompleted}
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Generar factura
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-      </CardContent>
-    </Card>
-  );
-}
 
 const DASHBOARD_TABS = ["overview", "bookings", "invoices"] as const;
 
@@ -1477,7 +1225,7 @@ function ProfessionalDashboardInner() {
           </TabsContent>
 
           <TabsContent value="invoices">
-            <InvoicesTabContent />
+            <SubscriptionInvoicesPanel />
           </TabsContent>
         </Tabs>
       </div>

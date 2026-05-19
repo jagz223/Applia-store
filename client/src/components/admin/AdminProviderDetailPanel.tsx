@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ArrowLeft, Loader2, Save } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, Save } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -24,6 +24,10 @@ import { useSubcategories } from "@/hooks/use-mango-data";
 import { AdminProviderServiceEditorCard } from "@/components/admin/AdminProviderServiceEditorCard";
 import { AdminProviderCategorySlotServices } from "@/components/admin/AdminProviderCategorySlotServices";
 import {
+  AdminVerificationDocumentDialog,
+  type AdminVerificationSlide,
+} from "@/components/admin/AdminVerificationDocumentDialog";
+import {
   buildProviderDetailPatchBody,
   fetchAdminProviderDetail,
   patchAdminProviderDetail,
@@ -38,15 +42,29 @@ type Props = {
   providerId: number;
   canEdit: boolean;
   returnHref: string;
+  /** Abre el visor de documentos al cargar (p. ej. desde listado con ?docs=1). */
+  initialDocumentsOpen?: boolean;
 };
 
-export function AdminProviderDetailPanel({ providerId, canEdit, returnHref }: Props) {
+export function AdminProviderDetailPanel({
+  providerId,
+  canEdit,
+  returnHref,
+  initialDocumentsOpen = false,
+}: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<AdminProviderDetailPayload | null>(null);
   const [subscriptionEndsLocal, setSubscriptionEndsLocal] = useState("");
   const [baselineKey, setBaselineKey] = useState<string | null>(null);
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(initialDocumentsOpen);
+
+  useEffect(() => {
+    if (initialDocumentsOpen) {
+      setDocumentsOpen(true);
+    }
+  }, [initialDocumentsOpen]);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["admin-provider-detail", providerId],
@@ -116,6 +134,20 @@ export function AdminProviderDetailPanel({ providerId, canEdit, returnHref }: Pr
   const { data: primarySubs = [] } = useSubcategories(draft?.provider.categoryId ?? undefined);
   const goBrandSet = useMemo(() => new Set(draft?.provider.goBrands ?? []), [draft?.provider.goBrands]);
 
+  const verificationSlides = useMemo((): AdminVerificationSlide[] => {
+    const vd = draft?.verificationDocuments;
+    if (!vd) return [];
+    const credTitle =
+      vd.providerCategorySlug === "transport" ? "Licencia de conducir" : "Documento profesional";
+    return [
+      { id: "avatar", title: "Foto de perfil", src: vd.avatar },
+      { id: "id", title: "Identificación", src: vd.userIdentification },
+      { id: "credential", title: credTitle, src: vd.professionalCredentialUrl },
+    ];
+  }, [draft?.verificationDocuments]);
+
+  const hasVerificationDocuments = verificationSlides.some((s) => Boolean(s.src));
+
   const toggleGoBrand = (brand: "transport" | "delivery" | "marketplace") => {
     if (!draft) return;
     const next = new Set(goBrandSet);
@@ -160,23 +192,41 @@ export function AdminProviderDetailPanel({ providerId, canEdit, returnHref }: Pr
               <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
                 {draft?.user
                   ? `${draft.user.name} ${draft.user.lastName} · ${draft.user.email ?? "sin correo"}`
-                  : "Datos del proveedor, categorías, servicios y suscripción."}
+                  : "Datos del asociado, categorías, servicios y suscripción."}
               </p>
               {isDirty ? (
                 <p className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">Hay cambios sin guardar</p>
               ) : null}
             </div>
-            {canEdit ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Button
                 type="button"
-                className="shrink-0"
-                disabled={!draft || saveMutation.isPending}
-                onClick={() => saveMutation.mutate()}
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={!draft || !hasVerificationDocuments}
+                onClick={() => setDocumentsOpen(true)}
               >
-                {saveMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Guardar
+                <FileText className="h-4 w-4" aria-hidden />
+                Ver documentos
               </Button>
-            ) : null}
+              {canEdit ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={!draft || saveMutation.isPending}
+                  onClick={() => saveMutation.mutate()}
+                >
+                  {saveMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  Guardar
+                </Button>
+              ) : null}
+            </div>
           </div>
         </header>
 
@@ -264,7 +314,6 @@ export function AdminProviderDetailPanel({ providerId, canEdit, returnHref }: Pr
                     <p className="text-xs text-muted-foreground">
                       Reservas: {draft.bookingsCount} · Valoración: {draft.user?.rating?.toFixed(1) ?? "—"} (
                       {draft.user?.ratingCount ?? 0})
-                      {draft.user?.wallet != null ? ` · Saldo: $${draft.user.wallet.toFixed(2)}` : null}
                     </p>
                   </div>
 
@@ -586,6 +635,20 @@ export function AdminProviderDetailPanel({ providerId, canEdit, returnHref }: Pr
             )}
         </main>
       </div>
+
+      <AdminVerificationDocumentDialog
+        open={documentsOpen}
+        onOpenChange={setDocumentsOpen}
+        userId={draft?.provider.userId ?? ""}
+        revieweeName={
+          draft?.user
+            ? `${draft.user.name} ${draft.user.lastName}`.trim() || "Asociado"
+            : "Asociado"
+        }
+        slides={verificationSlides}
+        initialIndex={0}
+        loading={documentsOpen && isLoading}
+      />
 
       <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
         <AlertDialogContent>

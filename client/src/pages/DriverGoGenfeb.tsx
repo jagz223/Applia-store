@@ -74,6 +74,12 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { GoDriverNegotiationBoardPanel } from "@/components/go/GoDriverNegotiationBoardPanel";
 import { goOffsetAboveBottomNav, goViewportClasses, useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { estimateDurationSecFromDistanceM, haversineM } from "@shared/maps-route-math";
+import {
+  GO_DRIVER_SUBSCRIPTION_INACTIVE_DRIVER_BANNER,
+  GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT,
+  GO_DRIVER_SUBSCRIPTION_INACTIVE_SLIDE_HINT,
+  isGoDriverSubscriptionActive,
+} from "@shared/go-driver-subscription";
 
 function lineGeoJson(from: { lat: number; lon: number }, to: { lat: number; lon: number }): GeoJsonObject {
   return {
@@ -238,11 +244,20 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   });
 
   const isAdmin = (user as { role?: string } | null)?.role === "admin";
+  const providerSubscriptionEndsAt = (provider as { visibilitySubscriptionEndsAt?: string | null } | null)
+    ?.visibilitySubscriptionEndsAt;
   const isCarGoDriver = !!provider && isCarGoProvider(provider, categories);
   const isPackGoDriver = !!provider && providerHasGoBrand(provider as any, "delivery", categories);
   const canSeeDriverView = isAdmin || (goSlug === "pack" ? isPackGoDriver || isCarGoDriver : isCarGoDriver);
   const hasVehicle = !!providerVehicle?.vehicle_type;
-  const canReceive = !!provider?.isVerified && (goSlug === "pack" ? isPackGoDriver || isCarGoDriver : isCarGoDriver) && hasVehicle;
+  const hasActiveSubscription = isAdmin || isGoDriverSubscriptionActive(providerSubscriptionEndsAt);
+  const meetsDriverBasics =
+    !!provider?.isVerified && (goSlug === "pack" ? isPackGoDriver || isCarGoDriver : isCarGoDriver) && hasVehicle;
+  const canReceive = meetsDriverBasics && hasActiveSubscription;
+  const canUseDriverNegotiation =
+    (isAdmin || provider?.isVerified === true) && hasActiveSubscription;
+  const slideDisabledHint =
+    meetsDriverBasics && !hasActiveSubscription ? GO_DRIVER_SUBSCRIPTION_INACTIVE_SLIDE_HINT : undefined;
 
   const slideDockRef = useRef<HTMLDivElement>(null);
 
@@ -265,16 +280,20 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     return () => goDriverUi.registerOpenHistory(null);
   }, [goDriverUi]);
 
-  const canOpenDriverNegotiationBoard = isAdmin || provider?.isVerified === true;
+  const canOpenDriverNegotiationBoard = canUseDriverNegotiation;
 
   useEffect(() => {
     if (!goDriverUi) return;
     goDriverUi.registerOpenNegotiationBoard(() => {
       if (!canOpenDriverNegotiationBoard) {
+        const verifiedNoSubscription =
+          provider?.isVerified === true &&
+          !isGoDriverSubscriptionActive(providerSubscriptionEndsAt);
         toast({
-          title: "Perfil no verificado",
-          description:
-            "Verifica tu perfil profesional para ver el tablero de regateo y poder ofertar en taxi y delivery.",
+          title: verifiedNoSubscription ? "Suscripción vencida" : "Perfil no verificado",
+          description: verifiedNoSubscription
+            ? GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT
+            : "Verifica tu perfil profesional para ver el tablero de regateo y poder ofertar en taxi y delivery.",
           variant: "destructive",
         });
         return;
@@ -282,7 +301,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setNegotiationBoardOpen(true);
     });
     return () => goDriverUi.registerOpenNegotiationBoard(null);
-  }, [goDriverUi, canOpenDriverNegotiationBoard, toast]);
+  }, [goDriverUi, canOpenDriverNegotiationBoard, toast, provider?.isVerified, providerSubscriptionEndsAt]);
 
   useEffect(() => {
     if (negotiationBoardOpen && !canOpenDriverNegotiationBoard) {
@@ -718,6 +737,13 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     clearAllGoReceiving();
   }, []);
 
+  /** Tras terminar o cancelar un viaje: si la suscripción ya no está activa, dejar de recibir pedidos. */
+  const disconnectReceivingIfSubscriptionLapsed = useCallback(() => {
+    if (isAdmin || hasActiveSubscription) return;
+    stopAllReceiving();
+    emitDriverPresenceOffline();
+  }, [isAdmin, hasActiveSubscription, stopAllReceiving, emitDriverPresenceOffline]);
+
   const resetReceivingAfterSocketLoss = useCallback(() => {
     stopAllReceiving();
     emitDriverPresenceOffline();
@@ -985,6 +1011,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setServiceEtaSec(null);
       lastServiceRouteFetchRef.current = null;
       void queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
+      disconnectReceivingIfSubscriptionLapsed();
     } catch (e) {
       toast({
         title: "No se pudo completar el viaje",
@@ -1029,6 +1056,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       lastServiceRouteFetchRef.current = null;
       toast({ title: "Viaje cancelado", description: "El servicio quedó anulado." });
       setCancelServiceOpen(false);
+      disconnectReceivingIfSubscriptionLapsed();
     } catch {
       toast({ title: "Error de red", variant: "destructive" });
     } finally {
@@ -1171,9 +1199,13 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     }
   }, [authLoading, isAuthenticated, goSlug, setLocation]);
 
-  // Si no está verificado/vehículo, nunca permitir quedar en "recibiendo".
+  // Si no cumple requisitos (o venció la suscripción), no quedar en "recibiendo".
+  // Excepción: con un viaje/envío activo puede terminar el servicio antes de desconectarse.
   useEffect(() => {
     if (canReceive) return;
+    const cargoRide = loadGoDriverActiveRideId("cargo");
+    const packRide = loadGoDriverActiveRideId("pack");
+    if (activeRideId || cargoRide || packRide) return;
     if (receiving) {
       if (goSlug === "pack") {
         setReceivingPack(false);
@@ -1183,7 +1215,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         saveGoReceiving("cargo", false);
       }
     }
-  }, [canReceive, receiving, goSlug]);
+  }, [canReceive, receiving, goSlug, activeRideId]);
 
   if (authLoading || !isAuthenticated || (providerLoading && !isAdmin) || (!provider && !isAdmin)) {
     return (
@@ -1263,6 +1295,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             saveGoReceiving("cargo", n);
           }}
           disabled={!canReceive}
+          disabledHint={slideDisabledHint}
           goSlug="cargo"
           className="border-border/70 bg-background/90 shadow-lg ring-1 ring-black/10 backdrop-blur-md dark:ring-white/10"
         />
@@ -1275,6 +1308,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             saveGoReceiving("pack", n);
           }}
           disabled={!canReceive}
+          disabledHint={slideDisabledHint}
           goSlug="pack"
           className="border-border/70 bg-background/90 shadow-lg ring-1 ring-black/10 backdrop-blur-md dark:ring-white/10"
         />
@@ -1447,6 +1481,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             saveGoReceiving("cargo", n);
           }}
           disabled={!canReceive}
+          disabledHint={slideDisabledHint}
           goSlug="cargo"
           className="border-border/60 bg-background/95 shadow-md ring-1 ring-black/[0.06] dark:bg-card/95 dark:ring-white/10"
         />
@@ -1458,6 +1493,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             saveGoReceiving("pack", n);
           }}
           disabled={!canReceive}
+          disabledHint={slideDisabledHint}
           goSlug="pack"
           className="border-border/60 bg-background/95 shadow-md ring-1 ring-black/[0.06] dark:bg-card/95 dark:ring-white/10"
         />
@@ -1514,7 +1550,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               ? `Aún no estás verificado (documentos + ${monthlyUsdLabel}). Completa la verificación para poder recibir viajes.`
               : !hasVehicle
                 ? "Te falta registrar tu vehículo. Regístralo para poder recibir viajes."
-                : "Completa los requisitos para poder recibir viajes."}
+                : meetsDriverBasics && !hasActiveSubscription
+                  ? GO_DRIVER_SUBSCRIPTION_INACTIVE_DRIVER_BANNER
+                  : "Completa los requisitos para poder recibir viajes."}
         </p>
       )}
     </header>
@@ -1592,7 +1630,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
                       ? "Verifica tu cuenta para recibir viajes."
                       : !hasVehicle
                         ? "Registra tu vehículo para recibir viajes."
-                        : "Completa los requisitos para recibir viajes."}
+                        : meetsDriverBasics && !hasActiveSubscription
+                          ? GO_DRIVER_SUBSCRIPTION_INACTIVE_SLIDE_HINT
+                          : "Completa los requisitos para recibir viajes."}
                 </p>
               )}
             </div>
@@ -1748,7 +1788,12 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               active={negotiationBoardOpen}
               providerVehicleType={providerVehicle?.vehicle_type}
               providerIsPetFriendly={!!providerVehicle?.is_pet_friendly}
-              canSubmitNegotiationOffers={isAdmin || provider?.isVerified === true}
+              canSubmitNegotiationOffers={canUseDriverNegotiation}
+              submitBlockedHint={
+                provider?.isVerified === true && !hasActiveSubscription
+                  ? GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT
+                  : undefined
+              }
               onOfferSubmitted={(rideId, amountUsd, module) => {
                 setDriverNegotiationSent({ rideId, module, amountUsd });
                 stopAllReceiving();

@@ -82,6 +82,8 @@ type Props = {
   providerIsPetFriendly?: boolean;
   onOfferSubmitted?: (rideId: string, amountUsd: number, module: "cargo" | "pack") => void;
   canSubmitNegotiationOffers?: boolean;
+  /** Mensaje cuando no puede enviar ofertas (p. ej. suscripción vencida). */
+  submitBlockedHint?: string;
 };
 
 function serviceModuleLabel(m: "cargo" | "pack"): string {
@@ -94,6 +96,7 @@ export function GoDriverNegotiationBoardPanel({
   providerIsPetFriendly = false,
   onOfferSubmitted,
   canSubmitNegotiationOffers = true,
+  submitBlockedHint,
 }: Props) {
   const { toast } = useToast();
   const { socket } = useSocket();
@@ -225,8 +228,10 @@ export function GoDriverNegotiationBoardPanel({
   const submitOffer = async (rideId: string, amountUsd: number, serviceModule: "cargo" | "pack") => {
     if (!canSubmitNegotiationOffers) {
       toast({
-        title: "Perfil no verificado",
-        description: "Completa la verificación profesional para enviar montos o contraofertas.",
+        title: submitBlockedHint ? "Suscripción vencida" : "Perfil no verificado",
+        description:
+          submitBlockedHint ??
+          "Completa la verificación profesional para enviar montos o contraofertas.",
         variant: "destructive",
       });
       return;
@@ -341,7 +346,8 @@ export function GoDriverNegotiationBoardPanel({
           className="shrink-0 rounded-xl border border-border bg-muted/40 px-3 py-2 text-[11px] leading-snug text-muted-foreground"
           role="status"
         >
-          Puedes ver las solicitudes. Para enviar un monto o contraoferta necesitas el perfil profesional verificado.
+          {submitBlockedHint ??
+            "Puedes ver las solicitudes. Para enviar un monto o contraoferta necesitas el perfil profesional verificado."}
         </div>
       ) : null}
 

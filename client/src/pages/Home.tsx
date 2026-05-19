@@ -491,7 +491,7 @@ export default function HomePage() {
                       <span className="font-bold text-foreground">100% Verificados</span>
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      Todos los proveedores pasan por un proceso de verificación.
+                      Todos los asociados pasan por un proceso de verificación.
                     </p>
                   </motion.div>
                 </div>

@@ -133,8 +133,12 @@ export class CatalogService {
     return this.storage.getAllServices(categoryId, search, providerCategoryId, subcategoryId, includeUnverifiedForAdmin);
   }
 
-  async getService(id: number) {
-    return this.storage.getService(id);
+  async getService(id: number, options?: { includeWhenListingUnpublished?: boolean }) {
+    return this.storage.getService(id, options);
+  }
+
+  async getServicesByProviderId(providerId: number) {
+    return this.storage.getServicesByProviderId(providerId);
   }
 
   async createService(service: InsertService) {

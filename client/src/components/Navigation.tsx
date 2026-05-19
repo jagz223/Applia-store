@@ -143,8 +143,8 @@ export function Navigation() {
   const hasProviderForDashboard =
     !!providerProfile || !!(user as { provider?: unknown } | null)?.provider;
   const canAccessActivityDashboard = canAccessAssociateActivityDashboard(user, hasProviderForDashboard);
-  /** Cualquier servicio propio (activo o inactivo) para el enlace a Mis servicios. */
-  const hasMyServiceNav = myServices.length > 0;
+  /** Asociado con perfil: siempre puede abrir Mis servicios (aunque la suscripción de catálogo haya vencido). */
+  const showMyServicesNav = isProfessional && hasProviderForDashboard;
 
   const { data: providerVehicle, isLoading: providerVehicleLoading } = useProviderVehicle({
     enabled: isAuthenticated && isProfessional && !!providerProfile,
@@ -221,7 +221,7 @@ export function Navigation() {
               </Link>
             </DropdownMenuItem>
           )}
-          {isProfessional && !myServicesLoading && hasMyServiceNav && (
+          {showMyServicesNav && (
             <DropdownMenuItem asChild>
               <Link href="/my-services" className="flex items-center gap-2 w-full">
                 <List className="h-4 w-4" />
@@ -594,7 +594,7 @@ export function Navigation() {
                     )}
                   </>
                 )}
-                {isProfessional && !myServicesLoading && hasMyServiceNav && (
+                {showMyServicesNav && (
                   <Link href="/my-services" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                     Mis servicios
                   </Link>

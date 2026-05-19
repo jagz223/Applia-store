@@ -6,7 +6,7 @@ import {
   BarChart3, Shield, Bell, Database, Layers,
   CheckCircle, XCircle, Clock, TrendingUp, UserPlus,
   Search, ChevronLeft, ChevronRight, Loader2, Wallet, Banknote, History, Inbox, PlayCircle, CreditCard,
-  Check, ChevronsUpDown
+  Check, ChevronsUpDown, Ticket
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -72,6 +72,9 @@ import { toDate, isValidDate } from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
 import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
+import { fetchAdminProviderDetail } from "@/components/admin/admin-provider-detail-lib";
+import { AdminPromotionalCodesPanel } from "@/components/admin/AdminPromotionalCodesPanel";
+import { formatSubscriptionPaymentAuditSummary } from "@shared/admin-audit-payment-meta";
 import { AnimatePresence, motion } from "framer-motion";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName, CATEGORY_DISPLAY_NAMES } from "@shared/default-categories";
 import { ADMIN_PROVIDER_LIST_BRAND_FILTERS } from "@shared/admin-active-providers-directory";
@@ -1173,6 +1176,18 @@ function adminAuditEventTitle(it: { action: string; meta?: unknown }): string {
   return it.action;
 }
 
+function adminAuditEventDetailLines(it: { action: string; meta?: unknown }): string[] {
+  if (
+    it.action === "subscription_payment_approved" ||
+    it.action === "subscription_payment_rejected"
+  ) {
+    return formatSubscriptionPaymentAuditSummary(
+      it.meta && typeof it.meta === "object" ? (it.meta as Record<string, unknown>) : null,
+    );
+  }
+  return [];
+}
+
 /** Resumen legible para admins de una propuesta `field: vehicle`. */
 function formatVehicleChangeProposalSummary(
   proposal: unknown,
@@ -1207,7 +1222,7 @@ function formatVehicleChangeProposalSummary(
 }
 
 /** Pestañas solo para administrador (no Soporte TI). */
-const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts", "services"] as const;
+const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts", "services", "promotional-codes"] as const;
 
 export default function AdminPanel() {
   const { user, isLoading: authLoading } = useAuth();
@@ -1247,11 +1262,15 @@ export default function AdminPanel() {
       /** Pestañas financieras ocultas: enviar a estadísticas */
       if (tab === "recargas" || tab === "saldo" || tab === "payouts") return "estadisticas";
       if (tab === "services") return "services";
+      if (tab === "promotional-codes") return "promotional-codes";
     }
     return "overview";
   });
+  const [promoCreateModalOpen, setPromoCreateModalOpen] = useState(false);
   const [userPage, setUserPage] = useState(1);
   const [providersPage, setProvidersPage] = useState(1);
+  /** Carga documentos de verificación al abrir el visor desde la pestaña Asociados (sin ir a editar). */
+  const [providerDocsFetchId, setProviderDocsFetchId] = useState<number | null>(null);
   const [overviewPendingProvidersPage, setOverviewPendingProvidersPage] = useState(1);
   const [overviewRecentBookingsPage, setOverviewRecentBookingsPage] = useState(1);
   const [adminTransfersPage, setAdminTransfersPage] = useState(1);
@@ -1289,6 +1308,7 @@ export default function AdminPanel() {
       window.history.replaceState(null, "", `${window.location.pathname}?${q.toString()}`);
     }
     if (tab === "services") setActiveTab("services");
+    if (tab === "promotional-codes") setActiveTab("promotional-codes");
     const highlight = q.get("highlight");
     if (highlight) {
       const id = parseInt(highlight, 10);
@@ -1515,6 +1535,33 @@ export default function AdminPanel() {
   });
   const activeProviderRows: AdminActiveProviderRow[] = adminActiveServicesData?.providers ?? [];
 
+  const { data: providerDocsDetail, isLoading: providerDocsLoading } = useQuery({
+    queryKey: ["admin-provider-detail-docs", providerDocsFetchId],
+    queryFn: () => fetchAdminProviderDetail(providerDocsFetchId!),
+    enabled: providerDocsFetchId != null && providerDocsFetchId > 0,
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (!providerDocsFetchId || !providerDocsDetail?.verificationDocuments) return;
+    const vd = providerDocsDetail.verificationDocuments;
+    const credTitle =
+      vd.providerCategorySlug === "transport" ? "Licencia de conducir" : "Documento profesional";
+    const slides = [
+      { id: "avatar", title: "Foto de perfil", src: vd.avatar ?? null },
+      { id: "id", title: "Identificación", src: vd.userIdentification ?? null },
+      { id: "credential", title: credTitle, src: vd.professionalCredentialUrl ?? null },
+    ];
+    const revieweeName = providerDocsDetail.user
+      ? `${providerDocsDetail.user.name ?? ""} ${providerDocsDetail.user.lastName ?? ""}`.trim()
+      : "";
+    setAssocImageDialog((prev) => ({
+      ...prev,
+      slides,
+      revieweeName: revieweeName || prev.revieweeName,
+    }));
+  }, [providerDocsFetchId, providerDocsDetail]);
+
   const { data: serviceBrandsData, isLoading: serviceBrandsLoading } = useQuery({
     queryKey: ["admin-service-brands"],
     queryFn: () => fetchWithAuth("/api/admin/service-brands"),
@@ -1639,14 +1686,14 @@ export default function AdminPanel() {
           queryKey: ["admin-service-brand-providers", selectedBrandCategoryId, brandProviderSearch, brandProviderMinRating, brandProviderSort],
         });
       }
-      const label = providerConfirmAction?.name ? `"${providerConfirmAction.name}"` : "el proveedor";
+      const label = providerConfirmAction?.name ? `"${providerConfirmAction.name}"` : "el asociado";
       const action = providerConfirmAction?.nextActive ? "activado" : "desactivado";
       toast({ title: "Acción aplicada", description: `Se ha ${action} ${label}.` });
       setPulseProviderId(providerConfirmAction?.providerId ?? null);
       setTimeout(() => setPulseProviderId(null), 650);
     },
     onError: (err: Error) => {
-      toast({ title: "Error", description: err.message || "No se pudo actualizar el proveedor.", variant: "destructive" });
+      toast({ title: "Error", description: err.message || "No se pudo actualizar el asociado.", variant: "destructive" });
     },
   });
 
@@ -1665,6 +1712,10 @@ export default function AdminPanel() {
     subscriptionMonths?: number | null;
     subscriptionMonthlyUsd?: number | null;
     subscriptionTotalUsd?: number | null;
+    promotionalCode?: string | null;
+    promotionalDiscountPercent?: number | null;
+    subscriptionOriginalTotalUsd?: number | null;
+    subscriptionDiscountedTotalUsd?: number | null;
     providerCategorySlug?: string | null;
     visibilitySubscriptionEndsAt?: string | null;
   };
@@ -1852,11 +1903,31 @@ export default function AdminPanel() {
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-mango-orange shrink-0" />
             <div className="min-w-0">
-              <h1 className="text-lg sm:text-2xl font-bold truncate">Panel de Administración</h1>
-              <p className="text-muted-foreground text-sm truncate">GenFeb</p>
+              <h1 className="text-base sm:text-2xl font-bold leading-snug">Panel de Administración</h1>
+              <p className="text-muted-foreground text-xs sm:text-sm">GenFeb</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            {fullAdmin ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2 h-9 sm:px-3 px-2"
+                onClick={() => {
+                  setActiveTab("promotional-codes");
+                  setPromoCreateModalOpen(true);
+                  if (typeof window !== "undefined" && window.history.replaceState) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("tab", "promotional-codes");
+                    window.history.replaceState(null, "", url.pathname + url.search);
+                  }
+                }}
+              >
+                <Ticket className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Crear código</span>
+              </Button>
+            ) : null}
             <Button variant="outline" size="icon" className="h-9 w-9">
               <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
@@ -1886,7 +1957,7 @@ export default function AdminPanel() {
         >
           <div className="relative -mx-3 sm:mx-0 mb-4">
             <div className="overflow-x-auto overflow-y-hidden pb-1 scroll-smooth md:overflow-visible pr-2 md:pr-0">
-              <TabsList className="inline-flex w-max min-w-full md:flex md:flex-wrap md:w-auto md:min-w-0 h-auto flex-nowrap gap-1 rounded-xl border border-border/60 bg-muted/25 p-1.5 md:border-border/50 md:bg-muted/20">
+              <TabsList className="inline-flex w-max h-auto flex-nowrap gap-1 rounded-xl border border-border/60 bg-muted/25 p-1 md:border-border/50 md:bg-muted/20 md:flex md:flex-wrap md:w-auto">
                 {fullAdmin && (
                   <TabsTrigger value="estadisticas" className="shrink-0 gap-1">
                     <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4 opacity-80" />
@@ -1895,11 +1966,23 @@ export default function AdminPanel() {
                   </TabsTrigger>
                 )}
                 {fullAdmin && (
-                  <TabsTrigger value="overview" className="shrink-0">Gestión de asociados</TabsTrigger>
+                  <TabsTrigger value="overview" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">
+                    <span className="sm:hidden">Asociados</span>
+                    <span className="hidden sm:inline">Gestión de asociados</span>
+                  </TabsTrigger>
                 )}
-                <TabsTrigger value="users" className="shrink-0">Usuarios</TabsTrigger>
-                <TabsTrigger value="providers" className="shrink-0">Proveedores</TabsTrigger>
-                <TabsTrigger value="bookings" className="shrink-0">Reservas</TabsTrigger>
+                <TabsTrigger value="users" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">Usuarios</TabsTrigger>
+                <TabsTrigger value="providers" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">
+                  <span className="sm:hidden">Asoc.</span>
+                  <span className="hidden sm:inline">Asociados</span>
+                </TabsTrigger>
+                <TabsTrigger value="bookings" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">Reservas</TabsTrigger>
+                {fullAdmin && (
+                  <TabsTrigger value="promotional-codes" className="shrink-0 gap-1.5">
+                    <Ticket className="h-4 w-4 shrink-0 opacity-80" />
+                    Códigos
+                  </TabsTrigger>
+                )}
                 {fullAdmin && (
                   <TabsTrigger value="categories" className="shrink-0">Categorías</TabsTrigger>
                 )}
@@ -1917,6 +2000,14 @@ export default function AdminPanel() {
 
           <TabsContent value="estadisticas" className="min-w-0">
             <AdminStatisticsPanel enabled={fullAdmin} />
+          </TabsContent>
+
+          <TabsContent value="promotional-codes" className="min-w-0">
+            <AdminPromotionalCodesPanel
+              enabled={fullAdmin && activeTab === "promotional-codes"}
+              createModalOpen={promoCreateModalOpen}
+              onCreateModalOpenChange={setPromoCreateModalOpen}
+            />
           </TabsContent>
 
           <TabsContent value="overview">
@@ -2207,11 +2298,20 @@ export default function AdminPanel() {
                                             ? `(${assoc.subscriptionMonths} meses)`
                                             : "(1 mes)"}{" "}
                                           (
-                                          {typeof assoc.subscriptionTotalUsd === "number" && Number.isFinite(assoc.subscriptionTotalUsd)
+                                          {typeof assoc.subscriptionTotalUsd === "number" &&
+                                          Number.isFinite(assoc.subscriptionTotalUsd)
                                             ? `${assoc.subscriptionTotalUsd.toFixed(2)} USD`
-                                            : typeof assoc.subscriptionMonthlyUsd === "number" && Number.isFinite(assoc.subscriptionMonthlyUsd)
+                                            : typeof assoc.subscriptionMonthlyUsd === "number" &&
+                                                Number.isFinite(assoc.subscriptionMonthlyUsd)
                                               ? `${Number(assoc.subscriptionMonthlyUsd).toFixed(2)} USD`
                                               : "15.00 USD"}
+                                          {assoc.promotionalCode &&
+                                          typeof assoc.subscriptionOriginalTotalUsd === "number" ? (
+                                            <span className="text-muted-foreground font-normal">
+                                              {" "}
+                                              (antes {assoc.subscriptionOriginalTotalUsd.toFixed(2)} USD)
+                                            </span>
+                                          ) : null}
                                           )
                                         </p>
                                         <p className="break-words text-xs text-muted-foreground mt-1">
@@ -2219,7 +2319,19 @@ export default function AdminPanel() {
                                           {assoc.transacction_date
                                             ? new Date(assoc.transacction_date).toLocaleDateString("es-EC")
                                             : "—"}{" "}
-                                          · Código: {assoc.transacction_code ?? "—"}
+                                          · Comprobante bancario: {assoc.transacction_code ?? "—"}
+                                          {assoc.promotionalCode ? (
+                                            <>
+                                              {" "}
+                                              · Código promo:{" "}
+                                              <span className="font-mono font-medium text-foreground">
+                                                {assoc.promotionalCode}
+                                              </span>
+                                              {typeof assoc.promotionalDiscountPercent === "number"
+                                                ? ` (−${assoc.promotionalDiscountPercent}%)`
+                                                : null}
+                                            </>
+                                          ) : null}
                                           {assoc.visibilitySubscriptionEndsAt ? (
                                             <>
                                               {" "}
@@ -2375,15 +2487,23 @@ export default function AdminPanel() {
                               ? "—"
                               : d.toLocaleString("es-EC", { dateStyle: "medium", timeStyle: "short" });
                             const actionLabel = adminAuditEventTitle(it);
+                            const detailLines = adminAuditEventDetailLines(it);
                             return (
                               <div key={it.id} className="rounded-lg border bg-background p-3 text-sm">
                                 <p className="font-medium">{actionLabel}</p>
                                 <p className="text-xs text-muted-foreground mt-1 break-words">
                                   {dateLabel} · Admin: {(it.adminName ?? it.adminUserId) || "—"}
-                                    {it.adminEmail ? ` (${it.adminEmail})` : ""} · Usuario:{" "}
-                                    {(it.affectedUserName ?? it.affectedUserId) || "—"}
-                                    {it.affectedUserEmail ? ` (${it.affectedUserEmail})` : ""}
+                                  {it.adminEmail ? ` (${it.adminEmail})` : ""} · Usuario:{" "}
+                                  {(it.affectedUserName ?? it.affectedUserId) || "—"}
+                                  {it.affectedUserEmail ? ` (${it.affectedUserEmail})` : ""}
                                 </p>
+                                {detailLines.length > 0 ? (
+                                  <ul className="mt-2 space-y-0.5 list-none text-xs text-foreground/90">
+                                    {detailLines.map((line) => (
+                                      <li key={line}>{line}</li>
+                                    ))}
+                                  </ul>
+                                ) : null}
                               </div>
                             );
                                 })}
@@ -2399,14 +2519,14 @@ export default function AdminPanel() {
             </div>
           </TabsContent>
 
-          <TabsContent value="users">
-            <Card>
-              <CardHeader>
-                <CardTitle>Gestión de Usuarios</CardTitle>
-                <CardDescription>Lista real de usuarios con filtros y paginación (10 por página)</CardDescription>
+          <TabsContent value="users" className="min-w-0">
+            <Card className="min-w-0 overflow-hidden">
+              <CardHeader className="p-4 sm:p-6 space-y-1">
+                <CardTitle className="text-lg sm:text-xl">Gestión de Usuarios</CardTitle>
+                <CardDescription className="text-sm">Lista real de usuarios con filtros y paginación (10 por página)</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <CardContent className="space-y-4 min-w-0 p-4 sm:p-6 pt-0">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   <Select
                     value={userFilters.role || "all"}
                     onValueChange={(v) => setUserFilters((f) => ({ ...f, role: v === "all" ? "" : v }))}
@@ -2440,9 +2560,9 @@ export default function AdminPanel() {
                   <Button
                     variant="secondary"
                     onClick={() => setUserPage(1)}
-                    className="flex items-center gap-2"
+                    className="flex w-full items-center justify-center gap-2 sm:w-auto"
                   >
-                    <Search className="h-4 w-4" />
+                    <Search className="h-4 w-4 shrink-0" />
                     Filtrar
                   </Button>
                 </div>
@@ -2454,42 +2574,51 @@ export default function AdminPanel() {
                   <p className="text-center py-8 text-muted-foreground">No hay usuarios que coincidan con los filtros.</p>
                 ) : (
                   <>
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       {usersList.map((u: { id: string; name?: string; lastName?: string; email?: string; role?: string; createdAt?: string }) => (
-                        <div key={u.id} className="flex items-center justify-between p-4 border rounded-lg">
-                          <div className="flex items-center gap-3">
-                            <Avatar>
+                        <div
+                          key={u.id}
+                          className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            <Avatar className="h-10 w-10 shrink-0">
                               <AvatarFallback>{(u.name || u.email || "?")[0]}</AvatarFallback>
                             </Avatar>
-                            <div>
-                              <p className="font-medium">{[u.name, u.lastName].filter(Boolean).join(" ") || "—"}</p>
-                              <p className="text-sm text-gray-500">{u.email ?? "—"}</p>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium truncate">
+                                {[u.name, u.lastName].filter(Boolean).join(" ") || "—"}
+                              </p>
+                              <p className="text-sm text-muted-foreground truncate">{u.email ?? "—"}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <Badge variant={hasAdminRole({ role: u.role }) ? "default" : "secondary"}>
+                          <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end sm:gap-3">
+                            <Badge
+                              variant={hasAdminRole({ role: u.role }) ? "default" : "secondary"}
+                              className="max-w-full truncate"
+                            >
                               {u.role ?? "—"}
                             </Badge>
-                            <p className="text-sm text-gray-500">
+                            <p className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap tabular-nums">
                               {u.createdAt && isValidDate(u.createdAt)
                                 ? toDate(u.createdAt).toLocaleDateString()
                                 : "—"}
                             </p>
-                            <Button size="sm" variant="outline" asChild>
+                            <Button size="sm" variant="outline" className="shrink-0" asChild>
                               <Link href={`/admin/users/${u.id}/edit`}>Editar</Link>
                             </Button>
                           </div>
                         </div>
                       ))}
                     </div>
-                    <div className="flex items-center justify-between pt-4 border-t">
-                      <p className="text-sm text-muted-foreground">
+                    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-xs sm:text-sm text-muted-foreground">
                         Total: {usersTotal} usuario{usersTotal !== 1 ? "s" : ""} · Página {userPage} de {usersTotalPages}
                       </p>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <Button
                           variant="outline"
                           size="sm"
+                          className="flex-1 sm:flex-none"
                           disabled={userPage <= 1}
                           onClick={() => setUserPage((p) => Math.max(1, p - 1))}
                         >
@@ -2499,6 +2628,7 @@ export default function AdminPanel() {
                         <Button
                           variant="outline"
                           size="sm"
+                          className="flex-1 sm:flex-none"
                           disabled={userPage >= usersTotalPages}
                           onClick={() => setUserPage((p) => Math.min(usersTotalPages, p + 1))}
                         >
@@ -2610,13 +2740,31 @@ export default function AdminPanel() {
                                 </div>
                                 <div className="flex flex-wrap items-center gap-3 sm:gap-4 justify-between sm:justify-end">
                                   <Badge variant={p.providerVerified ? "default" : "secondary"}>
-                                    {p.providerVerified ? "Proveedor verificado" : "Proveedor no verificado"}
+                                    {p.providerVerified ? "Asociado verificado" : "Asociado no verificado"}
                                   </Badge>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setProviderDocsFetchId(p.providerId);
+                                      setAssocImageDialog({
+                                        open: true,
+                                        userId: p.userId,
+                                        revieweeName: p.userName?.trim() || "—",
+                                        slides: [],
+                                        initialIndex: 0,
+                                      });
+                                    }}
+                                  >
+                                    <FileText className="h-3.5 w-3.5 mr-1" />
+                                    Ver documentos
+                                  </Button>
                                   <Button size="sm" variant="default" asChild>
                                     <Link
                                       href={`/admin/providers/${p.providerId}?return=${encodeURIComponent("/admin?tab=providers")}`}
                                     >
-                                      Gestionar asociado
+                                      Editar
                                     </Link>
                                   </Button>
                                   <Button size="sm" variant="outline" asChild>
@@ -2803,7 +2951,7 @@ export default function AdminPanel() {
                   <CardDescription>
                     {selectedBrandCategoryId == null
                       ? "Selecciona una marca para ver sus usuarios."
-                      : "Filtra por nombre/correo y estrellas. El botón Activar/Desactivar aplica al servicio del proveedor (no a su cuenta)."}
+                      : "Filtra por nombre/correo y estrellas. El botón Activar/Desactivar aplica al servicio del asociado (no a su cuenta)."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -4320,11 +4468,15 @@ export default function AdminPanel() {
         <AdminVerificationDocumentDialog
           key={assocImageDialog.open ? assocImageDialog.userId : "closed"}
           open={assocImageDialog.open}
-          onOpenChange={(o) => setAssocImageDialog((s) => ({ ...s, open: o }))}
+          onOpenChange={(o) => {
+            setAssocImageDialog((s) => ({ ...s, open: o }));
+            if (!o) setProviderDocsFetchId(null);
+          }}
           userId={assocImageDialog.userId}
           revieweeName={assocImageDialog.revieweeName}
           slides={assocImageDialog.slides}
           initialIndex={assocImageDialog.initialIndex}
+          loading={providerDocsFetchId != null && providerDocsLoading}
         />
 
         <Dialog
@@ -4500,7 +4652,7 @@ export default function AdminPanel() {
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Confirmación: Activar/Desactivar proveedor */}
+        {/* Confirmación: Activar/Desactivar asociado */}
         <AlertDialog
           open={providerConfirmOpen}
           onOpenChange={(o) => {
@@ -4514,7 +4666,7 @@ export default function AdminPanel() {
               <AlertDialogDescription>
                 {providerConfirmAction ? (
                   <>
-                    Vas a <strong>{providerConfirmAction.nextActive ? "activar" : "desactivar"}</strong> al proveedor{" "}
+                    Vas a <strong>{providerConfirmAction.nextActive ? "activar" : "desactivar"}</strong> al asociado{" "}
                     <strong>{providerConfirmAction.name}</strong>. Esto activará/desactivará sus servicios.
                   </>
                 ) : (

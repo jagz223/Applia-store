@@ -14,6 +14,8 @@ type Props = {
   goSlug?: "cargo" | "pack";
   className?: string;
   disabled?: boolean;
+  /** Si `disabled`, sustituye el texto por defecto (verificación/vehículo). */
+  disabledHint?: string;
   style?: React.CSSProperties;
 };
 
@@ -27,6 +29,7 @@ export function SlideToCargoOnline({
   goSlug = "cargo",
   className,
   disabled = false,
+  disabledHint,
   style,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -144,9 +147,10 @@ export function SlideToCargoOnline({
           )}
         >
             {disabled
-              ? goSlug === "pack"
-                ? "Completa verificación y registra tu vehículo para recibir envíos"
-                : "Completa verificación y registra tu vehículo para recibir viajes"
+              ? disabledHint ??
+                (goSlug === "pack"
+                  ? "Completa verificación y registra tu vehículo para recibir envíos"
+                  : "Completa verificación y registra tu vehículo para recibir viajes")
               : label}
         </p>
         <div>

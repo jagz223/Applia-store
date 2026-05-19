@@ -336,7 +336,7 @@ export async function registerAuthRoutes(
       if (data.field === "vehicle") {
         const provider = await genFebStorage.getProviderByUserId(String(req.user.id));
         if (!provider) {
-          return res.status(403).json({ message: "Solo para asociados con perfil de proveedor." });
+          return res.status(403).json({ message: "Solo para asociados con perfil activo." });
         }
         const categories = await genFebStorage.getCategories();
         if (!isGoVehicleProvider(provider, categories)) {

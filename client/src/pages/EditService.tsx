@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useRoute, Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -53,6 +53,9 @@ import {
 import { getCategoryDisplayName, effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 import { createServiceRequiresSubcategory } from "@shared/create-service-catalog-context";
+import { EDIT_SERVICE_SUBSCRIPTION_LOCKED_BANNER } from "@shared/provider-listing-owner-messages";
+import { ListingSubscriptionRenewButton } from "@/components/listing/ListingSubscriptionRenewButton";
+import { isProviderListingSubscriptionExpired } from "@/lib/provider-listing-subscription";
 import {
   canChangeCatalogServiceCategory,
   canDeleteCatalogService,
@@ -114,7 +117,10 @@ export default function EditService() {
 
   const isAdmin = hasAdminRole(user);
 
-  const isBlocked = false;
+  const listingSubscriptionExpired = isProviderListingSubscriptionExpired(
+    provider as Parameters<typeof isProviderListingSubscriptionExpired>[0],
+  );
+  const catalogEditLocked = listingSubscriptionExpired && !isAdmin;
 
   const { data: categories = [] } = useCategories();
   const { data: myServices = [] } = useMyServices({ enabled: !!service && !!user });
@@ -255,6 +261,7 @@ export default function EditService() {
   };
 
   const onSubmit = () => {
+    if (catalogEditLocked) return;
     if (isAdmin) {
       handleSaveConfirmed();
     } else {
@@ -300,6 +307,16 @@ export default function EditService() {
           {returnLabel}
         </Link>
       </Button>
+      {catalogEditLocked ? (
+        <div
+          className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm leading-relaxed text-amber-950 dark:text-amber-50"
+          role="status"
+        >
+          <p>{EDIT_SERVICE_SUBSCRIPTION_LOCKED_BANNER}</p>
+          <ListingSubscriptionRenewButton className="mt-3" />
+        </div>
+      ) : null}
+
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-display font-bold text-primary mb-2">Editar servicio</h1>
         <p className="text-muted-foreground">
@@ -325,6 +342,7 @@ export default function EditService() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <fieldset disabled={catalogEditLocked} className="space-y-6 border-0 p-0 m-0 min-w-0">
               {isProfessional ? (
                 <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 text-sm">
                   <div className="flex gap-2">
@@ -550,7 +568,7 @@ export default function EditService() {
                 )}
               />
 
-              {canDeleteThisService ? (
+              {canDeleteThisService && !catalogEditLocked ? (
                 <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-3">
                   <p className="text-sm font-medium text-foreground">Eliminar este servicio adicional</p>
                   <p className="text-xs text-muted-foreground">
@@ -576,7 +594,7 @@ export default function EditService() {
               <Button
                 type="submit"
                 className="w-full text-lg h-12"
-                disabled={updateService.isPending || isBlocked}
+                disabled={catalogEditLocked || updateService.isPending}
               >
                 {updateService.isPending ? (
                   <>
@@ -587,6 +605,7 @@ export default function EditService() {
                   "Guardar cambios"
                 )}
               </Button>
+            </fieldset>
             </form>
           </Form>
         </CardContent>

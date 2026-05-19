@@ -14,6 +14,10 @@ import { loadRiderTripLog } from "@/lib/cargo-rider-trip-log";
 import { useSocket } from "@/hooks/use-socket";
 import { useGoNotifications } from "@/contexts/GoNotificationsContext";
 import { loadGoDriverActiveRideId } from "@/lib/cargo-driver-storage";
+import {
+  GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT,
+  isGoDriverSubscriptionActive,
+} from "@shared/go-driver-subscription";
 import { loadGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -57,7 +61,12 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   const { toast } = useToast();
   const { data: currentProvider } = useCurrentProvider();
   const isAdmin = user?.role === "admin";
-  const canUseDriverNegotiationBoard = isAdmin || currentProvider?.isVerified === true;
+  const providerSubscriptionEndsAt = (
+    currentProvider as { visibilitySubscriptionEndsAt?: string | null } | null | undefined
+  )?.visibilitySubscriptionEndsAt;
+  const hasActiveSubscription = isAdmin || isGoDriverSubscriptionActive(providerSubscriptionEndsAt);
+  const canUseDriverNegotiationBoard =
+    (isAdmin || currentProvider?.isVerified === true) && hasActiveSubscription;
   const [riderHistoryOpen, setRiderHistoryOpen] = useState(false);
   const [driverEarningsOpen, setDriverEarningsOpen] = useState(false);
   const [goQuickSettingsOpen, setGoQuickSettingsOpen] = useState(false);
@@ -181,7 +190,9 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
               onClick: () => goDriverUi.openNegotiationBoard(),
               disabled: !canUseDriverNegotiationBoard || !!activeDriverService,
               nativeTitle: !canUseDriverNegotiationBoard
-                ? "Verifica tu perfil profesional para ver el tablero de regateo (taxi y delivery)."
+                ? currentProvider?.isVerified === true && !hasActiveSubscription
+                  ? GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT
+                  : "Verifica tu perfil profesional para ver el tablero de regateo (taxi y delivery)."
                 : activeDriverService
                   ? "Tienes un servicio activo (taxi, delivery u oferta enlazada). Finalízalo o cancélalo antes de abrir Regateo."
                   : undefined,
@@ -224,6 +235,9 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
       toast,
       setLocation,
       canUseDriverNegotiationBoard,
+      hasActiveSubscription,
+      currentProvider?.isVerified,
+      providerSubscriptionEndsAt,
       activeDriverService,
     ]
   );

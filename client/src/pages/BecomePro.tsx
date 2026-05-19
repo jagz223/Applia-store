@@ -373,7 +373,7 @@ export default function BecomePro() {
     return (
       <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <h1 className="text-2xl font-bold mb-4">Inicia sesión</h1>
-        <p className="mb-6 text-muted-foreground">Necesitas una cuenta para registrarte como proveedor.</p>
+        <p className="mb-6 text-muted-foreground">Necesitas una cuenta para registrarte como asociado.</p>
         <a href={api.auth.replit.login.path}>
           <Button className="w-full">Iniciar sesión / Registrarse</Button>
         </a>
@@ -498,7 +498,7 @@ export default function BecomePro() {
               ? `Registro · ${getCategoryDisplayName({ slug: "delivery" })}`
               : isShopGo
                 ? `Registro · ${getCategoryDisplayName({ slug: "marketplace" })}`
-                : "Datos de proveedor"}
+                : "Datos de asociado"}
         </h1>
         <p className="text-muted-foreground">
           {isGoDriverCategory ? (
@@ -521,7 +521,7 @@ export default function BecomePro() {
 
       <Card className="border-border/50 shadow-xl">
         <CardHeader>
-          <CardTitle>{isGoDriverCategory ? "Conductor y vehículo" : "Perfil de proveedor"}</CardTitle>
+          <CardTitle>{isGoDriverCategory ? "Conductor y vehículo" : "Perfil de asociado"}</CardTitle>
           <CardDescription>
             {isGoDriverCategory
               ? "Placa, tipo y estado del vehículo son obligatorios. Puedes completar título del servicio y biografía más adelante en tu panel. Tu cuenta debe ser verificada: al guardar, te pediremos identificación y licencia (u otro documento según categoría)."
@@ -549,7 +549,7 @@ export default function BecomePro() {
                 name="categoryId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Categoría de proveedor</FormLabel>
+                    <FormLabel>Categoría de asociado</FormLabel>
                     <Select
                       onValueChange={(v) => field.onChange(v ? Number(v) : undefined)}
                       value={field.value != null ? String(field.value) : ""}

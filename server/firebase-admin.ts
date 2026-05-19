@@ -158,6 +158,7 @@ export const FIRESTORE_COLLECTIONS = {
   BOOKING_STATUSES: "booking_statuses",
   TAXES: "taxes",
   COUPONS: "coupons",
+  PROMOTIONAL_CODES: "promotional_codes",
   ESCROW_PAYMENTS: "escrow_payments",
   DOCUMENTS: "documents",
   CONVERSATIONS: "conversations",

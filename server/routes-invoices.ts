@@ -9,6 +9,7 @@ import {
   createInvoiceFromTransfer, 
   createInvoiceFromFinancialReport 
 } from "./invoices";
+import { mapVerificationFeeToInvoiceListItem } from "./subscription-invoice-metadata";
 
 // Define a simpler authenticateJWT inline
 function authenticateJWT(req: any, res: any, next: any) {
@@ -156,19 +157,7 @@ export async function registerInvoiceRoutes(
           const verificationFees = financialReports.filter(r => r.type === "verification_fee");
           
           for (const fee of verificationFees) {
-            const nid = fee.id != null ? Number(fee.id) : NaN;
-            const reportKey = Number.isFinite(nid) ? nid : fee.id;
-            const amt = fee.amount != null ? Number(fee.amount) : 15;
-            invoices.push({
-              id: reportKey,
-              reportId: reportKey,
-              type: "verification",
-              invoiceNumber: `VER-${reportKey}`,
-              date: fee.createdAt,
-              service: "Cargo de Verificación de Identidad",
-              amount: Number.isFinite(amt) ? amt : 15,
-              status: fee.status ?? "pending",
-            });
+            invoices.push(mapVerificationFeeToInvoiceListItem(fee as Record<string, unknown>));
           }
         } catch (err) {
           console.error("Error obteniendo reportes financieros:", err);

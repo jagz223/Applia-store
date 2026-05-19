@@ -40,6 +40,7 @@ export interface IStorage {
     includeUnverifiedForAdmin?: boolean
   ): Promise<ServiceWithProvider[]>;
   getService(id: number): Promise<ServiceWithProvider | undefined>;
+  getServicesByProviderId(providerId: number): Promise<ServiceWithProvider[]>;
   createService(service: InsertService): Promise<Service>;
   getBookingsByUser(userId: string): Promise<(Booking & { service: Service })[]>;
   getBookingsByProvider(providerId: number): Promise<(Booking & { service: Service, user: User })[]>;
@@ -136,6 +137,24 @@ export class DatabaseStorage implements IStorage {
       row as unknown as Record<string, unknown>,
     );
     return { ...row, provider: (merged ?? row.provider) as typeof row.provider } as ServiceWithProvider;
+  }
+
+  async getServicesByProviderId(providerId: number): Promise<ServiceWithProvider[]> {
+    const db = await getDb();
+    const rows = await db.query.services.findMany({
+      where: eq(services.providerId, providerId),
+      with: {
+        provider: { with: { user: true } },
+        category: true,
+      },
+    });
+    return rows.map((row) => {
+      const merged = mergeProviderWithServiceListingProfile(
+        row.provider as unknown as Record<string, unknown>,
+        row as unknown as Record<string, unknown>,
+      );
+      return { ...row, provider: (merged ?? row.provider) as typeof row.provider } as ServiceWithProvider;
+    });
   }
 
   async createService(insertService: InsertService): Promise<Service> {
@@ -326,6 +345,25 @@ class MemoryStorage implements IStorage {
       provider: merged ?? providerWithUser,
       category: this._categories.find((c) => c.id === s.categoryId)!,
     } as ServiceWithProvider;
+  }
+
+  async getServicesByProviderId(providerId: number): Promise<ServiceWithProvider[]> {
+    return this._services
+      .filter((s) => s.providerId === providerId)
+      .map((s) => {
+        const provider = this._providers.find((p) => p.id === s.providerId)!;
+        const user = { id: provider.userId } as unknown as User;
+        const providerWithUser = { ...provider, user };
+        const merged = mergeProviderWithServiceListingProfile(
+          providerWithUser as unknown as Record<string, unknown>,
+          s as unknown as Record<string, unknown>,
+        );
+        return {
+          ...s,
+          provider: merged ?? providerWithUser,
+          category: this._categories.find((c) => c.id === s.categoryId)!,
+        } as ServiceWithProvider;
+      });
   }
 
   async createService(insertService: InsertService): Promise<Service> {
