@@ -563,7 +563,10 @@ export function useService(id: number) {
     queryKey: [api.services.get.path, id],
     queryFn: async () => {
       const url = buildUrl(api.services.get.path, { id });
-      const res = await fetch(url);
+      const token = getToken();
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error("No se pudo cargar el servicio");
       return api.services.get.responses[200].parse(await res.json());
     },
@@ -1668,7 +1671,15 @@ export function usePatchProfessionalVerificationImage() {
 export function usePatchProfessionalVerificationPayment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { transferReceiptCode: string; transferDate: string; subscriptionMonths: number }) => {
+    mutationFn: async (body: {
+      transferReceiptCode: string;
+      transferDate: string;
+      subscriptionMonths: number;
+      promotionalCode?: string;
+      promotionalDiscountPercent?: number;
+      subscriptionOriginalTotalUsd?: number;
+      subscriptionDiscountedTotalUsd?: number;
+    }) => {
       const token = getToken();
       const res = await fetch(`${PROFESSIONAL_VERIFICATION_ME}/payment`, {
         method: "PATCH",

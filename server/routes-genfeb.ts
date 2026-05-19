@@ -6,6 +6,13 @@ import { requireFullAdmin } from "./middleware-roles";
 import { getAdminAndSupportUsers, getFullAdminUsers } from "./staff-users";
 import { z } from "zod";
 import { notificationService } from "./services/notification.service";
+import { promotionalCodeService } from "./services";
+import { PromotionalCodeRedeemError } from "./services/promotional-code.service";
+import {
+  redeemPromotionalCodeRequestSchema,
+  validatePromotionalCodeRequestSchema,
+} from "@shared/promotional-code-schema";
+import { extendVisibilitySubscriptionEndsAtByMonths } from "@shared/professional-listing-subscription";
 import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
 import {
   applyServiceBookingChatLifecycle,
@@ -164,7 +171,7 @@ export async function registerGenFebRoutes(
       const providerId = (service as { providerId?: number; provider?: { id: number } }).provider?.id
         ?? (service as { providerId?: number }).providerId;
       if (providerId == null) {
-        return res.status(400).json({ message: "El servicio no tiene proveedor asociado" });
+        return res.status(400).json({ message: "El servicio no tiene un asociado vinculado" });
       }
 
       const booking = await storage.createBooking({
@@ -674,7 +681,7 @@ export async function registerGenFebRoutes(
       const booking = await storage.getBooking(bookingId);
       if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
       const provider = await storage.getProviderByUserId(userId);
-      if (!provider) return res.status(403).json({ message: "No eres proveedor de esta reserva" });
+      if (!provider) return res.status(403).json({ message: "No eres el asociado de esta reserva" });
       const bid = booking as { providerId?: number; status?: string };
       if (bid.providerId !== provider.id) return res.status(403).json({ message: "No puedes editar esta reserva" });
       if ((bid.status || "pending") !== "pending") {
@@ -767,7 +774,7 @@ export async function registerGenFebRoutes(
       const booking = await storage.getBooking(bookingId);
       if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
       const provider = await storage.getProviderByUserId(userId);
-      if (!provider) return res.status(403).json({ message: "No eres proveedor de esta reserva" });
+      if (!provider) return res.status(403).json({ message: "No eres el asociado de esta reserva" });
       const bid = booking as { providerId?: number; status?: string };
       if (bid.providerId !== (provider as { id: number }).id) return res.status(403).json({ message: "No puedes editar esta reserva" });
       if ((bid.status || "pending") !== "pending") {
@@ -2054,6 +2061,105 @@ export async function registerGenFebRoutes(
     }
   });
   
+  // ---------- CÓDIGOS PROMOCIONALES / TICKETS ----------
+
+  // POST /api/promotional-codes/validate — Validar código en flujo de pago (cliente)
+  app.post("/api/promotional-codes/validate", authenticateJWT, async (req: any, res) => {
+    try {
+      const parsed = validatePromotionalCodeRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+
+      const userId = req.user?.id as string | undefined;
+      const result = await promotionalCodeService.validatePromotionalCode(parsed.data.code, userId);
+      if (!result.valid) {
+        return res.status(400).json(result);
+      }
+
+      return res.json(result);
+    } catch (error) {
+      console.error("Error validating promotional code:", error);
+      return res.status(500).json({ message: "Error al validar código promocional" });
+    }
+  });
+
+  // POST /api/promotional-codes/redeem — Canjear código en pago de mensualidad
+  app.post("/api/promotional-codes/redeem", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id as string | undefined;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const provider = await storage.getProviderByUserId(userId);
+      if (!provider) {
+        return res.status(403).json({ message: "Solo para cuentas de profesional" });
+      }
+
+      const parsed = redeemPromotionalCodeRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+
+      const result = await promotionalCodeService.redeemPromotionalCodeForSubscription(parsed.data, userId);
+
+      if (result.applied === "meses_gratuitos") {
+        const providerId = Number((provider as { id?: number }).id);
+        if (Number.isFinite(providerId) && providerId > 0) {
+          const promoKey = `promo:${parsed.data.code.trim().toUpperCase()}:${Date.now()}`;
+          const nextIso = extendVisibilitySubscriptionEndsAtByMonths(
+            (provider as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
+            result.monthsGranted,
+          );
+          await storage.updateProvider(providerId, {
+            visibilitySubscriptionEndsAt: nextIso,
+            visibilitySubscriptionLastPaymentKey: promoKey,
+            visibilitySubscriptionLastPaymentApprovedAt: new Date(),
+            visibilitySubscriptionLastPaymentApprovedBy: "promotional_code",
+          } as any);
+        }
+
+        try {
+          await storage.setVerifyingStatusTransaction(userId, "verified" as any);
+        } catch (err) {
+          console.error("[promo] setVerifyingStatusTransaction:", err);
+        }
+
+        try {
+          const { buildVerificationReportDescription } = await import("./subscription-invoice-metadata");
+          const promoCode = parsed.data.code.trim().toUpperCase();
+          await storage.createFinancialReport({
+            userId,
+            type: "verification_fee",
+            amount: "0.00",
+            currency: "USD",
+            status: "completed",
+            paymentKind: "promo_free_months",
+            subscriptionMonths: result.monthsGranted,
+            freeMonthsGranted: result.monthsGranted,
+            promotionalCode: promoCode,
+            approvedAt: new Date(),
+            description: buildVerificationReportDescription({
+              months: result.monthsGranted,
+              promoCode,
+              freeMonthsGranted: result.monthsGranted,
+            }),
+            createdAt: new Date(),
+          });
+        } catch (err) {
+          console.error("[promo] createFinancialReport:", err);
+        }
+      }
+
+      return res.json(result);
+    } catch (error) {
+      if (error instanceof PromotionalCodeRedeemError) {
+        return res.status(400).json({ valid: false, message: error.message });
+      }
+      console.error("Error redeeming promotional code:", error);
+      return res.status(500).json({ message: "Error al aplicar código promocional" });
+    }
+  });
+
   // ---------- CUPONES / DESCUENTOS ----------
   
   // GET /api/coupons - Listar cupones

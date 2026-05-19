@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { Buffer } from "buffer";
+import { invoiceNotesFromReport } from "./subscription-invoice-metadata";
 
 interface InvoiceData {
   invoiceNumber: string;
@@ -29,6 +30,8 @@ interface InvoiceData {
   total: number;
   paymentMethod: string;
   referenceId: string;
+  /** Líneas adicionales (código promo, fecha de aprobación, etc.). */
+  notes?: string[];
 }
 
 /**
@@ -120,29 +123,50 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
       const totalsY = Math.max(tableTop + 80, doc.y + 20);
       doc.moveTo(300, totalsY).lineTo(560, totalsY).stroke();
 
-      const taxPercent = data.subtotal > 0 ? (data.tax / data.subtotal * 100).toFixed(0) : "12";
+      const showTax = data.tax > 0.0001;
+      let totalsLineY = totalsY + 10;
 
       doc
         .font("Helvetica")
-        .text("Subtotal:", 360, totalsY + 10, { width: 100, align: "right" })
-        .text(`$${data.subtotal.toFixed(2)}`, 460, totalsY + 10, { width: 80, align: "right" })
-        .text(`Impuesto (${taxPercent}%):`, 360, totalsY + 25, { width: 100, align: "right" })
-        .text(`$${data.tax.toFixed(2)}`, 460, totalsY + 25, { width: 80, align: "right" });
+        .text(showTax ? "Subtotal:" : "Importe:", 360, totalsLineY, { width: 100, align: "right" })
+        .text(`$${data.subtotal.toFixed(2)}`, 460, totalsLineY, { width: 80, align: "right" });
 
-      doc.moveTo(300, totalsY + 35).lineTo(560, totalsY + 35).stroke();
+      if (showTax) {
+        const taxPercent = data.subtotal > 0 ? ((data.tax / data.subtotal) * 100).toFixed(0) : "0";
+        totalsLineY += 15;
+        doc
+          .text(`Impuesto (${taxPercent}%):`, 360, totalsLineY, { width: 100, align: "right" })
+          .text(`$${data.tax.toFixed(2)}`, 460, totalsLineY, { width: 80, align: "right" });
+      }
+
+      totalsLineY += 10;
+      doc.moveTo(300, totalsLineY).lineTo(560, totalsLineY).stroke();
+      totalsLineY += 10;
 
       doc
         .font("Helvetica-Bold")
         .fontSize(12)
-        .text("TOTAL:", 360, totalsY + 45, { width: 100, align: "right" })
-        .text(`$${data.total.toFixed(2)}`, 460, totalsY + 45, { width: 80, align: "right" });
+        .text("TOTAL:", 360, totalsLineY, { width: 100, align: "right" })
+        .text(`$${data.total.toFixed(2)}`, 460, totalsLineY, { width: 80, align: "right" });
 
       // Payment Info
+      let infoY = totalsLineY + 35;
       doc
         .fontSize(10)
         .font("Helvetica")
-        .text(`Método de Pago: ${data.paymentMethod}`, 50, totalsY + 80)
-        .text(`Referencia ID: ${data.referenceId}`, 50, totalsY + 95);
+        .text(`Método de Pago: ${data.paymentMethod}`, 50, infoY)
+        .text(`Referencia ID: ${data.referenceId}`, 50, infoY + 15);
+
+      if (data.notes && data.notes.length > 0) {
+        infoY += 35;
+        doc.font("Helvetica-Bold").text("Detalle del pago", 50, infoY);
+        infoY += 14;
+        doc.font("Helvetica").fontSize(9);
+        for (const line of data.notes) {
+          doc.text(line, 50, infoY, { width: 500 });
+          infoY += doc.heightOfString(line, { width: 500 }) + 4;
+        }
+      }
 
       // Footer
       doc
@@ -303,13 +327,34 @@ export function createInvoiceFromFinancialReport(
   user: any
 ): InvoiceData {
   const subtotal = Number(report.amount) || 0;
-  const taxRate = 0.12; 
-  const tax = subtotal * taxRate;
-  const total = subtotal + tax;
+  const tax = 0;
+  const total = subtotal;
+
+  const months =
+    report.subscriptionMonths != null && Number.isFinite(Number(report.subscriptionMonths))
+      ? Number(report.subscriptionMonths)
+      : null;
+  const freeMonths =
+    report.freeMonthsGranted != null && Number.isFinite(Number(report.freeMonthsGranted))
+      ? Number(report.freeMonthsGranted)
+      : null;
+
+  let serviceName = "Suscripción de visibilidad en catálogo";
+  if (freeMonths != null && freeMonths > 0) {
+    serviceName = `Meses gratuitos por código promocional (${freeMonths} mes${freeMonths === 1 ? "" : "es"})`;
+  } else if (months != null && months > 0) {
+    serviceName = `Suscripción de visibilidad (${months} mes${months === 1 ? "" : "es"})`;
+  }
+
+  const description =
+    String(report.description ?? "").trim() ||
+    "Cuota mensual para publicar y mantener visibles tus servicios en Explorar.";
+
+  const notes = invoiceNotesFromReport(report as Record<string, unknown>);
 
   return {
     invoiceNumber: generateInvoiceNumber("VER"),
-    date: coerceReportDate(report.createdAt),
+    date: coerceReportDate(report.approvedAt ?? report.createdAt),
     dueDate: new Date(),
     client: {
       name: `${user.name || user.firstName} ${user.lastName || ""}`.trim(),
@@ -323,16 +368,20 @@ export function createInvoiceFromFinancialReport(
       address: "Av. Principal 123, Quito, Ecuador",
     },
     service: {
-      name: "Verificación de Identidad Profesional",
-      description: "Servicio de validación y verificación de documentos de asociado",
+      name: serviceName,
+      description,
       quantity: 1,
-      unitPrice: Number(report.amount) || 0,
+      unitPrice: subtotal,
       total: subtotal,
     },
     subtotal,
     tax,
     total,
-    paymentMethod: "Comprobante de pago en línea",
+    paymentMethod:
+      freeMonths != null && freeMonths > 0
+        ? "Código promocional (sin transferencia)"
+        : "Transferencia bancaria / comprobante",
     referenceId: `VR-${report.id}`,
+    notes,
   };
 }

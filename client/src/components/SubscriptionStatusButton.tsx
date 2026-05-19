@@ -77,10 +77,10 @@ export function SubscriptionStatusButton(props: { label?: string } & ButtonProps
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Mi Suscripción</AlertDialogTitle>
-            <AlertDialogDescription className="text-left leading-relaxed">
-              {state ? (
-                <>
-                  <div className="mt-2 space-y-1 text-sm">
+            {state ? (
+              <AlertDialogDescription asChild>
+                <div className="text-left text-sm leading-relaxed text-muted-foreground">
+                  <div className="mt-2 space-y-1">
                     <p>
                       <span className="text-muted-foreground">Estado:</span>{" "}
                       <span className="font-semibold text-foreground">
@@ -95,19 +95,22 @@ export function SubscriptionStatusButton(props: { label?: string } & ButtonProps
                     </p>
                   </div>
                   {!state.pending ? (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Puedes pagar <strong className="text-foreground">varios meses</strong> (hasta 1 año) para extender tu visibilidad.
+                    <p className="mt-3 text-xs">
+                      Puedes pagar <strong className="text-foreground">varios meses</strong> (hasta 1 año) para
+                      extender tu visibilidad.
                     </p>
                   ) : (
-                    <p className="mt-3 text-xs text-muted-foreground">
+                    <p className="mt-3 text-xs">
                       Ya tienes un comprobante en revisión. Cuando sea validado podrás volver a registrar un nuevo pago.
                     </p>
                   )}
-                </>
-              ) : (
-                "Esta sección aparece cuando tu cuenta está registrada como asociado."
-              )}
-            </AlertDialogDescription>
+                </div>
+              </AlertDialogDescription>
+            ) : (
+              <AlertDialogDescription className="text-left leading-relaxed">
+                Esta sección aparece cuando tu cuenta está registrada como asociado.
+              </AlertDialogDescription>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cerrar</AlertDialogCancel>

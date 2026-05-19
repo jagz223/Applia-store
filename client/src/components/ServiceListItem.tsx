@@ -8,7 +8,8 @@ import {
   resolvePreparationLevel,
 } from "@shared/provider-preparation";
 import { Link } from "wouter";
-import { Star, ArrowRight, User, Pencil, Trash2 } from "lucide-react";
+import { Star, ArrowRight, User, Pencil, Trash2, Lock } from "lucide-react";
+import { CATALOG_EDIT_LOCKED_MESSAGE } from "@shared/provider-listing-owner-messages";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -25,6 +26,8 @@ interface ServiceListItemProps {
   onDelete?: () => void;
   /** Ruta al pulsar «Volver» en editar (p. ej. /my-services). */
   editReturnTo?: string;
+  /** Suscripción de catálogo vencida: solo lectura. */
+  catalogEditLocked?: boolean;
 }
 
 function getProviderName(service: ServiceWithProvider) {
@@ -42,6 +45,7 @@ export function ServiceListItem({
   canDelete = false,
   onDelete,
   editReturnTo,
+  catalogEditLocked = false,
 }: ServiceListItemProps) {
   const categoryName = getCategoryDisplayName(service.category) || "Servicio";
   const providerUser = (service.provider as any)?.user as
@@ -96,6 +100,11 @@ export function ServiceListItem({
               {service.subcategory.name}
             </Badge>
           )}
+          {catalogEditLocked ? (
+            <Badge variant="outline" className="border-amber-500/45 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+              Fuera del catálogo
+            </Badge>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2 text-amber-500 mt-1">
@@ -151,7 +160,7 @@ export function ServiceListItem({
               {headerBlock}
             </Link>
             <div className="flex shrink-0 items-center gap-1 self-center">
-              {canDelete && onDelete ? (
+              {!catalogEditLocked && canDelete && onDelete ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -167,23 +176,37 @@ export function ServiceListItem({
                   <Trash2 className="h-5 w-5" />
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                asChild
-              >
-                <Link
-                  href={`/edit-service/${service.id}`}
-                  aria-label="Editar servicio"
-                  onClick={() =>
-                    setEditServiceReturnPath(editReturnTo ?? `/service/${service.id}`)
-                  }
+              {catalogEditLocked ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-muted-foreground cursor-not-allowed opacity-60"
+                  disabled
+                  title={CATALOG_EDIT_LOCKED_MESSAGE}
+                  aria-label={CATALOG_EDIT_LOCKED_MESSAGE}
                 >
-                  <Pencil className="h-5 w-5" />
-                </Link>
-              </Button>
+                  <Lock className="h-5 w-5" />
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                  asChild
+                >
+                  <Link
+                    href={`/edit-service/${service.id}`}
+                    aria-label="Editar servicio"
+                    onClick={() =>
+                      setEditServiceReturnPath(editReturnTo ?? `/service/${service.id}`)
+                    }
+                  >
+                    <Pencil className="h-5 w-5" />
+                  </Link>
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="ghost"

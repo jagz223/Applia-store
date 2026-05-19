@@ -17,6 +17,10 @@ import {
   driverPrimaryVehicleMatchesRideKind,
 } from "./go-negotiation-driver-eligibility";
 import {
+  driverGoSubscriptionAllowsOperation,
+  GO_DRIVER_SUBSCRIPTION_INACTIVE_MESSAGE,
+} from "./go-driver-subscription-guard";
+import {
   DRIVER_NEGOTIATION_OFFER_ALREADY_SENT_MESSAGE,
   GO_NEGOTIATION_OFFER_WINDOW_MS,
   NEGOTIATION_OFFER_REMOVED_REASON_RIDER_REJECTED,
@@ -26,11 +30,14 @@ import {
 import { driverIsBusyCrossModule, registerPackDriverBusy } from "./driver-busy-cross-module";
 import { resolveGoRideRouteQuote } from "./go-ride-route-quote";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
+import {
+  onMobilityRideChatCancelled,
+  onMobilityRideChatCompleted,
+  onMobilityRideChatStarted,
+  registerMobilityRideChatCreated,
+  runMobilityRideChatStartupSweep,
+} from "./mobility-ride-chat";
 import crypto from "crypto";
-
-/** Primer mensaje del hilo al crear la conversación del envío (sin mencionar precio por chat aún). */
-const PACK_RIDE_CHAT_OPENING =
-  "Chat iniciado. Podéis usar este chat para coordinar ajustes del envío cuando lo necesiten.";
 
 export type PackVehicleKind = "moto" | "auto" | "camioneta";
 export type PackPaymentMethod = "cash" | "bank_transfer";
@@ -440,6 +447,12 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
         onlineDrivers.delete(user.id);
         return;
       }
+      void (async () => {
+        const subscriptionOk = await driverGoSubscriptionAllowsOperation(user.id, (user as { role?: string }).role);
+        if (!subscriptionOk) {
+          onlineDrivers.delete(user.id);
+          return;
+        }
       const pres: DriverPresence = {
         userId: user.id,
         vehicleType: (data.vehicleType || "").trim(),
@@ -470,6 +483,7 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
         } catch (e) {
           console.error("[pack] presence offer", e);
         }
+      })();
       })();
     });
 
@@ -515,6 +529,8 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
 }
 
 export function registerPackRideRoutes(app: Express) {
+  void runMobilityRideChatStartupSweep(genFebStorage);
+
   // GET /api/pack/driver/pending-offer - Recupera una oferta pendiente (si existe) para el driver autenticado.
   app.get("/api/pack/driver/pending-offer", authenticateJWT, async (req: any, res) => {
     try {
@@ -569,6 +585,10 @@ export function registerPackRideRoutes(app: Express) {
     try {
       const driverUserId = req.user?.id as string;
       if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const subscriptionOk = await driverGoSubscriptionAllowsOperation(driverUserId, req.user?.role);
+      if (!subscriptionOk) {
+        return res.status(403).json({ message: GO_DRIVER_SUBSCRIPTION_INACTIVE_MESSAGE });
+      }
       const segmentRaw = typeof req.query?.vehicleSegment === "string" ? String(req.query.vehicleSegment).trim() : "";
       if (segmentRaw) {
         const allowed = await driverCanAccessNegotiationBoardSegment(driverUserId, segmentRaw, "pack");
@@ -815,6 +835,10 @@ export function registerPackRideRoutes(app: Express) {
           message: "Necesitas el perfil profesional verificado para enviar ofertas de regateo.",
         });
       }
+      const subscriptionOk = await driverGoSubscriptionAllowsOperation(driverUserId, req.user?.role);
+      if (!subscriptionOk) {
+        return res.status(403).json({ message: GO_DRIVER_SUBSCRIPTION_INACTIVE_MESSAGE });
+      }
       if (ride.negotiationExpiresAt != null && Date.now() > ride.negotiationExpiresAt) {
         return res.status(409).json({ message: "La ventana de ofertas expiró" });
       }
@@ -967,12 +991,10 @@ export function registerPackRideRoutes(app: Express) {
         });
         conversationId = Number((conv as { id: number }).id);
         ride.conversationId = conversationId;
-        await genFebStorage.createMessage({
+        await registerMobilityRideChatCreated(genFebStorage, {
           conversationId,
-          senderId: CHAT_SYSTEM_SENDER_ID,
-          content: PACK_RIDE_CHAT_OPENING,
-          type: "system",
-          status: "sent",
+          rideId: ride.id,
+          module: "delivery",
         });
       } catch (ce) {
         console.error("[pack] negotiation accept conversation", ce);
@@ -1019,6 +1041,10 @@ export function registerPackRideRoutes(app: Express) {
     try {
       const driverUserId = req.user?.id as string;
       if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const subscriptionOk = await driverGoSubscriptionAllowsOperation(driverUserId, req.user?.role);
+      if (!subscriptionOk) {
+        return res.status(403).json({ message: GO_DRIVER_SUBSCRIPTION_INACTIVE_MESSAGE });
+      }
       const rideId = String(req.params.rideId);
       const ride = rides.get(rideId);
       if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
@@ -1070,12 +1096,10 @@ export function registerPackRideRoutes(app: Express) {
         });
         conversationId = Number((conv as { id: number }).id);
         ride.conversationId = conversationId;
-        await genFebStorage.createMessage({
+        await registerMobilityRideChatCreated(genFebStorage, {
           conversationId,
-          senderId: CHAT_SYSTEM_SENDER_ID,
-          content: PACK_RIDE_CHAT_OPENING,
-          type: "system",
-          status: "sent",
+          rideId: ride.id,
+          module: "delivery",
         });
       } catch {}
 
@@ -1239,12 +1263,10 @@ export function registerPackRideRoutes(app: Express) {
         });
         conversationId = Number((conv as { id: number }).id);
         ride.conversationId = conversationId;
-        await genFebStorage.createMessage({
+        await registerMobilityRideChatCreated(genFebStorage, {
           conversationId,
-          senderId: CHAT_SYSTEM_SENDER_ID,
-          content: PACK_RIDE_CHAT_OPENING,
-          type: "system",
-          status: "sent",
+          rideId: ride.id,
+          module: "delivery",
         });
       } catch {}
 
@@ -1313,6 +1335,11 @@ export function registerPackRideRoutes(app: Express) {
       io?.to(`user:${ride.riderUserId}`).emit("pack:ride:started", { rideId });
       io?.to(`user:${driverUserId}`).emit("pack:ride:started", { rideId });
       if (ride.conversationId != null) {
+        try {
+          await onMobilityRideChatStarted(genFebStorage, ride.conversationId);
+        } catch (se) {
+          console.error("[pack] ride chat started", se);
+        }
         try {
           await genFebStorage.createMessage({
             conversationId: ride.conversationId,
@@ -1407,12 +1434,15 @@ export function registerPackRideRoutes(app: Express) {
       io?.to(`user:${ride.riderUserId}`).emit("pack:ride:completed", { rideId });
       io?.to(`user:${driverUserId}`).emit("pack:ride:completed", { rideId });
 
-      // Ocultar conversación del historial de ambos (si existe), pero mantenerla en BD para auditoría/admin.
-      if (ride.conversationId != null) {
+      if (ride.conversationId != null && ride.driverUserId) {
         try {
-          await genFebStorage.hideConversationForUsers(Number(ride.conversationId), [ride.riderUserId, driverUserId]);
+          await onMobilityRideChatCompleted(genFebStorage, {
+            conversationId: Number(ride.conversationId),
+            riderUserId: ride.riderUserId,
+            driverUserId,
+          });
         } catch (e) {
-          console.error("[pack] hideConversationForUsers(complete)", e);
+          console.error("[pack] ride chat completed", e);
         }
       }
       res.json({ ok: true });
@@ -1456,12 +1486,15 @@ export function registerPackRideRoutes(app: Express) {
         }
       }
 
-      // Ocultar conversación del historial de ambos (si existe).
       if (ride.conversationId != null && ride.driverUserId != null) {
         try {
-          await genFebStorage.hideConversationForUsers(Number(ride.conversationId), [ride.riderUserId, ride.driverUserId]);
+          await onMobilityRideChatCancelled(genFebStorage, {
+            conversationId: Number(ride.conversationId),
+            riderUserId: ride.riderUserId,
+            driverUserId: ride.driverUserId,
+          });
         } catch (e) {
-          console.error("[pack] hideConversationForUsers(cancel)", e);
+          console.error("[pack] ride chat cancelled", e);
         }
       }
       res.json({ ok: true, rideId, cancelledBy: isDriver ? "driver" : "rider" });

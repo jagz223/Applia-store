@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+﻿import { useState, useMemo, useEffect } from "react";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
@@ -41,6 +41,8 @@ import {
   peekVerifyReturnPath,
 } from "@/lib/verify-return-path";
 import { useToast } from "@/hooks/use-toast";
+import { SubscriptionPromoCodeApply } from "@/components/subscription/SubscriptionPromoCodeApply";
+import type { RedeemPromotionalCodeDiscount, RedeemPromotionalCodeFreeMonths } from "@shared/promotional-code-schema";
 import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
 
 const BANK_ACCOUNT_NUMBER = "7700896747";
@@ -71,7 +73,11 @@ export default function VerifyProfessionalPayment() {
   const [subscriptionMonths, setSubscriptionMonths] = useState<number>(1);
   const [copied, setCopied] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
-  const totalUsd = useMemo(() => monthlyUsd * subscriptionMonths, [monthlyUsd, subscriptionMonths]);
+  const [discountPromo, setDiscountPromo] = useState<RedeemPromotionalCodeDiscount | null>(null);
+  const [appliedPromoCode, setAppliedPromoCode] = useState<string | null>(null);
+
+  const baseTotalUsd = useMemo(() => monthlyUsd * subscriptionMonths, [monthlyUsd, subscriptionMonths]);
+  const totalUsd = discountPromo?.discountedTotalUsd ?? baseTotalUsd;
 
   const handleBack = () => {
     if (isRenewalSimple) {
@@ -95,6 +101,18 @@ export default function VerifyProfessionalPayment() {
     setConfirmModalOpen(true);
   };
 
+  const handleFreeMonthsPromo = async (_result: RedeemPromotionalCodeFreeMonths) => {
+    await queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
+    await queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+    await queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
+    setLocation(consumeVerifyReturnPath());
+  };
+
+  const handleDiscountPromo = (result: RedeemPromotionalCodeDiscount, code: string) => {
+    setDiscountPromo(result);
+    setAppliedPromoCode(code.trim().toUpperCase());
+  };
+
   const handleConfirmYes = () => {
     if (!transferDate) return;
     const transferDateStr = format(transferDate, "yyyy-MM-dd");
@@ -103,6 +121,14 @@ export default function VerifyProfessionalPayment() {
         transferDate: transferDateStr,
         transferReceiptCode: transferCode.trim(),
         subscriptionMonths,
+        ...(discountPromo && appliedPromoCode
+          ? {
+              promotionalCode: appliedPromoCode,
+              promotionalDiscountPercent: discountPromo.benefitValue,
+              subscriptionOriginalTotalUsd: discountPromo.originalTotalUsd,
+              subscriptionDiscountedTotalUsd: discountPromo.discountedTotalUsd,
+            }
+          : {}),
       },
       {
         onSuccess: async () => {
@@ -250,13 +276,31 @@ export default function VerifyProfessionalPayment() {
             <CardHeader>
               <CardTitle className="text-lg">Datos de la transferencia</CardTitle>
               <CardDescription>
-                Selecciona cuántos meses estás pagando. Total: <strong>{totalUsd} USD</strong>.
+                Selecciona cuántos meses estás pagando.{" "}
+                {discountPromo ? (
+                  <>
+                    Total:{" "}
+                    <span className="line-through text-muted-foreground mr-1">
+                      {discountPromo.originalTotalUsd} USD
+                    </span>
+                    <strong className="text-green-600">{totalUsd} USD</strong>
+                    <span className="text-muted-foreground"> (−{discountPromo.benefitValue}%)</span>
+                  </>
+                ) : (
+                  <>
+                    Total: <strong>{totalUsd} USD</strong>
+                  </>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
                 <Label>Meses a pagar</Label>
-                <Select value={String(subscriptionMonths)} onValueChange={(v) => setSubscriptionMonths(Math.max(1, Math.min(12, Number(v) || 1)))}>
+                <Select
+                  value={String(subscriptionMonths)}
+                  disabled={discountPromo != null}
+                  onValueChange={(v) => setSubscriptionMonths(Math.max(1, Math.min(12, Number(v) || 1)))}
+                >
                   <SelectTrigger className="w-full sm:max-w-sm">
                     <SelectValue />
                   </SelectTrigger>
@@ -275,6 +319,14 @@ export default function VerifyProfessionalPayment() {
                   Puedes pagar hasta 12 meses (1 año). El equipo validará tu comprobante y se sumarán los meses aprobados.
                 </p>
               </div>
+
+              <SubscriptionPromoCodeApply
+                monthlyUsd={monthlyUsd}
+                subscriptionMonths={subscriptionMonths}
+                disabled={discountPromo != null}
+                onFreeMonthsApplied={handleFreeMonthsPromo}
+                onDiscountApplied={handleDiscountPromo}
+              />
 
               <div className="space-y-2">
                 <Label>Fecha de la transferencia</Label>

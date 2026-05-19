@@ -62,6 +62,12 @@ export type AdminProviderDetailPayload = {
   vehicle: Record<string, unknown> | null;
   bookingsCount: number;
   categories: AdminProviderCategoryOption[];
+  verificationDocuments?: {
+    avatar: string | null;
+    userIdentification: string | null;
+    professionalCredentialUrl: string | null;
+    providerCategorySlug: string | null;
+  };
 };
 
 export async function fetchAdminProviderDetail(providerId: number): Promise<AdminProviderDetailPayload> {

@@ -175,6 +175,22 @@ export const taxes = pgTable("taxes", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// === CÓDIGOS PROMOCIONALES / TICKETS ===
+export const promotionalCodes = pgTable("promotional_codes", {
+  id: serial("id").primaryKey(),
+  code: varchar("code", { length: 50 }).notNull().unique(),
+  expirationType: varchar("expiration_type", { length: 20 }).notNull(), // por_tiempo | por_usos
+  expiresAt: timestamp("expires_at"), // Obligatorio si expirationType = por_tiempo
+  maxUses: integer("max_uses"), // Obligatorio si expirationType = por_usos
+  usedCount: integer("used_count").default(0).notNull(),
+  usedByUserCounts: jsonb("used_by_user_counts").$type<Record<string, number>>().default({}),
+  benefitType: varchar("benefit_type", { length: 20 }).notNull(), // descuento | meses_gratuitos
+  benefitValue: decimal("benefit_value", { precision: 10, scale: 2 }).notNull(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // === CUPONES / DESCUENTOS ===
 export const coupons = pgTable("coupons", {
   id: serial("id").primaryKey(),
@@ -232,6 +248,7 @@ export const insertFinancialReportSchema = createInsertSchema(financialReports);
 // Nuevos esquemas
 export const insertBookingStatusSchema = createInsertSchema(bookingStatuses);
 export const insertTaxSchema = createInsertSchema(taxes);
+export const insertPromotionalCodeSchema = createInsertSchema(promotionalCodes);
 export const insertCouponSchema = createInsertSchema(coupons);
 export const insertServiceAddonSchema = createInsertSchema(serviceAddons);
 export const insertBookingAddonSchema = createInsertSchema(bookingAddons);
@@ -253,6 +270,8 @@ export type BookingStatus = typeof bookingStatuses.$inferSelect;
 export type NewBookingStatus = typeof bookingStatuses.$inferInsert;
 export type Tax = typeof taxes.$inferSelect;
 export type NewTax = typeof taxes.$inferInsert;
+export type PromotionalCode = typeof promotionalCodes.$inferSelect;
+export type NewPromotionalCode = typeof promotionalCodes.$inferInsert;
 export type Coupon = typeof coupons.$inferSelect;
 export type NewCoupon = typeof coupons.$inferInsert;
 export type ServiceAddon = typeof serviceAddons.$inferSelect;

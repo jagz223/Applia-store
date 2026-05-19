@@ -37,6 +37,7 @@ import { ensureGoPanicAllowed, markGoPanicSent, notifyGoPanicAdmins } from "./mo
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
 import { filterCategoriesExcludedFromPublicApi, MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
 import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
+import { catalogServiceMutationBlockedResponse } from "./provider-listing-catalog-guard";
 import {
   getSubscriptionFeesByCategorySlug,
   subscriptionMonthlyUsdForProvider,
@@ -484,11 +485,16 @@ export async function registerRoutes(
         feesBySlug,
         categoriesForSub,
       );
+      const promoCode = body.promotionalCode?.trim().toUpperCase();
       const updated = await genFebStorage.upsertProfessionalVerificationPayment(userId, {
         transferReceiptCode: body.transferReceiptCode,
         transferDate: body.transferDate,
         subscriptionMonths: body.subscriptionMonths,
         subscriptionMonthlyUsd: monthlyUsd,
+        promotionalCode: promoCode ?? null,
+        promotionalDiscountPercent: promoCode ? body.promotionalDiscountPercent : null,
+        subscriptionOriginalTotalUsd: promoCode ? body.subscriptionOriginalTotalUsd : null,
+        subscriptionDiscountedTotalUsd: promoCode ? body.subscriptionDiscountedTotalUsd : null,
       });
 
       // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
@@ -503,16 +509,35 @@ export async function registerRoutes(
           (r: { type?: string; status?: string }) => r.type === "verification_fee" && r.status === "pending",
         );
         if (!hasPendingVerification) {
-          const months =
-            Math.max(1, Math.min(12, Math.trunc(body.subscriptionMonths)));
-          const amountUsd = (monthlyUsd * months).toFixed(2);
+          const months = Math.max(1, Math.min(12, Math.trunc(body.subscriptionMonths)));
+          const fullTotal = Math.round(monthlyUsd * months * 100) / 100;
+          const amountUsd =
+            promoCode && body.subscriptionDiscountedTotalUsd != null
+              ? body.subscriptionDiscountedTotalUsd.toFixed(2)
+              : fullTotal.toFixed(2);
+          const { buildVerificationReportDescription } = await import("./subscription-invoice-metadata");
           await genFebStorage.createFinancialReport({
             userId,
             type: "verification_fee",
             amount: amountUsd,
             currency: "USD",
             status: "pending",
-            description: `Pago por suscripción de visibilidad (${months} mes(es)) (Comprobante: ${body.transferReceiptCode})`,
+            paymentKind: promoCode ? "promo_discount" : "subscription_transfer",
+            subscriptionMonths: months,
+            subscriptionMonthlyUsd: monthlyUsd,
+            promotionalCode: promoCode ?? null,
+            promotionalDiscountPercent: promoCode ? body.promotionalDiscountPercent ?? null : null,
+            subscriptionOriginalTotalUsd: promoCode ? fullTotal : null,
+            subscriptionDiscountedTotalUsd: promoCode ? body.subscriptionDiscountedTotalUsd ?? null : null,
+            transferReceiptCode: body.transferReceiptCode?.trim() ?? null,
+            transferDate: body.transferDate ?? null,
+            description: buildVerificationReportDescription({
+              months,
+              transferReceiptCode: body.transferReceiptCode,
+              promoCode: promoCode ?? null,
+              promotionalDiscountPercent: promoCode ? body.promotionalDiscountPercent ?? null : null,
+              originalTotalUsd: promoCode ? fullTotal : null,
+            }),
             createdAt: new Date(),
           });
         }
@@ -637,8 +662,21 @@ export async function registerRoutes(
     // Catálogo público: no exponer servicios desactivados.
     res.json((list ?? []).filter((s: any) => s?.isActive !== false));
   });
-  app.get(api.services.get.path, async (req, res) => {
-    const service = await catalogService.getService(Number(req.params.id));
+  app.get(api.services.get.path, optionalAuthenticateJWT, async (req: any, res) => {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ message: "ID inválido" });
+
+    let service = await catalogService.getService(id);
+    if (!service && req.user?.id) {
+      const ownerCandidate = await catalogService.getService(id, { includeWhenListingUnpublished: true });
+      if (ownerCandidate) {
+        const provider = await catalogService.getProviderByUserId(req.user.id);
+        const isAdmin = hasAdminPrivileges(req.user?.role);
+        const isOwner = provider && ownerCandidate.providerId === provider.id;
+        if (isOwner || isAdmin) service = ownerCandidate;
+      }
+    }
+
     if (!service || (service as any)?.isActive === false) return res.status(404).json({ message: "Service not found" });
     res.json(service);
   });
@@ -666,8 +704,7 @@ export async function registerRoutes(
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const provider = await catalogService.getProviderByUserId(userId);
     if (!provider) return res.json([]);
-    const all = await catalogService.getAllServices();
-    const mine = all.filter((s: { providerId: number }) => s.providerId === provider.id);
+    const mine = await catalogService.getServicesByProviderId((provider as { id: number }).id);
     res.json(mine);
   });
 
@@ -703,7 +740,7 @@ export async function registerRoutes(
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const provider = await catalogService.getProviderByUserId(userId);
-      if (!provider) return res.status(403).json({ message: "Solo proveedores pueden crear servicios" });
+      if (!provider) return res.status(403).json({ message: "Solo los asociados pueden crear servicios" });
       const allServices = await catalogService.getAllServices();
       const existingForProvider = allServices.filter((s: { providerId: number }) => s.providerId === provider.id);
       const data = createServiceBodySchema.parse(req.body);
@@ -766,7 +803,7 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       if (Number.isNaN(id)) return res.status(400).json({ message: "ID inválido" });
-      const service = await catalogService.getService(id);
+      const service = await catalogService.getService(id, { includeWhenListingUnpublished: true });
       if (!service) return res.status(404).json({ message: "Service not found" });
       const userId = req.user?.id;
       const isAdmin = hasAdminPrivileges(req.user?.role);
@@ -774,6 +811,8 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       const isOwner = provider && service.providerId === provider.id;
       if (!isOwner && !isAdmin) return res.status(403).json({ message: "Solo el dueño del servicio o un admin puede editarlo" });
+      const catalogEditBlocked = catalogServiceMutationBlockedResponse(provider, isAdmin);
+      if (catalogEditBlocked) return res.status(catalogEditBlocked.status).json({ message: catalogEditBlocked.message });
       const data = updateServiceBodySchema.parse(req.body);
 
       const categories = await catalogService.getCategories();
@@ -878,7 +917,7 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       if (Number.isNaN(id)) return res.status(400).json({ message: "ID inválido" });
-      const service = await catalogService.getService(id);
+      const service = await catalogService.getService(id, { includeWhenListingUnpublished: true });
       if (!service) return res.status(404).json({ message: "Service not found" });
       const userId = req.user?.id;
       const isAdmin = hasAdminPrivileges(req.user?.role);
@@ -886,6 +925,8 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       const isOwner = provider && service.providerId === provider.id;
       if (!isOwner && !isAdmin) return res.status(403).json({ message: "Solo el dueño del servicio o un admin puede eliminarlo" });
+      const catalogEditBlocked = catalogServiceMutationBlockedResponse(provider, isAdmin);
+      if (catalogEditBlocked) return res.status(catalogEditBlocked.status).json({ message: catalogEditBlocked.message });
       if (provider && !isAdmin) {
         const allServices = await catalogService.getAllServices();
         const providerServices = allServices.filter((s: { providerId: number }) => s.providerId === provider.id);
@@ -1033,7 +1074,7 @@ export async function registerRoutes(
             acceptedProviderTermsOfUse: false,
           } as any);
         }
-        return res.status(409).json({ message: "Ya tienes un perfil de proveedor" });
+        return res.status(409).json({ message: "Ya tienes un perfil de asociado" });
       }
       const coursesCompleted =
         typeof coursesCompletedRaw === "string" && coursesCompletedRaw.trim() !== "" ? coursesCompletedRaw.trim() : undefined;
@@ -1143,7 +1184,7 @@ export async function registerRoutes(
       const userId = req.user?.id;
       const isAdmin = hasAdminPrivileges(req.user?.role);
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      if ((provider as any).userId !== userId && !isAdmin) return res.status(403).json({ message: "Solo el dueño o un admin puede editar este proveedor" });
+      if ((provider as any).userId !== userId && !isAdmin) return res.status(403).json({ message: "Solo el dueño o un admin puede editar este asociado" });
       const data = updateProviderBodySchema.parse(req.body);
       const updated = await catalogService.updateProvider(id, data as any);
       if (!updated) return res.status(404).json({ message: "Provider not found" });
@@ -1163,7 +1204,7 @@ export async function registerRoutes(
       const userId = req.user?.id;
       const isAdmin = hasAdminPrivileges(req.user?.role);
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      if ((provider as any).userId !== userId && !isAdmin) return res.status(403).json({ message: "Solo el dueño o un admin puede eliminar este proveedor" });
+      if ((provider as any).userId !== userId && !isAdmin) return res.status(403).json({ message: "Solo el dueño o un admin puede eliminar este asociado" });
       const ok = await catalogService.deleteProvider(id);
       if (!ok) return res.status(404).json({ message: "Provider not found" });
       return res.status(204).send();
@@ -1214,7 +1255,7 @@ export async function registerRoutes(
       const booking = await genFebStorage.getBooking(bookingId);
       if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
       const provider = await catalogService.getProviderByUserId(userId);
-      if (!provider) return res.status(403).json({ message: "No eres proveedor de esta reserva" });
+      if (!provider) return res.status(403).json({ message: "No eres el asociado de esta reserva" });
       const bid = booking as { providerId?: number; status?: string };
       if (bid.providerId !== (provider as { id: number }).id) return res.status(403).json({ message: "No puedes editar esta reserva" });
       if ((bid.status || "pending") !== "pending") {

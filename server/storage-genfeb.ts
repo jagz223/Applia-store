@@ -23,6 +23,11 @@ import { eq, and, like, desc } from "drizzle-orm";
 import type { IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage } from "./storage-contracts";
 import type { ProfessionalVerification, VerifyingStatus, ProfessionalVerificationState } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
+import {
+  PROMO_CODE_MSG_ALREADY_REDEEMED_BY_USER,
+  PROMO_CODE_MSG_NO_LONGER_AVAILABLE,
+  userHasRedeemedPromotionalCode,
+} from "@shared/promotional-code-utils";
 import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
 import { countVerificationsAwaitingAdminReview } from "./associate-verification-admin";
 import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
@@ -97,6 +102,8 @@ export interface IStorage
   }): Promise<any | null>;
   /** Lista conversaciones para auditoría admin (sin filtro de gracia ni hiddenForUserIds). */
   listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]>;
+  /** Marca hilos de viaje Go no completados cuyo plazo de 24 h ya venció. */
+  sweepStaleMobilityRideChats?(): Promise<number>;
 
   // Roles de Usuario (perfil del usuario, no catálogo de roles)
   getUserRole(userId: string): Promise<any | undefined>;
@@ -153,6 +160,32 @@ export interface IStorage
   deleteTax(id: number): Promise<void>;
   calculateTaxes(amount: number, taxIds: number[]): Promise<{ subtotal: number; taxes: any[]; total: number }>;
   
+  // Códigos promocionales / tickets
+  getPromotionalCodes(): Promise<any[]>;
+  getPromotionalCodeById(id: number): Promise<any | undefined>;
+  getPromotionalCodeByCode(code: string): Promise<any | undefined>;
+  createPromotionalCode(data: {
+    code: string;
+    expirationType: string;
+    expiresAt?: Date | null;
+    maxUses?: number | null;
+    benefitType: string;
+    benefitValue: string;
+  }): Promise<any>;
+  updatePromotionalCode(
+    id: number,
+    data: {
+      code: string;
+      expirationType: string;
+      expiresAt?: Date | null;
+      maxUses?: number | null;
+      benefitType: string;
+      benefitValue: string;
+    },
+  ): Promise<any | undefined>;
+  deletePromotionalCode(id: number): Promise<void>;
+  incrementPromotionalCodeUsedCount(id: number, userId?: string): Promise<any | undefined>;
+
   // Cupones/Descuentos
   getCoupons(userId: string): Promise<any[]>;
   createCoupon(coupon: any): Promise<any>;
@@ -283,7 +316,16 @@ export interface IStorage
   ): Promise<ProfessionalVerification>;
   upsertProfessionalVerificationPayment(
     userId: string,
-    data: { transferReceiptCode: string; transferDate: string; subscriptionMonths: number; subscriptionMonthlyUsd?: number }
+    data: {
+      transferReceiptCode: string;
+      transferDate: string;
+      subscriptionMonths: number;
+      subscriptionMonthlyUsd?: number;
+      promotionalCode?: string | null;
+      promotionalDiscountPercent?: number | null;
+      subscriptionOriginalTotalUsd?: number | null;
+      subscriptionDiscountedTotalUsd?: number | null;
+    },
   ): Promise<ProfessionalVerification>;
 
   // ==================== verifying_status (nueva colección) ====================
@@ -1181,6 +1223,29 @@ export class InMemoryStorage implements IStorage {
     Object.assign(conv, patch);
   }
 
+  async sweepStaleMobilityRideChats(): Promise<number> {
+    const now = Date.now();
+    let n = 0;
+    for (const conv of this.conversations) {
+      if (String((conv as any).kind ?? "") !== "mobility_ride") continue;
+      if ((conv as any).mobilityRideCompleted === true) continue;
+      const hideMs = this.serviceChatHideAtMs(conv);
+      const created = (conv as any).createdAt instanceof Date ? (conv as any).createdAt.getTime() : now;
+      const expired =
+        (hideMs != null && now > hideMs) ||
+        (hideMs == null && now > created + 24 * 60 * 60 * 1000);
+      if (!expired) continue;
+      const hideAt = hideMs != null ? new Date(hideMs) : new Date(created + 24 * 60 * 60 * 1000);
+      Object.assign(conv, {
+        messagesLocked: true,
+        serviceChatHideFromUsersAt: hideAt,
+        mobilityRideInProgress: false,
+      });
+      n += 1;
+    }
+    return n;
+  }
+
   async findConversationForServiceBooking(booking: {
     id: number;
     userId?: string;
@@ -1231,7 +1296,7 @@ export class InMemoryStorage implements IStorage {
   // ============== DEFINICIÓN DE ROLES (CRUD) ==============
   private roleDefinitions: RoleDefinition[] = [
     { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
-    { code: "professional", name: "Profesional", description: "Proveedor de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
+    { code: "professional", name: "Profesional", description: "Asociado de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
     { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
     { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
   ];
@@ -1277,7 +1342,7 @@ export class InMemoryStorage implements IStorage {
   async seedRoles(): Promise<void> {
     const defaults: RoleDefinition[] = [
       { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
-      { code: "professional", name: "Profesional", description: "Proveedor de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
+      { code: "professional", name: "Profesional", description: "Asociado de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
       { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
       { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
     ];
@@ -1313,6 +1378,8 @@ export class InMemoryStorage implements IStorage {
     const report = this.financialReports.find(r => String(r.id) === String(id));
     if (report) {
       report.status = status;
+      report.updatedAt = new Date();
+      if (status === "completed") report.approvedAt = new Date();
     }
   }
 
@@ -1664,8 +1731,15 @@ export class InMemoryStorage implements IStorage {
     return [];
   }
 
-  async getService(id: number): Promise<ServiceWithProvider | undefined> {
+  async getService(
+    _id: number,
+    _options?: { includeWhenListingUnpublished?: boolean },
+  ): Promise<ServiceWithProvider | undefined> {
     return undefined;
+  }
+
+  async getServicesByProviderId(_providerId: number): Promise<ServiceWithProvider[]> {
+    return [];
   }
 
   async createService(service: InsertService): Promise<Service> {
@@ -1799,6 +1873,111 @@ export class InMemoryStorage implements IStorage {
   ];
   private couponIdCounter = 2;
   
+  // ==================== CÓDIGOS PROMOCIONALES ====================
+
+  private promotionalCodes: any[] = [];
+  private promotionalCodeIdCounter = 1;
+
+  async getPromotionalCodes(): Promise<any[]> {
+    return [...this.promotionalCodes];
+  }
+
+  async getPromotionalCodeById(id: number): Promise<any | undefined> {
+    return this.promotionalCodes.find((p) => p.id === id);
+  }
+
+  async getPromotionalCodeByCode(code: string): Promise<any | undefined> {
+    const normalized = code.trim().toUpperCase();
+    return this.promotionalCodes.find((p) => String(p.code).toUpperCase() === normalized);
+  }
+
+  async createPromotionalCode(data: {
+    code: string;
+    expirationType: string;
+    expiresAt?: Date | null;
+    maxUses?: number | null;
+    benefitType: string;
+    benefitValue: string;
+  }): Promise<any> {
+    const existing = await this.getPromotionalCodeByCode(data.code);
+    if (existing) throw new Error("Ya existe un código promocional con este identificador");
+
+    const newCode = {
+      id: this.promotionalCodeIdCounter++,
+      code: data.code.trim().toUpperCase(),
+      expirationType: data.expirationType,
+      expiresAt: data.expiresAt ?? null,
+      maxUses: data.maxUses ?? null,
+      usedCount: 0,
+      usedByUserCounts: {} as Record<string, number>,
+      benefitType: data.benefitType,
+      benefitValue: data.benefitValue,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.promotionalCodes.push(newCode);
+    return newCode;
+  }
+
+  async updatePromotionalCode(
+    id: number,
+    data: {
+      code: string;
+      expirationType: string;
+      expiresAt?: Date | null;
+      maxUses?: number | null;
+      benefitType: string;
+      benefitValue: string;
+    },
+  ): Promise<any | undefined> {
+    const index = this.promotionalCodes.findIndex((p) => p.id === id);
+    if (index === -1) return undefined;
+
+    this.promotionalCodes[index] = {
+      ...this.promotionalCodes[index],
+      code: data.code.trim().toUpperCase(),
+      expirationType: data.expirationType,
+      expiresAt: data.expiresAt ?? null,
+      maxUses: data.maxUses ?? null,
+      benefitType: data.benefitType,
+      benefitValue: data.benefitValue,
+      updatedAt: new Date(),
+    };
+    return this.promotionalCodes[index];
+  }
+
+  async deletePromotionalCode(id: number): Promise<void> {
+    this.promotionalCodes = this.promotionalCodes.filter((p) => p.id !== id);
+  }
+
+  async incrementPromotionalCodeUsedCount(id: number, userId?: string): Promise<any | undefined> {
+    const index = this.promotionalCodes.findIndex((p) => p.id === id);
+    if (index === -1) return undefined;
+    const promo = this.promotionalCodes[index];
+    const uid = userId != null ? String(userId) : "";
+
+    if (userHasRedeemedPromotionalCode(promo.usedByUserCounts, uid)) {
+      throw new Error(PROMO_CODE_MSG_ALREADY_REDEEMED_BY_USER);
+    }
+
+    const nextCount = (promo.usedCount ?? 0) + 1;
+    if (promo.expirationType === "por_usos" && promo.maxUses != null && nextCount > promo.maxUses) {
+      throw new Error(PROMO_CODE_MSG_NO_LONGER_AVAILABLE);
+    }
+
+    const counts = { ...(promo.usedByUserCounts ?? {}) } as Record<string, number>;
+    if (uid) counts[uid] = (counts[uid] ?? 0) + 1;
+
+    this.promotionalCodes[index] = {
+      ...promo,
+      usedCount: nextCount,
+      usedByUserCounts: counts,
+      updatedAt: new Date(),
+    };
+    return this.promotionalCodes[index];
+  }
+
   async getCoupons(userId: string): Promise<any[]> {
     return this.coupons;
   }
@@ -2463,13 +2642,23 @@ export class InMemoryStorage implements IStorage {
 
   async upsertProfessionalVerificationPayment(
     userId: string,
-    data: { transferReceiptCode: string; transferDate: string; subscriptionMonths: number; subscriptionMonthlyUsd?: number }
+    data: {
+      transferReceiptCode: string;
+      transferDate: string;
+      subscriptionMonths: number;
+      subscriptionMonthlyUsd?: number;
+      promotionalCode?: string | null;
+      promotionalDiscountPercent?: number | null;
+      subscriptionOriginalTotalUsd?: number | null;
+      subscriptionDiscountedTotalUsd?: number | null;
+    },
   ): Promise<ProfessionalVerification> {
     const cur = this.professionalVerifications.get(userId);
+    const promoCode = data.promotionalCode?.trim().toUpperCase() || null;
     const next: ProfessionalVerification = {
       userId,
       imageUrl: cur?.imageUrl ?? null,
-      imageVerified: false, // siempre false por ahora
+      imageVerified: false,
       transferReceiptCode: data.transferReceiptCode.trim(),
       transferDate: data.transferDate.trim(),
       subscriptionMonths: Math.max(1, Math.min(12, Math.trunc(data.subscriptionMonths))),
@@ -2477,6 +2666,19 @@ export class InMemoryStorage implements IStorage {
         typeof data.subscriptionMonthlyUsd === "number" && Number.isFinite(data.subscriptionMonthlyUsd)
           ? Math.max(0, data.subscriptionMonthlyUsd)
           : (cur as any)?.subscriptionMonthlyUsd ?? null,
+      promotionalCode: promoCode,
+      promotionalDiscountPercent:
+        promoCode && typeof data.promotionalDiscountPercent === "number"
+          ? data.promotionalDiscountPercent
+          : null,
+      subscriptionOriginalTotalUsd:
+        promoCode && typeof data.subscriptionOriginalTotalUsd === "number"
+          ? data.subscriptionOriginalTotalUsd
+          : null,
+      subscriptionDiscountedTotalUsd:
+        promoCode && typeof data.subscriptionDiscountedTotalUsd === "number"
+          ? data.subscriptionDiscountedTotalUsd
+          : null,
       createdAt: cur?.createdAt ? new Date(cur.createdAt as any) : new Date(),
       updatedAt: new Date(),
     };

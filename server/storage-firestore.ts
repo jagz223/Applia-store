@@ -39,6 +39,11 @@ import type { ProfessionalVerification, ProfessionalVerificationState } from "@s
 import type { VerifyingStatus } from "@shared/professional-verification";
 import { isProfessionalVerificationLocked } from "@shared/professional-verification";
 import {
+  PROMO_CODE_MSG_ALREADY_REDEEMED_BY_USER,
+  PROMO_CODE_MSG_NO_LONGER_AVAILABLE,
+  userHasRedeemedPromotionalCode,
+} from "@shared/promotional-code-utils";
+import {
   computeListingPublished,
   listingSubscriptionDaysRemaining,
   parseVisibilitySubscriptionEndMs,
@@ -1060,7 +1065,10 @@ class FirestoreStorageImpl implements IStorage {
     return applyPublicServicePriceList(servicesWithProviders);
   }
 
-  async getService(id: number): Promise<ServiceWithProvider | undefined> {
+  async getService(
+    id: number,
+    options?: { includeWhenListingUnpublished?: boolean },
+  ): Promise<ServiceWithProvider | undefined> {
     if (!this.db) return undefined;
     const safeId = id != null && !Number.isNaN(Number(id)) ? Number(id) : null;
     if (safeId === null) return undefined;
@@ -1077,7 +1085,7 @@ class FirestoreStorageImpl implements IStorage {
     const provider = pid != null ? await this.getProvider(pid) : undefined;
     const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
     const listingOk = (providerWithUser as { isListingPublished?: boolean } | undefined)?.isListingPublished === true;
-    if (!listingOk) return undefined;
+    if (!options?.includeWhenListingUnpublished && !listingOk) return undefined;
     const allCategories = await this.getCategories();
     const category = allCategories.find((c) => c.id === service.categoryId) ?? (allCategories[0] as Category | undefined);
     const subId = (service as { subcategoryId?: number | null }).subcategoryId;
@@ -1097,6 +1105,55 @@ class FirestoreStorageImpl implements IStorage {
       category: category ?? ({} as Category),
       subcategory,
     } as ServiceWithProvider) as ServiceWithProvider;
+  }
+
+  async getServicesByProviderId(providerId: number): Promise<ServiceWithProvider[]> {
+    if (!this.db) return [];
+    const pid = Number(providerId);
+    if (!Number.isFinite(pid) || pid <= 0) return [];
+
+    const snapshot = await this.db
+      .collection(FIRESTORE_COLLECTIONS.SERVICES)
+      .where("providerId", "==", pid)
+      .get();
+    if (snapshot.empty) return [];
+
+    const provider = await this.getProvider(pid);
+    const providerWithUser = provider ? await this.enrichProviderWithUser(provider) : undefined;
+    const allCategories = await this.getCategories();
+    const subcategoryCache = new Map<number, { id: number; name: string }>();
+    const out: ServiceWithProvider[] = [];
+
+    for (const doc of snapshot.docs) {
+      const service = {
+        id: parseInt(doc.id, 10),
+        ...doc.data(),
+      } as Service;
+      const category = allCategories.find((c) => c.id === service.categoryId) ?? (allCategories[0] as Category | undefined);
+      const subId = (service as { subcategoryId?: number | null }).subcategoryId;
+      let subcategory: { id: number; name: string } | null = null;
+      if (subId != null && !Number.isNaN(Number(subId))) {
+        if (!subcategoryCache.has(Number(subId))) {
+          const sub = await this.getSubcategoryById(Number(subId));
+          if (sub) subcategoryCache.set(sub.id, { id: sub.id, name: sub.name });
+        }
+        subcategory = subcategoryCache.get(Number(subId)) ?? null;
+      }
+      const mergedProvider = mergeProviderWithServiceListingProfile(
+        providerWithUser as unknown as Record<string, unknown>,
+        service as unknown as Record<string, unknown>,
+      ) as typeof providerWithUser;
+      out.push(
+        applyPublicServicePrice({
+          ...service,
+          provider: mergedProvider ?? undefined,
+          category: category ?? ({} as Category),
+          subcategory,
+        } as ServiceWithProvider) as ServiceWithProvider,
+      );
+    }
+
+    return out;
   }
 
   async createService(service: InsertService): Promise<Service> {
@@ -2805,6 +2862,39 @@ class FirestoreStorageImpl implements IStorage {
     await ref.update(patch as any);
   }
 
+  async sweepStaleMobilityRideChats(): Promise<number> {
+    if (!this.db) return 0;
+    const now = Date.now();
+    const graceMs = 24 * 60 * 60 * 1000;
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.CONVERSATIONS).where("kind", "==", "mobility_ride").get();
+    let n = 0;
+    for (const doc of snap.docs) {
+      const data = doc.data() as Record<string, unknown>;
+      if (data.mobilityRideCompleted === true) continue;
+      const hideMs = this.conversationHideFromUsersAtMs(data);
+      let createdMs: number | null = null;
+      const created = data.createdAt;
+      if (created instanceof Date) createdMs = created.getTime();
+      else if (typeof (created as { toMillis?: () => number })?.toMillis === "function") {
+        createdMs = (created as { toMillis: () => number }).toMillis();
+      }
+      const expired =
+        (hideMs != null && now > hideMs) ||
+        (hideMs == null && createdMs != null && now > createdMs + graceMs);
+      if (!expired) continue;
+      const hideAt =
+        hideMs != null ? new Date(hideMs) : new Date((createdMs ?? now) + graceMs);
+      await doc.ref.update({
+        messagesLocked: true,
+        mobilityRideInProgress: false,
+        serviceChatHideFromUsersAt: hideAt,
+        updatedAt: new Date(),
+      });
+      n += 1;
+    }
+    return n;
+  }
+
   async findConversationForServiceBooking(booking: {
     id: number;
     userId?: string;
@@ -2865,7 +2955,9 @@ class FirestoreStorageImpl implements IStorage {
 
   async updateFinancialReportStatus(id: number | string, status: string): Promise<void> {
     if (!this.db) return;
-    await this.db.collection(FIRESTORE_COLLECTIONS.FINANCIAL_REPORTS).doc(id.toString()).update({ status, updatedAt: new Date() });
+    const patch: Record<string, unknown> = { status, updatedAt: new Date() };
+    if (status === "completed") patch.approvedAt = new Date();
+    await this.db.collection(FIRESTORE_COLLECTIONS.FINANCIAL_REPORTS).doc(id.toString()).update(patch);
   }
   async getKPIs(_userId: string): Promise<any> {
     return { totalIncome: 0, totalExpenses: 0, completedServices: 0, activeClients: 0, pendingBookings: 0, monthlyGrowth: 0, averageRating: 0 };
@@ -3182,6 +3274,178 @@ class FirestoreStorageImpl implements IStorage {
     return { subtotal: amount, taxes: taxDetails, total: amount + totalTax };
   }
 
+  // ============ CÓDIGOS PROMOCIONALES ============
+
+  private mapPromotionalCodeFromFirestore(
+    docId: string,
+    data: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const rawExpires = data.expiresAt;
+    let expiresAt: string | null = null;
+    if (rawExpires instanceof Date) {
+      expiresAt = rawExpires.toISOString();
+    } else if (rawExpires != null && typeof rawExpires === "object") {
+      const ts = rawExpires as { toDate?: () => Date; toMillis?: () => number; _seconds?: number };
+      if (typeof ts.toDate === "function") {
+        expiresAt = ts.toDate().toISOString();
+      } else if (typeof ts.toMillis === "function") {
+        expiresAt = new Date(ts.toMillis()).toISOString();
+      } else if (typeof ts._seconds === "number") {
+        expiresAt = new Date(ts._seconds * 1000).toISOString();
+      }
+    } else if (typeof rawExpires === "string" && rawExpires.trim()) {
+      expiresAt = rawExpires;
+    }
+
+    return {
+      ...data,
+      id: parseInt(docId) || docId,
+      expiresAt,
+      createdAt:
+        data.createdAt instanceof Date
+          ? data.createdAt.toISOString()
+          : data.createdAt,
+      updatedAt:
+        data.updatedAt instanceof Date
+          ? data.updatedAt.toISOString()
+          : data.updatedAt,
+    };
+  }
+
+  async getPromotionalCodes(): Promise<any[]> {
+    if (!this.db) return [];
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES).get();
+    return snap.docs.map((d) =>
+      this.mapPromotionalCodeFromFirestore(d.id, (d.data() ?? {}) as Record<string, unknown>),
+    );
+  }
+
+  async getPromotionalCodeById(id: number): Promise<any | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES).doc(id.toString()).get();
+    if (!doc.exists) return undefined;
+    return this.mapPromotionalCodeFromFirestore(doc.id, (doc.data() ?? {}) as Record<string, unknown>);
+  }
+
+  async getPromotionalCodeByCode(code: string): Promise<any | undefined> {
+    if (!this.db) return undefined;
+    const normalized = code.trim().toUpperCase();
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES)
+      .where("code", "==", normalized)
+      .limit(1)
+      .get();
+    if (snap.empty) return undefined;
+    const d = snap.docs[0];
+    return this.mapPromotionalCodeFromFirestore(d.id, (d.data() ?? {}) as Record<string, unknown>);
+  }
+
+  async createPromotionalCode(data: {
+    code: string;
+    expirationType: string;
+    expiresAt?: Date | null;
+    maxUses?: number | null;
+    benefitType: string;
+    benefitValue: string;
+  }): Promise<any> {
+    if (!this.db) throw new Error("Firestore no configurado");
+
+    const normalizedCode = data.code.trim().toUpperCase();
+    const existing = await this.getPromotionalCodeByCode(normalizedCode);
+    if (existing) throw new Error("Ya existe un código promocional con este identificador");
+
+    const id = await this.getNextId("promotional_codes");
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES).doc(id.toString());
+    const record = {
+      id,
+      code: normalizedCode,
+      expirationType: data.expirationType,
+      expiresAt: data.expiresAt ?? null,
+      maxUses: data.maxUses ?? null,
+      usedCount: 0,
+      usedByUserCounts: {},
+      benefitType: data.benefitType,
+      benefitValue: data.benefitValue,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    await docRef.set(record);
+    const snap = await docRef.get();
+    if (!snap.exists) return record;
+    return this.mapPromotionalCodeFromFirestore(snap.id, (snap.data() ?? {}) as Record<string, unknown>);
+  }
+
+  async updatePromotionalCode(
+    id: number,
+    data: {
+      code: string;
+      expirationType: string;
+      expiresAt?: Date | null;
+      maxUses?: number | null;
+      benefitType: string;
+      benefitValue: string;
+    },
+  ): Promise<any | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+
+    const patch = {
+      code: data.code.trim().toUpperCase(),
+      expirationType: data.expirationType,
+      expiresAt: data.expiresAt ?? null,
+      maxUses: data.maxUses ?? null,
+      benefitType: data.benefitType,
+      benefitValue: data.benefitValue,
+      updatedAt: new Date(),
+    };
+    await docRef.update(patch);
+    const updated = await docRef.get();
+    if (!updated.exists) return undefined;
+    return this.mapPromotionalCodeFromFirestore(updated.id, (updated.data() ?? {}) as Record<string, unknown>);
+  }
+
+  async deletePromotionalCode(id: number): Promise<void> {
+    if (!this.db) return;
+    await this.db.collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES).doc(id.toString()).delete();
+  }
+
+  async incrementPromotionalCodeUsedCount(id: number, userId?: string): Promise<any | undefined> {
+    if (!this.db) return undefined;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return undefined;
+    const data = doc.data() as {
+      usedCount?: number;
+      maxUses?: number | null;
+      expirationType?: string;
+      usedByUserCounts?: Record<string, number>;
+    };
+    const uid = userId != null ? String(userId) : "";
+
+    if (userHasRedeemedPromotionalCode(data.usedByUserCounts, uid)) {
+      throw new Error(PROMO_CODE_MSG_ALREADY_REDEEMED_BY_USER);
+    }
+
+    const nextCount = (data.usedCount ?? 0) + 1;
+    if (data.expirationType === "por_usos" && data.maxUses != null && nextCount > data.maxUses) {
+      throw new Error(PROMO_CODE_MSG_NO_LONGER_AVAILABLE);
+    }
+
+    const patch: Record<string, unknown> = { usedCount: nextCount, updatedAt: new Date() };
+    if (uid) {
+      const counts = { ...(data.usedByUserCounts ?? {}) };
+      counts[uid] = (counts[uid] ?? 0) + 1;
+      patch.usedByUserCounts = counts;
+    }
+    await docRef.update(patch);
+    const updated = await docRef.get();
+    if (!updated.exists) return undefined;
+    return this.mapPromotionalCodeFromFirestore(updated.id, (updated.data() ?? {}) as Record<string, unknown>);
+  }
+
   // ============ CUPONES ============
   async getCoupons(_userId: string): Promise<any[]> {
     if (!this.db) return [];
@@ -3379,6 +3643,19 @@ class FirestoreStorageImpl implements IStorage {
         typeof data.subscriptionMonthlyUsd === "number" && Number.isFinite(data.subscriptionMonthlyUsd)
           ? Math.max(0, Number(data.subscriptionMonthlyUsd))
           : null,
+      promotionalCode: data.promotionalCode != null ? String(data.promotionalCode) : null,
+      promotionalDiscountPercent:
+        typeof data.promotionalDiscountPercent === "number" && Number.isFinite(data.promotionalDiscountPercent)
+          ? data.promotionalDiscountPercent
+          : null,
+      subscriptionOriginalTotalUsd:
+        typeof data.subscriptionOriginalTotalUsd === "number" && Number.isFinite(data.subscriptionOriginalTotalUsd)
+          ? data.subscriptionOriginalTotalUsd
+          : null,
+      subscriptionDiscountedTotalUsd:
+        typeof data.subscriptionDiscountedTotalUsd === "number" && Number.isFinite(data.subscriptionDiscountedTotalUsd)
+          ? data.subscriptionDiscountedTotalUsd
+          : null,
       createdAt: data.createdAt as any,
       updatedAt: data.updatedAt as any,
     } as ProfessionalVerification;
@@ -3413,7 +3690,16 @@ class FirestoreStorageImpl implements IStorage {
 
   async upsertProfessionalVerificationPayment(
     userId: string,
-    data: { transferReceiptCode: string; transferDate: string; subscriptionMonths: number; subscriptionMonthlyUsd?: number }
+    data: {
+      transferReceiptCode: string;
+      transferDate: string;
+      subscriptionMonths: number;
+      subscriptionMonthlyUsd?: number;
+      promotionalCode?: string | null;
+      promotionalDiscountPercent?: number | null;
+      subscriptionOriginalTotalUsd?: number | null;
+      subscriptionDiscountedTotalUsd?: number | null;
+    },
   ): Promise<ProfessionalVerification> {
     if (!this.db) throw new Error("Firestore no configurado");
     const ref = this.db.collection(FIRESTORE_COLLECTIONS.PROFESSIONAL_VERIFICATIONS).doc(userId);
@@ -3437,6 +3723,18 @@ class FirestoreStorageImpl implements IStorage {
       subscriptionMonths: Math.max(1, Math.min(12, Math.trunc(data.subscriptionMonths))),
       updatedAt: new Date(),
     };
+    const promoCode = data.promotionalCode?.trim().toUpperCase() || null;
+    if (promoCode) {
+      payload.promotionalCode = promoCode;
+      payload.promotionalDiscountPercent = data.promotionalDiscountPercent ?? null;
+      payload.subscriptionOriginalTotalUsd = data.subscriptionOriginalTotalUsd ?? null;
+      payload.subscriptionDiscountedTotalUsd = data.subscriptionDiscountedTotalUsd ?? null;
+    } else {
+      payload.promotionalCode = null;
+      payload.promotionalDiscountPercent = null;
+      payload.subscriptionOriginalTotalUsd = null;
+      payload.subscriptionDiscountedTotalUsd = null;
+    }
     if (!snap.exists) {
       payload.createdAt = new Date();
     }
@@ -3672,7 +3970,7 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) return;
     const defaults: RoleDefinition[] = [
       { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
-      { code: "professional", name: "Profesional", description: "Proveedor de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
+      { code: "professional", name: "Profesional", description: "Asociado de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
       { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
       { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
     ];

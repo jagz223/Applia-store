@@ -665,11 +665,8 @@ export function ChatPanel({
                   )}
                 </div>
               ) : (
-                <div
-                  className="grid h-full min-h-0 w-full"
-                  style={{ display: "grid", gridTemplateColumns: "320px 1fr" }}
-                >
-                  <div className="min-h-0 overflow-hidden flex flex-col" style={{ width: 320, minWidth: 320, maxWidth: 320 }}>
+                <div className="grid h-full min-h-0 w-full grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
+                  <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border">
                     <ConversationList
                       conversations={conversations}
                       searchQuery={searchQuery}

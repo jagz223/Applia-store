@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { Link, Redirect, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -10,6 +10,10 @@ import {
   useDeleteService,
 } from "@/hooks/use-mango-data";
 import { ServiceListItem } from "@/components/ServiceListItem";
+import { MyServicesSubscriptionBanner } from "@/components/listing/MyServicesSubscriptionBanner";
+import { ListingSubscriptionRenewButton } from "@/components/listing/ListingSubscriptionRenewButton";
+import { goMobilitySubscriptionInactiveCta } from "@/components/listing-subscription-ribbon-copy";
+import { isProviderListingSubscriptionExpired } from "@/lib/provider-listing-subscription";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, ArrowLeft, PackageOpen, Plus, Car, Bike, Package, Settings2 } from "lucide-react";
@@ -76,10 +80,22 @@ export default function MyServices() {
 
   const showBecomeDriverCta = mobilityGoVisible && !!provider && !driverEnrollmentComplete;
 
-  const { rows: cardRows, allServicesWereGoCatalogOnly } = useMemo(
-    () => computeMyServicesCardRows({ services, showDriverPreview }),
-    [services, showDriverPreview],
+  const catalogVisibilitySuspended = isProviderListingSubscriptionExpired(
+    provider as Parameters<typeof isProviderListingSubscriptionExpired>[0],
   );
+
+  const { rows: cardRows } = useMemo(
+    () =>
+      computeMyServicesCardRows({
+        services,
+        showDriverPreview,
+        catalogVisibilitySuspended,
+      }),
+    [services, showDriverPreview, catalogVisibilitySuspended],
+  );
+
+  const hasServices = services.length > 0;
+  const canCreateCatalogService = !catalogVisibilitySuspended;
 
   const registrationCategoryId = provider ? Number((provider as { categoryId?: number }).categoryId) : undefined;
   const deleteService = useDeleteService();
@@ -110,17 +126,20 @@ export default function MyServices() {
                 Mis servicios
               </h1>
               <p className="mt-1 text-sm text-muted-foreground max-w-2xl">
-                Misma vista previa que en Explorar, sin filtros. Usa la flecha para abrir la ficha pública o el lápiz para
-                editar.
+                {catalogVisibilitySuspended
+                  ? "Tus fichas siguen aquí en solo lectura hasta renovar la suscripción. No aparecen en Explorar."
+                  : "Misma vista previa que en Explorar. Usa la flecha para la ficha pública o el lápiz para editar."}
               </p>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+              {canCreateCatalogService ? (
               <Button className="gap-2 sm:self-start" asChild>
                 <Link href="/create-service">
                   <Plus className="h-4 w-4" />
                   Nuevo servicio
                 </Link>
               </Button>
+              ) : null}
               {showBecomeDriverCta ? (
                 <Button variant="secondary" className="gap-2 sm:self-start" asChild>
                   <Link href="/become-driver">
@@ -135,6 +154,8 @@ export default function MyServices() {
       </div>
 
       <div className="container mx-auto max-w-7xl px-4 py-8">
+        {!loading && catalogVisibilitySuspended ? <MyServicesSubscriptionBanner /> : null}
+
         {!loading && provider && showDriverPreview ? (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -153,6 +174,19 @@ export default function MyServices() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
+                {catalogVisibilitySuspended ? (
+                  <div
+                    className="rounded-lg border border-amber-500/45 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-950 dark:text-amber-50"
+                    role="status"
+                  >
+                    <p className="font-semibold">{goMobilitySubscriptionInactiveCta}</p>
+                    <p className="mt-1 text-amber-950/85 dark:text-amber-50/90">
+                      Puedes seguir entrando a los paneles de taxi y delivery, pero no recibirás nuevos pedidos hasta
+                      renovar tu suscripción.
+                    </p>
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap gap-2">
                   <span
                     className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
@@ -229,7 +263,7 @@ export default function MyServices() {
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
             <p className="text-muted-foreground">Cargando tus servicios…</p>
           </div>
-        ) : services.length === 0 ? (
+        ) : !hasServices && !showDriverPreview ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -238,14 +272,22 @@ export default function MyServices() {
             <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-muted">
               <PackageOpen className="h-10 w-10 text-muted-foreground" />
             </div>
-            <h2 className="mb-2 font-display text-2xl font-bold">Aún no tienes servicios publicados</h2>
+            <h2 className="mb-2 font-display text-2xl font-bold">
+              {catalogVisibilitySuspended ? "Tus servicios no están visibles en el catálogo" : "Aún no tienes servicios publicados"}
+            </h2>
             <p className="mx-auto mb-8 max-w-md text-muted-foreground">
-              Cuando crees un servicio, aparecerá aquí con la misma vista previa que ven los clientes en Explorar.
+              {catalogVisibilitySuspended
+                ? "Renueva tu suscripción de visibilidad para volver a publicar en Explorar y editar tus fichas."
+                : "Cuando crees un servicio, aparecerá aquí con la misma vista previa que ven los clientes en Explorar."}
             </p>
             <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-              <Button className="rounded-full px-8" asChild>
-                <Link href="/create-service">Crear servicio</Link>
-              </Button>
+              {canCreateCatalogService ? (
+                <Button className="rounded-full px-8" asChild>
+                  <Link href="/create-service">Crear servicio</Link>
+                </Button>
+              ) : (
+                <ListingSubscriptionRenewButton className="rounded-full px-8" />
+              )}
               {showBecomeDriverCta ? (
                 <Button variant="secondary" className="rounded-full px-8 gap-2" asChild>
                   <Link href="/become-driver">
@@ -256,23 +298,11 @@ export default function MyServices() {
               ) : null}
             </div>
           </motion.div>
-        ) : allServicesWereGoCatalogOnly ? (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-xl border border-dashed border-border/80 bg-muted/20 px-4 py-10 text-center"
-          >
-            <p className="mx-auto max-w-lg text-sm text-muted-foreground leading-relaxed">
-              Los servicios de <span className="font-medium text-foreground">taxi, envíos y marketplace</span> no se
-              listan aquí: los ves en la vista previa de conductor. Cuando agregues un{" "}
-              <span className="font-medium text-foreground">servicio de otra categoría</span> (por ejemplo mantenimiento
-              o técnicos), aparecerá en esta lista para editarlo o abrir la ficha pública.
-            </p>
-          </motion.div>
-        ) : (
+        ) : !hasServices ? null : (
           <>
             <p className="mb-6 text-muted-foreground">
               {cardRows.length} servicio{cardRows.length === 1 ? "" : "s"}
+              {catalogVisibilitySuspended ? " · solo lectura hasta renovar suscripción" : ""}
             </p>
             <div className="flex flex-col gap-4">
               {cardRows.map((service, index) => (
@@ -286,7 +316,11 @@ export default function MyServices() {
                     service={service}
                     ownerToolbar
                     editReturnTo="/my-services"
-                    canDelete={canDeleteCatalogService(service.id, services, registrationCategoryId)}
+                    catalogEditLocked={catalogVisibilitySuspended}
+                    canDelete={
+                      !catalogVisibilitySuspended &&
+                      canDeleteCatalogService(service.id, services, registrationCategoryId)
+                    }
                     onDelete={() => setDeleteServiceId(service.id)}
                   />
                 </motion.div>

@@ -208,8 +208,8 @@ export default function CreateService() {
       <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <p className="text-muted-foreground mb-4">
           {isProfessional
-            ? "Completa tu perfil de proveedor para poder crear servicios."
-            : "Debes ser proveedor para crear servicios."}
+            ? "Completa tu perfil de asociado para poder crear servicios."
+            : "Debes ser asociado para crear servicios."}
         </p>
         <Button asChild>
           <Link href="/become-pro">Convertirse en asociado</Link>
@@ -298,7 +298,7 @@ export default function CreateService() {
 
       <Card className="border-border/50 shadow-xl">
         <CardHeader>
-          <CardTitle>Perfil de proveedor</CardTitle>
+          <CardTitle>Perfil de asociado</CardTitle>
           <CardDescription>
             Indica categoría y datos de esta oferta. Lo que escribas aquí aplica solo a este servicio y no modifica lo que
             ya tenías en otras categorías u ofertas.

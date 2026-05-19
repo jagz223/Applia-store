@@ -17,6 +17,14 @@ export const professionalVerificationSchema = z.object({
   subscriptionMonths: z.number().int().min(1).max(12).nullable().optional(),
   /** Mensualidad (USD) vigente al momento de registrar el comprobante. */
   subscriptionMonthlyUsd: z.number().min(0).max(10_000).nullable().optional(),
+  /** Código promocional de descuento aplicado al registrar el comprobante. */
+  promotionalCode: z.string().nullable().optional(),
+  /** Porcentaje de descuento del código (solo si aplica). */
+  promotionalDiscountPercent: z.number().min(1).max(100).nullable().optional(),
+  /** Total antes del descuento (USD). */
+  subscriptionOriginalTotalUsd: z.number().min(0).nullable().optional(),
+  /** Total que el asociado debió transferir tras el descuento (USD). */
+  subscriptionDiscountedTotalUsd: z.number().min(0).nullable().optional(),
   createdAt: z.union([z.date(), z.string()]).optional(),
   updatedAt: z.union([z.date(), z.string()]).optional(),
 });
@@ -54,12 +62,44 @@ export const patchProfessionalVerificationCredentialBody = z.object({
   size: z.number().optional(),
 });
 
-export const patchProfessionalVerificationPaymentBody = z.object({
-  transferReceiptCode: z.string().min(1).max(500),
-  transferDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  // Obligatorio: el admin debe ver exactamente lo que el asociado eligió.
-  subscriptionMonths: z.number().int().min(1).max(12),
-});
+export const patchProfessionalVerificationPaymentBody = z
+  .object({
+    transferReceiptCode: z.string().min(1).max(500),
+    transferDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    subscriptionMonths: z.number().int().min(1).max(12),
+    promotionalCode: z.string().trim().min(1).max(50).optional(),
+    promotionalDiscountPercent: z.number().min(1).max(100).optional(),
+    subscriptionOriginalTotalUsd: z.number().min(0).optional(),
+    subscriptionDiscountedTotalUsd: z.number().min(0).optional(),
+  })
+  .superRefine((data, ctx) => {
+    const hasCode = Boolean(data.promotionalCode?.trim());
+    const hasDiscount =
+      data.promotionalDiscountPercent != null &&
+      data.subscriptionOriginalTotalUsd != null &&
+      data.subscriptionDiscountedTotalUsd != null;
+    if (hasCode && !hasDiscount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Faltan datos del descuento promocional",
+        path: ["promotionalDiscountPercent"],
+      });
+    }
+    if (!hasCode && (data.promotionalDiscountPercent != null || data.subscriptionDiscountedTotalUsd != null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El código promocional es obligatorio si se envía un descuento",
+        path: ["promotionalCode"],
+      });
+    }
+  });
+
+export type SubscriptionPaymentPromoSnapshot = {
+  promotionalCode: string;
+  promotionalDiscountPercent: number;
+  subscriptionOriginalTotalUsd: number;
+  subscriptionDiscountedTotalUsd: number;
+};
 
 // ============ verifying_status (nueva colección) ============
 

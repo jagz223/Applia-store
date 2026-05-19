@@ -45,16 +45,16 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
   const bookingTotal = Math.max(1, b.pending + b.confirmed + b.in_progress + b.completed + b.cancelled);
 
   return (
-    <div className="grid grid-cols-1 gap-4 min-[400px]:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
       <Card className="min-w-0 border-border/80 bg-card shadow-sm">
-        <CardHeader className="pb-2 space-y-1">
+        <CardHeader className="space-y-1 p-4 sm:p-6 pb-2">
           <CardTitle className="text-base flex items-center gap-2">
             <Users className="h-4 w-4 text-mango-orange shrink-0" />
             Usuarios
           </CardTitle>
           <CardDescription className="text-xs">Totales en la plataforma</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 pt-0">
+        <CardContent className="space-y-3 px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div className="rounded-lg bg-muted/40 px-2.5 py-2 min-w-0 dark:bg-muted/25">
               <p className="text-[11px] text-muted-foreground truncate">Asociados</p>
@@ -76,14 +76,14 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
       </Card>
 
       <Card className="min-w-0 border-border/80 bg-card shadow-sm">
-        <CardHeader className="pb-2 space-y-1">
+        <CardHeader className="space-y-1 p-4 sm:p-6 pb-2">
           <CardTitle className="text-base flex items-center gap-2">
             <ClipboardList className="h-4 w-4 text-mango-orange shrink-0" />
             Reservas
           </CardTitle>
           <CardDescription className="text-xs">Por estado actual</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2.5 pt-0">
+        <CardContent className="space-y-2.5 px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
           <StatBar label="Pendiente" value={b.pending} max={bookingTotal} />
           <StatBar label="Confirmada" value={b.confirmed} max={bookingTotal} classNameBar="bg-violet-500/85" />
           <StatBar label="En curso" value={b.in_progress} max={bookingTotal} classNameBar="bg-amber-500/90" />
@@ -92,15 +92,15 @@ function SnapshotSection({ s }: { s: AdminDashboardStatsResponse["snapshot"] }) 
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 border-border/80 bg-card shadow-sm min-[400px]:col-span-2 xl:col-span-1">
-        <CardHeader className="pb-2 space-y-1">
+      <Card className="min-w-0 border-border/80 bg-card shadow-sm sm:col-span-2 xl:col-span-1">
+        <CardHeader className="space-y-1 p-4 sm:p-6 pb-2">
           <CardTitle className="text-base flex items-center gap-2">
             <Briefcase className="h-4 w-4 text-mango-orange shrink-0" />
             Servicios y colas
           </CardTitle>
           <CardDescription className="text-xs">Catálogo y tareas pendientes</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 pt-0">
+        <CardContent className="space-y-3 px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
             <div className="rounded-lg bg-muted/40 px-2.5 py-2 dark:bg-muted/25">
               <p className="text-[11px] text-muted-foreground">Serv. activos</p>
@@ -141,7 +141,7 @@ function PeriodSection({ p, range }: { p: AdminDashboardStatsResponse["period"];
 
   return (
     <Card className="border-border/80 bg-card shadow-sm min-w-0">
-      <CardHeader className="pb-2">
+      <CardHeader className="p-4 sm:p-6 pb-2">
         <CardTitle className="text-base flex items-center gap-2">
           <CalendarRange className="h-4 w-4 text-mango-orange shrink-0" />
           Actividad en el período
@@ -150,7 +150,7 @@ function PeriodSection({ p, range }: { p: AdminDashboardStatsResponse["period"];
           {fromLabel} — {toLabel}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6 pt-0">
+      <CardContent className="space-y-6 px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-2">Resumen numérico</p>
           <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2 max-w-xl">
@@ -200,18 +200,22 @@ export function AdminStatisticsPanel({ enabled }: { enabled: boolean }) {
   return (
     <div className="space-y-4 min-w-0">
       <Card className="border-border/80 bg-card shadow-sm overflow-hidden">
-        <CardHeader className="pb-3 space-y-3">
-          <div className="flex flex-col gap-3 min-[380px]:flex-row min-[380px]:items-start min-[380px]:justify-between">
-            <div className="min-w-0 space-y-1">
+        <CardHeader className="space-y-4 p-4 sm:p-6 pb-4 sm:pb-3">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between md:gap-6">
+            <div className="w-full space-y-1.5 md:flex-1 md:min-w-0">
               <CardTitle className="text-lg sm:text-xl flex items-center gap-2">
                 <BarChart3 className="h-5 w-5 text-mango-orange shrink-0" />
                 Estadísticas
               </CardTitle>
-              <CardDescription className="text-xs sm:text-sm">
+              <CardDescription className="text-sm leading-relaxed max-w-prose">
                 Números y barras del negocio. Filtra por periodo para ver registros y actividad.
               </CardDescription>
             </div>
-            <div className="flex flex-wrap gap-1.5 shrink-0 w-full min-[380px]:w-auto min-[380px]:justify-end">
+            <div
+              className="grid w-full grid-cols-4 gap-1.5 sm:max-w-sm md:w-auto md:max-w-none md:shrink-0"
+              role="group"
+              aria-label="Filtrar por periodo"
+            >
               {PERIOD_OPTIONS.map((opt) => (
                 <Button
                   key={opt.value}
@@ -219,13 +223,13 @@ export function AdminStatisticsPanel({ enabled }: { enabled: boolean }) {
                   variant={period === opt.value ? "default" : "outline"}
                   size="sm"
                   className={cn(
-                    "h-8 px-2.5 sm:px-3 text-xs sm:text-sm flex-1 min-[380px]:flex-none min-w-[4.25rem]",
+                    "h-9 px-2 text-xs sm:text-sm",
                     period !== opt.value && "border-border bg-background hover:bg-muted/50 dark:hover:bg-muted/30"
                   )}
                   onClick={() => setPeriod(opt.value)}
                 >
-                  <span className="sm:hidden">{opt.short}</span>
-                  <span className="hidden sm:inline">{opt.label}</span>
+                  <span className="md:hidden">{opt.short}</span>
+                  <span className="hidden md:inline">{opt.label}</span>
                 </Button>
               ))}
             </div>

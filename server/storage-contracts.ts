@@ -168,7 +168,12 @@ export interface ICatalogStorage {
     subcategoryId?: number,
     includeUnverifiedForAdmin?: boolean
   ): Promise<ServiceWithProvider[]>;
-  getService(id: number): Promise<ServiceWithProvider | undefined>;
+  getService(
+    id: number,
+    options?: { includeWhenListingUnpublished?: boolean },
+  ): Promise<ServiceWithProvider | undefined>;
+  /** Servicios del asociado (panel propio), sin filtrar por suscripción de visibilidad en catálogo. */
+  getServicesByProviderId(providerId: number): Promise<ServiceWithProvider[]>;
   createService(service: InsertService): Promise<Service>;
   updateService(id: number, data: ServiceUpdate): Promise<Service | undefined>;
   deleteService(id: number): Promise<boolean>;

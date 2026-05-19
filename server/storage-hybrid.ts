@@ -10,7 +10,7 @@ const FIRESTORE_METHODS = new Set([
   "getUserById", "getUserByEmail", "getUserByPhone", "createUser", "updateUser", "updateUserPassword",
   "getUserRole", "updateUserRole",
   "getCategories", "updateCategory", "getSubcategories", "getSubcategoryById", "createSubcategory", "updateSubcategory", "getAllProviders", "getProvider", "getProviderByUserId", "createProvider", "createProviderVehicle", "getPrimaryVehicleByProviderId", "getPrimaryVehicleByUserId", "getPrimaryVehicleFullByUserId", "upsertPrimaryProviderVehicle",
-  "getAllServices", "getService", "createService",
+  "getAllServices", "getService", "getServicesByProviderId", "createService", "updateService", "deleteService",
   "getBookingsByUser", "getBookingsByProvider", "getBooking", "createBooking", "updateBookingStatus", "updateBookingCost", "updateBookingSchedule", "acknowledgeBookingProChanges", "confirmBookingByClient", "completeBookingAndReleaseEscrow", "cancelBookingAndRefundClientEscrow",
   "getPendingBookingRatings", "submitBookingRating",
   "getProfessionalVerificationByUserId", "upsertProfessionalVerificationImage", "upsertProfessionalVerificationCredential", "upsertProfessionalVerificationPayment",
@@ -25,7 +25,7 @@ const FIRESTORE_METHODS = new Set([
   // Chat: debe persistir en Firestore para auditoría/admin.
   "getConversationsByUser", "createConversation", "getMessagesByConversation", "getLastMessageByConversation", "getUnreadCountByConversation",
   "createMessage", "markMessageAsRead", "markConversationAsRead", "hideConversationForUsers",
-  "patchConversation", "findConversationForServiceBooking", "listConversationsForAdmin",
+  "patchConversation", "findConversationForServiceBooking", "listConversationsForAdmin", "sweepStaleMobilityRideChats",
 ]);
 
 /** Delegador Firestore/memoria alineado con {@link IStorage} en tiempo de ejecución. */
@@ -82,7 +82,12 @@ export class HybridStorage {
   ) {
     return this.delegate("getAllServices", [categoryId, search, providerCategoryId, subcategoryId, includeUnverifiedForAdmin]);
   }
-  getService(id: number) { return this.delegate("getService", [id]); }
+  getService(id: number, options?: { includeWhenListingUnpublished?: boolean }) {
+    return this.delegate("getService", [id, options]);
+  }
+  getServicesByProviderId(providerId: number) {
+    return this.delegate("getServicesByProviderId", [providerId]);
+  }
   getProfessionalVerificationByUserId(userId: string) { return this.delegate("getProfessionalVerificationByUserId", [userId]); }
   upsertProfessionalVerificationImage(userId: string, imageUrl: string) {
     return this.delegate("upsertProfessionalVerificationImage", [userId, imageUrl]);
@@ -119,6 +124,8 @@ export class HybridStorage {
     return this.delegate("setVerifyingStatusTransaction", [userId, status]);
   }
   createService(service: any) { return this.delegate("createService", [service]); }
+  updateService(id: number, data: any) { return this.delegate("updateService", [id, data]); }
+  deleteService(id: number) { return this.delegate("deleteService", [id]); }
   getBookingsByUser(userId: string, status?: string) { return this.delegate("getBookingsByUser", [userId, status]); }
   getBookingsByProvider(providerId: number) { return this.delegate("getBookingsByProvider", [providerId]); }
   getBooking(id: number) { return this.delegate("getBooking", [id]); }
@@ -156,6 +163,9 @@ export class HybridStorage {
   hideConversationForUsers(conversationId: number, userIds: string[]) { return this.delegate("hideConversationForUsers", [conversationId, userIds]); }
   patchConversation(conversationId: number, patch: Record<string, unknown>) {
     return this.delegate("patchConversation", [conversationId, patch]);
+  }
+  sweepStaleMobilityRideChats() {
+    return this.delegate("sweepStaleMobilityRideChats", []);
   }
   findConversationForServiceBooking(booking: {
     id: number;
@@ -200,4 +210,17 @@ export class HybridStorage {
   createCoupon(coupon: any) { return this.memory.createCoupon(coupon); }
   updateCoupon(id: number, data: any) { return this.memory.updateCoupon(id, data); }
   deleteCoupon(id: number) { return this.memory.deleteCoupon(id); }
+  getPromotionalCodes() { return this.memory.getPromotionalCodes(); }
+  getPromotionalCodeById(id: number) { return this.memory.getPromotionalCodeById(id); }
+  getPromotionalCodeByCode(code: string) { return this.memory.getPromotionalCodeByCode(code); }
+  createPromotionalCode(data: Parameters<typeof this.memory.createPromotionalCode>[0]) {
+    return this.memory.createPromotionalCode(data);
+  }
+  updatePromotionalCode(id: number, data: Parameters<typeof this.memory.updatePromotionalCode>[1]) {
+    return this.memory.updatePromotionalCode(id, data);
+  }
+  deletePromotionalCode(id: number) { return this.memory.deletePromotionalCode(id); }
+  incrementPromotionalCodeUsedCount(id: number, userId?: string) {
+    return this.memory.incrementPromotionalCodeUsedCount(id, userId);
+  }
 }

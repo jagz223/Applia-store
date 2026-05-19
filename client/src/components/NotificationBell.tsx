@@ -484,7 +484,7 @@ export function NotificationBell() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80" align="end">
+      <PopoverContent className="w-80" align="end" sideOffset={8}>
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-semibold">Notificaciones</h3>
           {notifications.length > 0 && (

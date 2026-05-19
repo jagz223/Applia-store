@@ -12,7 +12,12 @@ import { authenticateJWT } from "./routes-auth";
 import { requireAdminStaff, requireFullAdmin, requireStaffFromDb } from "./middleware-roles";
 import { userService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
-import { catalogService } from "./services";
+import { catalogService, promotionalCodeService } from "./services";
+import {
+  PromotionalCodeConflictError,
+  PromotionalCodeNotFoundError,
+} from "./services/promotional-code.service";
+import { createPromotionalCodeSchema, updatePromotionalCodeSchema } from "@shared/promotional-code-schema";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { applyServiceBookingChatLifecycle } from "./service-booking-chat";
@@ -54,6 +59,7 @@ import {
 import { buildMobilityCategoryApprovalPatch } from "@shared/provider-category-membership";
 import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
 import { listingSubscriptionDaysRemaining } from "@shared/professional-listing-subscription";
+import { buildSubscriptionPaymentAuditMeta } from "@shared/admin-audit-payment-meta";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
@@ -448,6 +454,10 @@ export function registerAdminRoutes(app: Express): void {
         subscriptionMonths?: number | null;
         subscriptionMonthlyUsd?: number | null;
         subscriptionTotalUsd?: number | null;
+        promotionalCode?: string | null;
+        promotionalDiscountPercent?: number | null;
+        subscriptionOriginalTotalUsd?: number | null;
+        subscriptionDiscountedTotalUsd?: number | null;
       }> = [];
 
       for (const st of pending ?? []) {
@@ -490,10 +500,29 @@ export function registerAdminRoutes(app: Express): void {
           typeof (profVer as any)?.subscriptionMonthlyUsd === "number" && Number.isFinite((profVer as any).subscriptionMonthlyUsd)
             ? Math.max(0, Number((profVer as any).subscriptionMonthlyUsd))
             : null;
-        const subscriptionTotalUsd =
-          subscriptionMonths != null && subscriptionMonthlyUsd != null
-            ? Math.round(subscriptionMonths * subscriptionMonthlyUsd * 100) / 100
+        const promotionalCode =
+          typeof (profVer as any)?.promotionalCode === "string" ? String((profVer as any).promotionalCode).trim() : null;
+        const promotionalDiscountPercent =
+          typeof (profVer as any)?.promotionalDiscountPercent === "number" &&
+          Number.isFinite((profVer as any).promotionalDiscountPercent)
+            ? Number((profVer as any).promotionalDiscountPercent)
             : null;
+        const subscriptionOriginalTotalUsd =
+          typeof (profVer as any)?.subscriptionOriginalTotalUsd === "number" &&
+          Number.isFinite((profVer as any).subscriptionOriginalTotalUsd)
+            ? Number((profVer as any).subscriptionOriginalTotalUsd)
+            : null;
+        const subscriptionDiscountedTotalUsd =
+          typeof (profVer as any)?.subscriptionDiscountedTotalUsd === "number" &&
+          Number.isFinite((profVer as any).subscriptionDiscountedTotalUsd)
+            ? Number((profVer as any).subscriptionDiscountedTotalUsd)
+            : null;
+        const subscriptionTotalUsd =
+          subscriptionDiscountedTotalUsd != null
+            ? subscriptionDiscountedTotalUsd
+            : subscriptionMonths != null && subscriptionMonthlyUsd != null
+              ? Math.round(subscriptionMonths * subscriptionMonthlyUsd * 100) / 100
+              : null;
         const storedType = (st as any)?.requestType as ("onboarding" | "renewal" | undefined);
         const inferredType =
           storedType ??
@@ -523,6 +552,10 @@ export function registerAdminRoutes(app: Express): void {
           subscriptionMonths,
           subscriptionMonthlyUsd,
           subscriptionTotalUsd,
+          promotionalCode: promotionalCode || null,
+          promotionalDiscountPercent,
+          subscriptionOriginalTotalUsd,
+          subscriptionDiscountedTotalUsd,
         });
       }
 
@@ -1165,18 +1198,25 @@ export function registerAdminRoutes(app: Express): void {
         // --- Auditoría ---
         try {
           const isApprove = status === "verified";
-          const provider = await genFebStorage.getProviderByUserId(userId);
-          const isRenewal = (provider as any)?.isVerified === true;
+          const providerForAudit = await genFebStorage.getProviderByUserId(userId);
+          const isRenewal = (providerForAudit as any)?.isVerified === true;
+          const profVerForAudit = await genFebStorage.getProfessionalVerificationByUserId(userId);
+          const categoriesForAudit = await genFebStorage.getCategories();
+          const vehicleForAudit = userId ? await genFebStorage.getPrimaryVehicleFullByUserId(userId) : null;
           await createAdminAuditEvent({
             action: isApprove
               ? "subscription_payment_approved"
               : "subscription_payment_rejected",
             adminUserId: String(req.user?.id ?? ""),
             affectedUserId: userId,
-            meta: {
+            meta: buildSubscriptionPaymentAuditMeta({
               requestType: isRenewal ? "renewal" : "onboarding",
-              ...(isApprove ? null : { reason: rejectReason }),
-            },
+              provider: providerForAudit as any,
+              professionalVerification: profVerForAudit as any,
+              categories: categoriesForAudit,
+              hasVehicle: vehicleForAudit != null,
+              ...(isApprove ? {} : { rejectReason }),
+            }),
           });
         } catch {
           /* ignore */
@@ -1259,7 +1299,7 @@ export function registerAdminRoutes(app: Express): void {
       return res.status(200).json({ providers: items, total: items.length });
     } catch (error) {
       console.error("Error listing providers with services:", error);
-      return res.status(500).json({ message: "Error al listar proveedores" });
+      return res.status(500).json({ message: "Error al listar asociados" });
     }
   });
 
@@ -1723,7 +1763,7 @@ export function registerAdminRoutes(app: Express): void {
       return res.status(200).json({ providers: items, total: items.length });
     } catch (e) {
       console.error("Error listing brand providers:", e);
-      return res.status(500).json({ message: "Error al listar proveedores de la marca" });
+      return res.status(500).json({ message: "Error al listar asociados de la marca" });
     }
   });
 
@@ -1753,7 +1793,7 @@ export function registerAdminRoutes(app: Express): void {
       return res.status(200).json({ ok: true, updated: ids.length });
     } catch (e) {
       console.error("Error toggling provider services:", e);
-      return res.status(500).json({ message: "Error al actualizar servicios del proveedor" });
+      return res.status(500).json({ message: "Error al actualizar servicios del asociado" });
     }
   });
 
@@ -1919,6 +1959,15 @@ export function registerAdminRoutes(app: Express): void {
 
       const vehicle = userId ? await genFebStorage.getPrimaryVehicleFullByUserId(userId) : null;
       const bookings = await genFebStorage.getBookingsByProvider(providerId);
+      const profVer = userId ? await genFebStorage.getProfessionalVerificationByUserId(userId) : null;
+      const primaryCatId = Number((provider as { categoryId?: unknown }).categoryId);
+      const primaryCatRow =
+        Number.isFinite(primaryCatId) && primaryCatId > 0
+          ? categories.find((c) => Number(c.id) === primaryCatId)
+          : undefined;
+      const providerCategorySlug =
+        (primaryCatRow as { slug?: string } | undefined)?.slug ??
+        (String((provider as { category?: string }).category ?? "").trim() || null);
 
       return res.status(200).json({
         provider: {
@@ -1950,6 +1999,18 @@ export function registerAdminRoutes(app: Express): void {
         services,
         vehicle,
         bookingsCount: (bookings ?? []).length,
+        verificationDocuments: {
+          avatar:
+            rawUser && typeof (rawUser as { avatar?: unknown }).avatar === "string"
+              ? ((rawUser as { avatar: string }).avatar)
+              : null,
+          userIdentification:
+            rawUser && typeof (rawUser as { user_identification?: unknown }).user_identification === "string"
+              ? ((rawUser as { user_identification: string }).user_identification)
+              : null,
+          professionalCredentialUrl: profVer?.professionalCredentialUrl ?? null,
+          providerCategorySlug,
+        },
         categories: categories.map((c) => ({
           id: c.id,
           slug: (c as { slug?: string }).slug ?? "",
@@ -2545,6 +2606,88 @@ export function registerAdminRoutes(app: Express): void {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
       console.error("Error updating subcategory:", error);
       return res.status(500).json({ message: "Error al actualizar subcategoría" });
+    }
+  });
+
+  // GET /api/admin/promotional-codes — Listar códigos promocionales
+  app.get("/api/admin/promotional-codes", authenticateJWT, requireFullAdmin, async (_req: any, res) => {
+    try {
+      const codes = await promotionalCodeService.listPromotionalCodes();
+      return res.json(codes);
+    } catch (error) {
+      console.error("Error listing promotional codes:", error);
+      return res.status(500).json({ message: "Error al listar códigos promocionales" });
+    }
+  });
+
+  // POST /api/admin/promotional-codes — Crear código promocional / ticket
+  app.post("/api/admin/promotional-codes", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const parsed = createPromotionalCodeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+
+      const created = await promotionalCodeService.createPromotionalCode(parsed.data);
+      return res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof PromotionalCodeConflictError) {
+        return res.status(409).json({ message: error.message });
+      }
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.flatten() });
+      }
+      console.error("Error creating promotional code:", error);
+      return res.status(500).json({ message: "Error al crear código promocional" });
+    }
+  });
+
+  // PATCH /api/admin/promotional-codes/:id — Actualizar código promocional
+  app.patch("/api/admin/promotional-codes/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "ID inválido" });
+      }
+
+      const parsed = updatePromotionalCodeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+      }
+
+      const updated = await promotionalCodeService.updatePromotionalCode(id, parsed.data);
+      return res.json(updated);
+    } catch (error) {
+      if (error instanceof PromotionalCodeNotFoundError) {
+        return res.status(404).json({ message: error.message });
+      }
+      if (error instanceof PromotionalCodeConflictError) {
+        return res.status(409).json({ message: error.message });
+      }
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.flatten() });
+      }
+      console.error("Error updating promotional code:", error);
+      return res.status(500).json({ message: "Error al actualizar código promocional" });
+    }
+  });
+
+  // DELETE /api/admin/promotional-codes/:id — Eliminar código promocional
+  app.delete("/api/admin/promotional-codes/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (Number.isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "ID inválido" });
+      }
+
+      await promotionalCodeService.deletePromotionalCode(id);
+      return res.status(204).send();
+    } catch (error) {
+      if (error instanceof PromotionalCodeNotFoundError) {
+        return res.status(404).json({ message: error.message });
+      }
+      console.error("Error deleting promotional code:", error);
+      return res.status(500).json({ message: "Error al eliminar código promocional" });
     }
   });
 
