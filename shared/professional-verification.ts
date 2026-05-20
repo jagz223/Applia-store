@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isVisibilitySubscriptionWindowActive } from "./professional-listing-subscription";
 
 /** Documento Firestore: un registro por usuario profesional (id de documento = userId). */
 export const professionalVerificationSchema = z.object({
@@ -48,6 +49,42 @@ export function isAssociateOnboardingDossierComplete(
   const code = typeof v?.transferReceiptCode === "string" && v.transferReceiptCode.trim().length > 0;
   const date = typeof v?.transferDate === "string" && v.transferDate.trim().length > 0;
   return img && cred && code && date;
+}
+
+/** Slice mínimo del proveedor para saber si la cuota de visibilidad quedó cubierta por canje de meses gratis. */
+export type PrefundPromoProviderSlice = {
+  visibilitySubscriptionLastPaymentApprovedBy?: string | null;
+  visibilitySubscriptionEndsAt?: unknown;
+};
+
+export function hasVerificationCuotaSatisfiedByPromoPrefund(
+  provider: PrefundPromoProviderSlice | null | undefined,
+): boolean {
+  if (!provider) return false;
+  const by = String(provider.visibilitySubscriptionLastPaymentApprovedBy ?? "").trim();
+  return by === "promotional_code" && isVisibilitySubscriptionWindowActive(provider.visibilitySubscriptionEndsAt);
+}
+
+/** Identificación + documento profesional (o licencia) subidos. */
+export function isAssociateOnboardingVerificationDocsComplete(
+  v: Pick<ProfessionalVerification, "imageUrl" | "professionalCredentialUrl"> | null | undefined,
+): boolean {
+  const img = typeof v?.imageUrl === "string" && v.imageUrl.trim().length > 0;
+  const cred = typeof v?.professionalCredentialUrl === "string" && v.professionalCredentialUrl.trim().length > 0;
+  return img && cred;
+}
+
+/**
+ * Alta inicial: el asociado puede entrar a la cola del admin cuando tiene ambos documentos y
+ * (comprobante de transferencia registrado) o (meses gratis por código con suscripción vigente).
+ */
+export function isAssociateOnboardingAdminQueueReady(
+  v: Pick<ProfessionalVerification, "imageUrl" | "professionalCredentialUrl" | "transferReceiptCode" | "transferDate"> | null | undefined,
+  provider: PrefundPromoProviderSlice | null | undefined,
+): boolean {
+  if (!isAssociateOnboardingVerificationDocsComplete(v)) return false;
+  if (isAssociateOnboardingDossierComplete(v)) return true;
+  return hasVerificationCuotaSatisfiedByPromoPrefund(provider);
 }
 
 export const patchProfessionalVerificationImageBody = z.object({
@@ -125,6 +162,15 @@ export const verifyingStatusSchema = z.object({
   /** null = aún no enviado / sin valor en Firestore */
   transacction_date: z.string().nullable(),
   transacction_verified: professionalVerificationStateSchema.nullable(),
+  /** Reemplazos de identificación mientras `identification_verified === "pending"` (máx. 1). */
+  pendingIdResubmitCount: z.number().int().min(0).max(10).optional(),
+  /** Reemplazos del documento profesional/licencia mientras la solicitud está en revisión (máx. 1). */
+  pendingCredentialResubmitCount: z.number().int().min(0).max(10).optional(),
+  /** true mientras canjeó meses gratis antes de tener documentos listos para la cola del admin. */
+  prefundPromoAwaitingDossier: z.boolean().optional(),
+  /** Código canjeado (auditoría / UI admin). */
+  prefundPromoCode: z.string().max(80).optional(),
+  prefundPromoMonths: z.number().int().min(1).max(12).optional(),
   createdAt: z.union([z.date(), z.string()]).optional(),
   updatedAt: z.union([z.date(), z.string()]).optional(),
 });

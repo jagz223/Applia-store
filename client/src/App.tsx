@@ -55,6 +55,7 @@ import { ProviderTermsGate } from "@/components/ProviderTermsGate";
 import VerifyProfessional from "@/pages/VerifyProfessional";
 import VerifyProfessionalPayment from "@/pages/VerifyProfessionalPayment";
 import { GoShellLayout } from "@/components/go/GoShellLayout";
+import { useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { GoCategoryGate } from "@/components/go/GoCategoryGate";
 import { GoActiveRideResume } from "@/components/go/GoActiveRideResume";
 import GoShop from "@/pages/go/GoShop";
@@ -196,9 +197,13 @@ function GoRouter() {
 function App() {
   const [location] = useLocation();
   const inGoShell = location === "/go" || location.startsWith("/go/");
+  const pathname = location.split("?")[0] ?? location;
+  const inCentralPanel = pathname === "/central" || pathname.startsWith("/central/");
+  const compactViewport = useGoCompactViewport();
+  /** Móvil en /central: mapa a pantalla completa con barra propia (sin nav/footer global). */
+  const centralMobileShell = inCentralPanel && compactViewport;
   /** En /chat el input va fijo abajo; el footer global quedaría “entre” mensajes y barra — se oculta en esta ruta. */
-  const showGlobalFooter =
-    location.split("?")[0] !== "/chat";
+  const showGlobalFooter = pathname !== "/chat" && !centralMobileShell;
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -218,6 +223,10 @@ function App() {
               <GoShellLayout>
                 <GoRouter />
               </GoShellLayout>
+            ) : centralMobileShell ? (
+              <main className="relative min-h-0 flex-1 bg-background">
+                <MainRouter />
+              </main>
             ) : (
               <div className="flex min-h-screen flex-col bg-background font-sans">
                 <Navigation />

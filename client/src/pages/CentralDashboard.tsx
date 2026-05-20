@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Redirect } from "wouter";
-import { Building2, Loader2, Star, UserPlus } from "lucide-react";
+import { Link, Redirect, useSearch } from "wouter";
+import { Building2, Loader2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { resolveCentralServiceMapView } from "@shared/dispatch-company";
 import { useAuth } from "@/hooks/use-auth";
 import { canAccessCentralDashboard, hasAdminRole } from "@/lib/auth-utils";
 import {
@@ -8,93 +10,65 @@ import {
   useCentralFleet,
   useCentralFares,
   useCentralMe,
+  useCentralMembers,
+  useCentralAffiliationRequests,
   usePatchCentralFares,
-  useRegisterCentralMember,
+  usePatchCentralServiceMap,
+  CENTRAL_FLEET_QUERY_KEY,
+  mergeCentralFleetDriverPatch,
   type CentralFleetDriver,
+  type CentralFleetSocketPatch,
 } from "@/hooks/use-central";
 import { useSocket } from "@/hooks/use-socket";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { CentralFleetMap } from "@/components/central/CentralFleetMap";
+import { CentralDashboardDesktop } from "@/components/central/CentralDashboardDesktop";
+import { CentralDashboardMobile } from "@/components/central/CentralDashboardMobile";
+import { useCentralWideLayout } from "@/hooks/use-central-wide-layout";
+import { CompanyCombobox } from "@/components/central/CompanyCombobox";
 import type { DispatchMobilityFares, DispatchPackFares } from "@shared/dispatch-company";
-
-function FareTierFields({
-  label,
-  perKm,
-  minUsd,
-  onPerKm,
-  onMin,
-}: {
-  label: string;
-  perKm: number;
-  minUsd: number;
-  onPerKm: (v: number) => void;
-  onMin: (v: number) => void;
-}) {
-  return (
-    <div className="grid gap-2 rounded-lg border border-border p-3 sm:grid-cols-3 sm:items-end">
-      <p className="text-sm font-medium sm:col-span-3">{label}</p>
-      <div>
-        <Label className="text-xs">USD / km</Label>
-        <Input
-          type="number"
-          step="0.01"
-          min={0}
-          value={perKm}
-          onChange={(e) => onPerKm(Number(e.target.value))}
-        />
-      </div>
-      <div>
-        <Label className="text-xs">Precio mínimo (USD)</Label>
-        <Input
-          type="number"
-          step="0.01"
-          min={0}
-          value={minUsd}
-          onChange={(e) => onMin(Number(e.target.value))}
-        />
-      </div>
-    </div>
-  );
-}
+import { CENTRAL_APP_SETTINGS_HREF } from "@/lib/central-dashboard-hrefs";
 
 export default function CentralDashboard() {
+  const isWideCentralLayout = useCentralWideLayout();
+  const queryClient = useQueryClient();
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const { socket } = useSocket();
   const isAdmin = hasAdminRole(user);
+  const search = useSearch();
+  const affiliationRequestFromUrl = useMemo(() => {
+    const q = new URLSearchParams(search || "");
+    return q.get("affiliationRequest")?.trim() || null;
+  }, [search]);
+  const companyIdFromUrl = useMemo(() => {
+    const q = new URLSearchParams(search || "");
+    return q.get("companyId")?.trim() || null;
+  }, [search]);
   const [companySearch, setCompanySearch] = useState("");
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(
     (user as { dispatchCompanyId?: string } | null)?.dispatchCompanyId ?? null,
   );
   const [selectedDriver, setSelectedDriver] = useState<CentralFleetDriver | null>(null);
-  const [memberType, setMemberType] = useState<"central" | "driver">("driver");
-  const [offerKind, setOfferKind] = useState<"moto" | "carro" | "camion" | "pet">("carro");
 
   const { data: companies } = useCentralCompaniesForAdmin(companySearch, isAdmin);
-  const effectiveCompanyId = isAdmin ? selectedCompanyId : (user as { dispatchCompanyId?: string })?.dispatchCompanyId ?? null;
+  const effectiveCompanyId = isAdmin
+    ? selectedCompanyId
+    : ((user as { dispatchCompanyId?: string })?.dispatchCompanyId ?? null);
 
   const { data: me } = useCentralMe(effectiveCompanyId);
-  const { data: fleet = [], refetch: refetchFleet } = useCentralFleet(effectiveCompanyId);
+  const { data: fleet = [], refetch: refetchFleet, isFetching: fleetRefreshing } = useCentralFleet(effectiveCompanyId);
+  const { data: members = [] } = useCentralMembers(effectiveCompanyId);
   const { data: faresData } = useCentralFares(effectiveCompanyId);
   const patchFares = usePatchCentralFares(effectiveCompanyId);
-  const registerMember = useRegisterCentralMember(effectiveCompanyId);
+  const patchServiceMap = usePatchCentralServiceMap(effectiveCompanyId);
+
+  const { data: affiliationRequests = [] } = useCentralAffiliationRequests(effectiveCompanyId);
+  const pendingAffiliationCount = useMemo(
+    () => affiliationRequests.filter((r) => r.status === "pending").length,
+    [affiliationRequests],
+  );
 
   const [mobilityDraft, setMobilityDraft] = useState<DispatchMobilityFares | null>(null);
   const [packDraft, setPackDraft] = useState<DispatchPackFares | null>(null);
@@ -107,13 +81,20 @@ export default function CentralDashboard() {
   useEffect(() => {
     if (!socket || !effectiveCompanyId) return;
     socket.emit("central:fleet:subscribe", { companyId: effectiveCompanyId });
-    const onUpdate = () => void refetchFleet();
+    const onUpdate = (raw: unknown) => {
+      const patch = raw as CentralFleetSocketPatch;
+      if (!patch?.userId || patch.dispatchCompanyId !== effectiveCompanyId) return;
+      const key = CENTRAL_FLEET_QUERY_KEY(effectiveCompanyId);
+      queryClient.setQueryData<CentralFleetDriver[]>(key, (prev) =>
+        mergeCentralFleetDriverPatch(prev, patch),
+      );
+    };
     socket.on("central:fleet:update", onUpdate);
     return () => {
       socket.emit("central:fleet:unsubscribe", { companyId: effectiveCompanyId });
       socket.off("central:fleet:update", onUpdate);
     };
-  }, [socket, effectiveCompanyId, refetchFleet]);
+  }, [socket, effectiveCompanyId, queryClient]);
 
   useEffect(() => {
     if (!isAdmin && (user as { dispatchCompanyId?: string })?.dispatchCompanyId) {
@@ -121,10 +102,81 @@ export default function CentralDashboard() {
     }
   }, [user, isAdmin]);
 
-  const driversOnMap = useMemo(
-    () => fleet.filter((d) => d.lat != null && d.lon != null),
-    [fleet],
-  );
+  /** Desde notificación (p. ej. admin): preseleccionar la central del enlace. */
+  useEffect(() => {
+    if (!isAdmin || !companyIdFromUrl) return;
+    setSelectedCompanyId(companyIdFromUrl);
+  }, [isAdmin, companyIdFromUrl]);
+
+  const driversOnMap = useMemo(() => fleet.filter((d) => d.lat != null && d.lon != null), [fleet]);
+  /** Datos en vivo del conductor seleccionado (teléfono, placa, posición) al refrescar la flota. */
+  const selectedDriverLive = useMemo(() => {
+    if (!selectedDriver) return null;
+    return fleet.find((d) => d.userId === selectedDriver.userId) ?? selectedDriver;
+  }, [fleet, selectedDriver]);
+
+  const companyName = me?.company?.name ?? "Empresa";
+  const serviceMapView = useMemo(() => resolveCentralServiceMapView(me?.company), [me?.company]);
+
+  const handlePersistServiceMap = async (lat: number, lon: number, zoom: number) => {
+    const cityZoom = Math.min(14, Math.max(9, Math.round(zoom)));
+    try {
+      await patchServiceMap.mutateAsync({ lat, lon, cityZoom });
+      toast({
+        title: "Vista guardada",
+        description: "«Mi ciudad» y el zoom inicial usarán esta posición para tu central.",
+      });
+    } catch (e: unknown) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: e instanceof Error ? e.message : "No se pudo guardar",
+      });
+    }
+  };
+
+  const handleSaveFares = () => {
+    if (!mobilityDraft || !packDraft) return;
+    patchFares.mutate(
+      { mobilityFares: mobilityDraft, packFares: packDraft },
+      {
+        onSuccess: () => toast({ title: "Tarifas guardadas" }),
+        onError: (e) => toast({ variant: "destructive", title: "Error", description: e.message }),
+      },
+    );
+  };
+
+  const sharedProps = {
+    companyId: effectiveCompanyId!,
+    companyName,
+    isAdmin,
+    companies: companies ?? [],
+    companySearch,
+    onCompanySearchChange: setCompanySearch,
+    selectedCompanyId: effectiveCompanyId,
+    onCompanyChange: setSelectedCompanyId,
+    driversOnMap,
+    membersCount: members.length,
+    activeOnMap: driversOnMap.length,
+    inServiceCount: fleet.filter((d) => d.inService).length,
+    fleetCount: fleet.length,
+    selectedDriver: selectedDriverLive,
+    onSelectDriver: setSelectedDriver,
+    mobilityDraft,
+    packDraft,
+    onMobilityDraftChange: setMobilityDraft,
+    onPackDraftChange: setPackDraft,
+    onSaveFares: handleSaveFares,
+    faresSaving: patchFares.isPending,
+    onMemberRegistered: () => void refetchFleet(),
+    serviceMapView,
+    onPersistServiceMap: handlePersistServiceMap,
+    persistServiceMapPending: patchServiceMap.isPending,
+    pendingAffiliationCount,
+    highlightAffiliationRequestId: affiliationRequestFromUrl,
+    onRefreshFleet: refetchFleet,
+    fleetRefreshing,
+  };
 
   if (authLoading) {
     return (
@@ -141,10 +193,10 @@ export default function CentralDashboard() {
   if (isAdmin && !effectiveCompanyId) {
     return (
       <div className="container max-w-lg py-12">
-        <Card>
+        <Card className="border-primary/20 shadow-md">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
+              <Building2 className="h-5 w-5 text-primary" />
               Panel Central
             </CardTitle>
             <CardDescription>Selecciona la empresa despachadora que deseas administrar.</CardDescription>
@@ -163,293 +215,34 @@ export default function CentralDashboard() {
     );
   }
 
-  const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    try {
-      await registerMember.mutateAsync({
-        memberType,
-        email: String(fd.get("email")),
-        password: String(fd.get("password")),
-        name: String(fd.get("name")),
-        lastName: String(fd.get("lastName")),
-        phone: String(fd.get("phone")),
-        offerKind: memberType === "driver" ? offerKind : undefined,
-      });
-      toast({ title: "Usuario registrado", description: "La cuenta fue creada correctamente." });
-      (e.target as HTMLFormElement).reset();
-      void refetchFleet();
-    } catch (err: unknown) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: err instanceof Error ? err.message : "No se pudo registrar",
-      });
-    }
-  };
-
-  return (
-    <div className="container max-w-7xl py-6 space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Central — {me?.company?.name ?? "Empresa"}</h1>
-          <p className="text-muted-foreground text-sm">Flota en tiempo real y tarifas de taxi y delivery.</p>
-        </div>
-        {isAdmin && (
-          <CompanyCombobox
-            companies={companies ?? []}
-            value={effectiveCompanyId}
-            onChange={setSelectedCompanyId}
-            search={companySearch}
-            onSearchChange={setCompanySearch}
-          />
-        )}
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2 overflow-hidden">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Mapa de flota</CardTitle>
-            <CardDescription>Conductores buscando clientes o en servicio activo.</CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <CentralFleetMap drivers={driversOnMap} onSelectDriver={setSelectedDriver} />
-          </CardContent>
-        </Card>
-
-        <Card>
+  if (!effectiveCompanyId) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-12">
+        <Card className="border-amber-500/30 shadow-md">
           <CardHeader>
-            <CardTitle className="text-lg">Conductor</CardTitle>
+            <CardTitle className="text-lg">Sin empresa despachadora asignada</CardTitle>
+            <CardDescription>
+              Tu cuenta tiene acceso al panel central, pero no figura vinculada a ninguna empresa activa. Pide a un
+              administrador que asigne tu usuario a una central, o revisa que tu sesión esté actualizada.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            {selectedDriver ? (
-              <DriverCard driver={selectedDriver} />
-            ) : (
-              <p className="text-sm text-muted-foreground">Selecciona un marcador en el mapa.</p>
-            )}
+          <CardContent className="flex flex-wrap gap-2">
+            <Button asChild variant="default">
+              <Link href="/">Volver al inicio</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href={CENTRAL_APP_SETTINGS_HREF}>Ir a configuración</Link>
+            </Button>
           </CardContent>
         </Card>
       </div>
+    );
+  }
 
-      <Tabs defaultValue="fares">
-        <TabsList>
-          <TabsTrigger value="fares">Tarifas</TabsTrigger>
-          <TabsTrigger value="members">Registrar usuarios</TabsTrigger>
-        </TabsList>
-        <TabsContent value="fares" className="space-y-4">
-          {mobilityDraft && packDraft && (
-            <>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Taxi (movilidad)</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(
-                    [
-                      ["moto", "Moto"],
-                      ["auto", "Auto"],
-                      ["camioneta", "Camioneta"],
-                      ["pet_car", "Pet"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <FareTierFields
-                      key={key}
-                      label={label}
-                      perKm={mobilityDraft[key].perKmUsd}
-                      minUsd={mobilityDraft[key].minUsd}
-                      onPerKm={(v) =>
-                        setMobilityDraft((m) => (m ? { ...m, [key]: { ...m[key], perKmUsd: v } } : m))
-                      }
-                      onMin={(v) =>
-                        setMobilityDraft((m) => (m ? { ...m, [key]: { ...m[key], minUsd: v } } : m))
-                      }
-                    />
-                  ))}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Delivery</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(
-                    [
-                      ["moto", "Moto"],
-                      ["auto", "Auto"],
-                      ["camioneta", "Camioneta"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <FareTierFields
-                      key={key}
-                      label={label}
-                      perKm={packDraft[key].perKmUsd}
-                      minUsd={packDraft[key].minUsd}
-                      onPerKm={(v) =>
-                        setPackDraft((p) => (p ? { ...p, [key]: { ...p[key], perKmUsd: v } } : p))
-                      }
-                      onMin={(v) =>
-                        setPackDraft((p) => (p ? { ...p, [key]: { ...p[key], minUsd: v } } : p))
-                      }
-                    />
-                  ))}
-                </CardContent>
-              </Card>
-              <Button
-                disabled={patchFares.isPending}
-                onClick={() =>
-                  patchFares.mutate(
-                    { mobilityFares: mobilityDraft, packFares: packDraft },
-                    {
-                      onSuccess: () => toast({ title: "Tarifas guardadas" }),
-                      onError: (e) =>
-                        toast({ variant: "destructive", title: "Error", description: e.message }),
-                    },
-                  )
-                }
-              >
-                {patchFares.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar tarifas"}
-              </Button>
-            </>
-          )}
-        </TabsContent>
-        <TabsContent value="members">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <UserPlus className="h-4 w-4" />
-                Nuevo usuario de la empresa
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form className="grid gap-4 max-w-md" onSubmit={handleRegister}>
-                <div className="grid gap-2">
-                  <Label>Tipo</Label>
-                  <Select value={memberType} onValueChange={(v) => setMemberType(v as "central" | "driver")}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="central">Operador central</SelectItem>
-                      <SelectItem value="driver">Conductor (taxi + delivery)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {memberType === "driver" && (
-                  <div className="grid gap-2">
-                    <Label>Vehículo</Label>
-                    <Select value={offerKind} onValueChange={(v) => setOfferKind(v as typeof offerKind)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="moto">Moto</SelectItem>
-                        <SelectItem value="carro">Carro</SelectItem>
-                        <SelectItem value="camion">Camioneta</SelectItem>
-                        <SelectItem value="pet">Pet</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                <Input name="name" placeholder="Nombre" required />
-                <Input name="lastName" placeholder="Apellido" required />
-                <Input name="email" type="email" placeholder="Correo" required />
-                <Input name="phone" placeholder="Teléfono" required />
-                <Input name="password" type="password" placeholder="Contraseña" required minLength={6} />
-                <Button type="submit" disabled={registerMember.isPending}>
-                  Registrar
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-}
-
-function DriverCard({ driver }: { driver: CentralFleetDriver }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-3">
-        <Avatar className="h-12 w-12">
-          <AvatarImage src={driver.avatar ?? undefined} />
-          <AvatarFallback>
-            {driver.name[0]}
-            {driver.lastName[0]}
-          </AvatarFallback>
-        </Avatar>
-        <div>
-          <p className="font-semibold">
-            {driver.name} {driver.lastName}
-          </p>
-          <p className="text-sm text-muted-foreground flex items-center gap-1">
-            <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
-            {driver.rating.toFixed(1)}
-          </p>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Badge variant={driver.inService ? "default" : "secondary"}>
-          {driver.inService ? "En servicio" : "Buscando clientes"}
-        </Badge>
-        <Badge variant={driver.receiving ? "outline" : "destructive"}>
-          {driver.receiving ? "Activo" : "Inactivo"}
-        </Badge>
-      </div>
-    </div>
-  );
-}
-
-function CompanyCombobox({
-  companies,
-  value,
-  onChange,
-  search,
-  onSearchChange,
-}: {
-  companies: { id: string; name: string }[];
-  value: string | null;
-  onChange: (id: string | null) => void;
-  search: string;
-  onSearchChange: (s: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = companies.find((c) => c.id === value);
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return companies;
-    return companies.filter((c) => c.name.toLowerCase().includes(q));
-  }, [companies, search]);
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="outline" className="w-full max-w-sm justify-between font-normal">
-          {selected?.name ?? "Seleccionar central…"}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[320px] p-0" align="start">
-        <Command shouldFilter={false}>
-          <CommandInput placeholder="Buscar empresa…" value={search} onValueChange={onSearchChange} />
-          <CommandList>
-            <CommandEmpty>Sin resultados</CommandEmpty>
-            <CommandGroup>
-              {filtered.map((c) => (
-                <CommandItem
-                  key={c.id}
-                  value={c.id}
-                  onSelect={() => {
-                    onChange(c.id);
-                    setOpen(false);
-                  }}
-                >
-                  {c.name}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+  /** Un solo árbol con mapa Leaflet: si Mobile y Desktop montan a la vez, el mapa de escritorio (oculto con CSS) sigue viviendo en DOM y se superpone en móvil. */
+  return isWideCentralLayout ? (
+    <CentralDashboardDesktop {...sharedProps} />
+  ) : (
+    <CentralDashboardMobile {...sharedProps} />
   );
 }

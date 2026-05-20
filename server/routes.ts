@@ -14,11 +14,24 @@ import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
+import { getDispatchCompany } from "./dispatch-companies";
+import {
+  createCentralAffiliationRequest,
+  findPendingAffiliation,
+  listCentralAffiliationRequestsForApplicant,
+  getCentralAffiliationRequest,
+  updateCentralAffiliationRequest,
+} from "./central-affiliation-store";
+import { notifyCentralOperatorsNewAffiliation } from "./central-affiliation-notify";
 import {
   patchProfessionalVerificationImageBody,
   patchProfessionalVerificationCredentialBody,
   patchProfessionalVerificationPaymentBody,
+  hasVerificationCuotaSatisfiedByPromoPrefund,
+  isAssociateOnboardingDossierComplete,
+  isAssociateOnboardingVerificationDocsComplete,
 } from "@shared/professional-verification";
+import { ensurePromoPrefundedOnboardingQueuedForAdmin } from "./associate-verification-promo-prefund";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { registerGenFebRoutes } from "./routes-genfeb";
 import { registerAuthRoutes as registerJwtAuthRoutes, authenticateJWT, optionalAuthenticateJWT } from "./routes-auth";
@@ -188,6 +201,7 @@ export async function registerRoutes(
     serviceDescription: z.string().trim().max(5000).optional(),
     vehicle: z.any().optional(),
     dispatchCompanyId: z.string().nullable().optional(),
+    pendingCentralCompanyId: z.string().min(1).max(80).optional(),
   });
 
   /** Habilita módulos taxi + delivery (Go) y datos de conductor para un proveedor ya existente. */
@@ -267,15 +281,46 @@ export async function registerRoutes(
           ? null
           : String(body.dispatchCompanyId ?? "").trim() || null;
 
-      await catalogService.updateProvider(pid, {
+      const pendingCentralRaw =
+        typeof body.pendingCentralCompanyId === "string" ? body.pendingCentralCompanyId.trim() : "";
+      const pendingCentral = pendingCentralRaw.length > 0 ? pendingCentralRaw : "";
+
+      const providerPatch: Record<string, unknown> = {
         goBrands: merged,
         goDriverOfferTitle: serviceTitle,
         goDriverOfferDescription: serviceDescription,
-        ...(body.dispatchCompanyId !== undefined ? { dispatchCompanyId } : {}),
         ...categoryPatch,
-      });
+      };
+
+      if (pendingCentral) {
+        const comp = await getDispatchCompany(pendingCentral);
+        if (!comp?.isActive) {
+          return res.status(400).json({ message: "La empresa central indicada no existe o no está activa." });
+        }
+        providerPatch.dispatchCompanyId = null;
+      } else if (body.dispatchCompanyId !== undefined) {
+        providerPatch.dispatchCompanyId = dispatchCompanyId;
+      }
+
+      await catalogService.updateProvider(pid, providerPatch as Parameters<typeof catalogService.updateProvider>[1]);
 
       await catalogService.syncProviderCategorySlotsFromServices(pid);
+
+      if (pendingCentral) {
+        const dup = await findPendingAffiliation(userId, pendingCentral);
+        if (!dup) {
+          const row = await createCentralAffiliationRequest({
+            applicantUserId: userId,
+            providerId: pid,
+            dispatchCompanyId: pendingCentral,
+          });
+          await notifyCentralOperatorsNewAffiliation({
+            requestId: row.id,
+            companyId: pendingCentral,
+            applicantUserId: userId,
+          });
+        }
+      }
 
       const hasTransport = providerHasGoBrand({ ...provider, goBrands: merged }, "transport", categories);
       const hasDelivery = providerHasGoBrand({ ...provider, goBrands: merged }, "delivery", categories);
@@ -287,12 +332,58 @@ export async function registerRoutes(
         hasPrimaryVehicle: !!vAfter,
         hasTransport,
         hasDelivery,
+        centralAffiliationPending: Boolean(pendingCentral),
       });
     } catch (e: any) {
       if (e?.name === "ZodError") {
         return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
       }
       return res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  app.get("/api/me/central-affiliation-requests", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const list = await listCentralAffiliationRequestsForApplicant(String(userId));
+      const requests = await Promise.all(
+        list.map(async (row) => {
+          const c = await getDispatchCompany(row.dispatchCompanyId);
+          return { ...row, companyName: c?.name ?? "Central" };
+        }),
+      );
+      res.json({ requests });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  const grantCentralDataSharingSchema = z.object({
+    requestId: z.string().min(1).max(120),
+  });
+
+  app.post("/api/me/central-affiliation/grant-data-sharing", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const { requestId } = grantCentralDataSharingSchema.parse(req.body);
+      const row = await getCentralAffiliationRequest(requestId);
+      if (!row || row.applicantUserId !== userId) {
+        return res.status(404).json({ message: "Solicitud no encontrada." });
+      }
+      if (row.dataAccessStatus !== "requested") {
+        return res.status(409).json({ message: "No hay una solicitud de datos pendiente para esta central." });
+      }
+      await updateCentralAffiliationRequest(requestId, { dataAccessStatus: "granted" });
+      await genFebStorage.updateUser(userId, {
+        centralDataShareForCompanyId: row.dispatchCompanyId,
+        centralDataShareGrantedAt: new Date().toISOString(),
+      } as Parameters<typeof genFebStorage.updateUser>[1]);
+      res.json({ ok: true });
+    } catch (e: any) {
+      if (e?.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
+      res.status(500).json({ message: e?.message ?? "Error" });
     }
   });
 
@@ -346,6 +437,11 @@ export async function registerRoutes(
           identification_verified: "rejected",
           transacction_date: null,
           transacction_verified: null,
+          pendingIdResubmitCount: 0,
+          pendingCredentialResubmitCount: 0,
+          prefundPromoAwaitingDossier: false,
+          prefundPromoCode: null,
+          prefundPromoMonths: null,
         });
       }
 
@@ -355,6 +451,17 @@ export async function registerRoutes(
         identification_verified: st.identification_verified,
         transacction_date: st.transacction_date ?? null,
         transacction_verified: st.transacction_verified,
+        pendingIdResubmitCount: (st as any).pendingIdResubmitCount ?? 0,
+        pendingCredentialResubmitCount: (st as any).pendingCredentialResubmitCount ?? 0,
+        prefundPromoAwaitingDossier: (st as any).prefundPromoAwaitingDossier === true,
+        prefundPromoCode:
+          typeof (st as any).prefundPromoCode === "string" && String((st as any).prefundPromoCode).trim()
+            ? String((st as any).prefundPromoCode).trim().toUpperCase()
+            : null,
+        prefundPromoMonths:
+          typeof (st as any).prefundPromoMonths === "number" && Number.isFinite((st as any).prefundPromoMonths)
+            ? Math.max(1, Math.min(12, Math.trunc((st as any).prefundPromoMonths)))
+            : null,
       });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Error" });
@@ -375,6 +482,16 @@ export async function registerRoutes(
         return res.status(409).json({ message: "La identificación ya fue verificada" });
       }
 
+      const profBefore = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const hadImage = Boolean(typeof profBefore?.imageUrl === "string" && profBefore.imageUrl.trim());
+      const idPending = st?.identification_verified === "pending";
+      if (hadImage && idPending && (st?.pendingIdResubmitCount ?? 0) >= 1) {
+        return res.status(409).json({
+          message:
+            "Ya reemplazaste una vez tu identificación mientras la solicitud está en revisión. Espera la respuesta del equipo; si rechazan tus documentos podrás enviar todo de nuevo.",
+        });
+      }
+
       const body = patchProfessionalVerificationImageBody.parse(req.body);
 
       await genFebStorage.updateUser(userId, {
@@ -388,8 +505,11 @@ export async function registerRoutes(
       // Cambiar estado en verifying_status → identification_verified = pending
       await genFebStorage.upsertVerifyingStatusIdentificationPending(userId, "onboarding" as any);
 
-      // Notificación a admins solo cuando el onboarding está completo (identificación + documento + pago),
-      // ver `PATCH .../payment` y listado `/api/admin/verifying-status/pending`.
+      if (hadImage && idPending) {
+        await genFebStorage.incrementPendingIdResubmitCount(userId);
+      }
+
+      await ensurePromoPrefundedOnboardingQueuedForAdmin(userId);
 
       const doc = await genFebStorage.getProfessionalVerificationByUserId(userId);
       res.json({
@@ -416,8 +536,30 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
 
+      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      if ((provider as { isVerified?: boolean }).isVerified) {
+        return res.status(409).json({ message: "Tu cuenta profesional ya está verificada" });
+      }
+
+      const profBefore = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const hadCred = Boolean(
+        typeof profBefore?.professionalCredentialUrl === "string" && profBefore.professionalCredentialUrl.trim(),
+      );
+      const inReview =
+        st?.identification_verified === "pending" || st?.transacction_verified === "pending";
+      if (hadCred && inReview && (st?.pendingCredentialResubmitCount ?? 0) >= 1) {
+        return res.status(409).json({
+          message:
+            "Ya reemplazaste una vez tu documento profesional mientras la solicitud está en revisión. Espera la respuesta del equipo; si rechazan tus documentos podrás enviar todo de nuevo.",
+        });
+      }
+
       const parsed = patchProfessionalVerificationCredentialBody.parse(req.body);
       const updated = await genFebStorage.upsertProfessionalVerificationCredential(userId, parsed.professionalCredentialUrl);
+
+      if (hadCred && inReview) {
+        await genFebStorage.incrementPendingCredentialResubmitCount(userId);
+      }
 
       // Guardar también en Mis documentos (bóveda). Esto permite verlo siempre aunque haya subido más tarde.
       try {
@@ -438,6 +580,8 @@ export async function registerRoutes(
         console.error("Error guardando documento profesional en bóveda:", e);
       }
 
+      await ensurePromoPrefundedOnboardingQueuedForAdmin(userId);
+
       return res.json({
         userId,
         professionalCredentialUrl: updated?.professionalCredentialUrl ?? null,
@@ -451,6 +595,62 @@ export async function registerRoutes(
     } catch (e: any) {
       if (e?.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
       res.status(400).json({ message: e?.message || "Error al guardar" });
+    }
+  });
+
+  /** Alta con ticket de mes(es) gratis: envía documentos + comprobante simbólico del código a revisión del admin. */
+  app.post("/api/me/professional-verification/submit-prefund-dossier", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const provider = await catalogService.getProviderByUserId(userId);
+      if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
+      if ((provider as { isVerified?: boolean }).isVerified) {
+        return res.status(409).json({ message: "Tu cuenta profesional ya está verificada" });
+      }
+
+      if (!hasVerificationCuotaSatisfiedByPromoPrefund(provider as any)) {
+        return res.status(400).json({
+          message: "Primero canjea un código de mes(es) gratis en la pantalla de cuota o espera a que tu beneficio esté activo.",
+        });
+      }
+
+      const prof = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      if (!isAssociateOnboardingVerificationDocsComplete(prof)) {
+        return res.status(400).json({
+          message: "Sube tu identificación y tu documento profesional (o licencia) antes de enviar a verificación.",
+        });
+      }
+
+      const stBefore = await genFebStorage.getVerifyingStatusByUserId(userId);
+      if (stBefore?.transacction_verified === "pending") {
+        return res.status(409).json({
+          message: "Tu solicitud ya está en revisión. El equipo validará tus documentos y el beneficio del código.",
+        });
+      }
+      if (stBefore?.transacction_verified === "verified") {
+        return res.status(409).json({ message: "Tu cuota ya fue verificada por el equipo." });
+      }
+
+      await ensurePromoPrefundedOnboardingQueuedForAdmin(userId);
+
+      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      const profAfter = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      if (!isAssociateOnboardingDossierComplete(profAfter) || st?.transacction_verified !== "pending") {
+        return res.status(500).json({
+          message: "No se pudo registrar el envío. Intenta de nuevo o contacta soporte.",
+        });
+      }
+
+      return res.json({
+        ok: true,
+        prefundPromoCode: (st as { prefundPromoCode?: string }).prefundPromoCode ?? null,
+        prefundPromoMonths: (st as { prefundPromoMonths?: number }).prefundPromoMonths ?? null,
+        transferReceiptCode: profAfter?.transferReceiptCode ?? null,
+        transferDate: profAfter?.transferDate ?? null,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Error al enviar la solicitud" });
     }
   });
 

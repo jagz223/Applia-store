@@ -32,6 +32,45 @@ export const DEFAULT_DISPATCH_PACK_FARES: DispatchPackFares = {
   camioneta: { perKmUsd: 1.25, minUsd: 15 },
 };
 
+/** Centro por defecto del mapa de panel central (área metropolitana Quito). */
+export const DEFAULT_CENTRAL_SERVICE_MAP = {
+  lat: -0.1807,
+  lon: -78.4678,
+  /** Zoom amplio para ver la ciudad; no GPS del operador. */
+  cityZoom: 11,
+} as const;
+
+export type CentralServiceMapView = {
+  lat: number;
+  lon: number;
+  cityZoom: number;
+};
+
+/** Resuelve centro/zoom del mapa de central (Firestore puede tener valores personalizados). */
+export function resolveCentralServiceMapView(
+  company: Partial<{
+    serviceMapLat: number | null | undefined;
+    serviceMapLon: number | null | undefined;
+    serviceMapCityZoom: number | null | undefined;
+  }> | null | undefined,
+): CentralServiceMapView {
+  const d = DEFAULT_CENTRAL_SERVICE_MAP;
+  const lat = typeof company?.serviceMapLat === "number" && Number.isFinite(company.serviceMapLat)
+    ? company.serviceMapLat
+    : d.lat;
+  const lon = typeof company?.serviceMapLon === "number" && Number.isFinite(company.serviceMapLon)
+    ? company.serviceMapLon
+    : d.lon;
+  const cityZoom =
+    typeof company?.serviceMapCityZoom === "number" &&
+    Number.isFinite(company.serviceMapCityZoom) &&
+    company.serviceMapCityZoom >= 9 &&
+    company.serviceMapCityZoom <= 14
+      ? company.serviceMapCityZoom
+      : d.cityZoom;
+  return { lat, lon, cityZoom };
+}
+
 export type DispatchCompany = {
   id: string;
   name: string;
@@ -41,6 +80,10 @@ export type DispatchCompany = {
   packFares: DispatchPackFares;
   createdAt: string;
   updatedAt: string;
+  /** Centro de la ciudad de operación en el mapa del panel central (opcional). */
+  serviceMapLat?: number | null;
+  serviceMapLon?: number | null;
+  serviceMapCityZoom?: number | null;
 };
 
 export const DISPATCH_COMPANY_NONE = "__none__";

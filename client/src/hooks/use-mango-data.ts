@@ -340,6 +340,8 @@ export function useProviderVehicle(options?: { enabled?: boolean }) {
 
 export type EnrollGoDriverPayload = {
   dispatchCompanyId?: string | null;
+  /** Solicitud pendiente de aprobación por la central (no asigna empresa hasta que aprueben). */
+  pendingCentralCompanyId?: string | null;
   serviceTitle?: string;
   serviceDescription?: string;
   vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle;
@@ -369,18 +371,63 @@ export function useEnrollGoDriver() {
         hasPrimaryVehicle?: boolean;
         hasTransport?: boolean;
         hasDelivery?: boolean;
+        centralAffiliationPending?: boolean;
       };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/me/provider-vehicle"] });
       queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      queryClient.invalidateQueries({ queryKey: ["my-central-affiliation-requests"] });
       debouncedRefetch(queryClient, [api.providers.me.path]);
       debouncedRefetch(queryClient, ["/api/me/provider-vehicle"]);
       toast({
         title: "Genfeb Go activado",
-        description:
-          "Taxi y delivery quedan habilitados en tu cuenta (según verificación y suscripción). Puedes abrir Genfeb Go para conducir.",
+        description: data?.centralAffiliationPending
+          ? "Taxi y delivery quedan habilitados. Tu solicitud de afiliación a la central fue enviada; te avisaremos cuando la revisen."
+          : "Taxi y delivery quedan habilitados en tu cuenta (según verificación y suscripción). Puedes abrir Genfeb Go para conducir.",
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+/**
+ * Solicitud de afiliación a central para un conductor Go ya dado de alta (sin volver a enviar vehículo).
+ * Reutiliza POST /api/me/go-driver con cuerpo mínimo.
+ */
+export function useSubmitGoDriverPendingCentral() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (pendingCentralCompanyId: string) => {
+      const token = getToken();
+      const res = await fetch("/api/me/go-driver", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ pendingCentralCompanyId, dispatchCompanyId: null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { message?: string }).message || "No se pudo enviar la solicitud a la central");
+      }
+      return data as { centralAffiliationPending?: boolean };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+      queryClient.invalidateQueries({ queryKey: ["my-central-affiliation-requests"] });
+      debouncedRefetch(queryClient, [api.providers.me.path]);
+      toast({
+        title: "Solicitud enviada",
+        description: data?.centralAffiliationPending
+          ? "La central recibirá tu solicitud de afiliación. Te avisaremos cuando la revisen."
+          : "Tu solicitud fue registrada.",
       });
     },
     onError: (err: Error) => {
@@ -1602,6 +1649,13 @@ export type VerifyingStatusMeDto = {
   transacction_date: string | null;
   /** null = aún no hay intento de pago registrado */
   transacction_verified: "rejected" | "pending" | "verified" | null;
+  /** Reemplazos mientras sigue en revisión (cada tipo, máx. 1 extra; se resetea si el admin rechaza). */
+  pendingIdResubmitCount?: number;
+  pendingCredentialResubmitCount?: number;
+  /** Canje de meses gratis antes de tener expediente completo para el admin. */
+  prefundPromoAwaitingDossier?: boolean;
+  prefundPromoCode?: string | null;
+  prefundPromoMonths?: number | null;
 };
 
 export function useVerifyingStatusMe(enabled: boolean) {
@@ -1705,6 +1759,37 @@ export function usePatchProfessionalVerificationPayment() {
   });
 }
 
+export function useSubmitPrefundPromoDossier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = getToken();
+      const res = await fetch(`${PROFESSIONAL_VERIFICATION_ME}/submit-prefund-dossier`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { message?: string }).message || "No se pudo enviar la solicitud");
+      }
+      return data as {
+        ok: boolean;
+        prefundPromoCode?: string | null;
+        prefundPromoMonths?: number | null;
+        transferReceiptCode?: string | null;
+        transferDate?: string | null;
+      };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
+      queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
+    },
+  });
+}
+
 export function usePatchProfessionalVerificationCredential() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -1724,6 +1809,7 @@ export function usePatchProfessionalVerificationCredential() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
+      queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
       queryClient.invalidateQueries({ queryKey: ["vault-documents"] });
     },
   });

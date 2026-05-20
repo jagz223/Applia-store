@@ -179,9 +179,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const receiving = goSlug === "pack" ? receivingPack : receivingCargo;
   const activeRideIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    activeRideIdRef.current = activeRideId;
-  }, [activeRideId]);
+  activeRideIdRef.current = activeRideId;
   const activeRideOfferRef = useRef<CargoRideOfferPayload | null>(null);
   useEffect(() => {
     activeRideOfferRef.current = activeRideOffer;
@@ -311,12 +309,25 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 
   useEffect(() => {
     if (!navigator.geolocation) return;
-    const id = navigator.geolocation.watchPosition(
-      (p) => setGeoPos({ lat: p.coords.latitude, lon: p.coords.longitude }),
+    let cancelled = false;
+    const apply = (p: GeolocationPosition) => {
+      if (cancelled) return;
+      setGeoPos({ lat: p.coords.latitude, lon: p.coords.longitude });
+    };
+    navigator.geolocation.getCurrentPosition(
+      apply,
       () => {},
-      { enableHighAccuracy: true, maximumAge: 4000, timeout: 20000 }
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 25_000 },
     );
-    return () => navigator.geolocation.clearWatch(id);
+    const id = navigator.geolocation.watchPosition(
+      apply,
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 60_000 },
+    );
+    return () => {
+      cancelled = true;
+      navigator.geolocation.clearWatch(id);
+    };
   }, []);
 
   useEffect(() => {
@@ -726,6 +737,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   }, [rateStars, toast, rideApiBase, canReceive, providerVehicle?.vehicle_type, goSlug]);
 
   const emitDriverPresenceOffline = useCallback(() => {
+    /** No borrar presencia en servidor durante un viaje: la central sigue mostrando posición. */
+    if (activeRideIdRef.current) return;
     if (!socket) return;
     socket.emit("cargo:driver:presence", { receiving: false, vehicleType: "", isPetFriendly: false, lat: 0, lon: 0 });
     socket.emit("pack:driver:presence", { receiving: false, vehicleType: "", lat: 0, lon: 0 });
@@ -763,37 +776,60 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 
   useEffect(() => {
     if (!socket) return;
-    if (!canReceive || !providerVehicle?.vehicle_type || !geoPos) {
-      emitDriverPresenceOffline();
+
+    const vehicleType = providerVehicle?.vehicle_type?.trim() ?? "";
+    const pet = !!providerVehicle?.is_pet_friendly;
+
+    const syncFleetPresence = (): boolean => {
+      const pos = geoPosRef.current;
+      if (!pos || !vehicleType) return false;
+
+      if (canReceive) {
+        const cargoReceiving = receivingCargo;
+        const packReceiving = receivingPack;
+        socket.emit("cargo:driver:presence", {
+          receiving: cargoReceiving,
+          vehicleType: cargoReceiving ? vehicleType : "",
+          isPetFriendly: pet,
+          lat: pos.lat,
+          lon: pos.lon,
+        });
+        socket.emit("pack:driver:presence", {
+          receiving: packReceiving,
+          vehicleType: packReceiving ? vehicleType : "",
+          lat: pos.lat,
+          lon: pos.lon,
+        });
+        return true;
+      }
+
+      if (activeRideIdRef.current) {
+        socket.emit("cargo:driver:presence", {
+          receiving: false,
+          vehicleType: goSlug === "cargo" ? vehicleType : "",
+          isPetFriendly: pet,
+          lat: pos.lat,
+          lon: pos.lon,
+        });
+        socket.emit("pack:driver:presence", {
+          receiving: false,
+          vehicleType: goSlug === "pack" ? vehicleType : "",
+          lat: pos.lat,
+          lon: pos.lon,
+        });
+        return true;
+      }
+
+      return false;
+    };
+
+    if (!syncFleetPresence()) {
+      if (!activeRideIdRef.current) emitDriverPresenceOffline();
       return;
     }
 
-    const cargoReceiving = receivingCargo;
-    const packReceiving = receivingPack;
-
-    const sendCargo = () => {
-      socket.emit("cargo:driver:presence", {
-        receiving: cargoReceiving,
-        vehicleType: cargoReceiving ? providerVehicle.vehicle_type : "",
-        isPetFriendly: !!providerVehicle.is_pet_friendly,
-        lat: geoPos.lat,
-        lon: geoPos.lon,
-      });
-    };
-    const sendPack = () => {
-      socket.emit("pack:driver:presence", {
-        receiving: packReceiving,
-        vehicleType: packReceiving ? providerVehicle.vehicle_type : "",
-        lat: geoPos.lat,
-        lon: geoPos.lon,
-      });
-    };
-
-    sendCargo();
-    sendPack();
     const t = window.setInterval(() => {
-      sendCargo();
-      sendPack();
+      syncFleetPresence();
     }, 4000);
 
     return () => {
@@ -809,6 +845,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     providerVehicle?.is_pet_friendly,
     geoPos,
     emitDriverPresenceOffline,
+    goSlug,
+    activeRideId,
   ]);
 
   useEffect(() => {
@@ -1044,7 +1082,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         });
         return;
       }
-      activeRideIdRef.current = null;
       clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       setActiveRideId(null);
       setActiveRideOffer(null);
@@ -1676,7 +1713,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 
       {/* Escritorio / tablet: mapa ancho + columna de controles (sin saldo fijo inferior). */}
       <div
-        className="container mx-auto hidden w-full max-w-full flex-1 flex-col gap-6 px-4 pb-10 pt-4 md:flex md:max-w-5xl md:gap-7 lg:max-w-6xl lg:gap-10 lg:px-6 xl:max-w-[88rem]"
+        className="container mx-auto hidden w-full max-w-full flex-1 flex-col gap-6 px-4 pb-10 pt-4 lg:flex lg:max-w-6xl lg:gap-10 lg:px-6 xl:max-w-[88rem]"
       >
         {headerBlock}
 

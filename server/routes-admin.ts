@@ -12,6 +12,7 @@ import { authenticateJWT } from "./routes-auth";
 import { requireAdminStaff, requireFullAdmin, requireStaffFromDb } from "./middleware-roles";
 import { userService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
+import { maybeVerifyProfessional } from "./maybe-verify-professional";
 import { catalogService, promotionalCodeService } from "./services";
 import {
   PromotionalCodeConflictError,
@@ -43,11 +44,13 @@ import {
   setHiddenCategorySlugs,
   setHiddenCategorySlugsForRole,
 } from "./category-visibility";
+import admin from "firebase-admin";
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
 import { isFullAdmin } from "@shared/roles";
 import {
   extendVisibilitySubscriptionEndsAtByMonths,
   parseVisibilitySubscriptionEndMs,
+  listingSubscriptionDaysRemaining,
 } from "@shared/professional-listing-subscription";
 import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
 import { vehicleChangeProposalSchema } from "@shared/vehicle-change-proposal";
@@ -58,7 +61,6 @@ import {
 } from "@shared/admin-active-providers-directory";
 import { buildMobilityCategoryApprovalPatch } from "@shared/provider-category-membership";
 import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
-import { listingSubscriptionDaysRemaining } from "@shared/professional-listing-subscription";
 import { buildSubscriptionPaymentAuditMeta } from "@shared/admin-audit-payment-meta";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
@@ -129,6 +131,46 @@ const updateUserSchema = z.object({
   role: z.string().min(1).max(50).optional(),
   newPassword: z.string().min(6).max(100).optional(),
 });
+
+/** Serializa `createdAt` del historial admin (Firestore Timestamp, Date, ISO, {seconds}) a ISO para JSON. */
+function serializeAdminAuditCreatedAt(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  if (typeof value === "object" && "toDate" in value && typeof (value as { toDate: () => Date }).toDate === "function") {
+    const d = (value as { toDate: () => Date }).toDate();
+    return d instanceof Date && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+  }
+  if (typeof value === "object" && value !== null) {
+    const o = value as Record<string, unknown>;
+    const sec = o.seconds ?? o._seconds;
+    if (typeof sec === "number" && !Number.isNaN(sec)) {
+      const d = new Date(sec * 1000 + (typeof o.nanoseconds === "number" ? o.nanoseconds / 1e6 : 0));
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    }
+    if (typeof o.toMillis === "function") {
+      const d = new Date((o.toMillis as () => number)());
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    }
+  }
+  return null;
+}
+
+/** Límite `YYYY-MM-DD` como inicio/fin de día UTC (intervalo inclusivo en `to`). */
+function utcDayBounds(ymd: string): { start: Date; end: Date } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    throw new Error("invalid_date");
+  }
+  const start = new Date(`${ymd}T00:00:00.000Z`);
+  const end = new Date(`${ymd}T23:59:59.999Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new Error("invalid_date");
+  return { start, end };
+}
 
 /** Serializa a objeto plano para JSON (p. ej. Timestamp de Firestore → ISO string). */
 function toPlainUser(obj: unknown): Record<string, unknown> {
@@ -368,53 +410,6 @@ export function registerAdminRoutes(app: Express): void {
   app.use("/api/admin/users", authenticateJWT, requireStaffFromDb, adminUsersRouter);
 
   /**
-   * Si ambos pasos de verificación están en "verified",
-   * entonces marca al profesional como verificado (providers.isVerified = true).
-   */
-  async function maybeVerifyProfessional(userId: string): Promise<void> {
-    const st = await genFebStorage.getVerifyingStatusByUserId(userId);
-    if (!st) return;
-
-    const bothApproved = st.identification_verified === "verified" && st.transacction_verified === "verified";
-    if (!bothApproved) return;
-
-    const provider = await genFebStorage.getProviderByUserId(userId);
-    if (!provider) return;
-
-    // ProviderUpdate (types) no incluye isVerified; en runtime la colección sí lo soporta.
-    await genFebStorage.updateProvider(provider.id, { isVerified: true } as any);
-
-    // --- Notificar al usuario (Bienvenida) ---
-    try {
-      const msg = "¡Felicidades! Ahora eres un Asociado verificado de GenFeb. ¡Bienvenido!";
-      await genFebStorage.createNotification({
-        userId,
-        type: "verification_welcome",
-        data: { message: msg, url: "/professional-dashboard" }
-      });
-
-      const io = getIO();
-      if (io) {
-        io.to(`user:${userId}`).emit("notification", {
-          type: "verification_welcome",
-          title: "¡Bienvenido Asociado!",
-          body: msg,
-          data: { url: "/professional-dashboard" }
-        });
-      }
-
-      void notificationService.sendPushToUser(userId, {
-        title: "¡Bienvenido Asociado!",
-        body: msg,
-        data: { url: "/professional-dashboard" }
-      }).catch(err => console.error("[push-welcome] Error:", err));
-    } catch (err) {
-      console.error("Error notificando bienvenida:", err);
-    }
-    // -----------------------------------------
-  }
-
-  /**
    * VERIFICACIÓN DE ASOCIADOS
    * verificación_status/pending + aprobar/rechazar
    */
@@ -458,6 +453,10 @@ export function registerAdminRoutes(app: Express): void {
         promotionalDiscountPercent?: number | null;
         subscriptionOriginalTotalUsd?: number | null;
         subscriptionDiscountedTotalUsd?: number | null;
+        /** true si canjeó meses gratis antes de tener expediente completo para el admin. */
+        prefundPromoAwaitingDossier?: boolean;
+        prefundPromoCode?: string | null;
+        prefundPromoMonths?: number | null;
       }> = [];
 
       for (const st of pending ?? []) {
@@ -531,10 +530,21 @@ export function registerAdminRoutes(app: Express): void {
             : "onboarding");
 
         const isRenewalProvider = (provider as any)?.isVerified === true;
-        if (!isRenewalProvider && !isAssociateOnboardingDossierComplete(profVer)) {
+        const prefundAwaiting =
+          (st as { prefundPromoAwaitingDossier?: boolean }).prefundPromoAwaitingDossier === true;
+        if (!isRenewalProvider && !isAssociateOnboardingDossierComplete(profVer) && !prefundAwaiting) {
           continue;
         }
 
+        const prefundCode =
+          typeof (st as { prefundPromoCode?: string }).prefundPromoCode === "string"
+            ? String((st as { prefundPromoCode?: string }).prefundPromoCode).trim()
+            : null;
+        const rawPrefundMonths = (st as { prefundPromoMonths?: unknown }).prefundPromoMonths;
+        const prefundMonths =
+          typeof rawPrefundMonths === "number" && Number.isFinite(rawPrefundMonths)
+            ? Math.max(1, Math.min(12, Math.trunc(rawPrefundMonths)))
+            : null;
         items.push({
           userId,
           name,
@@ -556,6 +566,9 @@ export function registerAdminRoutes(app: Express): void {
           promotionalDiscountPercent,
           subscriptionOriginalTotalUsd,
           subscriptionDiscountedTotalUsd,
+          prefundPromoAwaitingDossier: prefundAwaiting,
+          prefundPromoCode: prefundCode || null,
+          prefundPromoMonths: prefundMonths,
         });
       }
 
@@ -568,19 +581,61 @@ export function registerAdminRoutes(app: Express): void {
 
   app.get("/api/admin/audit-log", authenticateJWT, requireFullAdmin, async (req: any, res) => {
     try {
-      const limRaw = Number(req.query?.limit ?? 50);
-      const limit = Number.isFinite(limRaw) ? Math.max(1, Math.min(200, limRaw)) : 50;
+      const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+      const fromQ = String(req.query?.from ?? "").trim();
+      const toQ = String(req.query?.to ?? "").trim();
+      if (fromQ && !dateRe.test(fromQ)) {
+        return res.status(400).json({ message: "Parámetro 'from' debe ser YYYY-MM-DD." });
+      }
+      if (toQ && !dateRe.test(toQ)) {
+        return res.status(400).json({ message: "Parámetro 'to' debe ser YYYY-MM-DD." });
+      }
+      if (fromQ && toQ && fromQ > toQ) {
+        return res.status(400).json({ message: "'from' no puede ser posterior a 'to'." });
+      }
+
+      const hasRange = Boolean(fromQ || toQ);
+      let rangeStart: Date;
+      let rangeEnd: Date;
+      try {
+        rangeStart = fromQ ? utcDayBounds(fromQ).start : new Date(0);
+        rangeEnd = toQ ? utcDayBounds(toQ).end : new Date(8640000000000000);
+      } catch {
+        return res.status(400).json({ message: "Fechas inválidas." });
+      }
+
+      const limRaw = Number(req.query?.limit ?? (hasRange ? 300 : 80));
+      const limitCap = hasRange ? 500 : 200;
+      const limit = Number.isFinite(limRaw) ? Math.max(1, Math.min(limitCap, limRaw)) : hasRange ? 300 : 80;
+
       const db = getFirestore();
       let rawItems: any[];
+
       if (db) {
-        const snap = await db
-          .collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG)
-          .orderBy("createdAt", "desc")
-          .limit(limit)
-          .get();
-        rawItems = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        const col = db.collection(FIRESTORE_COLLECTIONS.ADMIN_AUDIT_LOG);
+        let snap;
+        if (hasRange) {
+          const ft = admin.firestore.Timestamp.fromDate(rangeStart);
+          const tt = admin.firestore.Timestamp.fromDate(rangeEnd);
+          snap = await col.where("createdAt", ">=", ft).where("createdAt", "<=", tt).orderBy("createdAt", "desc").limit(limit).get();
+        } else {
+          snap = await col.orderBy("createdAt", "desc").limit(limit).get();
+        }
+        rawItems = snap.docs.map((d: { id: string; data: () => Record<string, unknown> }) => ({
+          id: d.id,
+          ...d.data(),
+        }));
       } else {
-        rawItems = adminAuditMemoryLog.slice(0, limit).map((row) => ({
+        const filtered = hasRange
+          ? adminAuditMemoryLog.filter((row) => {
+              const t =
+                row.createdAt instanceof Date
+                  ? row.createdAt.getTime()
+                  : new Date(row.createdAt as unknown as string).getTime();
+              return t >= rangeStart.getTime() && t <= rangeEnd.getTime();
+            })
+          : adminAuditMemoryLog;
+        rawItems = filtered.slice(0, limit).map((row) => ({
           id: row.id,
           action: row.action,
           adminUserId: row.adminUserId,
@@ -633,8 +688,10 @@ export function registerAdminRoutes(app: Express): void {
       const items = rawItems.map((it) => {
         const admin = adminById.get(String(it.adminUserId ?? "").trim()) ?? null;
         const affected = affectedById.get(String(it.affectedUserId ?? "").trim()) ?? null;
+        const createdAtIso = serializeAdminAuditCreatedAt(it.createdAt);
         return {
           ...it,
+          createdAt: createdAtIso,
           adminName: admin?.name ?? null,
           adminEmail: admin?.email ?? null,
           affectedUserName: affected?.name ?? null,
@@ -642,7 +699,7 @@ export function registerAdminRoutes(app: Express): void {
         };
       });
 
-      return res.json({ items, total: items.length });
+      return res.json({ items, total: items.length, from: fromQ || null, to: toQ || null });
     } catch (e) {
       console.error("Error listing admin audit log:", e);
       return res.status(500).json({ message: "Error al listar historial" });
@@ -960,7 +1017,9 @@ export function registerAdminRoutes(app: Express): void {
             action: isApprove ? "associate_onboarding_approved" : "associate_onboarding_rejected",
             adminUserId: String(req.user?.id ?? ""),
             affectedUserId: userId,
-            meta: isApprove ? undefined : { reason: rejectReason },
+            meta: isApprove
+              ? { documentKind: "identification" }
+              : { documentKind: "identification", reason: rejectReason },
           });
         } catch {
           /* ignore */

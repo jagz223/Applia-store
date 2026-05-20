@@ -6,6 +6,7 @@ import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
 import {
   DEFAULT_DISPATCH_MOBILITY_FARES,
   DEFAULT_DISPATCH_PACK_FARES,
+  DEFAULT_CENTRAL_SERVICE_MAP,
   type DispatchCompany,
   type DispatchMobilityFares,
   type DispatchPackFares,
@@ -53,8 +54,21 @@ export function sanitizeDispatchPackFares(input?: Partial<DispatchPackFares>): D
   };
 }
 
+function sanitizeServiceMapLatLon(
+  lat: unknown,
+  lon: unknown,
+  zoom: unknown,
+): Pick<DispatchCompany, "serviceMapLat" | "serviceMapLon" | "serviceMapCityZoom"> {
+  const d = DEFAULT_CENTRAL_SERVICE_MAP;
+  const latN = typeof lat === "number" && Number.isFinite(lat) ? clamp(lat, -90, 90) : d.lat;
+  const lonN = typeof lon === "number" && Number.isFinite(lon) ? clamp(lon, -180, 180) : d.lon;
+  const z = typeof zoom === "number" && Number.isFinite(zoom) ? clamp(Math.round(zoom), 9, 14) : d.cityZoom;
+  return { serviceMapLat: latN, serviceMapLon: lonN, serviceMapCityZoom: z };
+}
+
 function docToCompany(id: string, data: Record<string, unknown>): DispatchCompany {
   const now = new Date().toISOString();
+  const sm = sanitizeServiceMapLatLon(data.serviceMapLat, data.serviceMapLon, data.serviceMapCityZoom);
   return {
     id,
     name: String(data.name ?? "").trim(),
@@ -64,6 +78,7 @@ function docToCompany(id: string, data: Record<string, unknown>): DispatchCompan
     packFares: sanitizeDispatchPackFares(data.packFares as Partial<DispatchPackFares>),
     createdAt: String(data.createdAt ?? now),
     updatedAt: String(data.updatedAt ?? now),
+    ...sm,
   };
 }
 
@@ -73,6 +88,7 @@ export async function createDispatchCompany(input: {
 }): Promise<DispatchCompany> {
   const id = randomUUID();
   const now = new Date().toISOString();
+  const d = DEFAULT_CENTRAL_SERVICE_MAP;
   const company: DispatchCompany = {
     id,
     name: input.name.trim(),
@@ -82,6 +98,9 @@ export async function createDispatchCompany(input: {
     packFares: { ...DEFAULT_DISPATCH_PACK_FARES },
     createdAt: now,
     updatedAt: now,
+    serviceMapLat: d.lat,
+    serviceMapLon: d.lon,
+    serviceMapCityZoom: d.cityZoom,
   };
   memoryCompanies.set(id, company);
   const db = getFirestore();
@@ -120,13 +139,35 @@ export async function listDispatchCompanies(activeOnly = true): Promise<Dispatch
 
 export async function updateDispatchCompany(
   id: string,
-  patch: Partial<Pick<DispatchCompany, "name" | "isActive" | "mobilityFares" | "packFares">>,
+  patch: Partial<
+    Pick<
+      DispatchCompany,
+      | "name"
+      | "isActive"
+      | "mobilityFares"
+      | "packFares"
+      | "serviceMapLat"
+      | "serviceMapLon"
+      | "serviceMapCityZoom"
+    >
+  >,
 ): Promise<DispatchCompany | null> {
   const current = await getDispatchCompany(id);
   if (!current) return null;
+  const sm =
+    patch.serviceMapLat !== undefined ||
+    patch.serviceMapLon !== undefined ||
+    patch.serviceMapCityZoom !== undefined
+      ? sanitizeServiceMapLatLon(
+          patch.serviceMapLat ?? current.serviceMapLat,
+          patch.serviceMapLon ?? current.serviceMapLon,
+          patch.serviceMapCityZoom ?? current.serviceMapCityZoom,
+        )
+      : {};
   const updated: DispatchCompany = {
     ...current,
     ...patch,
+    ...sm,
     mobilityFares: patch.mobilityFares
       ? sanitizeDispatchMobilityFares(patch.mobilityFares)
       : current.mobilityFares,

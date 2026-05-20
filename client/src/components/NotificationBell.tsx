@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2 } from "lucide-react";
+import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,16 @@ import { Link, useLocation } from "wouter";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useConversations } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  NOTIFICATION_TYPE_CENTRAL_AFFILIATION,
+  NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED,
+  NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED,
+  NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS,
+} from "@shared/central-affiliation";
+import {
+  centralAffiliationApplicantNotificationPath,
+  centralAffiliationNotificationPath,
+} from "@/lib/central-affiliation-notification-path";
 
 /** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificaci?n (con highlight para resaltar el elemento). */
 function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
@@ -134,6 +144,13 @@ function getNotificationPath(notification: { id?: string; type: string; data?: a
       const u = data.url ?? data.data?.url;
       return typeof u === "string" && u.startsWith("/") ? u : "/settings";
     }
+    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION:
+      return centralAffiliationNotificationPath(data);
+    case NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS:
+      return centralAffiliationApplicantNotificationPath(data);
+    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED:
+    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED:
+      return centralAffiliationApplicantNotificationPath(data);
     default:
       return "/dashboard";
   }
@@ -263,6 +280,12 @@ export function NotificationBell() {
         return <Bell className="h-4 w-4 text-green-500" />;
       case "vehicle_change_request_rejected":
         return <Bell className="h-4 w-4 text-amber-500" />;
+      case NOTIFICATION_TYPE_CENTRAL_AFFILIATION:
+      case NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS:
+      case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED:
+        return <Building2 className="h-4 w-4 text-primary" />;
+      case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED:
+        return <Building2 className="h-4 w-4 text-amber-600" />;
       default:
         return <Bell className="h-4 w-4 text-gray-500" />;
     }
@@ -395,6 +418,19 @@ export function NotificationBell() {
         ? "Abre Configuración para ver tu vehículo actualizado."
         : "Revisa el motivo en Configuración o envía una nueva solicitud.";
     }
+    if (type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION) {
+      return "Un conductor solicitó afiliarse a tu central. Revisa nombre, vehículo y documentación.";
+    }
+    if (type === NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS) {
+      return "Abre tu panel de asociado (Resumen) para revisar el alcance y ceder datos si lo deseas.";
+    }
+    if (type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED || type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED) {
+      const msg = data?.message ?? (data as any)?.data?.message;
+      if (typeof msg === "string" && msg.trim()) return msg.trim();
+      return type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED
+        ? "Tu central aprobó tu solicitud de afiliación."
+        : "Tu central no aprobó tu solicitud de afiliación.";
+    }
     return null;
   };
 
@@ -449,6 +485,21 @@ export function NotificationBell() {
       const t = data?.title ?? (data as any)?.data?.title;
       if (typeof t === "string" && t.trim()) return t.trim();
       return type === "vehicle_change_request_approved" ? "Vehículo actualizado" : "Vehículo: solicitud rechazada";
+    }
+    if (type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION) {
+      const name = data?.applicantName ?? (data as any)?.data?.applicantName ?? "Un conductor";
+      const cn = data?.companyName ?? (data as any)?.data?.companyName ?? "tu central";
+      return `${name} quiere unirse a ${cn}`;
+    }
+    if (type === NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS) {
+      const cn = data?.companyName ?? (data as any)?.data?.companyName ?? "Tu central";
+      return `${cn} solicita acceso a tus datos de contacto`;
+    }
+    if (type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED) {
+      return "Afiliación aprobada";
+    }
+    if (type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED) {
+      return "Afiliación no aprobada";
     }
     if (type === "message") {
       const d = data ?? ({} as any);

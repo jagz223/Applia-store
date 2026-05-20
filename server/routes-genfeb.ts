@@ -13,6 +13,9 @@ import {
   validatePromotionalCodeRequestSchema,
 } from "@shared/promotional-code-schema";
 import { extendVisibilitySubscriptionEndsAtByMonths } from "@shared/professional-listing-subscription";
+import { isAssociateOnboardingAdminQueueReady, type PrefundPromoProviderSlice } from "@shared/professional-verification";
+import { ensurePromoPrefundedOnboardingQueuedForAdmin } from "./associate-verification-promo-prefund";
+import { maybeVerifyProfessional } from "./maybe-verify-professional";
 import { getIO, sendNotificationToAdmins, sendNotificationToUser } from "./socket";
 import {
   applyServiceBookingChatLifecycle,
@@ -1897,6 +1900,19 @@ export async function registerGenFebRoutes(
       res.status(500).json({ message: "Internal server error" });
     }
   });
+
+  // POST /api/notifications/read-all - Marcar todas como leídas (campana «Limpiar»)
+  app.post("/api/notifications/read-all", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      await storage.markAllNotificationsAsReadForUser(String(userId));
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
   
   // ---------- INTEGRACIÓN CON APP MANGO ----------
   
@@ -2116,12 +2132,26 @@ export async function registerGenFebRoutes(
             visibilitySubscriptionLastPaymentApprovedAt: new Date(),
             visibilitySubscriptionLastPaymentApprovedBy: "promotional_code",
           } as any);
-        }
 
-        try {
-          await storage.setVerifyingStatusTransaction(userId, "verified" as any);
-        } catch (err) {
-          console.error("[promo] setVerifyingStatusTransaction:", err);
+          const profAfter = await storage.getProfessionalVerificationByUserId(userId);
+          const providerAfter = await storage.getProviderByUserId(userId);
+          if (!isAssociateOnboardingAdminQueueReady(profAfter, providerAfter as PrefundPromoProviderSlice | null)) {
+            await storage.upsertVerifyingStatusPrefundPromoAwaitingDossier(userId, {
+              code: parsed.data.code.trim().toUpperCase(),
+              monthsGranted: result.monthsGranted,
+            });
+          } else {
+            try {
+              await ensurePromoPrefundedOnboardingQueuedForAdmin(userId);
+            } catch (err) {
+              console.error("[promo] ensurePromoPrefundedOnboardingQueuedForAdmin tras meses gratuitos:", err);
+            }
+            try {
+              await maybeVerifyProfessional(userId);
+            } catch (err) {
+              console.error("[promo] maybeVerifyProfessional tras meses gratuitos:", err);
+            }
+          }
         }
 
         try {

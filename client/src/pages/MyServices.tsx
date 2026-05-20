@@ -16,13 +16,19 @@ import { goMobilitySubscriptionInactiveCta } from "@/components/listing-subscrip
 import { isProviderListingSubscriptionExpired } from "@/lib/provider-listing-subscription";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, ArrowLeft, PackageOpen, Plus, Car, Bike, Package, Settings2 } from "lucide-react";
+import { Loader2, ArrowLeft, PackageOpen, Plus, Car, Bike, Package, Settings2, Building2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { SETTINGS_VEHICLE_SECTION_QUERY_KEY } from "@shared/settings-notification-urls";
 import { providerHasGoBrand } from "@shared/provider-go";
 import { computeMyServicesCardRows } from "@shared/my-services-display-policy";
 import { canDeleteCatalogService } from "@shared/provider-primary-catalog-service";
+import {
+  canOfferCentralAffiliationRequest,
+  hasPendingCentralAffiliationRequest,
+} from "@/lib/go-driver-central-affiliation";
+import { RequestCentralAffiliationDialog } from "@/components/provider/RequestCentralAffiliationDialog";
+import { useMyCentralAffiliationRequests } from "@/hooks/use-central";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -78,6 +84,17 @@ export default function MyServices() {
 
   const showDriverPreview = !!vehicle || goTaxi || goDelivery;
 
+  const { data: affiliationRequests = [] } = useMyCentralAffiliationRequests(
+    shouldFetchMyServices && mobilityGoVisible && !!provider,
+  );
+
+  const canRequestCentralAffiliation = canOfferCentralAffiliationRequest({
+    mobilityGoVisible,
+    driverEnrollmentComplete,
+    provider: provider as { dispatchCompanyId?: string | null } | null,
+  });
+  const centralAffiliationPending = hasPendingCentralAffiliationRequest(affiliationRequests);
+
   const showBecomeDriverCta = mobilityGoVisible && !!provider && !driverEnrollmentComplete;
 
   const catalogVisibilitySuspended = isProviderListingSubscriptionExpired(
@@ -100,6 +117,7 @@ export default function MyServices() {
   const registrationCategoryId = provider ? Number((provider as { categoryId?: number }).categoryId) : undefined;
   const deleteService = useDeleteService();
   const [deleteServiceId, setDeleteServiceId] = useState<number | null>(null);
+  const [centralAffiliationDialogOpen, setCentralAffiliationDialogOpen] = useState(false);
 
   if (!authLoading && !isAuthenticated) {
     return <Redirect to="/login" />;
@@ -147,6 +165,26 @@ export default function MyServices() {
                     Convertirse en conductor
                   </Link>
                 </Button>
+              ) : null}
+              {canRequestCentralAffiliation ? (
+                centralAffiliationPending ? (
+                  <Button variant="outline" className="gap-2 sm:self-start" asChild>
+                    <Link href="/professional-dashboard?tab=overview">
+                      <Building2 className="h-4 w-4" />
+                      Solicitud de central
+                    </Link>
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 sm:self-start"
+                    onClick={() => setCentralAffiliationDialogOpen(true)}
+                  >
+                    <Building2 className="h-4 w-4" />
+                    Solicitar central
+                  </Button>
+                )
               ) : null}
             </div>
           </div>
@@ -252,6 +290,27 @@ export default function MyServices() {
                   <Button variant="ghost" size="sm" asChild>
                     <Link href="/go/delivery/driver/settings">Ajustes delivery</Link>
                   </Button>
+                  {canRequestCentralAffiliation ? (
+                    centralAffiliationPending ? (
+                      <Button variant="secondary" size="sm" className="gap-2" asChild>
+                        <Link href="/professional-dashboard?tab=overview">
+                          <Building2 className="h-4 w-4" />
+                          Solicitud de central
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => setCentralAffiliationDialogOpen(true)}
+                      >
+                        <Building2 className="h-4 w-4" />
+                        Solicitar central
+                      </Button>
+                    )
+                  ) : null}
                 </div>
               </CardContent>
             </Card>
@@ -358,6 +417,8 @@ export default function MyServices() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RequestCentralAffiliationDialog open={centralAffiliationDialogOpen} onOpenChange={setCentralAffiliationDialogOpen} />
     </div>
   );
 }

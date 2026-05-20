@@ -33,24 +33,47 @@ export function useAssociateOnboardingIncomplete() {
   const role = String((user as { role?: string } | null)?.role ?? "").toLowerCase();
   const isProfessionalRole = role === "professional";
 
-  const hasProvider = providerProfile != null;
+  /**
+   * `/api/auth/me` suele traer `user.provider` en cuanto existe fila de proveedor.
+   * `/api/providers/me` puede ir detrás (caché null + refetch): sin esto el banner «registro sin terminar»
+   * parpadea un frame y desaparece al recargar.
+   */
+  const embeddedProviderId = Number((user as { provider?: { id?: unknown } } | null)?.provider?.id);
+  const hasEmbeddedProvider = Number.isFinite(embeddedProviderId) && embeddedProviderId > 0;
+  const hasProviderRecord = providerProfile != null || hasEmbeddedProvider;
+
+  /** Profesional sin fila aún resuelta: esperar a que termine el fetch (incl. refetch con isLoading ya false). */
+  const providerStillResolving =
+    isAuthenticated &&
+    isProfessionalRole &&
+    !hasProviderRecord &&
+    (providerLoading || providerFetching);
 
   useEffect(() => {
-    if (hasProvider) clearAssociateOnboardingStarted();
-  }, [hasProvider]);
+    if (hasProviderRecord) clearAssociateOnboardingStarted();
+  }, [hasProviderRecord]);
 
   const incomplete = useMemo(() => {
     if (!isAuthenticated || authLoading) return false;
     if (providerLoading) return false;
-    if (hasProvider) return false;
+    if (providerStillResolving) return false;
+    if (hasProviderRecord) return false;
     return isProfessionalRole || startedFlag;
-  }, [isAuthenticated, authLoading, providerLoading, hasProvider, isProfessionalRole, startedFlag]);
+  }, [
+    isAuthenticated,
+    authLoading,
+    providerLoading,
+    hasProviderRecord,
+    isProfessionalRole,
+    startedFlag,
+    providerStillResolving,
+  ]);
 
   const associatePanelHref = incomplete ? "/become-pro" : "/professional-dashboard";
 
   return {
     incomplete,
     associatePanelHref,
-    loading: authLoading || providerLoading,
+    loading: authLoading || providerLoading || providerStillResolving,
   };
 }

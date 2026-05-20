@@ -64,6 +64,8 @@ export type ProviderUpdate = Partial<
     Provider,
     "categoryId" | "category" | "profession" | "bio" | "yearsExperience" | "hourlyRate" | "skills" | "isVerified"
   > & {
+    /** Empresa despachadora (central); en Firestore en el doc del proveedor. */
+    dispatchCompanyId?: string | null;
     subcategoryId?: number | null;
     /** Módulos Go (taxi / delivery / marketplace) cuando el proveedor opera en Car Go. */
     goBrands?: string[] | null;

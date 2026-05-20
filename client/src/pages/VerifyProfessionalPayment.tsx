@@ -28,12 +28,16 @@ import {
   useCurrentProvider,
   useCategories,
   useProfessionalVerification,
+  useVerifyingStatusMe,
   VERIFICATION_STATUS_ME,
   PROFESSIONAL_VERIFICATION_ME,
   type VerifyingStatusMeDto,
   type ProfessionalVerificationDto,
 } from "@/hooks/use-mango-data";
-import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
+import {
+  hasVerificationCuotaSatisfiedByPromoPrefund,
+  isAssociateOnboardingDossierComplete,
+} from "@shared/professional-verification";
 import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
 import {
   consumeVerifyReturnPath,
@@ -61,6 +65,7 @@ export default function VerifyProfessionalPayment() {
   const verificationEnabled = Boolean(isAuthenticated && user?.provider);
   const { data: verificationForGate, isLoading: verificationGateLoading } =
     useProfessionalVerification(verificationEnabled);
+  const { data: verifyingStatus, isLoading: verifyingStatusLoading } = useVerifyingStatusMe(verificationEnabled);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -68,6 +73,41 @@ export default function VerifyProfessionalPayment() {
   useEffect(() => {
     ensureDefaultVerifyReturnPath();
   }, []);
+
+  /** Alta inicial: si el pago ya fue validado (cupón, ticket, transferencia), no volver a pedir comprobante aquí. */
+  useEffect(() => {
+    if (!verificationEnabled || isRenewalSimple || verifyingStatusLoading || !verifyingStatus) return;
+    if (verifyingStatus.transacction_verified === "verified") {
+      setLocation("/professional/verify");
+    }
+  }, [verificationEnabled, isRenewalSimple, verifyingStatusLoading, verifyingStatus, setLocation]);
+
+  const hasIdAndCredentialEarly =
+    Boolean(String(verificationForGate?.imageUrl ?? "").trim()) &&
+    Boolean(String(verificationForGate?.professionalCredentialUrl ?? "").trim());
+
+  /** Tras canjear mes(es) gratis, el envío al admin se hace desde verificación, no desde transferencia bancaria. */
+  useEffect(() => {
+    if (!verificationEnabled || isRenewalSimple || verificationGateLoading || verifyingStatusLoading) return;
+    if (
+      !hasVerificationCuotaSatisfiedByPromoPrefund(
+        provider as { visibilitySubscriptionLastPaymentApprovedBy?: string | null; visibilitySubscriptionEndsAt?: unknown },
+      )
+    ) {
+      return;
+    }
+    if (!hasIdAndCredentialEarly) return;
+    setLocation("/professional/verify");
+  }, [
+    verificationEnabled,
+    isRenewalSimple,
+    verificationGateLoading,
+    verifyingStatusLoading,
+    provider,
+    hasIdAndCredentialEarly,
+    setLocation,
+  ]);
+
   const [transferDate, setTransferDate] = useState<Date | undefined>(undefined);
   const [transferCode, setTransferCode] = useState<string>("");
   const [subscriptionMonths, setSubscriptionMonths] = useState<number>(1);
@@ -105,7 +145,12 @@ export default function VerifyProfessionalPayment() {
     await queryClient.invalidateQueries({ queryKey: [VERIFICATION_STATUS_ME] });
     await queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
     await queryClient.invalidateQueries({ queryKey: [PROFESSIONAL_VERIFICATION_ME] });
-    setLocation(consumeVerifyReturnPath());
+    toast({
+      title: "Mes(es) gratis activados",
+      description:
+        "Tu cuota quedó cubierta por el ticket. Completa tus documentos en verificación y pulsa «Enviar todo a ser verificado».",
+    });
+    queueMicrotask(() => setLocation("/professional/verify"));
   };
 
   const handleDiscountPromo = (result: RedeemPromotionalCodeDiscount, code: string) => {
@@ -209,7 +254,15 @@ export default function VerifyProfessionalPayment() {
     Boolean(String(verificationForGate?.professionalCredentialUrl ?? "").trim());
   const canAccessPayment = isRenewalSimple || hasIdAndCredentialForPayment;
 
-  if (verificationGateLoading) {
+  if (verificationGateLoading || verifyingStatusLoading) {
+    return (
+      <div className="container max-w-4xl py-16 flex justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!isRenewalSimple && verifyingStatus?.transacction_verified === "verified") {
     return (
       <div className="container max-w-4xl py-16 flex justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />

@@ -2993,6 +2993,22 @@ class FirestoreStorageImpl implements IStorage {
     await this.db.collection(FIRESTORE_COLLECTIONS.NOTIFICATIONS).doc(notificationId.toString()).update({ read: true, readAt: new Date() });
   }
 
+  async markAllNotificationsAsReadForUser(userId: string): Promise<void> {
+    if (!this.db) return;
+    const snap = await this.db.collection(FIRESTORE_COLLECTIONS.NOTIFICATIONS).where("userId", "==", userId).get();
+    const unreadDocs = snap.docs.filter((d) => !(d.data() as { read?: boolean }).read);
+    if (unreadDocs.length === 0) return;
+    const now = new Date();
+    const CHUNK = 450;
+    for (let i = 0; i < unreadDocs.length; i += CHUNK) {
+      const batch = this.db.batch();
+      for (const doc of unreadDocs.slice(i, i + CHUNK)) {
+        batch.update(doc.ref, { read: true, readAt: now });
+      }
+      await batch.commit();
+    }
+  }
+
   // ============ PETICIONES DE CAMBIO DE CUENTA ============
   async createAccountChangeRequest(input: {
     userId: string;
@@ -3783,6 +3799,23 @@ class FirestoreStorageImpl implements IStorage {
         data.transacction_verified === undefined || data.transacction_verified === null
           ? null
           : (data.transacction_verified as any),
+      pendingIdResubmitCount:
+        typeof data.pendingIdResubmitCount === "number" && Number.isFinite(data.pendingIdResubmitCount)
+          ? Math.max(0, Math.trunc(data.pendingIdResubmitCount as number))
+          : undefined,
+      pendingCredentialResubmitCount:
+        typeof data.pendingCredentialResubmitCount === "number" && Number.isFinite(data.pendingCredentialResubmitCount)
+          ? Math.max(0, Math.trunc(data.pendingCredentialResubmitCount as number))
+          : undefined,
+      prefundPromoAwaitingDossier: data.prefundPromoAwaitingDossier === true ? true : undefined,
+      prefundPromoCode:
+        typeof data.prefundPromoCode === "string" && data.prefundPromoCode.trim()
+          ? String(data.prefundPromoCode).trim().toUpperCase()
+          : undefined,
+      prefundPromoMonths:
+        typeof data.prefundPromoMonths === "number" && Number.isFinite(data.prefundPromoMonths)
+          ? Math.max(1, Math.min(12, Math.trunc(data.prefundPromoMonths as number)))
+          : undefined,
       createdAt: data.createdAt as any,
       updatedAt: data.updatedAt as any,
     } as VerifyingStatus;
@@ -3801,11 +3834,18 @@ class FirestoreStorageImpl implements IStorage {
     const snap = await ref.get();
 
     if (snap.exists) {
-      await ref.update({
+      const prev = snap.data() as Record<string, unknown> | undefined;
+      const prevId = prev?.identification_verified;
+      const patch: Record<string, unknown> = {
         requestType,
         identification_verified: "pending",
         updatedAt: new Date(),
-      });
+      };
+      if (prevId === "rejected") {
+        patch.pendingIdResubmitCount = 0;
+        patch.pendingCredentialResubmitCount = 0;
+      }
+      await ref.update(patch);
     } else {
       await ref.set({
         user: userId,
@@ -3840,6 +3880,11 @@ class FirestoreStorageImpl implements IStorage {
         identification_verified: existing?.identification_verified ?? "rejected",
         transacction_date: transactionDate,
         transacction_verified: "pending",
+        pendingIdResubmitCount: existing?.pendingIdResubmitCount,
+        pendingCredentialResubmitCount: existing?.pendingCredentialResubmitCount,
+        prefundPromoAwaitingDossier: false,
+        prefundPromoCode: (existing as { prefundPromoCode?: string } | null)?.prefundPromoCode,
+        prefundPromoMonths: (existing as { prefundPromoMonths?: number } | null)?.prefundPromoMonths,
         createdAt: existing?.createdAt ?? new Date(),
         updatedAt: new Date(),
       },
@@ -3862,15 +3907,33 @@ class FirestoreStorageImpl implements IStorage {
         data.transacction_verified === undefined || data.transacction_verified === null
           ? null
           : (data.transacction_verified as any),
+      pendingIdResubmitCount:
+        typeof data.pendingIdResubmitCount === "number" && Number.isFinite(data.pendingIdResubmitCount)
+          ? Math.max(0, Math.trunc(data.pendingIdResubmitCount as number))
+          : undefined,
+      pendingCredentialResubmitCount:
+        typeof data.pendingCredentialResubmitCount === "number" && Number.isFinite(data.pendingCredentialResubmitCount)
+          ? Math.max(0, Math.trunc(data.pendingCredentialResubmitCount as number))
+          : undefined,
+      prefundPromoAwaitingDossier: data.prefundPromoAwaitingDossier === true ? true : undefined,
+      prefundPromoCode:
+        typeof data.prefundPromoCode === "string" && data.prefundPromoCode.trim()
+          ? String(data.prefundPromoCode).trim().toUpperCase()
+          : undefined,
+      prefundPromoMonths:
+        typeof data.prefundPromoMonths === "number" && Number.isFinite(data.prefundPromoMonths)
+          ? Math.max(1, Math.min(12, Math.trunc(data.prefundPromoMonths as number)))
+          : undefined,
       createdAt: data.createdAt as any,
       updatedAt: data.updatedAt as any,
     });
 
     const byUserId = new Map<string, VerifyingStatus>();
 
-    const [snapId, snapTx] = await Promise.all([
+    const [snapId, snapTx, snapPrefund] = await Promise.all([
       this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).where("identification_verified", "==", "pending").get(),
       this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).where("transacction_verified", "==", "pending").get(),
+      this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).where("prefundPromoAwaitingDossier", "==", true).get(),
     ]);
 
     for (const d of snapId.docs) {
@@ -3879,6 +3942,11 @@ class FirestoreStorageImpl implements IStorage {
       byUserId.set(String(d.id), v);
     }
     for (const d of snapTx.docs) {
+      const data = d.data() as Record<string, unknown>;
+      const v = makeFromData({ ...data, user: data.user ?? d.id });
+      byUserId.set(String(d.id), v);
+    }
+    for (const d of snapPrefund.docs) {
       const data = d.data() as Record<string, unknown>;
       const v = makeFromData({ ...data, user: data.user ?? d.id });
       byUserId.set(String(d.id), v);
@@ -3895,10 +3963,15 @@ class FirestoreStorageImpl implements IStorage {
     // Solo bloquear si ya está verificado.
     if (existing.identification_verified === "verified") throw new Error("La identificación ya fue verificada");
 
-    await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update({
+    const updatePayload: Record<string, unknown> = {
       identification_verified: status,
       updatedAt: new Date(),
-    });
+    };
+    if (status === "rejected") {
+      updatePayload.pendingIdResubmitCount = 0;
+      updatePayload.pendingCredentialResubmitCount = 0;
+    }
+    await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update(updatePayload);
 
     const out = await this.getVerifyingStatusByUserId(userId);
     if (!out) throw new Error("No se pudo guardar el estado");
@@ -3912,13 +3985,112 @@ class FirestoreStorageImpl implements IStorage {
     if (existing.transacction_verified == null) throw new Error("Aún no hay comprobante de pago");
     if (existing.transacction_verified === "verified") throw new Error("La transacción ya fue verificada");
 
-    await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update({
+    const updatePayload: Record<string, unknown> = {
       transacction_verified: status,
       updatedAt: new Date(),
-    });
+    };
+    if (status === "rejected") {
+      updatePayload.pendingIdResubmitCount = 0;
+      updatePayload.pendingCredentialResubmitCount = 0;
+    }
+    await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update(updatePayload);
 
     const out = await this.getVerifyingStatusByUserId(userId);
     if (!out) throw new Error("No se pudo guardar el estado");
+    return out;
+  }
+
+  async incrementPendingIdResubmitCount(userId: string): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update({
+      pendingIdResubmitCount: 1,
+      updatedAt: new Date(),
+    });
+  }
+
+  async incrementPendingCredentialResubmitCount(userId: string): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    await this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId).update({
+      pendingCredentialResubmitCount: 1,
+      updatedAt: new Date(),
+    });
+  }
+
+  async upsertVerifyingStatusPrefundPromoAwaitingDossier(
+    userId: string,
+    args: { code: string; monthsGranted: number },
+  ): Promise<VerifyingStatus> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId);
+    const existing = await this.getVerifyingStatusByUserId(userId);
+    const code = args.code.trim().toUpperCase();
+    const months = Math.max(1, Math.min(12, Math.trunc(args.monthsGranted)));
+    await ref.set(
+      {
+        user: userId,
+        requestType: existing?.requestType ?? "onboarding",
+        identification_verified: existing?.identification_verified ?? "rejected",
+        transacction_date: existing?.transacction_date ?? null,
+        transacction_verified: existing?.transacction_verified ?? null,
+        pendingIdResubmitCount: existing?.pendingIdResubmitCount,
+        pendingCredentialResubmitCount: existing?.pendingCredentialResubmitCount,
+        prefundPromoAwaitingDossier: true,
+        prefundPromoCode: code,
+        prefundPromoMonths: months,
+        createdAt: existing?.createdAt ?? new Date(),
+        updatedAt: new Date(),
+      },
+      { merge: true },
+    );
+    const out = await this.getVerifyingStatusByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar el estado");
+    return out;
+  }
+
+  async clearVerifyingStatusPrefundPromoAwaitingDossier(userId: string): Promise<void> {
+    if (!this.db) return;
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.VERIFYING_STATUS).doc(userId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    await ref.update({
+      prefundPromoAwaitingDossier: false,
+      updatedAt: new Date(),
+    });
+  }
+
+  async mergeProfessionalVerificationFreeMonthsPrefundPlaceholder(
+    userId: string,
+    data: {
+      transferReceiptCode: string;
+      transferDate: string;
+      subscriptionMonths: number;
+      promotionalCode: string | null;
+    },
+  ): Promise<ProfessionalVerification> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const ref = this.db.collection(FIRESTORE_COLLECTIONS.PROFESSIONAL_VERIFICATIONS).doc(userId);
+    const snap = await ref.get();
+    const existing = snap.exists ? await this.getProfessionalVerificationByUserId(userId) : null;
+    const payload: Record<string, unknown> = {
+      userId,
+      imageUrl: existing?.imageUrl ?? null,
+      imageVerified: existing?.imageVerified === true ? true : false,
+      professionalCredentialUrl: existing?.professionalCredentialUrl ?? null,
+      transferReceiptCode: data.transferReceiptCode.trim(),
+      transferDate: data.transferDate.trim(),
+      subscriptionMonths: Math.max(1, Math.min(12, Math.trunc(data.subscriptionMonths))),
+      promotionalCode: data.promotionalCode?.trim().toUpperCase() || null,
+      promotionalDiscountPercent: null,
+      subscriptionOriginalTotalUsd: null,
+      subscriptionDiscountedTotalUsd: null,
+      updatedAt: new Date(),
+    };
+    if (!snap.exists) {
+      payload.createdAt = new Date();
+    }
+    await ref.set(payload, { merge: true });
+    const out = await this.getProfessionalVerificationByUserId(userId);
+    if (!out) throw new Error("No se pudo guardar el comprobante simbólico");
     return out;
   }
 

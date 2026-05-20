@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useRef, useState } from "react";
 import { Loader2, PartyPopper, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,7 @@ export function SubscriptionPromoCodeApply({
   onDiscountApplied,
 }: SubscriptionPromoCodeApplyProps) {
   const redeemMutation = useRedeemPromotionalCode();
+  const freeMonthsDismissHandledRef = useRef(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [codeDraft, setCodeDraft] = useState("");
   const [inlineError, setInlineError] = useState<string | null>(null);
@@ -65,6 +66,7 @@ export function SubscriptionPromoCodeApply({
       setCodeDraft("");
 
       if (result.applied === "meses_gratuitos") {
+        freeMonthsDismissHandledRef.current = false;
         setFreeMonthsSuccess(result);
         return;
       }
@@ -172,6 +174,8 @@ export function SubscriptionPromoCodeApply({
         open={freeMonthsSuccess != null}
         onOpenChange={(open) => {
           if (open || !freeMonthsSuccess) return;
+          if (freeMonthsDismissHandledRef.current) return;
+          freeMonthsDismissHandledRef.current = true;
           const applied = freeMonthsSuccess;
           setFreeMonthsSuccess(null);
           onFreeMonthsApplied(applied);
@@ -200,7 +204,8 @@ export function SubscriptionPromoCodeApply({
             <Button
               type="button"
               onClick={() => {
-                if (!freeMonthsSuccess) return;
+                if (!freeMonthsSuccess || freeMonthsDismissHandledRef.current) return;
+                freeMonthsDismissHandledRef.current = true;
                 const applied = freeMonthsSuccess;
                 setFreeMonthsSuccess(null);
                 onFreeMonthsApplied(applied);
