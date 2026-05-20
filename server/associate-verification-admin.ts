@@ -1,6 +1,8 @@
 import {
-  isAssociateOnboardingDossierComplete,
+  isAssociateOnboardingAdminQueueReady,
+  type PrefundPromoProviderSlice,
   type ProfessionalVerification,
+  type VerifyingStatus,
 } from "@shared/professional-verification";
 
 type MinimalStorage = {
@@ -10,7 +12,8 @@ type MinimalStorage = {
 };
 
 /**
- * Cuenta solicitudes que el admin debe atender: renovaciones (solo pago) o onboarding con los 3 requisitos completos.
+ * Cuenta solicitudes que el admin debe atender: renovaciones, onboarding listo para cola,
+ * o asociados con mes(es) gratis por código que aún deben completar documentación (prefund).
  */
 export async function countVerificationsAwaitingAdminReview(storage: MinimalStorage): Promise<number> {
   const pending = await storage.getPendingVerifyingStatuses();
@@ -24,7 +27,11 @@ export async function countVerificationsAwaitingAdminReview(storage: MinimalStor
       continue;
     }
     const prof = await storage.getProfessionalVerificationByUserId(userId);
-    if (isAssociateOnboardingDossierComplete(prof as ProfessionalVerification | null)) {
+    const vst = st as VerifyingStatus;
+    if (
+      vst.prefundPromoAwaitingDossier === true ||
+      isAssociateOnboardingAdminQueueReady(prof as ProfessionalVerification | null, provider as PrefundPromoProviderSlice | null)
+    ) {
       n++;
     }
   }

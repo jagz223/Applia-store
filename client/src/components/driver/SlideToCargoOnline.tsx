@@ -73,7 +73,11 @@ export function SlideToCargoOnline({
     setDragging(true);
     dragStartOffset.current = offsetRef.current;
     dragStartClientX.current = e.clientX;
-    (e.currentTarget as HTMLButtonElement).setPointerCapture(e.pointerId);
+    try {
+      (e.currentTarget as HTMLButtonElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* Algunos entornos rechazan captura; el gesto sigue con eventos en el botón */
+    }
   };
 
   const onKnobPointerMove = (e: React.PointerEvent) => {
@@ -105,9 +109,20 @@ export function SlideToCargoOnline({
     }
   }, [maxX, receiving, onReceivingChange]);
 
+  const releaseCaptureSafe = (el: HTMLButtonElement, pointerId: number) => {
+    try {
+      if (typeof pointerId !== "number" || Number.isNaN(pointerId)) return;
+      if (el.hasPointerCapture(pointerId)) el.releasePointerCapture(pointerId);
+    } catch {
+      /* DOMException: Invalid pointer id (remount, doble pointerup/cancel, etc.) */
+    }
+  };
+
   const onKnobPointerUp = (e: React.PointerEvent) => {
     const el = e.currentTarget as HTMLButtonElement;
-    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    const wasActive = activeDrag.current;
+    releaseCaptureSafe(el, e.pointerId);
+    if (!wasActive) return;
     finishDrag();
   };
 
@@ -181,6 +196,14 @@ export function SlideToCargoOnline({
             onPointerMove={onKnobPointerMove}
             onPointerUp={onKnobPointerUp}
             onPointerCancel={onKnobPointerUp}
+            onLostPointerCapture={() => {
+              if (!activeDrag.current) return;
+              activeDrag.current = false;
+              setDragging(false);
+              const snap = receiving ? maxX : 0;
+              offsetRef.current = snap;
+              setOffset(snap);
+            }}
             disabled={disabled}
           >
             <ChevronRight className="h-7 w-7 shrink-0" aria-hidden />

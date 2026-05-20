@@ -63,6 +63,7 @@ import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscrip
 import { isAssociateOnboardingDossierComplete } from "@shared/professional-verification";
 import { getTransferTypeLabel, type TransferForInvoice } from "@/lib/invoice-pdf";
 import { SubscriptionInvoicesPanel } from "@/components/subscription/SubscriptionInvoicesPanel";
+import { ProfessionalCentralAffiliationPanel } from "@/components/professional/ProfessionalCentralAffiliationPanel";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
@@ -820,7 +821,9 @@ function ProfessionalDashboardInner() {
 
   const getTabFromUrl = () => {
     const search = typeof window !== "undefined" ? window.location.search : "";
-    const tab = new URLSearchParams(search).get("tab");
+    const params = new URLSearchParams(search);
+    if (params.get("centralAffiliation")) return "overview";
+    const tab = params.get("tab");
     if (tab === "transactions") return "overview";
     const t =
       tab && DASHBOARD_TABS.includes(tab as (typeof DASHBOARD_TABS)[number]) ? tab : "overview";
@@ -1118,6 +1121,7 @@ function ProfessionalDashboardInner() {
 
           <TabsContent value="overview" className="mt-4 outline-none">
             <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6">
+              <ProfessionalCentralAffiliationPanel />
               <Card className="card-industrial border-border/60 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg sm:text-xl">Suscripción de visibilidad</CardTitle>

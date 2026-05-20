@@ -140,11 +140,26 @@ type DriverPresence = {
   lon: number;
   updatedAt: number;
   dispatchCompanyId: string | null;
+  idleOnMapDuringRide?: boolean;
 };
 const onlineDrivers = new Map<string, DriverPresence>();
 
 export function getPackOnlineDriversSnapshot(): ReadonlyMap<string, DriverPresence> {
   return onlineDrivers;
+}
+
+/** Igual que {@link refreshMobilityPresenceDispatchCompany} para presencia delivery (pack). */
+export async function refreshPackPresenceDispatchCompany(driverUserId: string): Promise<void> {
+  const row = onlineDrivers.get(driverUserId);
+  if (!row) return;
+  const provider = await catalogService.getProviderByUserId(driverUserId);
+  const dispatchCompanyId = normalizeDispatchCompanyId(
+    (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
+  );
+  if (dispatchCompanyId === row.dispatchCompanyId) return;
+  const next: DriverPresence = { ...row, dispatchCompanyId };
+  onlineDrivers.set(driverUserId, next);
+  emitCentralFleetUpdate(getIO(), { ...next, isPetFriendly: false });
 }
 
 export function packDriverInActiveRide(userId: string): boolean {
@@ -157,6 +172,43 @@ export function packDriverInActiveRide(userId: string): boolean {
     }
   }
   return false;
+}
+
+/** Resumen del envío delivery activo del conductor para el panel central (matched / in_progress). */
+export async function getPackActiveRideForCentral(driverUserId: string) {
+  for (const r of rides.values()) {
+    if (r.driverUserId !== driverUserId) continue;
+    if (r.status !== "matched" && r.status !== "in_progress") continue;
+    const rider = await buildRiderPublic(r.riderUserId);
+    return {
+      mode: "delivery" as const,
+      rideId: r.id,
+      status: r.status,
+      vehicleType: r.vehicleType,
+      paymentMethod: r.paymentMethod,
+      paymentConfirmed: r.paymentConfirmed,
+      estimatedUsd: r.estimatedUsd,
+      suggestedUsd: typeof r.suggestedUsd === "number" ? r.suggestedUsd : null,
+      distanceM: r.distanceM,
+      durationSec: r.durationSec,
+      start: r.start,
+      end: r.end,
+      routeGeometry: r.routeGeometry,
+      driverSearchingClient: r.driverSearchingClient ?? false,
+      isNegotiated: r.isNegotiated ?? false,
+      rider: {
+        name: rider.name,
+        lastName: rider.lastName,
+        phone: rider.phone,
+        profileImageUrl: rider.profileImageUrl,
+        rating: rider.rating,
+        ratingCount: rider.ratingCount,
+        completedTrips: rider.completedTrips,
+        email: rider.email,
+      },
+    };
+  }
+  return null;
 }
 
 function safeNumber(v: unknown, fallback = 0): number {
@@ -464,6 +516,28 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
     socket.on("pack:driver:presence", (data: { receiving: boolean; vehicleType: string; lat: number; lon: number }) => {
       if (!data) return;
       if (!data.receiving) {
+        if (packDriverInActiveRide(user.id)) {
+          const prev = onlineDrivers.get(user.id);
+          if (prev) {
+            const lat = Number(data.lat);
+            const lon = Number(data.lon);
+            const posOk =
+              Number.isFinite(lat) &&
+              Number.isFinite(lon) &&
+              Math.abs(lat) <= 90 &&
+              Math.abs(lon) <= 180 &&
+              (Math.abs(lat) > 1e-4 || Math.abs(lon) > 1e-4);
+            const next: DriverPresence = {
+              ...prev,
+              updatedAt: Date.now(),
+              idleOnMapDuringRide: true,
+              ...(posOk ? { lat, lon } : {}),
+            };
+            onlineDrivers.set(user.id, next);
+            emitCentralFleetUpdate(io, { ...next, isPetFriendly: false });
+          }
+          return;
+        }
         const prev = onlineDrivers.get(user.id);
         onlineDrivers.delete(user.id);
         if (prev) emitCentralFleetUpdate(io, { ...prev, isPetFriendly: false, updatedAt: Date.now() }, true);
@@ -485,6 +559,7 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
         dispatchCompanyId: normalizeDispatchCompanyId(
           (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
         ),
+        idleOnMapDuringRide: false,
       };
       onlineDrivers.set(user.id, pres);
       emitCentralFleetUpdate(io, { ...pres, isPetFriendly: false });
@@ -547,6 +622,17 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
         lat: data.lat,
         lon: data.lon,
       });
+      const presRow = onlineDrivers.get(user.id);
+      if (
+        presRow &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        (ride.status === "matched" || ride.status === "in_progress")
+      ) {
+        const next: DriverPresence = { ...presRow, lat, lon, updatedAt: Date.now() };
+        onlineDrivers.set(user.id, next);
+        emitCentralFleetUpdate(io, { ...next, isPetFriendly: false });
+      }
     });
 
     socket.on("disconnect", () => {

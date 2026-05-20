@@ -69,15 +69,34 @@ export function ProfessionalVerificationBanner() {
           "max-md:py-1.5 max-md:px-3 sm:py-2.5 sm:px-4"
         )}
       >
-        <div className="container mx-auto flex max-w-6xl min-w-0 items-start gap-2 sm:gap-2.5">
-          <AlertCircle
-            className="mt-0.5 h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300 sm:h-5 sm:w-5"
-            aria-hidden
-          />
-          <p className="min-w-0 font-medium leading-snug">
-            <span className="md:hidden">{inReviewCopy.compact}</span>
-            <span className="hidden md:inline">{inReviewCopy.full}</span>
-          </p>
+        <div className="container mx-auto flex max-w-6xl min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+          <div className="flex min-w-0 items-start gap-2 sm:gap-2.5">
+            <AlertCircle
+              className="mt-0.5 h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300 sm:h-5 sm:w-5"
+              aria-hidden
+            />
+            <div className="min-w-0">
+              <p className="font-medium leading-snug">
+                <span className="md:hidden">{inReviewCopy.compact}</span>
+                <span className="hidden md:inline">{inReviewCopy.full}</span>
+              </p>
+              <p className="mt-1.5 text-[11px] font-normal leading-snug text-sky-900/85 dark:text-sky-100/85 sm:text-xs">
+                Si subiste un archivo por error, en Verificación puedes sustituirlo: como máximo una vez más por
+                tipo de documento (identificación y documento profesional) mientras siga en revisión. Si el equipo
+                rechaza los archivos, podrás enviar todo de nuevo sin ese límite.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 shrink-0 touch-manipulation self-start border-sky-300 bg-white/80 text-sky-950 hover:bg-sky-100 dark:border-sky-500/50 dark:bg-sky-950/40 dark:text-sky-50 dark:hover:bg-sky-900/60 sm:self-center"
+            asChild
+          >
+            <Link href="/professional/verify" onClick={() => storeVerifyReturnPath()}>
+              Ir a verificación
+            </Link>
+          </Button>
         </div>
       </div>
     );

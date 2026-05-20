@@ -14,6 +14,11 @@ import {
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { RATINGS_PENDING_QUERY_KEY } from "@/hooks/use-mango-data";
 import { api } from "@shared/routes";
+import {
+  NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED,
+  NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED,
+  NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS,
+} from "@shared/central-affiliation";
 
 const ADMIN_WALLET_TRANSFERS_KEY = "/api/admin/wallet/transfers";
 const ADMIN_WITHDRAWALS_KEY = "/api/admin/withdrawals";
@@ -358,6 +363,36 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           variant: type === "vehicle_change_request_rejected" ? "destructive" : undefined,
         });
       }
+      if (
+        type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED ||
+        type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED ||
+        type === NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS
+      ) {
+        queryClient.invalidateQueries({ queryKey: ["my-central-affiliation-requests"] });
+        queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+        debouncedRefetch(queryClient, ["my-central-affiliation-requests"]);
+        debouncedRefetch(queryClient, [api.providers.me.path]);
+        if (type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED || type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED) {
+          const t =
+            typeof notification?.title === "string" && notification.title.trim()
+              ? notification.title.trim()
+              : type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED
+                ? "Afiliación aprobada"
+                : "Afiliación no aprobada";
+          const description =
+            typeof notification?.body === "string" && notification.body.trim()
+              ? notification.body.trim()
+              : (notification?.data?.message as string | undefined);
+          toast({
+            title: t,
+            description:
+              typeof description === "string" && description.trim()
+                ? description.trim()
+                : "Revisa Afiliación central en tu resumen de asociado.",
+            variant: type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED ? "destructive" : undefined,
+          });
+        }
+      }
       if (type === "verification_result") {
         queryClient.invalidateQueries({ queryKey: ["/api/invoices", "list"] });
         debouncedRefetch(queryClient, ["/api/invoices", "list"]);
@@ -544,9 +579,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated]);
 
   const clearNotifications = useCallback(() => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.read ? n : { ...n, read: true }))
-    );
+    setNotifications((prev) => prev.map((n) => (n.read ? n : { ...n, read: true })));
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    void fetch("/api/notifications/read-all", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
   }, []);
 
   const markNotificationAsRead = useCallback((id: string) => {

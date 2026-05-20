@@ -155,6 +155,44 @@ export function mobilityDriverInActiveRide(userId: string): boolean {
   return false;
 }
 
+/** Resumen del viaje taxi activo del conductor para el panel central (matched / in_progress). */
+export async function getMobilityActiveRideForCentral(driverUserId: string) {
+  for (const r of rides.values()) {
+    if (r.driverUserId !== driverUserId) continue;
+    if (r.status !== "matched" && r.status !== "in_progress") continue;
+    const rider = await buildRiderPublic(r.riderUserId);
+    return {
+      mode: "taxi" as const,
+      rideId: r.id,
+      status: r.status,
+      vehicleType: r.vehicleType,
+      paymentMethod: r.paymentMethod,
+      paymentConfirmed: r.paymentConfirmed,
+      estimatedUsd: r.estimatedUsd,
+      suggestedUsd: typeof r.suggestedUsd === "number" ? r.suggestedUsd : null,
+      distanceM: r.distanceM,
+      durationSec: r.durationSec,
+      start: r.start,
+      end: r.end,
+      routeGeometry: r.routeGeometry,
+      petEnabled: r.petEnabled,
+      driverSearchingClient: r.driverSearchingClient ?? false,
+      isNegotiated: r.isNegotiated ?? false,
+      rider: {
+        name: rider.name,
+        lastName: rider.lastName,
+        phone: rider.phone,
+        profileImageUrl: rider.profileImageUrl,
+        rating: rider.rating,
+        ratingCount: rider.ratingCount,
+        completedTrips: rider.completedTrips,
+        email: rider.email,
+      },
+    };
+  }
+  return null;
+}
+
 const rideTimers = new Map<
   string,
   { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }
@@ -178,11 +216,30 @@ type DriverPresence = {
   lon: number;
   updatedAt: number;
   dispatchCompanyId: string | null;
+  /** Conductor en viaje: dejó «recibir» pero conservamos fila para el mapa de la central. */
+  idleOnMapDuringRide?: boolean;
 };
 const onlineDrivers = new Map<string, DriverPresence>();
 
 export function getMobilityOnlineDriversSnapshot(): ReadonlyMap<string, DriverPresence> {
   return onlineDrivers;
+}
+
+/**
+ * Tras vincular el proveedor a una central (p. ej. afiliación aprobada), actualiza la fila de presencia taxi
+ * si el conductor ya estaba «recibiendo» con `dispatchCompanyId` antiguo o nulo (evita que la central no lo vea en mapa).
+ */
+export async function refreshMobilityPresenceDispatchCompany(driverUserId: string): Promise<void> {
+  const row = onlineDrivers.get(driverUserId);
+  if (!row) return;
+  const provider = await catalogService.getProviderByUserId(driverUserId);
+  const dispatchCompanyId = normalizeDispatchCompanyId(
+    (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
+  );
+  if (dispatchCompanyId === row.dispatchCompanyId) return;
+  const next: DriverPresence = { ...row, dispatchCompanyId };
+  onlineDrivers.set(driverUserId, next);
+  emitCentralFleetUpdate(getIO(), next);
 }
 
 const PRESENCE_TTL_MS = 45_000;
@@ -1695,6 +1752,28 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
       (data: { receiving: boolean; vehicleType: string; isPetFriendly?: boolean; lat: number; lon: number }) => {
         if (!data) return;
         if (!data.receiving) {
+          if (mobilityDriverInActiveRide(user.id)) {
+            const prev = onlineDrivers.get(user.id);
+            if (prev) {
+              const lat = Number(data.lat);
+              const lon = Number(data.lon);
+              const posOk =
+                Number.isFinite(lat) &&
+                Number.isFinite(lon) &&
+                Math.abs(lat) <= 90 &&
+                Math.abs(lon) <= 180 &&
+                (Math.abs(lat) > 1e-4 || Math.abs(lon) > 1e-4);
+              const next: DriverPresence = {
+                ...prev,
+                updatedAt: Date.now(),
+                idleOnMapDuringRide: true,
+                ...(posOk ? { lat, lon } : {}),
+              };
+              onlineDrivers.set(user.id, next);
+              emitCentralFleetUpdate(getIO(), next);
+            }
+            return;
+          }
           const prev = onlineDrivers.get(user.id);
           onlineDrivers.delete(user.id);
           if (prev) emitCentralFleetUpdate(getIO(), { ...prev, updatedAt: Date.now() }, true);
@@ -1717,6 +1796,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
           dispatchCompanyId: normalizeDispatchCompanyId(
             (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
           ),
+          idleOnMapDuringRide: false,
         };
         onlineDrivers.set(user.id, pres);
         emitCentralFleetUpdate(getIO(), pres);
@@ -1783,6 +1863,17 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
         lat: data.lat,
         lon: data.lon,
       });
+      const presRow = onlineDrivers.get(user.id);
+      if (
+        presRow &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        (ride.status === "matched" || ride.status === "in_progress")
+      ) {
+        const next: DriverPresence = { ...presRow, lat, lon, updatedAt: Date.now() };
+        onlineDrivers.set(user.id, next);
+        emitCentralFleetUpdate(getIO(), next);
+      }
     });
 
     socket.on("disconnect", () => {

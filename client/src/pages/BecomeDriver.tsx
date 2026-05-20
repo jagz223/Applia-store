@@ -75,7 +75,8 @@ import { Loader2, ArrowLeft, Car } from "lucide-react";
 import { GoDriverVehicleFormGrid, goVehicleCanMarkPetFriendly } from "@/components/provider/GoDriverVehicleFormGrid";
 import { GoThreeServicesReminder } from "@/components/provider/GoThreeServicesReminder";
 import { useDispatchCompanyOptions } from "@/hooks/use-central";
-import { DISPATCH_COMPANY_NONE } from "@shared/dispatch-company";
+import { GoDriverCentralAffiliationFields } from "@/components/provider/GoDriverCentralAffiliationFields";
+import { useToast } from "@/hooks/use-toast";
 
 const DEFAULT_VEHICLE_FORM = {
   license_plate: "",
@@ -219,19 +220,26 @@ function BecomeDriverFormBody({
   }, [hasPrimaryVehicle, vehicleBrand, vehicleModelWatch, nhtsaYears, form]);
 
   const enroll = useEnrollGoDriver();
+  const { toast } = useToast();
   const { data: dispatchCompanies = [] } = useDispatchCompanyOptions();
-  const [dispatchCompanyId, setDispatchCompanyId] = useState(DISPATCH_COMPANY_NONE);
-
-  useEffect(() => {
-    const cid = (provider as { dispatchCompanyId?: string | null } | null)?.dispatchCompanyId;
-    setDispatchCompanyId(cid ?? DISPATCH_COMPANY_NONE);
-  }, [provider]);
+  const [belongToCentral, setBelongToCentral] = useState(false);
+  const [centralSearch, setCentralSearch] = useState("");
+  const [pendingCentralCompanyId, setPendingCentralCompanyId] = useState<string | null>(null);
 
   const onSubmit = async (values: FormValues) => {
+    if (belongToCentral && !pendingCentralCompanyId) {
+      toast({
+        variant: "destructive",
+        title: "Selecciona una central",
+        description: "Indica a qué empresa despachadora quieres solicitar afiliación.",
+      });
+      return;
+    }
     await enroll.mutateAsync({
       ...(hasPrimaryVehicle ? {} : { vehicle: buildVehiclePayload(values.vehicle) }),
-      dispatchCompanyId:
-        dispatchCompanyId === DISPATCH_COMPANY_NONE ? null : dispatchCompanyId,
+      ...(belongToCentral && pendingCentralCompanyId
+        ? { pendingCentralCompanyId, dispatchCompanyId: null }
+        : { dispatchCompanyId: null }),
     });
     onEnrolled();
   };
@@ -313,27 +321,22 @@ function BecomeDriverFormBody({
               </div>
             )}
 
-            <FormItem>
-              <FormLabel>Empresa (central)</FormLabel>
-              <FormDescription className="text-xs">
-                Si perteneces a una empresa despachadora, selecciónala. Si eres independiente, deja la primera opción.
-              </FormDescription>
-              <Select value={dispatchCompanyId} onValueChange={setDispatchCompanyId}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Empresa" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectItem value={DISPATCH_COMPANY_NONE}>No pertenezco a ninguna empresa</SelectItem>
-                  {dispatchCompanies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormItem>
+            <GoDriverCentralAffiliationFields
+              companies={dispatchCompanies}
+              belongToCentral={belongToCentral}
+              onBelongToCentralChange={(on) => {
+                setBelongToCentral(on);
+                if (!on) {
+                  setPendingCentralCompanyId(null);
+                  setCentralSearch("");
+                }
+              }}
+              pendingCentralCompanyId={pendingCentralCompanyId}
+              onPendingCentralCompanyIdChange={setPendingCentralCompanyId}
+              search={centralSearch}
+              onSearchChange={setCentralSearch}
+              commandListClassName="max-h-[200px]"
+            />
 
             <Button type="submit" className="w-full sm:w-auto gap-2" disabled={enroll.isPending}>
               {enroll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

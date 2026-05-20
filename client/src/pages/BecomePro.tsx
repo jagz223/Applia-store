@@ -7,9 +7,18 @@ import { providerSkillsSchema } from "@shared/skills-schema";
 import { type InsertProvider } from "@shared/schema";
 import { insertProviderVehicleSchema, type VehicleType } from "@shared/vehicle-schema";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCreateProvider, useCurrentProvider, useCategories, useSubcategories, useCategoryVisibility } from "@/hooks/use-mango-data";
+import {
+  useCreateProvider,
+  useCurrentProvider,
+  useCategories,
+  useSubcategories,
+  useCategoryVisibility,
+  useSubmitGoDriverPendingCentral,
+} from "@/hooks/use-mango-data";
+import { useDispatchCompanyOptions } from "@/hooks/use-central";
 import { useNhtsaMakes, useNhtsaModelsForMake, useNhtsaYearsForMakeModel } from "@/hooks/use-nhtsa-vpic";
 import { GoDriverVehicleFormGrid, goVehicleCanMarkPetFriendly } from "@/components/provider/GoDriverVehicleFormGrid";
+import { GoDriverCentralAffiliationFields } from "@/components/provider/GoDriverCentralAffiliationFields";
 import { GoThreeServicesReminder } from "@/components/provider/GoThreeServicesReminder";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
@@ -24,7 +33,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { ProviderSkillsField } from "@/components/ProviderSkillsField";
 import {
@@ -179,8 +188,13 @@ export default function BecomePro() {
   );
   const { data: existingProfile, isLoading: profileLoading } = useCurrentProvider();
   const createProvider = useCreateProvider();
+  const submitPendingCentral = useSubmitGoDriverPendingCentral();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+  const { data: dispatchCompanies = [] } = useDispatchCompanyOptions();
+  const [belongToCentral, setBelongToCentral] = useState(false);
+  const [centralSearch, setCentralSearch] = useState("");
+  const [pendingCentralCompanyId, setPendingCentralCompanyId] = useState<string | null>(null);
 
   const { data: categories = [] } = useCategories();
   const providerCategories = useMemo(
@@ -238,6 +252,13 @@ export default function BecomePro() {
     if (!isGoDriverCategory) return "carro" as const;
     return vehicleTypeToGoOfferKind(vehicleType);
   }, [isGoDriverCategory, vehicleType]);
+
+  useEffect(() => {
+    if (isGoDriverCategory) return;
+    setBelongToCentral(false);
+    setPendingCentralCompanyId(null);
+    setCentralSearch("");
+  }, [isGoDriverCategory]);
 
   /** Al elegir taxi o delivery ocultamos el bloque de perfil; limpiamos valores por si el usuario cambió de otra categoría. */
   useEffect(() => {
@@ -381,10 +402,19 @@ export default function BecomePro() {
     );
   }
 
-  function onSubmit(data: BecomeProForm) {
+  async function onSubmit(data: BecomeProForm) {
     const slug = data.categoryId != null ? categories?.find((c) => c.id === data.categoryId)?.slug : undefined;
     const goDriver =
       slug === "transport" || slug === "delivery" || slug === "marketplace";
+
+    if (goDriver && belongToCentral && !pendingCentralCompanyId) {
+      toast({
+        variant: "destructive",
+        title: "Selecciona una central",
+        description: "Indica a qué empresa despachadora quieres solicitar afiliación, o desmarca «Pertenezco a una central».",
+      });
+      return;
+    }
 
     let vehiclePayload: ReturnType<typeof insertProviderVehicleSchema.parse> | undefined;
     if (goDriver) {
@@ -443,49 +473,58 @@ export default function BecomePro() {
       }
     }
 
-    createProvider.mutate(
-      {
-        ...rest,
-        profession: professionOut,
-        bio: bioOut,
-        categoryId: data.categoryId,
-        category: slug ?? data.category ?? undefined,
-        ...(goDriver
-          ? {
-              goBrands: ["transport", "delivery", "marketplace"],
-            }
-          : {}),
-        subcategoryId: data.subcategoryId ?? undefined,
-        skills: goDriver ? [] : skillsOut,
-        serviceTitle: serviceTitleOut,
-        serviceDescription: serviceDescriptionOut,
-        ...(goDriver && vehiclePayload ? { vehicle: vehiclePayload } : {}),
-        ...(isTrade && prepTrim ? { preparationLevel: prepTrim, coursesCompleted: prepTrim } : {}),
-        ...(!goDriver && certsTrim ? { certifications: certsTrim } : {}),
-      } as InsertProvider & {
-        serviceTitle?: string;
-        serviceDescription?: string;
-        vehicle?: typeof vehiclePayload;
-        preparationLevel?: string;
-        coursesCompleted?: string;
-        certifications?: string;
-      },
-      {
-        onSuccess: () => {
-          clearAssociateOnboardingStarted();
-          setVerifyReturnPath("/professional-dashboard");
-          // Navegar antes de invalidar queries: si `existingProfile` pasa a existir mientras sigues en /become-pro,
-          // el efecto redirigiría al panel y anularía la ida a verificación.
-          setLocation("/professional/verify");
-          void queryClient.invalidateQueries({ queryKey: ["user"] });
-          void queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
-          void queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+    try {
+      await createProvider.mutateAsync(
+        {
+          ...rest,
+          profession: professionOut,
+          bio: bioOut,
+          categoryId: data.categoryId,
+          category: slug ?? data.category ?? undefined,
+          ...(goDriver
+            ? {
+                goBrands: ["transport", "delivery", "marketplace"],
+              }
+            : {}),
+          subcategoryId: data.subcategoryId ?? undefined,
+          skills: goDriver ? [] : skillsOut,
+          serviceTitle: serviceTitleOut,
+          serviceDescription: serviceDescriptionOut,
+          ...(goDriver && vehiclePayload ? { vehicle: vehiclePayload } : {}),
+          ...(isTrade && prepTrim ? { preparationLevel: prepTrim, coursesCompleted: prepTrim } : {}),
+          ...(!goDriver && certsTrim ? { certifications: certsTrim } : {}),
+        } as InsertProvider & {
+          serviceTitle?: string;
+          serviceDescription?: string;
+          vehicle?: typeof vehiclePayload;
+          preparationLevel?: string;
+          coursesCompleted?: string;
+          certifications?: string;
         },
-        onError: () => {
-          queryClient.invalidateQueries({ queryKey: ["user"] });
-        },
+      );
+
+      if (goDriver && belongToCentral && pendingCentralCompanyId) {
+        try {
+          await submitPendingCentral.mutateAsync(pendingCentralCompanyId);
+        } catch {
+          toast({
+            variant: "destructive",
+            title: "Perfil creado, pero no se envió la solicitud a la central",
+            description:
+              "Tu cuenta y vehículo quedaron registrados. Puedes enviar la solicitud de afiliación desde «Mis servicios» o el panel de asociado.",
+          });
+        }
       }
-    );
+
+      clearAssociateOnboardingStarted();
+      setVerifyReturnPath("/professional-dashboard");
+      setLocation("/professional/verify");
+      void queryClient.invalidateQueries({ queryKey: ["user"] });
+      void queryClient.invalidateQueries({ queryKey: [api.providers.me.path] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/me/services"] });
+    } catch {
+      void queryClient.invalidateQueries({ queryKey: ["user"] });
+    }
   }
 
   return (
@@ -652,6 +691,24 @@ export default function BecomePro() {
                   nhtsaErrorMessage="No se pudo cargar el catálogo. Comprueba tu conexión e inténtalo de nuevo."
                 />
               )}
+
+              {isGoDriverCategory ? (
+                <GoDriverCentralAffiliationFields
+                  companies={dispatchCompanies}
+                  belongToCentral={belongToCentral}
+                  onBelongToCentralChange={(on) => {
+                    setBelongToCentral(on);
+                    if (!on) {
+                      setPendingCentralCompanyId(null);
+                      setCentralSearch("");
+                    }
+                  }}
+                  pendingCentralCompanyId={pendingCentralCompanyId}
+                  onPendingCentralCompanyIdChange={setPendingCentralCompanyId}
+                  search={centralSearch}
+                  onSearchChange={setCentralSearch}
+                />
+              ) : null}
 
               {!isGoDriverCategory && isFocusCatalogCategory && categoryIntro ? (
                 <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
@@ -869,8 +926,14 @@ export default function BecomePro() {
                 </>
               )}
 
-              <Button type="submit" className="w-full text-lg h-12" disabled={createProvider.isPending}>
-                {createProvider.isPending ? "Guardando y abriendo verificación…" : "Guardar e ir a verificación"}
+              <Button
+                type="submit"
+                className="w-full text-lg h-12"
+                disabled={createProvider.isPending || submitPendingCentral.isPending}
+              >
+                {createProvider.isPending || submitPendingCentral.isPending
+                  ? "Guardando y abriendo verificación…"
+                  : "Guardar e ir a verificación"}
               </Button>
             </form>
           </Form>

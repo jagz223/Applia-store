@@ -120,6 +120,8 @@ export interface IStorage
   getNotifications(userId: string, unreadOnly?: boolean): Promise<any[]>;
   createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }): Promise<any>;
   markNotificationAsRead(notificationId: number): Promise<void>;
+  /** Marca todas las notificaciones del usuario como leídas (panel campana / «Limpiar»). */
+  markAllNotificationsAsReadForUser(userId: string): Promise<void>;
 
   // Peticiones de cambio de cuenta (correo/nombre/teléfono/vehículo Go)
   createAccountChangeRequest(input: {
@@ -342,6 +344,24 @@ export interface IStorage
   ): Promise<VerifyingStatus>;
   setVerifyingStatusIdentification(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
   setVerifyingStatusTransaction(userId: string, status: ProfessionalVerificationState): Promise<VerifyingStatus>;
+  /** Tras reemplazar documento en revisión (máx. 1 por tipo). */
+  incrementPendingIdResubmitCount(userId: string): Promise<void>;
+  incrementPendingCredentialResubmitCount(userId: string): Promise<void>;
+  /** Canje meses gratis antes de completar documentos: marca cola admin + auditoría. */
+  upsertVerifyingStatusPrefundPromoAwaitingDossier(
+    userId: string,
+    args: { code: string; monthsGranted: number },
+  ): Promise<VerifyingStatus>;
+  clearVerifyingStatusPrefundPromoAwaitingDossier(userId: string): Promise<void>;
+  mergeProfessionalVerificationFreeMonthsPrefundPlaceholder(
+    userId: string,
+    data: {
+      transferReceiptCode: string;
+      transferDate: string;
+      subscriptionMonths: number;
+      promotionalCode: string | null;
+    },
+  ): Promise<ProfessionalVerification>;
 
   getAdminDashboardStats(params: { from: Date; to: Date }): Promise<AdminDashboardStatsResult>;
 
@@ -1428,6 +1448,16 @@ export class InMemoryStorage implements IStorage {
     if (notif) {
       notif.read = true;
       notif.readAt = new Date();
+    }
+  }
+
+  async markAllNotificationsAsReadForUser(userId: string): Promise<void> {
+    const now = new Date();
+    for (const n of this.notifications) {
+      if (n.userId === userId && !n.read) {
+        n.read = true;
+        n.readAt = now;
+      }
     }
   }
 
@@ -2719,6 +2749,7 @@ export class InMemoryStorage implements IStorage {
     requestType: "onboarding" | "renewal" = "onboarding",
   ): Promise<VerifyingStatus> {
     const cur = this.verifyingStatuses.get(userId);
+    const resetAfterReject = cur?.identification_verified === "rejected";
     const next: VerifyingStatus = {
       user: userId,
       requestType,
@@ -2726,6 +2757,11 @@ export class InMemoryStorage implements IStorage {
       transacction_date: cur?.transacction_date ?? null,
       // No tocar el estado del pago al subir identificación: null sigue null, pending sigue pending, etc.
       transacction_verified: cur?.transacction_verified ?? null,
+      pendingIdResubmitCount: resetAfterReject ? 0 : cur?.pendingIdResubmitCount,
+      pendingCredentialResubmitCount: resetAfterReject ? 0 : cur?.pendingCredentialResubmitCount,
+      prefundPromoAwaitingDossier: (cur as any)?.prefundPromoAwaitingDossier,
+      prefundPromoCode: (cur as any)?.prefundPromoCode,
+      prefundPromoMonths: (cur as any)?.prefundPromoMonths,
       createdAt: cur?.createdAt ? (cur.createdAt as any) : new Date(),
       updatedAt: new Date(),
     };
@@ -2746,6 +2782,11 @@ export class InMemoryStorage implements IStorage {
       identification_verified: cur?.identification_verified ?? "rejected",
       transacction_date: transactionDate,
       transacction_verified: "pending",
+      pendingIdResubmitCount: cur?.pendingIdResubmitCount,
+      pendingCredentialResubmitCount: cur?.pendingCredentialResubmitCount,
+      prefundPromoAwaitingDossier: false,
+      prefundPromoCode: (cur as any)?.prefundPromoCode,
+      prefundPromoMonths: (cur as any)?.prefundPromoMonths,
       createdAt: cur?.createdAt ? (cur.createdAt as any) : new Date(),
       updatedAt: new Date(),
     };
@@ -2755,7 +2796,10 @@ export class InMemoryStorage implements IStorage {
 
   async getPendingVerifyingStatuses(): Promise<VerifyingStatus[]> {
     return Array.from(this.verifyingStatuses.values()).filter(
-      (s) => s.identification_verified === "pending" || s.transacction_verified === "pending"
+      (s) =>
+        s.identification_verified === "pending" ||
+        s.transacction_verified === "pending" ||
+        (s as { prefundPromoAwaitingDossier?: boolean }).prefundPromoAwaitingDossier === true,
     );
   }
 
@@ -2769,6 +2813,9 @@ export class InMemoryStorage implements IStorage {
       ...cur,
       identification_verified: status,
       updatedAt: new Date(),
+      ...(status === "rejected"
+        ? { pendingIdResubmitCount: 0, pendingCredentialResubmitCount: 0 }
+        : {}),
     };
     this.verifyingStatuses.set(userId, next);
     return next;
@@ -2784,8 +2831,101 @@ export class InMemoryStorage implements IStorage {
       ...cur,
       transacction_verified: status,
       updatedAt: new Date(),
+      ...(status === "rejected"
+        ? { pendingIdResubmitCount: 0, pendingCredentialResubmitCount: 0 }
+        : {}),
     };
     this.verifyingStatuses.set(userId, next);
+    return next;
+  }
+
+  async incrementPendingIdResubmitCount(userId: string): Promise<void> {
+    const cur = this.verifyingStatuses.get(userId);
+    if (!cur) return;
+    this.verifyingStatuses.set(userId, {
+      ...cur,
+      pendingIdResubmitCount: 1,
+      updatedAt: new Date(),
+    });
+  }
+
+  async incrementPendingCredentialResubmitCount(userId: string): Promise<void> {
+    const cur = this.verifyingStatuses.get(userId);
+    if (!cur) return;
+    this.verifyingStatuses.set(userId, {
+      ...cur,
+      pendingCredentialResubmitCount: 1,
+      updatedAt: new Date(),
+    });
+  }
+
+  async upsertVerifyingStatusPrefundPromoAwaitingDossier(
+    userId: string,
+    args: { code: string; monthsGranted: number },
+  ): Promise<VerifyingStatus> {
+    const cur = this.verifyingStatuses.get(userId);
+    const code = args.code.trim().toUpperCase();
+    const months = Math.max(1, Math.min(12, Math.trunc(args.monthsGranted)));
+    const next: VerifyingStatus = {
+      user: userId,
+      requestType: cur?.requestType ?? "onboarding",
+      identification_verified: cur?.identification_verified ?? "rejected",
+      transacction_date: cur?.transacction_date ?? null,
+      transacction_verified: cur?.transacction_verified ?? null,
+      pendingIdResubmitCount: cur?.pendingIdResubmitCount,
+      pendingCredentialResubmitCount: cur?.pendingCredentialResubmitCount,
+      prefundPromoAwaitingDossier: true,
+      prefundPromoCode: code,
+      prefundPromoMonths: months,
+      createdAt: cur?.createdAt ? (cur.createdAt as any) : new Date(),
+      updatedAt: new Date(),
+    } as VerifyingStatus;
+    this.verifyingStatuses.set(userId, next);
+    return next;
+  }
+
+  async clearVerifyingStatusPrefundPromoAwaitingDossier(userId: string): Promise<void> {
+    const cur = this.verifyingStatuses.get(userId);
+    if (!cur) return;
+    this.verifyingStatuses.set(userId, {
+      ...cur,
+      prefundPromoAwaitingDossier: false,
+      updatedAt: new Date(),
+    } as VerifyingStatus);
+  }
+
+  async mergeProfessionalVerificationFreeMonthsPrefundPlaceholder(
+    userId: string,
+    data: {
+      transferReceiptCode: string;
+      transferDate: string;
+      subscriptionMonths: number;
+      promotionalCode: string | null;
+    },
+  ): Promise<ProfessionalVerification> {
+    const cur = this.professionalVerifications.get(userId);
+    const base: ProfessionalVerification = cur ?? {
+      userId,
+      imageUrl: null,
+      imageVerified: false,
+      professionalCredentialUrl: null,
+      transferReceiptCode: null,
+      transferDate: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const next: ProfessionalVerification = {
+      ...base,
+      transferReceiptCode: data.transferReceiptCode.trim(),
+      transferDate: data.transferDate.trim(),
+      subscriptionMonths: Math.max(1, Math.min(12, Math.trunc(data.subscriptionMonths))),
+      promotionalCode: data.promotionalCode,
+      promotionalDiscountPercent: null,
+      subscriptionOriginalTotalUsd: null,
+      subscriptionDiscountedTotalUsd: null,
+      updatedAt: new Date(),
+    };
+    this.professionalVerifications.set(userId, next);
     return next;
   }
 

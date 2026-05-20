@@ -20,7 +20,12 @@ const FIRESTORE_METHODS = new Set([
   "getPendingVerifyingStatuses",
   "setVerifyingStatusIdentification",
   "setVerifyingStatusTransaction",
-  "getNotifications", "createNotification", "markNotificationAsRead",
+  "incrementPendingIdResubmitCount",
+  "incrementPendingCredentialResubmitCount",
+  "upsertVerifyingStatusPrefundPromoAwaitingDossier",
+  "clearVerifyingStatusPrefundPromoAwaitingDossier",
+  "mergeProfessionalVerificationFreeMonthsPrefundPlaceholder",
+  "getNotifications", "createNotification", "markNotificationAsRead", "markAllNotificationsAsReadForUser",
   "createAccountChangeRequest", "getMyAccountChangeRequests", "getPendingAccountChangeRequests", "resolveAccountChangeRequest",
   // Chat: debe persistir en Firestore para auditoría/admin.
   "getConversationsByUser", "createConversation", "getMessagesByConversation", "getLastMessageByConversation", "getUnreadCountByConversation",
@@ -123,6 +128,29 @@ export class HybridStorage {
   setVerifyingStatusTransaction(userId: string, status: any) {
     return this.delegate("setVerifyingStatusTransaction", [userId, status]);
   }
+  incrementPendingIdResubmitCount(userId: string) {
+    return this.delegate("incrementPendingIdResubmitCount", [userId]);
+  }
+  incrementPendingCredentialResubmitCount(userId: string) {
+    return this.delegate("incrementPendingCredentialResubmitCount", [userId]);
+  }
+  upsertVerifyingStatusPrefundPromoAwaitingDossier(userId: string, args: { code: string; monthsGranted: number }) {
+    return this.delegate("upsertVerifyingStatusPrefundPromoAwaitingDossier", [userId, args]);
+  }
+  clearVerifyingStatusPrefundPromoAwaitingDossier(userId: string) {
+    return this.delegate("clearVerifyingStatusPrefundPromoAwaitingDossier", [userId]);
+  }
+  mergeProfessionalVerificationFreeMonthsPrefundPlaceholder(
+    userId: string,
+    data: {
+      transferReceiptCode: string;
+      transferDate: string;
+      subscriptionMonths: number;
+      promotionalCode: string | null;
+    },
+  ) {
+    return this.delegate("mergeProfessionalVerificationFreeMonthsPrefundPlaceholder", [userId, data]);
+  }
   createService(service: any) { return this.delegate("createService", [service]); }
   updateService(id: number, data: any) { return this.delegate("updateService", [id, data]); }
   deleteService(id: number) { return this.delegate("deleteService", [id]); }
@@ -183,6 +211,9 @@ export class HybridStorage {
   getNotifications(userId: string, unreadOnly?: boolean) { return this.delegate("getNotifications", [userId, unreadOnly]); }
   createNotification(notification: { userId: string; type: string; data: Record<string, unknown> }) { return this.delegate("createNotification", [notification]); }
   markNotificationAsRead(notificationId: number) { return this.delegate("markNotificationAsRead", [notificationId]); }
+  markAllNotificationsAsReadForUser(userId: string) {
+    return this.delegate("markAllNotificationsAsReadForUser", [userId]);
+  }
   createAccountChangeRequest(input: any) { return this.delegate("createAccountChangeRequest", [input]); }
   getMyAccountChangeRequests(userId: string) { return this.delegate("getMyAccountChangeRequests", [userId]); }
   getPendingAccountChangeRequests() { return this.delegate("getPendingAccountChangeRequests", []); }

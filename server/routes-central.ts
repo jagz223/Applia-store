@@ -14,12 +14,35 @@ import {
   sanitizeDispatchMobilityFares,
   sanitizeDispatchPackFares,
 } from "./dispatch-companies";
-import { getMobilityOnlineDriversSnapshot, mobilityDriverInActiveRide } from "./mobility-rides";
-import { getPackOnlineDriversSnapshot, packDriverInActiveRide } from "./pack-rides";
+import {
+  getMobilityOnlineDriversSnapshot,
+  getMobilityActiveRideForCentral,
+  mobilityDriverInActiveRide,
+  refreshMobilityPresenceDispatchCompany,
+} from "./mobility-rides";
+import {
+  getPackOnlineDriversSnapshot,
+  getPackActiveRideForCentral,
+  packDriverInActiveRide,
+  refreshPackPresenceDispatchCompany,
+} from "./pack-rides";
 import { centralFleetRoom } from "./central-fleet-notify";
 import { buildGoDriverEnrollmentCategoryPatch } from "@shared/provider-category-membership";
-import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
-import { goOfferKindToVehicleType, type GoDriverOfferKindSlug } from "@shared/go-driver-offer-kind";
+import {
+  registerCentralMemberSchema,
+  patchCentralMemberSchema,
+} from "@shared/central-member";
+import { listCompanyMembers, memberBelongsToCompany, patchCompanyMember } from "./central-members";
+import {
+  getCentralAffiliationRequest,
+  listCentralAffiliationRequestsForCompany,
+  updateCentralAffiliationRequest,
+} from "./central-affiliation-store";
+import {
+  notifyApplicantAffiliationApproved,
+  notifyApplicantAffiliationRejected,
+  notifyApplicantDataAccessRequested,
+} from "./central-affiliation-notify";
 
 const PRESENCE_TTL_MS = 45_000;
 
@@ -46,18 +69,28 @@ async function resolveCompanyIdForRequest(
   return { error: "Sin acceso", status: 403 };
 }
 
-function mergedPresenceForUser(userId: string) {
-  const taxi = getMobilityOnlineDriversSnapshot().get(userId);
-  const pack = getPackOnlineDriversSnapshot().get(userId);
-  const pres = taxi ?? pack;
-  if (!pres) return null;
-  const now = Date.now();
-  if (now - pres.updatedAt > PRESENCE_TTL_MS) return null;
-  return {
-    ...pres,
-    isPetFriendly: taxi?.isPetFriendly ?? false,
-    receiving: true,
-  };
+/** Con viaje activo se conserva la última posición aunque venza el TTL (el conductor ya no emite «recibiendo»). */
+function freshMobilityPresence(userId: string, inActiveRide: boolean) {
+  const row = getMobilityOnlineDriversSnapshot().get(userId);
+  if (!row) return null;
+  if (!inActiveRide && Date.now() - row.updatedAt > PRESENCE_TTL_MS) return null;
+  return row;
+}
+
+function freshPackPresence(userId: string, inActiveRide: boolean) {
+  const row = getPackOnlineDriversSnapshot().get(userId);
+  if (!row) return null;
+  if (!inActiveRide && Date.now() - row.updatedAt > PRESENCE_TTL_MS) return null;
+  return row;
+}
+
+/** Posición/vehículo para la central: si hay taxi y delivery, el más reciente por `updatedAt`. */
+function pickPresenceForDisplay(
+  taxi: ReturnType<typeof freshMobilityPresence>,
+  pack: ReturnType<typeof freshPackPresence>,
+) {
+  if (taxi && pack) return taxi.updatedAt >= pack.updatedAt ? taxi : pack;
+  return taxi ?? pack;
 }
 
 export function registerCentralRoutes(app: Express): void {
@@ -115,6 +148,29 @@ export function registerCentralRoutes(app: Express): void {
     res.json(updated);
   });
 
+  const patchServiceMapSchema = z.object({
+    companyId: z.string().optional(),
+    lat: z.number().min(-90).max(90),
+    lon: z.number().min(-180).max(180),
+    cityZoom: z.number().min(9).max(14).optional(),
+  });
+
+  app.patch("/api/central/service-map", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const body = patchServiceMapSchema.parse(req.body);
+    const resolved = await resolveCompanyIdForRequest(req, body.companyId);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+    const patch: Parameters<typeof updateDispatchCompany>[1] = {
+      serviceMapLat: body.lat,
+      serviceMapLon: body.lon,
+    };
+    if (body.cityZoom !== undefined) patch.serviceMapCityZoom = body.cityZoom;
+    const updated = await updateDispatchCompany(resolved.companyId, patch);
+    res.json(updated);
+  });
+
   app.get("/api/central/fleet", authenticateJWT, async (req: any, res) => {
     if (!canAccessCentralPanel(req.user?.role)) {
       return res.status(403).json({ message: "Sin acceso" });
@@ -131,15 +187,22 @@ export function registerCentralRoutes(app: Express): void {
     for (const p of fleet) {
       const userId = String((p as { userId?: string }).userId ?? "");
       if (!userId) continue;
-      const pres = mergedPresenceForUser(userId);
       const inService = mobilityDriverInActiveRide(userId) || packDriverInActiveRide(userId);
+      const taxiPres = freshMobilityPresence(userId, inService);
+      const packPres = freshPackPresence(userId, inService);
+      const pres = pickPresenceForDisplay(taxiPres, packPres);
       if (!pres && !inService) continue;
+
+      const activeService = inService
+        ? (await getMobilityActiveRideForCentral(userId)) ?? (await getPackActiveRideForCentral(userId))
+        : null;
 
       const user = (await genFebStorage.getUserById(userId)) as {
         name?: string;
         lastName?: string;
         avatar?: string;
         rating?: number;
+        phone?: string | null;
       } | null;
       const vehicle = await genFebStorage.getPrimaryVehicleByUserId(userId);
 
@@ -148,35 +211,69 @@ export function registerCentralRoutes(app: Express): void {
         name: user?.name ?? "",
         lastName: user?.lastName ?? "",
         avatar: user?.avatar ?? null,
+        phone: user?.phone != null && String(user.phone).trim() ? String(user.phone).trim() : null,
+        licensePlate:
+          vehicle?.license_plate != null && String(vehicle.license_plate).trim()
+            ? String(vehicle.license_plate).trim().toUpperCase()
+            : null,
         rating: Number(user?.rating ?? 5),
         vehicleType: pres?.vehicleType ?? vehicle?.vehicle_type ?? "car",
-        isPetFriendly: pres?.isPetFriendly ?? false,
-        lat: pres?.lat ?? null,
-        lon: pres?.lon ?? null,
-        receiving: !!pres,
+        isPetFriendly: taxiPres?.isPetFriendly ?? false,
+        lat: pres?.lat ?? activeService?.start.lat ?? null,
+        lon: pres?.lon ?? activeService?.start.lon ?? null,
+        receivingTaxi: !!(taxiPres && !taxiPres.idleOnMapDuringRide),
+        receivingDelivery: !!(packPres && !packPres.idleOnMapDuringRide),
+        receiving: !!(
+          (taxiPres && !taxiPres.idleOnMapDuringRide) ||
+          (packPres && !packPres.idleOnMapDuringRide)
+        ),
         inService,
         updatedAt: pres?.updatedAt ?? null,
+        activeService,
       });
     }
     res.json({ drivers });
   });
 
-  const registerMemberSchema = z.object({
-    companyId: z.string().optional(),
-    memberType: z.enum(["central", "driver"]),
-    email: z.string().email(),
-    password: z.string().min(6),
-    name: z.string().min(2),
-    lastName: z.string().min(2),
-    phone: z.string().min(1),
-    offerKind: z.enum(["moto", "carro", "camion", "pet"]).optional(),
+  app.get("/api/central/members", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const resolved = await resolveCompanyIdForRequest(req, req.query.companyId as string);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+    const members = await listCompanyMembers(resolved.companyId);
+    res.json({ members });
+  });
+
+  app.patch("/api/central/members/:userId", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const userId = String(req.params.userId ?? "").trim();
+    if (!userId) return res.status(400).json({ message: "userId requerido" });
+    const body = patchCentralMemberSchema.parse(req.body);
+    const resolved = await resolveCompanyIdForRequest(req, body.companyId);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+
+    const belongs = await memberBelongsToCompany(userId, resolved.companyId);
+    if (!belongs.ok) return res.status(404).json({ message: "Usuario no encontrado en esta empresa" });
+
+    const result = await patchCompanyMember(userId, resolved.companyId, {
+      email: body.email,
+      phone: body.phone,
+      newPassword: body.newPassword,
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ message: result.error });
+    }
+    res.json({ ok: true });
   });
 
   app.post("/api/central/members", authenticateJWT, async (req: any, res) => {
     if (!canAccessCentralPanel(req.user?.role)) {
       return res.status(403).json({ message: "Sin acceso" });
     }
-    const body = registerMemberSchema.parse(req.body);
+    const body = registerCentralMemberSchema.parse(req.body);
     const resolved = await resolveCompanyIdForRequest(req, body.companyId);
     if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
 
@@ -202,10 +299,7 @@ export function registerCentralRoutes(app: Express): void {
     })) as { id: string };
 
     if (body.memberType === "driver") {
-      const kindRaw = body.offerKind ?? "carro";
-      const isPet = kindRaw === "pet";
-      const kind = (isPet ? "carro" : kindRaw) as GoDriverOfferKindSlug;
-      const vehicleType = goOfferKindToVehicleType(kind);
+      const vehicle = body.vehicle!;
       const categories = await catalogService.getCategories();
       const categoryPatch = buildGoDriverEnrollmentCategoryPatch(
         { categoryId: null, secondCategoryId: null, thirdCategoryId: null } as Parameters<
@@ -228,25 +322,171 @@ export function registerCentralRoutes(app: Express): void {
           "Servicios de taxi y delivery en Genfeb Go. Registrado por la central de la empresa.",
       } as Parameters<typeof catalogService.updateProvider>[1]);
 
-      const parsedVehicle = insertProviderVehicleSchema.safeParse({
-        license_plate: "PEND-00",
-        model_year: new Date().getFullYear(),
-        brand: "Pendiente",
-        model: "Pendiente",
-        vehicle_status: "pending_inspection",
-        vehicle_type: vehicleType,
-        is_pet_friendly: isPet,
+      await genFebStorage.createProviderVehicle({
+        providerId: (provider as { id: number }).id,
+        userId: user.id,
+        vehicle,
       });
-      if (parsedVehicle.success) {
-        await genFebStorage.createProviderVehicle({
-          providerId: (provider as { id: number }).id,
-          userId: user.id,
-          vehicle: parsedVehicle.data,
-        });
-      }
     }
 
     res.status(201).json({ ok: true, userId: user.id, role });
+  });
+
+  app.get("/api/central/affiliation-requests", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const resolved = await resolveCompanyIdForRequest(req, req.query.companyId as string);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+    const list = await listCentralAffiliationRequestsForCompany(resolved.companyId);
+    res.json({ requests: list });
+  });
+
+  app.get("/api/central/affiliation-requests/:id/applicant-preview", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const resolved = await resolveCompanyIdForRequest(req, req.query.companyId as string);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+    const id = String(req.params.id ?? "").trim();
+    if (!id) return res.status(400).json({ message: "id requerido" });
+    const row = await getCentralAffiliationRequest(id);
+    if (!row || row.dispatchCompanyId !== resolved.companyId) {
+      return res.status(404).json({ message: "Solicitud no encontrada" });
+    }
+    const applicant = (await genFebStorage.getUserById(row.applicantUserId)) as Record<string, unknown> | null;
+    const vehicle = await genFebStorage.getPrimaryVehicleByUserId(row.applicantUserId);
+    const prof = await genFebStorage.getProfessionalVerificationByUserId(row.applicantUserId);
+    const shareCompany = String((applicant as { centralDataShareForCompanyId?: string })?.centralDataShareForCompanyId ?? "");
+    const dataGranted =
+      row.dataAccessStatus === "granted" || shareCompany === resolved.companyId;
+
+    const name = String(applicant?.name ?? (applicant as { firstName?: string })?.firstName ?? "").trim();
+    const lastName = String(applicant?.lastName ?? "").trim();
+
+    res.json({
+      request: row,
+      applicant: {
+        userId: row.applicantUserId,
+        name,
+        lastName,
+        email: dataGranted ? String(applicant?.email ?? "") : null,
+        phone: dataGranted ? String(applicant?.phone ?? "") : null,
+        credentialsManagedByUser: true,
+      },
+      vehicle: vehicle
+        ? {
+            license_plate: vehicle.license_plate,
+            brand: vehicle.brand,
+            model: vehicle.model,
+            model_year: vehicle.model_year,
+            vehicle_type: vehicle.vehicle_type,
+          }
+        : null,
+      verification: {
+        professionalCredentialUrl: prof?.professionalCredentialUrl ?? null,
+        imageVerified: prof?.imageVerified === true,
+      },
+      dataAccessGranted: dataGranted,
+    });
+  });
+
+  app.post("/api/central/affiliation-requests/:id/request-data-access", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const resolved = await resolveCompanyIdForRequest(req, req.body?.companyId as string);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+    const id = String(req.params.id ?? "").trim();
+    if (!id) return res.status(400).json({ message: "id requerido" });
+    const row = await getCentralAffiliationRequest(id);
+    if (!row || row.dispatchCompanyId !== resolved.companyId || row.status !== "pending") {
+      return res.status(404).json({ message: "Solicitud no encontrada" });
+    }
+    if (row.dataAccessStatus === "granted") {
+      return res.status(409).json({ message: "El conductor ya autorizó el acceso a datos." });
+    }
+    if (row.dataAccessStatus === "requested") {
+      return res.json({ ok: true, alreadySent: true });
+    }
+    const operatorId = String(req.user?.id ?? "");
+    await updateCentralAffiliationRequest(id, {
+      dataAccessStatus: "requested",
+      dataAccessRequestedByUserId: operatorId,
+      dataAccessRequestedAt: new Date().toISOString(),
+    });
+    const company = await getDispatchCompany(resolved.companyId);
+    const companyName = company?.name ?? "Tu central";
+    await notifyApplicantDataAccessRequested({
+      applicantUserId: row.applicantUserId,
+      companyName,
+      requestId: id,
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/api/central/affiliation-requests/:id/approve", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const resolved = await resolveCompanyIdForRequest(req, req.body?.companyId as string);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+    const id = String(req.params.id ?? "").trim();
+    if (!id) return res.status(400).json({ message: "id requerido" });
+    const row = await getCentralAffiliationRequest(id);
+    if (!row || row.dispatchCompanyId !== resolved.companyId) {
+      return res.status(404).json({ message: "Solicitud no encontrada" });
+    }
+    if (row.status !== "pending") {
+      return res.status(409).json({ message: "La solicitud ya fue procesada." });
+    }
+    const provider = await catalogService.getProviderByUserId(row.applicantUserId);
+    if (!provider) return res.status(404).json({ message: "Proveedor no encontrado" });
+    const pid = (provider as { id: number }).id;
+    await catalogService.updateProvider(pid, {
+      dispatchCompanyId: resolved.companyId,
+    } as Parameters<typeof catalogService.updateProvider>[1]);
+    await updateCentralAffiliationRequest(id, { status: "approved" });
+    await genFebStorage.updateUser(row.applicantUserId, {
+      credentialsManagedOutsideCentral: true,
+      dispatchCompanyId: resolved.companyId,
+    } as Parameters<typeof genFebStorage.updateUser>[1]);
+    void refreshMobilityPresenceDispatchCompany(row.applicantUserId);
+    void refreshPackPresenceDispatchCompany(row.applicantUserId);
+    const company = await getDispatchCompany(resolved.companyId);
+    const companyName = company?.name ?? "Tu central";
+    await notifyApplicantAffiliationApproved({
+      applicantUserId: row.applicantUserId,
+      companyName,
+      requestId: id,
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/api/central/affiliation-requests/:id/reject", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const resolved = await resolveCompanyIdForRequest(req, req.body?.companyId as string);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+    const id = String(req.params.id ?? "").trim();
+    if (!id) return res.status(400).json({ message: "id requerido" });
+    const row = await getCentralAffiliationRequest(id);
+    if (!row || row.dispatchCompanyId !== resolved.companyId) {
+      return res.status(404).json({ message: "Solicitud no encontrada" });
+    }
+    if (row.status !== "pending") {
+      return res.status(409).json({ message: "La solicitud ya fue procesada." });
+    }
+    await updateCentralAffiliationRequest(id, { status: "rejected" });
+    const company = await getDispatchCompany(resolved.companyId);
+    const companyName = company?.name ?? "La central";
+    await notifyApplicantAffiliationRejected({
+      applicantUserId: row.applicantUserId,
+      companyName,
+      requestId: id,
+    });
+    res.json({ ok: true });
   });
 }
 

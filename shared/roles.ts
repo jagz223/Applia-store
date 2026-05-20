@@ -22,6 +22,7 @@ export function normalizeRoleCode(role: string | undefined | null): string | nul
   // tiSupport / Soporte TI / tisupport / ti_support / ti-support / "ti support"
   const compact = lower.replace(/[\s_-]/g, "");
   if (compact === "tisupport" || t === "Soporte TI") return "tiSupport";
+  if (lower === "central") return "central";
   return t;
 }
 

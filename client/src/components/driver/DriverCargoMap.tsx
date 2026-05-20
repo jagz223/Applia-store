@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { MapContainer, TileLayer, Marker, ZoomControl, useMap, GeoJSON, CircleMarker } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, ZoomControl, useMap, useMapEvents, GeoJSON, CircleMarker } from "react-leaflet";
 import L from "leaflet";
 import { Loader2, LocateFixed, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,49 @@ import {
 const DEFAULT_CENTER: [number, number] = [-0.22, -78.5];
 const DEFAULT_ZOOM = 7;
 
+/** Misma vista entre taxi ↔ delivery (rutas distintas remontan el mapa). */
+const DRIVER_GO_MAP_VIEW_KEY = "genfeb.driverGo.mapView.v1";
+
+type PersistedMapView = { lat: number; lng: number; zoom: number; at: number };
+
+function readPersistedMapView(): PersistedMapView | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(DRIVER_GO_MAP_VIEW_KEY);
+    if (!raw) return null;
+    const j = JSON.parse(raw) as Partial<PersistedMapView>;
+    if (!Number.isFinite(j.lat) || !Number.isFinite(j.lng) || !Number.isFinite(j.zoom)) return null;
+    if (Date.now() - (j.at ?? 0) > 7 * 24 * 60 * 60 * 1000) return null;
+    return { lat: j.lat!, lng: j.lng!, zoom: Math.min(18, Math.max(4, j.zoom!)), at: j.at ?? Date.now() };
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedMapView(lat: number, lng: number, zoom: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(
+      DRIVER_GO_MAP_VIEW_KEY,
+      JSON.stringify({ lat, lng, zoom: Math.min(18, Math.max(4, zoom)), at: Date.now() }),
+    );
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function getInitialDriverMapFrame(): {
+  center: [number, number];
+  zoom: number;
+  hadPersistedView: boolean;
+} {
+  const p = readPersistedMapView();
+  if (p) {
+    return { center: [p.lat, p.lng], zoom: p.zoom, hadPersistedView: true };
+  }
+  return { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, hadPersistedView: false };
+}
+
 function WatchDriverPosition({
   onPosition,
 }: {
@@ -29,30 +72,101 @@ function WatchDriverPosition({
 }) {
   useEffect(() => {
     if (!navigator.geolocation) return;
-    const id = navigator.geolocation.watchPosition(
-      (pos) => {
-        onPosition({
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
-        });
+    let cancelled = false;
+    const apply = (pos: GeolocationPosition) => {
+      if (cancelled) return;
+      onPosition({
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+      });
+    };
+    navigator.geolocation.getCurrentPosition(
+      apply,
+      () => {
+        /* timeout/permiso: no borrar marcador; el watch puede recuperar */
       },
-      () => onPosition(null),
-      { enableHighAccuracy: true, maximumAge: 4000, timeout: 20_000 }
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 25_000 },
     );
-    return () => navigator.geolocation.clearWatch(id);
+    const id = navigator.geolocation.watchPosition(
+      apply,
+      () => {
+        /* errores transitorios del GPS: conservar última posición en el padre */
+      },
+      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 60_000 },
+    );
+    return () => {
+      cancelled = true;
+      navigator.geolocation.clearWatch(id);
+    };
   }, [onPosition]);
   return null;
 }
 
-function FlyToFirstFix({ lat, lon }: { lat: number; lon: number }) {
+/** Guarda centro/zoom al mover el mapa (cambio taxi/delivery reusa la última vista). */
+function PersistDriverMapView() {
+  const map = useMap();
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const save = useCallback(() => {
+    try {
+      if (!map.getContainer()?.isConnected) return;
+      const c = map.getCenter();
+      writePersistedMapView(c.lat, c.lng, map.getZoom());
+    } catch {
+      /* desmontado */
+    }
+  }, [map]);
+  useMapEvents({
+    moveend: () => {
+      if (debounce.current) clearTimeout(debounce.current);
+      debounce.current = setTimeout(save, 450);
+    },
+    zoomend: () => {
+      if (debounce.current) clearTimeout(debounce.current);
+      debounce.current = setTimeout(save, 450);
+    },
+  });
+  useEffect(
+    () => () => {
+      if (debounce.current) clearTimeout(debounce.current);
+    },
+    [],
+  );
+  return null;
+}
+
+/**
+ * Solo la primera vez sin vista guardada: acerca al GPS. Si ya hay vista en sessionStorage (p. ej. tras cambiar de pestaña),
+ * no movemos la cámara: el marcador sigue al conductor sin resetear el encuadre.
+ */
+function InitialFlyToGpsIfNoPersisted({
+  hadPersistedView,
+  me,
+}: {
+  hadPersistedView: boolean;
+  me: { lat: number; lon: number } | null;
+}) {
   const map = useMap();
   const done = useRef(false);
   useEffect(() => {
-    if (done.current) return;
+    if (hadPersistedView || !me || done.current) return;
     done.current = true;
-    map.setView(L.latLng(lat, lon), Math.max(map.getZoom(), 15), { animate: true });
-    requestAnimationFrame(() => map.invalidateSize({ animate: false }));
-  }, [map, lat, lon]);
+    try {
+      const c = map.getContainer();
+      if (!c?.isConnected) return;
+      map.setView(L.latLng(me.lat, me.lon), Math.max(map.getZoom(), 15), { animate: true });
+      writePersistedMapView(me.lat, me.lon, Math.max(map.getZoom(), 15));
+      requestAnimationFrame(() => {
+        try {
+          if (!map.getContainer()?.isConnected) return;
+          map.invalidateSize({ animate: false });
+        } catch {
+          /* mapa desmontado */
+        }
+      });
+    } catch {
+      /* contenedor Leaflet no listo o ya desmontado */
+    }
+  }, [hadPersistedView, map, me]);
   return null;
 }
 
@@ -137,9 +251,16 @@ function DriverMapRecenterToolbar({
   const [locating, setLocating] = useState(false);
 
   useLayoutEffect(() => {
-    const root = map.getContainer();
+    let root: HTMLElement;
+    try {
+      root = map.getContainer();
+    } catch {
+      return;
+    }
+    if (!root?.isConnected) return;
+
     const col = root.querySelector(
-      fullscreen ? ".leaflet-top.leaflet-right" : ".leaflet-top.leaflet-left"
+      fullscreen ? ".leaflet-top.leaflet-right" : ".leaflet-top.leaflet-left",
     ) as HTMLDivElement | null;
     if (!col) return;
 
@@ -154,7 +275,11 @@ function DriverMapRecenterToolbar({
 
     const tryPlace = () => {
       if (done) return;
-      if (!col.isConnected) return;
+      try {
+        if (!map.getContainer()?.isConnected || !col.isConnected) return;
+      } catch {
+        return;
+      }
       const zoom = col.querySelector(".leaflet-control-zoom, .leaflet-bar") as HTMLElement | null;
       if (zoom) {
         zoom.after(el);
@@ -177,15 +302,31 @@ function DriverMapRecenterToolbar({
     return () => {
       done = true;
       cancelAnimationFrame(raf);
-      el.remove();
+      try {
+        el.remove();
+      } catch {
+        /* ignore */
+      }
       setHost(null);
     };
   }, [map, fullscreen]);
 
   const centerOn = useCallback(
     (lat: number, lon: number) => {
-      map.setView(L.latLng(lat, lon), Math.max(map.getZoom(), 15), { animate: true });
-      requestAnimationFrame(() => map.invalidateSize({ animate: false }));
+      try {
+        if (!map.getContainer()?.isConnected) return;
+        map.setView(L.latLng(lat, lon), Math.max(map.getZoom(), 15), { animate: true });
+        requestAnimationFrame(() => {
+          try {
+            if (!map.getContainer()?.isConnected) return;
+            map.invalidateSize({ animate: false });
+          } catch {
+            /* mapa desmontado */
+          }
+        });
+      } catch {
+        /* mapa desmontado */
+      }
     },
     [map]
   );
@@ -277,11 +418,21 @@ export function DriverCargoMap({
   const raster = getTaxiRasterLayerProps(theme === "dark");
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: fullscreen ? 120 : 64 });
   const [me, setMe] = useState<{ lat: number; lon: number } | null>(null);
-  const onPosition = useCallback((p: { lat: number; lon: number } | null) => setMe(p), []);
+  const meRef = useRef<{ lat: number; lon: number } | null>(null);
+  const onPosition = useCallback((p: { lat: number; lon: number } | null) => {
+    if (p) {
+      meRef.current = p;
+      setMe(p);
+    } else if (meRef.current) {
+      setMe(meRef.current);
+    }
+  }, []);
   const [tiltDeg, setTiltDeg] = useState(0);
   const [bearingDeg, setBearingDeg] = useState(0);
 
   const driverIcon = useMemo(() => createDriverVehicleIcon(vehicleType), [vehicleType]);
+
+  const initialFrame = useMemo(() => getInitialDriverMapFrame(), []);
 
   const shellStyle = fullscreen
     ? ({ width: "100%", height: "100%", minHeight: 0, maxHeight: "none" } as const)
@@ -333,8 +484,8 @@ export function DriverCargoMap({
             style={{ transform: `rotateX(${tiltDeg}deg)` }}
           >
             <MapContainer
-              center={me ? [me.lat, me.lon] : DEFAULT_CENTER}
-              zoom={me ? 15 : DEFAULT_ZOOM}
+              center={initialFrame.center}
+              zoom={initialFrame.zoom}
               attributionControl={false}
               zoomControl={!fullscreen}
               className={fullscreen ? "z-0 h-full w-full rounded-none" : "z-0 h-full w-full rounded-2xl"}
@@ -358,6 +509,7 @@ export function DriverCargoMap({
                 {...(raster.apiKey ? { apiKey: raster.apiKey } : {})}
               />
               <LeafletMapLayoutFix />
+              <PersistDriverMapView />
               <WatchDriverPosition onPosition={onPosition} />
               {showRecenter ? (
                 <DriverMapRecenterToolbar me={me} onLocated={onPosition} fullscreen={!!fullscreen} />
@@ -365,7 +517,7 @@ export function DriverCargoMap({
               {me && (
                 <>
                   <Marker position={[me.lat, me.lon]} icon={driverIcon} interactive={false} zIndexOffset={600} />
-                  <FlyToFirstFix lat={me.lat} lon={me.lon} />
+                  <InitialFlyToGpsIfNoPersisted hadPersistedView={initialFrame.hadPersistedView} me={me} />
                 </>
               )}
               {end ? <FitToService start={start} end={end} me={me} /> : null}

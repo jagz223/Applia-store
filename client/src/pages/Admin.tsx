@@ -1145,6 +1145,26 @@ function AdminCategoriesTab() {
   );
 }
 
+/** Interpreta `createdAt` del API (ISO) o legado Firestore en caché del cliente. */
+function parseAdminAuditCreatedAt(raw: unknown): Date | null {
+  if (raw == null) return null;
+  if (typeof raw === "string") {
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof raw === "object" && raw !== null && "toDate" in raw && typeof (raw as { toDate?: () => Date }).toDate === "function") {
+    const d = (raw as { toDate: () => Date }).toDate();
+    return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
+  }
+  const o = raw as { seconds?: number; _seconds?: number; nanoseconds?: number };
+  const sec = o?.seconds ?? o?._seconds;
+  if (typeof sec === "number" && !Number.isNaN(sec)) {
+    const d = new Date(sec * 1000);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
 /** Título en español para una fila del historial de auditoría admin (resumen / pestaña overview). */
 function adminAuditEventTitle(it: { action: string; meta?: unknown }): string {
   const metaObj = it.meta && typeof it.meta === "object" ? (it.meta as Record<string, unknown>) : null;
@@ -1169,21 +1189,34 @@ function adminAuditEventTitle(it: { action: string; meta?: unknown }): string {
     return `Cambio de datos de cuenta: ${verb}`;
   }
 
-  if (it.action === "subscription_payment_approved") return "Pago mensual aprobado";
-  if (it.action === "subscription_payment_rejected") return "Pago mensual rechazado";
-  if (it.action === "associate_onboarding_approved") return "Nuevo asociado aprobado";
-  if (it.action === "associate_onboarding_rejected") return "Nuevo asociado rechazado";
+  if (it.action === "subscription_payment_approved") return "Mensualidad / comprobante de pago aprobado";
+  if (it.action === "subscription_payment_rejected") return "Mensualidad / comprobante de pago rechazado";
+  if (it.action === "associate_onboarding_approved") return "Documento de identificación aprobado";
+  if (it.action === "associate_onboarding_rejected") return "Documento de identificación rechazado";
   return it.action;
 }
 
 function adminAuditEventDetailLines(it: { action: string; meta?: unknown }): string[] {
+  const meta = it.meta && typeof it.meta === "object" ? (it.meta as Record<string, unknown>) : null;
+
+  if (it.action === "associate_onboarding_approved" || it.action === "associate_onboarding_rejected") {
+    const dk = String(meta?.documentKind ?? "").trim();
+    if (dk === "identification" || dk === "") {
+      const lines = ["Tipo: aprobación o rechazo de documento (identificación oficial del asociado)."];
+      if (it.action === "associate_onboarding_rejected") {
+        const reason = String(meta?.reason ?? "").trim();
+        if (reason) lines.push(`Motivo: ${reason}`);
+      }
+      return lines;
+    }
+    return [];
+  }
+
   if (
     it.action === "subscription_payment_approved" ||
     it.action === "subscription_payment_rejected"
   ) {
-    return formatSubscriptionPaymentAuditSummary(
-      it.meta && typeof it.meta === "object" ? (it.meta as Record<string, unknown>) : null,
-    );
+    return formatSubscriptionPaymentAuditSummary(meta);
   }
   return [];
 }
@@ -1718,6 +1751,9 @@ export default function AdminPanel() {
     subscriptionDiscountedTotalUsd?: number | null;
     providerCategorySlug?: string | null;
     visibilitySubscriptionEndsAt?: string | null;
+    prefundPromoAwaitingDossier?: boolean;
+    prefundPromoCode?: string | null;
+    prefundPromoMonths?: number | null;
   };
 
   const credentialSlideTitle = (assoc: AdminVerifyingStatusItem) =>
@@ -1755,9 +1791,23 @@ export default function AdminPanel() {
   });
   const pendingAccountChangeRequests: AdminAccountChangeRequest[] = adminAccountChangeReqData?.requests ?? [];
 
+  const [auditLogPage, setAuditLogPage] = useState(1);
+  const AUDIT_LOG_PAGE_SIZE = 5;
+  const [auditDateFromDraft, setAuditDateFromDraft] = useState("");
+  const [auditDateToDraft, setAuditDateToDraft] = useState("");
+  const [auditDateFrom, setAuditDateFrom] = useState("");
+  const [auditDateTo, setAuditDateTo] = useState("");
+
   const { data: adminAuditLogData, isLoading: adminAuditLogLoading } = useQuery({
-    queryKey: ["admin-audit-log"],
-    queryFn: () => fetchWithAuth("/api/admin/audit-log?limit=80"),
+    queryKey: ["admin-audit-log", auditDateFrom, auditDateTo],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set("limit", auditDateFrom || auditDateTo ? "400" : "120");
+      if (auditDateFrom) params.set("from", auditDateFrom);
+      if (auditDateTo) params.set("to", auditDateTo);
+      const qs = params.toString();
+      return fetchWithAuth(`/api/admin/audit-log?${qs}`);
+    },
     enabled: fullAdmin && activeTab === "overview",
   });
   const auditItems: Array<{
@@ -1772,8 +1822,6 @@ export default function AdminPanel() {
     createdAt: any;
     meta?: any;
   }> = adminAuditLogData?.items ?? [];
-  const [auditLogPage, setAuditLogPage] = useState(1);
-  const AUDIT_LOG_PAGE_SIZE = 5;
 
   const resolveAccountChangeRequestMutation = useMutation({
     mutationFn: async (args: { id: number; action: "approve" | "reject"; reason?: string }) =>
@@ -2289,6 +2337,21 @@ export default function AdminPanel() {
                                   </div>
                                   ) : null}
 
+                                  {assoc.prefundPromoAwaitingDossier ? (
+                                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+                                      <p className="font-medium">Mes(es) gratis por código (antes del expediente)</p>
+                                      <p className="mt-1 text-xs leading-relaxed opacity-95">
+                                        Canjeó el código{" "}
+                                        <span className="font-mono font-semibold">{assoc.prefundPromoCode ?? "—"}</span>
+                                        {typeof assoc.prefundPromoMonths === "number" && assoc.prefundPromoMonths > 0
+                                          ? ` (${assoc.prefundPromoMonths} mes${assoc.prefundPromoMonths === 1 ? "" : "es"})`
+                                          : null}
+                                        . La cuota de visibilidad puede estar activa por el canje; aún falta completar o
+                                        verificar la documentación para cerrar el alta en el panel.
+                                      </p>
+                                    </div>
+                                  ) : null}
+
                                   <div className="rounded-lg border border-border/60 p-3 space-y-3 bg-muted/10">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                       <div className="min-w-0 flex-1">
@@ -2319,7 +2382,10 @@ export default function AdminPanel() {
                                           {assoc.transacction_date
                                             ? new Date(assoc.transacction_date).toLocaleDateString("es-EC")
                                             : "—"}{" "}
-                                          · Comprobante bancario: {assoc.transacction_code ?? "—"}
+                                          · Comprobante:{" "}
+                                          {assoc.transacction_code?.startsWith("MES-GRATIS:")
+                                            ? `Ticket promocional — ${assoc.transacction_code.replace(/^MES-GRATIS:/, "").trim()}`
+                                            : (assoc.transacction_code ?? "—")}
                                           {assoc.promotionalCode ? (
                                             <>
                                               {" "}
@@ -2436,9 +2502,65 @@ export default function AdminPanel() {
                         <div className="min-w-0">
                           <p className="font-medium">Historial de auditoría</p>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Registro de acciones sensibles (pagos, altas de asociados, cambios de datos de cuenta o de
-                            vehículo): fecha, admin, acción y usuario afectado.
+                            Registro de acciones sensibles (pagos, verificación de documentos de identificación,
+                            cambios de cuenta o vehículo). Cada evento muestra fecha y hora exactas. Filtro opcional por
+                            rango de días (UTC): inicio del día «Desde» y fin del día «Hasta», ambos inclusivos.
                           </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-background/80 p-3 sm:flex-row sm:flex-wrap sm:items-end">
+                        <div className="grid flex-1 gap-1 min-w-[140px]">
+                          <label className="text-xs font-medium text-muted-foreground" htmlFor="audit-from">
+                            Desde
+                          </label>
+                          <Input
+                            id="audit-from"
+                            type="date"
+                            className="text-sm"
+                            value={auditDateFromDraft}
+                            onChange={(e) => setAuditDateFromDraft(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid flex-1 gap-1 min-w-[140px]">
+                          <label className="text-xs font-medium text-muted-foreground" htmlFor="audit-to">
+                            Hasta
+                          </label>
+                          <Input
+                            id="audit-to"
+                            type="date"
+                            className="text-sm"
+                            value={auditDateToDraft}
+                            onChange={(e) => setAuditDateToDraft(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setAuditDateFrom(auditDateFromDraft.trim());
+                              setAuditDateTo(auditDateToDraft.trim());
+                              setAuditLogPage(1);
+                            }}
+                          >
+                            Aplicar filtro
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setAuditDateFromDraft("");
+                              setAuditDateToDraft("");
+                              setAuditDateFrom("");
+                              setAuditDateTo("");
+                              setAuditLogPage(1);
+                            }}
+                          >
+                            Limpiar fechas
+                          </Button>
                         </div>
                       </div>
 
@@ -2482,17 +2604,29 @@ export default function AdminPanel() {
                               </div>
                               <div className="space-y-2">
                                 {paged.map((it) => {
-                            const d = new Date(it.createdAt?.toDate ? it.createdAt.toDate() : it.createdAt);
-                            const dateLabel = Number.isNaN(d.getTime())
-                              ? "—"
-                              : d.toLocaleString("es-EC", { dateStyle: "medium", timeStyle: "short" });
+                            const d = parseAdminAuditCreatedAt(it.createdAt);
+                            const fechaHoraLabel = d
+                              ? d.toLocaleString("es-EC", {
+                                  weekday: "long",
+                                  day: "numeric",
+                                  month: "long",
+                                  year: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  second: "2-digit",
+                                })
+                              : "Fecha/hora no disponible";
                             const actionLabel = adminAuditEventTitle(it);
                             const detailLines = adminAuditEventDetailLines(it);
                             return (
                               <div key={it.id} className="rounded-lg border bg-background p-3 text-sm">
                                 <p className="font-medium">{actionLabel}</p>
-                                <p className="text-xs text-muted-foreground mt-1 break-words">
-                                  {dateLabel} · Admin: {(it.adminName ?? it.adminUserId) || "—"}
+                                <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                  Fecha y hora
+                                </p>
+                                <p className="text-sm font-medium text-foreground tabular-nums">{fechaHoraLabel}</p>
+                                <p className="text-xs text-muted-foreground mt-2 break-words">
+                                  Admin: {(it.adminName ?? it.adminUserId) || "—"}
                                   {it.adminEmail ? ` (${it.adminEmail})` : ""} · Usuario:{" "}
                                   {(it.affectedUserName ?? it.affectedUserId) || "—"}
                                   {it.affectedUserEmail ? ` (${it.affectedUserEmail})` : ""}

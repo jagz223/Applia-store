@@ -213,6 +213,8 @@ class NotificationService {
             notification: { title: payload.title, body: payload.body },
             data: dataStr,
             webpush: message.webpush,
+            android: message.android,
+            apns: message.apns,
           });
           sent++;
         } catch (tokenErr) {

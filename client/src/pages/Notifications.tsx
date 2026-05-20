@@ -16,6 +16,16 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSocket } from "@/hooks/use-socket";
 import { useConversations } from "@/hooks/use-chat";
 import { serviceBookingPaymentLabel } from "@shared/booking-payment";
+import {
+  NOTIFICATION_TYPE_CENTRAL_AFFILIATION,
+  NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED,
+  NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED,
+  NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS,
+} from "@shared/central-affiliation";
+import {
+  centralAffiliationApplicantNotificationPath,
+  centralAffiliationNotificationPath,
+} from "@/lib/central-affiliation-notification-path";
 
 const PAGE_SIZE = 10;
 
@@ -140,6 +150,13 @@ function getNotificationPath(notification: { id?: string; type: string; data?: a
       const u = data.url ?? data.data?.url;
       return typeof u === "string" && u.startsWith("/") ? u : "/settings";
     }
+    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION:
+      return centralAffiliationNotificationPath(data);
+    case NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS:
+      return centralAffiliationApplicantNotificationPath(data);
+    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED:
+    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED:
+      return centralAffiliationApplicantNotificationPath(data);
     default:
       return "/dashboard";
   }
