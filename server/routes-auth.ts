@@ -8,6 +8,7 @@ import { isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categorie
 import { isGoVehicleProvider } from "@shared/provider-car-go";
 import { notifyFullAdminsPendingAccountChangeRequest } from "./account-change-notify-admins";
 import { genFebStorage } from "./storage-genfeb";
+import { createDispatchCompany } from "./dispatch-companies";
 
 // Environment variables
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -53,8 +54,17 @@ const registerSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
   phone: z.string().min(1, "El teléfono es obligatorio").transform((s) => normalizePhone(s)),
-  role: z.enum(["client", "professional", "admin"]).default("client"),
+  role: z.enum(["client", "professional", "admin", "central"]).default("client"),
+  companyName: z.string().trim().min(2, "Nombre de empresa obligatorio").max(120).optional(),
   avatar: z.string().url("La foto de perfil debe ser una URL válida").optional().or(z.literal("")),
+}).superRefine((data, ctx) => {
+  if (data.role === "central" && !data.companyName?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "El nombre de empresa es obligatorio para cuentas Central",
+      path: ["companyName"],
+    });
+  }
 });
 
 // Schema para login
@@ -106,6 +116,7 @@ function buildAuthClientUser(
     createdAt: user.createdAt,
     profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
     acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
+    dispatchCompanyId: (user as { dispatchCompanyId?: string | null }).dispatchCompanyId ?? null,
     provider: provider ?? null,
   };
 }
@@ -193,6 +204,15 @@ export async function registerAuthRoutes(
         ratingCount: 0,
         avatar: data.avatar ? data.avatar : undefined,
       })) as any;
+
+      if (data.role === "central") {
+        const company = await createDispatchCompany({
+          name: String(data.companyName ?? "").trim(),
+          ownerUserId: user.id,
+        });
+        await genFebStorage.updateUser(user.id, { dispatchCompanyId: company.id } as any);
+        user.dispatchCompanyId = company.id;
+      }
       
       // Generar token
       const token = generateToken({

@@ -25,6 +25,7 @@ import ServiceDetails from "@/pages/ServiceDetails";
 import Dashboard from "@/pages/Dashboard";
 import BecomePro from "@/pages/BecomePro";
 import BecomeDriver from "@/pages/BecomeDriver";
+import CentralDashboard from "@/pages/CentralDashboard";
 import CreateService from "@/pages/CreateService";
 import MyServices from "@/pages/MyServices";
 import EditService from "@/pages/EditService";
@@ -81,6 +82,7 @@ function MainRouter() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/become-pro" component={BecomePro} />
       <Route path="/become-driver" component={BecomeDriver} />
+      <Route path="/central" component={CentralDashboard} />
       <Route path="/create-service" component={CreateService} />
       <Route path="/my-services" component={MyServices} />
       <Route path="/edit-service/:id" component={EditService} />

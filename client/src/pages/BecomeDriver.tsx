@@ -74,6 +74,8 @@ import {
 import { Loader2, ArrowLeft, Car } from "lucide-react";
 import { GoDriverVehicleFormGrid, goVehicleCanMarkPetFriendly } from "@/components/provider/GoDriverVehicleFormGrid";
 import { GoThreeServicesReminder } from "@/components/provider/GoThreeServicesReminder";
+import { useDispatchCompanyOptions } from "@/hooks/use-central";
+import { DISPATCH_COMPANY_NONE } from "@shared/dispatch-company";
 
 const DEFAULT_VEHICLE_FORM = {
   license_plate: "",
@@ -217,10 +219,19 @@ function BecomeDriverFormBody({
   }, [hasPrimaryVehicle, vehicleBrand, vehicleModelWatch, nhtsaYears, form]);
 
   const enroll = useEnrollGoDriver();
+  const { data: dispatchCompanies = [] } = useDispatchCompanyOptions();
+  const [dispatchCompanyId, setDispatchCompanyId] = useState(DISPATCH_COMPANY_NONE);
+
+  useEffect(() => {
+    const cid = (provider as { dispatchCompanyId?: string | null } | null)?.dispatchCompanyId;
+    setDispatchCompanyId(cid ?? DISPATCH_COMPANY_NONE);
+  }, [provider]);
 
   const onSubmit = async (values: FormValues) => {
     await enroll.mutateAsync({
       ...(hasPrimaryVehicle ? {} : { vehicle: buildVehiclePayload(values.vehicle) }),
+      dispatchCompanyId:
+        dispatchCompanyId === DISPATCH_COMPANY_NONE ? null : dispatchCompanyId,
     });
     onEnrolled();
   };
@@ -301,6 +312,28 @@ function BecomeDriverFormBody({
                 />
               </div>
             )}
+
+            <FormItem>
+              <FormLabel>Empresa (central)</FormLabel>
+              <FormDescription className="text-xs">
+                Si perteneces a una empresa despachadora, selecciónala. Si eres independiente, deja la primera opción.
+              </FormDescription>
+              <Select value={dispatchCompanyId} onValueChange={setDispatchCompanyId}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Empresa" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value={DISPATCH_COMPANY_NONE}>No pertenezco a ninguna empresa</SelectItem>
+                  {dispatchCompanies.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormItem>
 
             <Button type="submit" className="w-full sm:w-auto gap-2" disabled={enroll.isPending}>
               {enroll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

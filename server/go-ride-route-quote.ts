@@ -1,12 +1,7 @@
 import type { GeoJsonObject } from "geojson";
-import {
-  computeMobilitySuggestedUsd,
-  computePackSuggestedUsd,
-  type GoVehicleType,
-} from "@shared/mobility-fare-quote";
-import { getMobilityFares } from "./mobility-fares";
-import { getPackFares } from "./pack-fares";
+import type { GoVehicleType } from "@shared/mobility-fare-quote";
 import { computeDrivingRoute } from "./maps-route-service";
+import { resolveSuggestedUsdForDriver } from "./fare-resolver";
 
 export type GoRideModule = "taxi" | "delivery";
 
@@ -24,30 +19,21 @@ export async function resolveGoRideRouteQuote(input: {
   vehicleType: GoVehicleType;
   module: GoRideModule;
   petEnabled?: boolean;
+  /** Si se indica, aplica tarifas de la central del conductor; si no, tarifas globales. */
+  driverUserId?: string | null;
 }): Promise<ResolvedGoRideRouteQuote> {
   const route = await computeDrivingRoute(
     { lon: input.start.lon, lat: input.start.lat },
     { lon: input.end.lon, lat: input.end.lat },
   );
 
-  let suggestedUsd = 0;
-  if (input.module === "delivery") {
-    const vt =
-      input.vehicleType === "pet_car"
-        ? "auto"
-        : (input.vehicleType as "moto" | "auto" | "camioneta");
-    const fares = await getPackFares();
-    suggestedUsd =
-      computePackSuggestedUsd(fares, vt, route.distanceM) ??
-      computePackSuggestedUsd(fares, "auto", route.distanceM) ??
-      0;
-  } else {
-    const fares = await getMobilityFares();
-    suggestedUsd =
-      computeMobilitySuggestedUsd(fares, input.vehicleType, route.distanceM, {
-        petEnabled: input.petEnabled,
-      }) ?? 0;
-  }
+  const { suggestedUsd } = await resolveSuggestedUsdForDriver({
+    module: input.module,
+    vehicleType: input.vehicleType,
+    distanceM: route.distanceM,
+    driverUserId: input.driverUserId ?? null,
+    petEnabled: input.petEnabled,
+  });
 
   return {
     distanceM: route.distanceM,
