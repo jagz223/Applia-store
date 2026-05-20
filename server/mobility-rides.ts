@@ -33,6 +33,9 @@ import {
 } from "@shared/mobility-negotiation";
 import { driverIsBusyCrossModule, registerMobilityDriverBusy } from "./driver-busy-cross-module";
 import { resolveGoRideRouteQuote } from "./go-ride-route-quote";
+import { applyDriverFareToRide } from "./ride-fare-apply";
+import { normalizeDispatchCompanyId } from "@shared/dispatch-company";
+import { emitCentralFleetUpdate } from "./central-fleet-notify";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
   onMobilityRideChatCancelled,
@@ -139,6 +142,19 @@ type RideRecord = {
 };
 
 const rides = new Map<string, RideRecord>();
+
+export function mobilityDriverInActiveRide(userId: string): boolean {
+  for (const r of rides.values()) {
+    if (
+      r.driverUserId === userId &&
+      (r.status === "matched" || r.status === "in_progress")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const rideTimers = new Map<
   string,
   { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }
@@ -161,8 +177,13 @@ type DriverPresence = {
   lat: number;
   lon: number;
   updatedAt: number;
+  dispatchCompanyId: string | null;
 };
 const onlineDrivers = new Map<string, DriverPresence>();
+
+export function getMobilityOnlineDriversSnapshot(): ReadonlyMap<string, DriverPresence> {
+  return onlineDrivers;
+}
 
 const PRESENCE_TTL_MS = 45_000;
 const REOFFER_COOLDOWN_MS = 75_000;
@@ -1020,6 +1041,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.status = "matched";
       ride.isNegotiated = true;
       ride.paymentConfirmed = false;
+      await applyDriverFareToRide(ride, driverId, "taxi");
       clearRideTimers(ride.id);
 
       const io = getIO();
@@ -1141,6 +1163,9 @@ export function registerMobilityRideRoutes(app: Express) {
       }
       ride.driverUserId = driverUserId;
       ride.status = "matched";
+      if (!ride.isNegotiated) {
+        await applyDriverFareToRide(ride, driverUserId, "taxi");
+      }
       clearRideTimers(ride.id);
 
       withdrawDriverNegotiationOffersEverywhere(io, driverUserId, rideId);
@@ -1670,7 +1695,9 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
       (data: { receiving: boolean; vehicleType: string; isPetFriendly?: boolean; lat: number; lon: number }) => {
         if (!data) return;
         if (!data.receiving) {
+          const prev = onlineDrivers.get(user.id);
           onlineDrivers.delete(user.id);
+          if (prev) emitCentralFleetUpdate(getIO(), { ...prev, updatedAt: Date.now() }, true);
           return;
         }
         void (async () => {
@@ -1679,6 +1706,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
             onlineDrivers.delete(user.id);
             return;
           }
+        const provider = await catalogService.getProviderByUserId(user.id);
         const pres: DriverPresence = {
           userId: user.id,
           vehicleType: (data.vehicleType || "").trim(),
@@ -1686,8 +1714,12 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
           lat: data.lat,
           lon: data.lon,
           updatedAt: Date.now(),
+          dispatchCompanyId: normalizeDispatchCompanyId(
+            (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
+          ),
         };
         onlineDrivers.set(user.id, pres);
+        emitCentralFleetUpdate(getIO(), pres);
 
         // Si hay rides en búsqueda, ofrecer también a drivers que se ponen online después.
         void (async () => {

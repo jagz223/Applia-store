@@ -34,12 +34,18 @@ const registerSchema = z.object({
     .transform((s) => s.trim()),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
   confirmPassword: z.string(),
-  role: z.enum(["client", "professional"]),
+  role: z.enum(["client", "professional", "central"]),
+  companyName: z.string().trim().max(120).optional(),
   avatar: z.string().url("La URL de la imagen debe ser válida").optional().or(z.literal("")),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Las contraseñas no coinciden",
-  path: ["confirmPassword"],
-});
+})
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Las contraseñas no coinciden",
+    path: ["confirmPassword"],
+  })
+  .refine((data) => data.role !== "central" || (data.companyName?.trim().length ?? 0) >= 2, {
+    message: "El nombre de empresa es obligatorio",
+    path: ["companyName"],
+  });
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
@@ -132,6 +138,8 @@ export default function Register() {
 
       if (data.role === "professional") {
         setLocation("/become-pro");
+      } else if (data.role === "central") {
+        setLocation("/central");
       } else {
         setLocation("/");
       }
@@ -405,12 +413,33 @@ export default function Register() {
                             Asociado/Driver
                           </Label>
                         </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="central" id="central-reg" />
+                          <Label htmlFor="central-reg" className="cursor-pointer">
+                            Central
+                          </Label>
+                        </div>
                       </RadioGroup>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              {form.watch("role") === "central" && (
+                <FormField
+                  control={form.control}
+                  name="companyName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nombre de empresa</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Mi empresa de taxi" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
             </CardContent>
             <CardFooter className="flex flex-col space-y-4">
               <Button type="submit" className="w-full" disabled={isLoading}>

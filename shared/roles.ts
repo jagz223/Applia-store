@@ -39,3 +39,12 @@ export function hasAdminPrivileges(role: string | undefined | null): boolean {
 export function isFullAdmin(role: string | undefined | null): boolean {
   return normalizeRoleCode(role) === "admin";
 }
+
+export function isCentralRole(role: string | undefined | null): boolean {
+  return normalizeRoleCode(role) === "central";
+}
+
+/** Panel Central: operadores de empresa despachadora o administración. */
+export function canAccessCentralPanel(role: string | undefined | null): boolean {
+  return isCentralRole(role) || hasAdminPrivileges(role);
+}

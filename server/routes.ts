@@ -26,6 +26,7 @@ import { registerInvoiceRoutes } from "./routes-invoices";
 import { registerPayPalRoutes } from "./routes-paypal";
 import { registerRoleRoutes } from "./routes-roles";
 import { registerAdminRoutes } from "./routes-admin";
+import { registerCentralRoutes } from "./routes-central";
 import { registerMapRoutes } from "./routes-maps";
 import { registerMobilityRideRoutes, mobilityPanicResolveContext } from "./mobility-rides";
 import { registerPackRideRoutes, packPanicResolveContext } from "./pack-rides";
@@ -61,6 +62,7 @@ export async function registerRoutes(
   // Registrar PRIMERO las rutas /api (admin, roles, health) para que tengan prioridad
   // y no sean interceptadas por session/passport ni por Vite
   registerAdminRoutes(app);
+  registerCentralRoutes(app);
   registerRoleRoutes(app);
   registerMapRoutes(app);
   registerMobilityRideRoutes(app);
@@ -185,6 +187,7 @@ export async function registerRoutes(
     serviceTitle: z.string().trim().max(500).optional(),
     serviceDescription: z.string().trim().max(5000).optional(),
     vehicle: z.any().optional(),
+    dispatchCompanyId: z.string().nullable().optional(),
   });
 
   /** Habilita módulos taxi + delivery (Go) y datos de conductor para un proveedor ya existente. */
@@ -259,10 +262,16 @@ export async function registerRoutes(
         categories,
       );
 
+      const dispatchCompanyId =
+        body.dispatchCompanyId === null || body.dispatchCompanyId === ""
+          ? null
+          : String(body.dispatchCompanyId ?? "").trim() || null;
+
       await catalogService.updateProvider(pid, {
         goBrands: merged,
         goDriverOfferTitle: serviceTitle,
         goDriverOfferDescription: serviceDescription,
+        ...(body.dispatchCompanyId !== undefined ? { dispatchCompanyId } : {}),
         ...categoryPatch,
       });
 

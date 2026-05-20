@@ -29,6 +29,9 @@ import {
 } from "@shared/mobility-negotiation";
 import { driverIsBusyCrossModule, registerPackDriverBusy } from "./driver-busy-cross-module";
 import { resolveGoRideRouteQuote } from "./go-ride-route-quote";
+import { applyDriverFareToRide } from "./ride-fare-apply";
+import { normalizeDispatchCompanyId } from "@shared/dispatch-company";
+import { emitCentralFleetUpdate } from "./central-fleet-notify";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
   onMobilityRideChatCancelled,
@@ -136,8 +139,25 @@ type DriverPresence = {
   lat: number;
   lon: number;
   updatedAt: number;
+  dispatchCompanyId: string | null;
 };
 const onlineDrivers = new Map<string, DriverPresence>();
+
+export function getPackOnlineDriversSnapshot(): ReadonlyMap<string, DriverPresence> {
+  return onlineDrivers;
+}
+
+export function packDriverInActiveRide(userId: string): boolean {
+  for (const r of rides.values()) {
+    if (
+      r.driverUserId === userId &&
+      (r.status === "matched" || r.status === "in_progress")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function safeNumber(v: unknown, fallback = 0): number {
   const n = typeof v === "string" ? Number(v) : (v as number);
@@ -444,7 +464,9 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
     socket.on("pack:driver:presence", (data: { receiving: boolean; vehicleType: string; lat: number; lon: number }) => {
       if (!data) return;
       if (!data.receiving) {
+        const prev = onlineDrivers.get(user.id);
         onlineDrivers.delete(user.id);
+        if (prev) emitCentralFleetUpdate(io, { ...prev, isPetFriendly: false, updatedAt: Date.now() }, true);
         return;
       }
       void (async () => {
@@ -453,14 +475,19 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
           onlineDrivers.delete(user.id);
           return;
         }
+        const provider = await catalogService.getProviderByUserId(user.id);
       const pres: DriverPresence = {
         userId: user.id,
         vehicleType: (data.vehicleType || "").trim(),
         lat: data.lat,
         lon: data.lon,
         updatedAt: Date.now(),
+        dispatchCompanyId: normalizeDispatchCompanyId(
+          (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
+        ),
       };
       onlineDrivers.set(user.id, pres);
+      emitCentralFleetUpdate(io, { ...pres, isPetFriendly: false });
 
       // Si hay envíos en búsqueda, ofrecer también a drivers que se ponen online después.
       void (async () => {
@@ -1080,6 +1107,9 @@ export function registerPackRideRoutes(app: Express) {
       }
       ride.driverUserId = driverUserId;
       ride.status = "matched";
+      if (!ride.isNegotiated) {
+        await applyDriverFareToRide(ride, driverUserId, "delivery");
+      }
       clearRideTimers(ride.id);
 
       withdrawDriverNegotiationOffersEverywhere(io, driverUserId, rideId);
@@ -1589,14 +1619,19 @@ export function registerPackRideRoutes(app: Express) {
       if (!uid) return res.status(401).json({ message: "Unauthorized" });
       const parsed = presenceSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ message: "Payload inválido" });
+      const provider = await catalogService.getProviderByUserId(uid);
       const pres: DriverPresence = {
         userId: uid,
         vehicleType: parsed.data.vehicleType,
         lat: parsed.data.lat,
         lon: parsed.data.lon,
         updatedAt: Date.now(),
+        dispatchCompanyId: normalizeDispatchCompanyId(
+          (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
+        ),
       };
       onlineDrivers.set(uid, pres);
+      emitCentralFleetUpdate(getIO(), { ...pres, isPetFriendly: false });
 
       // Si el driver se reporta tarde, intentar re-ofertar rides pendientes sin oferta activa.
       const io = getIO();

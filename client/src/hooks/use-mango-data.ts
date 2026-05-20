@@ -339,6 +339,7 @@ export function useProviderVehicle(options?: { enabled?: boolean }) {
 }
 
 export type EnrollGoDriverPayload = {
+  dispatchCompanyId?: string | null;
   serviceTitle?: string;
   serviceDescription?: string;
   vehicle?: import("@shared/vehicle-schema").InsertProviderVehicle;

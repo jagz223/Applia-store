@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { useAssociateOnboardingIncomplete } from "@/hooks/use-associate-onboarding-incomplete";
-import { hasAdminRole, canAccessAssociateActivityDashboard } from "@/lib/auth-utils";
+import { hasAdminRole, canAccessAssociateActivityDashboard, canAccessCentralDashboard } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility, useProviderVehicle } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
@@ -33,6 +33,7 @@ import {
   Star,
   Smartphone,
   AlertTriangle,
+  Building2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -158,6 +159,7 @@ export function Navigation() {
     providerHasGoBrand(providerProfile as ProviderGoRef, "delivery", categories);
 
   const isAdmin = (user as { role?: string } | null)?.role === "admin";
+  const showCentralNav = canAccessCentralDashboard(user);
   /** Conductor Car Go (verificado o no): acceso a vista driver (recibir) en Go. */
   const isCarGoDriver = !!providerProfile && isCarGoProvider(providerProfile, categories);
   const isVerifiedCarGoDriver = providerProfile?.isVerified === true && isCarGoDriver;
@@ -495,6 +497,14 @@ export function Navigation() {
                       Configuración
                     </Link>
                   </DropdownMenuItem>
+                  {showCentralNav && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/central" className="flex items-center">
+                        <Building2 className="mr-2 h-4 w-4" />
+                        Central
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   {hasAdminRole(user) && (
                     <>
                       <DropdownMenuSeparator />
@@ -646,6 +656,17 @@ export function Navigation() {
                 <Link href="/chat" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mensajes
                 </Link>
+                {isAuthenticated && (
+                  <Link href="/settings" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                    Configuración
+                  </Link>
+                )}
+                {showCentralNav && (
+                  <Link href="/central" className="text-lg font-medium flex items-center gap-2" onClick={() => setMobileOpen(false)}>
+                    <Building2 className="h-5 w-5 shrink-0" />
+                    Central
+                  </Link>
+                )}
                 {!isAuthenticated && (
                   <>
                     <Link href="/settings" className="text-lg font-medium text-muted-foreground" onClick={() => setMobileOpen(false)}>

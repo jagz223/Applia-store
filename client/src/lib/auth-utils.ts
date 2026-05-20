@@ -1,8 +1,8 @@
-import { hasAdminPrivileges, isFullAdmin, normalizeRoleCode } from "@shared/roles";
+import { canAccessCentralPanel, hasAdminPrivileges, isFullAdmin, normalizeRoleCode } from "@shared/roles";
 import { api } from "@shared/routes";
 
 /** Roles que no deben ver el CTA "Convertirse en Profesional" (salvo reglas especiales por rol). */
-export const ROLES_HIDING_BECOME_PRO_CTA = ["professional", "tiSupport"] as const;
+export const ROLES_HIDING_BECOME_PRO_CTA = ["professional", "tiSupport", "central"] as const;
 
 /**
  * Indica si debe mostrarse el CTA de "Convertirse en Profesional".
@@ -27,6 +27,10 @@ export function hasAdminRole(user: { role?: string } | null): boolean {
 /** Solo administrador (no Soporte TI): pestañas financieras y verificación de asociados. */
 export function hasFullAdminRole(user: { role?: string } | null): boolean {
   return isFullAdmin(user?.role);
+}
+
+export function canAccessCentralDashboard(user: { role?: string } | null): boolean {
+  return canAccessCentralPanel(user?.role);
 }
 
 /**
