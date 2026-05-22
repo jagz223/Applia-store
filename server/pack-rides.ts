@@ -31,7 +31,9 @@ import { driverIsBusyCrossModule, registerPackDriverBusy } from "./driver-busy-c
 import { resolveGoRideRouteQuote } from "./go-ride-route-quote";
 import { applyDriverFareToRide } from "./ride-fare-apply";
 import { normalizeDispatchCompanyId } from "@shared/dispatch-company";
+import { toCentralActiveServiceForPanel } from "@shared/central-active-service-for-central";
 import { emitCentralFleetUpdate } from "./central-fleet-notify";
+import { persistMobilityRideToHistory } from "./mobility-ride-archive-helper";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
   onMobilityRideChatCancelled,
@@ -179,9 +181,8 @@ export async function getPackActiveRideForCentral(driverUserId: string) {
   for (const r of rides.values()) {
     if (r.driverUserId !== driverUserId) continue;
     if (r.status !== "matched" && r.status !== "in_progress") continue;
-    const rider = await buildRiderPublic(r.riderUserId);
-    return {
-      mode: "delivery" as const,
+    return toCentralActiveServiceForPanel({
+      mode: "delivery",
       rideId: r.id,
       status: r.status,
       vehicleType: r.vehicleType,
@@ -193,20 +194,9 @@ export async function getPackActiveRideForCentral(driverUserId: string) {
       durationSec: r.durationSec,
       start: r.start,
       end: r.end,
-      routeGeometry: r.routeGeometry,
       driverSearchingClient: r.driverSearchingClient ?? false,
       isNegotiated: r.isNegotiated ?? false,
-      rider: {
-        name: rider.name,
-        lastName: rider.lastName,
-        phone: rider.phone,
-        profileImageUrl: rider.profileImageUrl,
-        rating: rider.rating,
-        ratingCount: rider.ratingCount,
-        completedTrips: rider.completedTrips,
-        email: rider.email,
-      },
-    };
+    });
   }
   return null;
 }
@@ -1546,6 +1536,7 @@ export function registerPackRideRoutes(app: Express) {
       ride.financialsSettled = true;
 
       ride.status = "expired";
+      void persistMobilityRideToHistory(ride, "pack", "completed");
       const io = getIO();
       io?.to(`user:${ride.riderUserId}`).emit("pack:ride:completed", { rideId });
       io?.to(`user:${driverUserId}`).emit("pack:ride:completed", { rideId });
@@ -1600,6 +1591,7 @@ export function registerPackRideRoutes(app: Express) {
         for (const uid2 of notify) {
           io.to(`user:${uid2}`).emit("pack:ride:cancelled", payload);
         }
+        void persistMobilityRideToHistory(ride, "pack", "cancelled", { cancelledBy });
       }
 
       if (ride.conversationId != null && ride.driverUserId != null) {

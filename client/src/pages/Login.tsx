@@ -46,6 +46,14 @@ export default function Login() {
           title: "Bienvenido",
           description: `Hola ${fullName}, has iniciado sesión correctamente`,
         });
+        const u = result.user as { recoveryQuestionsConfigured?: boolean };
+        if (u.recoveryQuestionsConfigured !== true) {
+          const redirect = sessionStorage.getItem("postLoginRedirect");
+          const next = redirect && redirect.startsWith("/") ? redirect : "/";
+          if (redirect) sessionStorage.removeItem("postLoginRedirect");
+          setLocation(`/account-recovery/setup?next=${encodeURIComponent(next)}`);
+          return;
+        }
         const redirect = sessionStorage.getItem("postLoginRedirect");
         if (redirect) {
           sessionStorage.removeItem("postLoginRedirect");
@@ -142,6 +150,11 @@ export default function Login() {
                   </>
                 )}
               </Button>
+              <p className="text-center text-sm text-muted-foreground">
+                <Link href="/forgot-password" className="text-mango-orange hover:underline font-medium">
+                  ¿Olvidaste tu contraseña? Pulsa aquí
+                </Link>
+              </p>
               <p className="text-center text-sm text-muted-foreground">
                 ¿No tienes cuenta?{" "}
                 <Link href="/register" className="text-mango-orange hover:underline font-medium">

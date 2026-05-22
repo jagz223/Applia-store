@@ -2,7 +2,15 @@
 
 La app sube la foto de perfil **desde el navegador** directamente a **Firebase Storage** (no pasa por Render). Solo se guarda en Firestore la URL que devuelve Storage.
 
-También se suben desde el cliente: **documento de identidad** (`verification_ids/`), **documento profesional** (`professional_credentials/`) y **avatares** (`avatars/`).
+También se suben desde el cliente: **documento de identidad** (`verification_ids/`), **documento profesional** (`professional_credentials/`), **avatares** (`avatars/`) e **iconos de categorías** (`category-icons/`).
+
+## Error al subir icono de categoría: `storage/unauthorized`
+
+Si al subir un PNG en **Admin → Categorías** aparece:
+
+`Firebase Storage: User does not have permission to access 'category-icons/....png' (storage/unauthorized)`
+
+falta publicar la regla de la carpeta `category-icons/` en Storage. En el repo está en **`storage.rules`** (bloque `match /category-icons/{fileName}`). Publícala en Firebase Console → **Storage** → **Rules** → **Publish**, o ejecuta `firebase deploy --only storage`.
 
 ## Error al subir PDF: `storage/unauthorized`
 

@@ -9,11 +9,23 @@ import { RoleService } from "./role.service";
 import { CatalogService } from "./catalog.service";
 import { BookingService } from "./booking.service";
 import { PromotionalCodeService } from "./promotional-code.service";
+import { AdminUserRegistrationService } from "./admin-user-registration.service";
 
 export const userService = new UserService(genFebStorage);
+export const adminUserRegistrationService = new AdminUserRegistrationService(
+  genFebStorage,
+  genFebStorage
+);
 export const roleService = new RoleService(genFebStorage);
 export const catalogService = new CatalogService(genFebStorage);
 export const bookingService = new BookingService(genFebStorage);
 export const promotionalCodeService = new PromotionalCodeService(genFebStorage);
 
-export { UserService, RoleService, CatalogService, BookingService, PromotionalCodeService };
+export {
+  UserService,
+  RoleService,
+  CatalogService,
+  BookingService,
+  PromotionalCodeService,
+  AdminUserRegistrationService,
+};

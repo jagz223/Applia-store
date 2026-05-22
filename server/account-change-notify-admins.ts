@@ -9,7 +9,7 @@ import { genFebStorage } from "./storage-genfeb";
 
 const ADMIN_OVERVIEW_URL = "/admin?tab=overview";
 
-export type PendingAccountChangeNotifyField = "email" | "name" | "phone" | "vehicle";
+export type PendingAccountChangeNotifyField = "email" | "name" | "phone" | "vehicle" | "recovery_questions";
 
 function fieldLabelEs(field: PendingAccountChangeNotifyField): string {
   switch (field) {
@@ -21,6 +21,8 @@ function fieldLabelEs(field: PendingAccountChangeNotifyField): string {
       return "teléfono";
     case "vehicle":
       return "vehículo (taxi / delivery / marketplace)";
+    case "recovery_questions":
+      return "preguntas de recuperación de contraseña";
     default:
       return field;
   }

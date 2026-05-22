@@ -8,7 +8,30 @@ import { isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categorie
 import { isGoVehicleProvider } from "@shared/provider-car-go";
 import { notifyFullAdminsPendingAccountChangeRequest } from "./account-change-notify-admins";
 import { genFebStorage } from "./storage-genfeb";
-import { createDispatchCompany } from "./dispatch-companies";
+import { PUBLIC_REGISTER_ROLES, normalizePhone } from "@shared/admin-user-registration";
+import { resolveUserPermissions } from "./resolve-user-permissions";
+import {
+  RECOVERY_QUESTION_OPTIONS,
+  recoveryQuestionsSetupSchema,
+  forgotPasswordLookupSchema,
+  forgotPasswordVerifySchema,
+  forgotPasswordResetSchema,
+  changePasswordWithRecoverySchema,
+} from "@shared/account-recovery";
+import {
+  generatePasswordResetToken,
+  hashRecoveryQuestions,
+  userHasRecoveryConfigured,
+  verifyPasswordResetToken,
+  verifyRecoveryQuestions,
+} from "./account-recovery";
+import {
+  avatarCooldownRemainingMs,
+  formatAvatarCooldownRemaining,
+  isHostedStorageAvatarUrl,
+} from "@shared/avatar-profile";
+import { getIO } from "./socket";
+import { notificationService } from "./services/notification.service";
 
 // Environment variables
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -36,14 +59,6 @@ const DUPLICATE_EMAIL_MESSAGE =
 const DUPLICATE_PHONE_MESSAGE =
   "Este teléfono ya está registrado. Usa otro número o inicia sesión.";
 
-function normalizePhone(raw: string): string {
-  const s = (raw ?? "").trim();
-  if (!s) return "";
-  const hasPlus = s.startsWith("+");
-  const digits = s.replace(/[^\d]/g, "");
-  return hasPlus ? `+${digits}` : digits;
-}
-
 const registerSchema = z.object({
   email: z
     .string()
@@ -54,17 +69,8 @@ const registerSchema = z.object({
   name: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
   phone: z.string().min(1, "El teléfono es obligatorio").transform((s) => normalizePhone(s)),
-  role: z.enum(["client", "professional", "admin", "central"]).default("client"),
-  companyName: z.string().trim().min(2, "Nombre de empresa obligatorio").max(120).optional(),
+  role: z.enum(PUBLIC_REGISTER_ROLES).default("client"),
   avatar: z.string().url("La foto de perfil debe ser una URL válida").optional().or(z.literal("")),
-}).superRefine((data, ctx) => {
-  if (data.role === "central" && !data.companyName?.trim()) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "El nombre de empresa es obligatorio para cuentas Central",
-      path: ["companyName"],
-    });
-  }
 });
 
 // Schema para login
@@ -97,10 +103,12 @@ function acceptedProviderTermsOfUseForApi(user: { role?: string; acceptedProvide
 }
 
 /** Cuerpo de usuario para login, registro, /me y aceptación de términos (sin password). */
-function buildAuthClientUser(
+async function buildAuthClientUser(
   user: Record<string, unknown>,
   provider: { id: number; [key: string]: unknown } | null
 ) {
+  const role = String(user.role ?? "");
+  const permissions = await resolveUserPermissions(role);
   return {
     id: user.id,
     email: user.email,
@@ -109,15 +117,18 @@ function buildAuthClientUser(
     role: user.role,
     phone: user.phone,
     avatar: user.avatar,
+    avatarLastChangedAt: (user as { avatarLastChangedAt?: unknown }).avatarLastChangedAt ?? null,
     bankName: user.bankName,
     accountNumber: user.accountNumber,
     wallet: user.wallet ?? 0,
     pendingBalance: user.pendingBalance ?? 0,
     createdAt: user.createdAt,
     profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
+    recoveryQuestionsConfigured: userHasRecoveryConfigured(user as { recoveryQuestionsConfigured?: boolean; recoveryQuestions?: unknown }),
     acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
     dispatchCompanyId: (user as { dispatchCompanyId?: string | null }).dispatchCompanyId ?? null,
     provider: provider ?? null,
+    permissions,
   };
 }
 
@@ -205,15 +216,6 @@ export async function registerAuthRoutes(
         avatar: data.avatar ? data.avatar : undefined,
       })) as any;
 
-      if (data.role === "central") {
-        const company = await createDispatchCompany({
-          name: String(data.companyName ?? "").trim(),
-          ownerUserId: user.id,
-        });
-        await genFebStorage.updateUser(user.id, { dispatchCompanyId: company.id } as any);
-        user.dispatchCompanyId = company.id;
-      }
-      
       // Generar token
       const token = generateToken({
         id: user.id,
@@ -224,20 +226,15 @@ export async function registerAuthRoutes(
         phone: user.phone,
       });
 
+      const provider = await genFebStorage.getProviderByUserId(user.id);
+      const clientUser = await buildAuthClientUser(
+        user as Record<string, unknown>,
+        provider as { id: number; [key: string]: unknown } | null
+      );
       res.status(201).json({
         message: "Usuario registrado exitosamente",
         token,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          lastName: user.lastName,
-          role: user.role,
-          phone: user.phone,
-          avatar: (user as { avatar?: string }).avatar,
-          profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
-          acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
-        },
+        user: clientUser,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -292,21 +289,14 @@ export async function registerAuthRoutes(
       });
 
       const provider = await genFebStorage.getProviderByUserId(user.id);
+      const clientUser = await buildAuthClientUser(
+        user as Record<string, unknown>,
+        provider as { id: number; [key: string]: unknown } | null
+      );
       res.json({
         message: "Login exitoso",
         token,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          lastName: user.lastName,
-          role: user.role,
-          phone: user.phone,
-          avatar: (user as { avatar?: string }).avatar,
-          profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
-          acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
-          provider: provider ?? null,
-        },
+        user: clientUser,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -330,7 +320,10 @@ export async function registerAuthRoutes(
       }
       const provider = await genFebStorage.getProviderByUserId(req.user.id);
       res.json(
-        buildAuthClientUser(user as Record<string, unknown>, provider as { id: number; [key: string]: unknown } | null)
+        await buildAuthClientUser(
+          user as Record<string, unknown>,
+          provider as { id: number; [key: string]: unknown } | null
+        )
       );
     } catch (error) {
       console.error("Error obteniendo usuario:", error);
@@ -343,7 +336,7 @@ export async function registerAuthRoutes(
     try {
       const schema = z.union([
         z.object({
-          field: z.enum(["email", "name", "phone"]),
+          field: z.enum(["email", "name", "phone", "recovery_questions"]),
           reason: z.string().min(3, "Describe brevemente el motivo").max(280, "Máximo 280 caracteres").transform((s) => s.trim()),
         }),
         z.object({
@@ -446,7 +439,6 @@ export async function registerAuthRoutes(
           .string()
           .optional()
           .transform((s) => (s == null || String(s).trim() === "" ? undefined : normalizePhone(String(s)))),
-        avatar: z.string().url().optional(),
         bankName: z.string().max(120).optional().transform((v) => (v === "" ? undefined : v?.trim())),
         accountNumber: z.string().max(40).optional().transform((v) => (v === "" ? undefined : v == null ? undefined : sanitizeAccountNumber(v))),
       });
@@ -518,6 +510,73 @@ export async function registerAuthRoutes(
       res.status(500).json({ message: "Error interno del servidor" });
     }
   });
+
+  // POST /api/auth/avatar — Actualizar foto (subida a Storage o URL externa; máximo cada 24 h).
+  app.post("/api/auth/avatar", authenticateJWT, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        avatarUrl: z.string().url("URL de avatar inválida"),
+      });
+      const { avatarUrl } = schema.parse(req.body);
+      const url = avatarUrl.trim();
+
+      const current = (await genFebStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
+      if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
+
+      const prev = String(current.avatar ?? "").trim();
+      if (prev === url) {
+        return res.status(400).json({ message: "La foto seleccionada ya es tu foto actual." });
+      }
+
+      const remaining = avatarCooldownRemainingMs(
+        current.avatarLastChangedAt as string | Date | null | undefined
+      );
+      if (remaining > 0) {
+        const wait = formatAvatarCooldownRemaining(remaining);
+        return res.status(429).json({
+          message: `Solo puedes cambiar la foto cada 24 horas. Vuelve a intentarlo en ${wait}.`,
+          cooldownRemainingMs: remaining,
+        });
+      }
+
+      const isHosted = isHostedStorageAvatarUrl(url);
+      if (!isHosted) {
+        try {
+          const parsed = new URL(url);
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return res.status(400).json({ message: "La URL debe usar http o https." });
+          }
+        } catch {
+          return res.status(400).json({ message: "URL de avatar inválida." });
+        }
+      }
+
+      const updatedUser = await genFebStorage.updateUser(req.user.id, {
+        avatar: url,
+        avatarLastChangedAt: new Date(),
+      } as Record<string, unknown>);
+      if (!updatedUser) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      const provider = await genFebStorage.getProviderByUserId(req.user.id);
+      const { password: _p, ...safe } = updatedUser as Record<string, unknown>;
+      void _p;
+      res.json({
+        message: "Foto de perfil actualizada",
+        user: await buildAuthClientUser(
+          safe,
+          provider as { id: number; [key: string]: unknown } | null
+        ),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Error de validación", errors: error.errors });
+      }
+      console.error("Error actualizando avatar:", error);
+      res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
   
   // PUT /api/auth/password - Cambiar contraseña
   app.put("/api/auth/password", authenticateJWT, async (req: any, res) => {
@@ -582,11 +641,204 @@ export async function registerAuthRoutes(
       void _p;
       res.json({
         message: "Condiciones de uso aceptadas",
-        user: buildAuthClientUser(safe, provider as { id: number; [key: string]: unknown } | null),
+        user: await buildAuthClientUser(
+          safe,
+          provider as { id: number; [key: string]: unknown } | null
+        ),
       });
     } catch (error) {
       console.error("Error aceptando condiciones de prestador:", error);
       res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
+
+  async function notifyPasswordChanged(userId: string): Promise<void> {
+    const title = "Contraseña actualizada";
+    const bodyText = "Tu contraseña fue cambiada correctamente. Si no fuiste tú, contacta a soporte de inmediato.";
+    const notifData = { url: "/login", message: bodyText, title };
+    const created = await genFebStorage.createNotification({
+      userId,
+      type: "password_changed",
+      data: notifData,
+    });
+    const io = getIO();
+    if (io) {
+      io.to(`user:${userId}`).emit("notification", {
+        id: (created as { id?: unknown })?.id,
+        type: "password_changed",
+        title,
+        body: bodyText,
+        data: notifData,
+      });
+    }
+    void notificationService
+      .sendPushToUser(userId, { title, body: bodyText, data: { url: "/login" } })
+      .catch((err) => console.error("[push-password-changed]", err));
+  }
+
+  // POST /api/auth/password-with-recovery — Cambiar contraseña desde Configuración (preguntas + sesión)
+  app.post("/api/auth/password-with-recovery", authenticateJWT, async (req: any, res) => {
+    try {
+      const { answers, newPassword } = changePasswordWithRecoverySchema.parse(req.body);
+      const current = (await genFebStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
+      if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
+      if (!userHasRecoveryConfigured(current)) {
+        return res.status(403).json({
+          message: "Primero debes configurar tus preguntas de recuperación.",
+        });
+      }
+      const stored = (current.recoveryQuestions ?? []) as { questionId: string; answerHash: string }[];
+      const ok = await verifyRecoveryQuestions(stored, answers);
+      if (!ok) {
+        return res.status(401).json({
+          message: "Las preguntas seleccionadas o las respuestas no coinciden con tu configuración.",
+        });
+      }
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await genFebStorage.updateUserPassword(req.user.id, hashedPassword);
+      await notifyPasswordChanged(req.user.id);
+      return res.status(200).json({ message: "Contraseña actualizada correctamente" });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error("Error changing password with recovery:", error);
+      return res.status(500).json({ message: "Error al cambiar la contraseña" });
+    }
+  });
+
+  // GET /api/auth/recovery-question-options — Catálogo público de preguntas
+  app.get("/api/auth/recovery-question-options", (_req, res) => {
+    res.json({ questions: RECOVERY_QUESTION_OPTIONS });
+  });
+
+  // POST /api/auth/recovery-questions — Configurar o reconfigurar preguntas (requiere sesión)
+  app.post("/api/auth/recovery-questions", authenticateJWT, async (req: any, res) => {
+    try {
+      const answers = recoveryQuestionsSetupSchema.parse(req.body?.answers ?? req.body);
+      const current = (await genFebStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
+      if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
+
+      const configured = userHasRecoveryConfigured(current);
+      const grants = (current.profileEditGrants ?? {}) as { recoveryQuestions?: boolean };
+      if (configured && grants.recoveryQuestions !== true) {
+        return res.status(403).json({
+          message:
+            "Para cambiar tus preguntas de recuperación, solicita permiso en Configuración y espera la aprobación del administrador.",
+        });
+      }
+
+      const hashed = await hashRecoveryQuestions(answers);
+      const nextGrants = { ...grants, recoveryQuestions: false };
+      const updated = await genFebStorage.updateUser(req.user.id, {
+        recoveryQuestions: hashed,
+        recoveryQuestionsConfigured: true,
+        profileEditGrants: nextGrants,
+      } as any);
+      if (!updated) return res.status(404).json({ message: "Usuario no encontrado" });
+
+      const provider = await genFebStorage.getProviderByUserId(req.user.id);
+      const { password: _p, recoveryQuestions: _rq, ...safe } = updated as Record<string, unknown>;
+      void _p;
+      void _rq;
+      return res.status(200).json({
+        message: "Preguntas de recuperación guardadas",
+        user: await buildAuthClientUser(
+          safe,
+          provider as { id: number; [key: string]: unknown } | null,
+        ),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error("Error saving recovery questions:", error);
+      return res.status(500).json({ message: "Error al guardar preguntas de recuperación" });
+    }
+  });
+
+  // POST /api/auth/forgot-password/lookup — Comprueba si el correo puede usar recuperación (no revela las preguntas elegidas)
+  app.post("/api/auth/forgot-password/lookup", async (req, res) => {
+    try {
+      const { email } = forgotPasswordLookupSchema.parse(req.body);
+      const user = (await genFebStorage.getUserByEmail(email)) as Record<string, unknown> | null;
+      if (!user || (user as { deletedAt?: unknown }).deletedAt) {
+        return res.status(200).json({
+          found: false,
+          message: "Si el correo está registrado, podrás continuar con las preguntas de seguridad.",
+        });
+      }
+      if (!userHasRecoveryConfigured(user)) {
+        return res.status(200).json({
+          found: false,
+          message: "Si el correo está registrado, podrás continuar con las preguntas de seguridad.",
+        });
+      }
+      return res.status(200).json({
+        found: true,
+        message: "Selecciona las 3 preguntas que configuraste y escribe tus respuestas.",
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Correo inválido", errors: error.errors });
+      }
+      console.error("forgot-password lookup:", error);
+      return res.status(500).json({ message: "Error al buscar la cuenta" });
+    }
+  });
+
+  // POST /api/auth/forgot-password/verify — Validar respuestas y emitir token de restablecimiento
+  app.post("/api/auth/forgot-password/verify", async (req, res) => {
+    try {
+      const { email, answers } = forgotPasswordVerifySchema.parse(req.body);
+      const user = (await genFebStorage.getUserByEmail(email)) as Record<string, unknown> | null;
+      if (!user || (user as { deletedAt?: unknown }).deletedAt) {
+        return res.status(401).json({
+          message: "Las preguntas seleccionadas o las respuestas no coinciden con tu configuración.",
+        });
+      }
+      const stored = (user.recoveryQuestions ?? []) as { questionId: string; answerHash: string }[];
+      const ok = await verifyRecoveryQuestions(stored, answers);
+      if (!ok) {
+        return res.status(401).json({
+          message: "Las preguntas seleccionadas o las respuestas no coinciden con tu configuración.",
+        });
+      }
+      const resetToken = generatePasswordResetToken(String(user.id), email, effectiveSecret);
+      return res.status(200).json({ resetToken });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error("forgot-password verify:", error);
+      return res.status(500).json({ message: "Error al verificar respuestas" });
+    }
+  });
+
+  // POST /api/auth/forgot-password/reset — Nueva contraseña con token de verificación
+  app.post("/api/auth/forgot-password/reset", async (req, res) => {
+    try {
+      const { resetToken, newPassword } = forgotPasswordResetSchema.parse(req.body);
+      const payload = verifyPasswordResetToken(resetToken, effectiveSecret);
+      if (!payload) {
+        return res.status(401).json({ message: "El enlace de recuperación expiró. Vuelve a intentarlo." });
+      }
+      const user = (await genFebStorage.getUserById(payload.userId)) as Record<string, unknown> | null;
+      if (!user || String(user.email ?? "").toLowerCase() !== payload.email) {
+        return res.status(401).json({ message: "Token inválido" });
+      }
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await genFebStorage.updateUserPassword(payload.userId, hashedPassword);
+      await notifyPasswordChanged(payload.userId);
+      return res.status(200).json({
+        message: "Contraseña actualizada. Ya puedes iniciar sesión.",
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error("forgot-password reset:", error);
+      return res.status(500).json({ message: "Error al restablecer contraseña" });
     }
   });
 

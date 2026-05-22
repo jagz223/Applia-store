@@ -1,5 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { CategoryIcon } from "@/components/CategoryIcon";
+import { CategoryVisual } from "@/components/CategoryVisual";
 
 import { motion } from "framer-motion";
 
@@ -11,7 +11,7 @@ export interface SubcategoryItem {
 
 export interface ExploreCategoryCardsProps {
   /** Lista de categorías de proveedor (con id, name, icon, slug). */
-  categories: Array<{ id: number | null; name: string } & { slug?: string; icon?: string }>;
+  categories: Array<{ id: number | null; name: string } & { slug?: string; icon?: string; imageUrl?: string | null }>;
   /** Subcategorías por categoryId (ej. Servicios Profesionales -> Servicios Legales, Consultoría Financiera). */
   subcategoriesByCategoryId?: Record<number, SubcategoryItem[]>;
   /** Se llama al hacer clic en una carta. La visibilidad la define el admin, no el número de asociados. */
@@ -35,6 +35,7 @@ export function ExploreCategoryCards({
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-4 md:gap-6">
         {categories.map((cat, index) => {
           const iconName = (cat as { icon?: string }).icon ?? "HelpCircle";
+          const imageUrl = (cat as { imageUrl?: string | null }).imageUrl;
           return (
             <motion.div
               key={cat.id}
@@ -48,7 +49,7 @@ export function ExploreCategoryCards({
               >
                 <CardContent className="p-6 text-center">
                   <div className="p-4 rounded-xl text-primary bg-primary/10 w-fit mx-auto mb-4 group-hover:scale-110 transition-transform">
-                    <CategoryIcon name={iconName} className="w-8 h-8" />
+                    <CategoryVisual iconName={iconName} imageUrl={imageUrl} className="w-8 h-8" imgClassName="h-10 w-10" />
                   </div>
                   <h3 className="text-lg font-bold mb-1">{cat.name}</h3>
                 </CardContent>

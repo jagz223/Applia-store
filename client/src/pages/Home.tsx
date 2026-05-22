@@ -48,7 +48,7 @@ import {
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { HomeVideoCarousel } from "@/components/home/HomeVideoCarousel";
-import { CategoryIcon } from "@/components/CategoryIcon";
+import { CategoryVisual } from "@/components/CategoryVisual";
 import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 
 type HomeServiceCategory = {
@@ -101,7 +101,7 @@ export default function HomePage() {
 
   // Flat list: all subcategories + mobility cards (same size)
   const allHomeServiceItems = useMemo(() => {
-    const items: { key: string; name: string; icon: string; parentName: string; href: string }[] = [];
+    const items: { key: string; name: string; icon: string; imageUrl?: string | null; parentName: string; href: string }[] = [];
     for (const { slug, subs } of [
       { slug: MAN_GO_CATEGORY_SLUG, subs: manGoSubs },
       { slug: "professional", subs: professionalSubs },
@@ -113,7 +113,8 @@ export default function HomePage() {
         items.push({
           key: `sub-${(sub as any).id}`,
           name: (sub as any).name,
-          icon: def?.icon ?? "HelpCircle",
+          icon: (sub as any).icon ?? def?.icon ?? "HelpCircle",
+          imageUrl: (sub as any).imageUrl ?? (cat as any).imageUrl ?? null,
           parentName: getCategoryDisplayName(cat as any),
           href: `/explore?providerCategoryId=${(cat as any).id}&subcategoryId=${(sub as any).id}`,
         });
@@ -121,7 +122,14 @@ export default function HomePage() {
     }
     if (mobilityAllowed.transport) {
       const cat = categories.find((c: any) => c.slug === "transport");
-      items.push({ key: "transport", name: (cat as any)?.name ?? "Servicios de transporte", icon: "Car", parentName: "Conductores disponibles", href: "/go/taxi" });
+      items.push({
+        key: "transport",
+        name: (cat as any)?.name ?? "Servicios de transporte",
+        icon: (cat as any)?.icon ?? "Car",
+        imageUrl: (cat as any)?.imageUrl ?? null,
+        parentName: "Conductores disponibles",
+        href: "/go/taxi",
+      });
     }
     return items;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -602,7 +610,12 @@ export default function HomePage() {
                   <Card className="cursor-pointer group hover:border-primary/50 transition-all duration-300 h-full card-industrial">
                     <CardContent className="p-3 sm:p-5 text-center flex flex-col items-center gap-2 h-full justify-center min-h-[110px]">
                       <div className="p-2.5 rounded-xl bg-primary/10 text-primary group-hover:scale-110 transition-transform">
-                        <CategoryIcon name={item.icon} className="w-5 h-5 sm:w-6 sm:h-6" />
+                        <CategoryVisual
+                          iconName={item.icon}
+                          imageUrl={item.imageUrl}
+                          className="w-5 h-5 sm:w-6 sm:h-6"
+                          imgClassName="h-8 w-8 sm:h-9 sm:w-9"
+                        />
                       </div>
                       <div className="min-w-0 w-full">
                         <p className="text-xs sm:text-sm font-semibold leading-tight">{item.name}</p>

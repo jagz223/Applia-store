@@ -25,6 +25,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
+import { SettingsChangePasswordCard } from "@/components/settings/SettingsChangePasswordCard";
+import { SettingsAvatarEditor } from "@/components/settings/SettingsAvatarEditor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,7 +66,6 @@ const profileSchema = z.object({
   name: z.string().min(2, "Mínimo 2 caracteres").max(100).optional().or(z.literal("")),
   lastName: z.string().min(2, "Mínimo 2 caracteres").max(100).optional().or(z.literal("")),
   phone: z.string().max(50).optional(),
-  avatar: z.string().url("URL inválida").optional().or(z.literal("")),
   bankName: z.string().max(120).optional(),
   accountNumber: z
     .string()
@@ -105,7 +106,7 @@ export default function Settings() {
   const [showSecondConfirm, setShowSecondConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [pendingSensitiveSave, setPendingSensitiveSave] = useState<ProfileForm | null>(null);
-  const [changeReqField, setChangeReqField] = useState<"email" | "name" | "phone">("phone");
+  const [changeReqField, setChangeReqField] = useState<"email" | "name" | "phone" | "recovery_questions">("phone");
   const [changeReqReason, setChangeReqReason] = useState("");
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const [vehicleChangeOpen, setVehicleChangeOpen] = useState(false);
@@ -169,7 +170,6 @@ export default function Settings() {
       name: "",
       lastName: "",
       phone: "",
-      avatar: "",
       bankName: "",
       accountNumber: "",
     },
@@ -183,7 +183,6 @@ export default function Settings() {
       name: (u.name as string) ?? "",
       lastName: (u.lastName as string) ?? "",
       phone: (u.phone as string) ?? "",
-      avatar: (u.avatar as string) ?? "",
       bankName: (u.bankName as string) ?? "",
       accountNumber: (u.accountNumber as string) ?? "",
     });
@@ -195,8 +194,18 @@ export default function Settings() {
       email: g.email === true,
       name: g.name === true,
       phone: g.phone === true,
+      recoveryQuestions: g.recoveryQuestions === true,
     };
   }, [user]);
+
+  const recoveryConfigured =
+    (user as { recoveryQuestionsConfigured?: boolean } | null)?.recoveryQuestionsConfigured === true;
+
+  const showChangeRequestPanel =
+    !grants.name ||
+    !grants.phone ||
+    !grants.email ||
+    (recoveryConfigured && !grants.recoveryQuestions);
 
   const doSubmit = async (data: ProfileForm) => {
     const token = localStorage.getItem("token");
@@ -205,7 +214,6 @@ export default function Settings() {
       name: grants.name ? (data.name || undefined) : undefined,
       lastName: grants.name ? (data.lastName || undefined) : undefined,
       phone: grants.phone ? (data.phone || undefined) : undefined,
-      avatar: data.avatar || undefined,
       bankName: data.bankName || undefined,
       accountNumber: data.accountNumber ? sanitizeAccountNumber(data.accountNumber) : undefined,
     };
@@ -375,26 +383,61 @@ export default function Settings() {
   }
 
   return (
-    <div className="container max-w-lg mx-auto py-8 px-4">
-      <div className="flex items-center gap-4 mb-6">
+    <div className="container mx-auto max-w-lg py-8 px-4 sm:px-6 lg:max-w-6xl xl:max-w-7xl">
+      <div className="mb-6 flex items-center gap-4 lg:mb-8">
         <Button variant="ghost" size="icon" asChild>
           <Link href={settingsBackHref}>
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl font-bold">Configuración</h1>
+          <h1 className="text-2xl font-bold lg:text-3xl">Configuración</h1>
           <p className="text-sm text-muted-foreground">Gestiona tu perfil y preferencias</p>
         </div>
       </div>
 
-      <ThemeAppearanceCard className="mb-6" />
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-8">
+        <aside className="flex flex-col gap-6 lg:col-span-4 lg:sticky lg:top-6 lg:self-start">
+          <ThemeAppearanceCard />
+          <SettingsChangePasswordCard recoveryConfigured={recoveryConfigured} />
+          <Card>
+            <CardHeader>
+              <CardTitle>Preguntas de recuperación</CardTitle>
+              <CardDescription>
+                Si olvidas tu contraseña, responderás estas preguntas. Para cambiarlas necesitas aprobación del
+                administrador (como con correo o teléfono).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Estado:{" "}
+                <span className="font-medium text-foreground">
+                  {recoveryConfigured ? "Configuradas" : "Pendientes de configurar"}
+                </span>
+              </p>
+              {grants.recoveryQuestions ? (
+                <Button type="button" asChild className="w-full sm:w-auto">
+                  <Link href="/account-recovery/setup?reconfigure=1">Cambiar preguntas y respuestas</Link>
+                </Button>
+              ) : recoveryConfigured ? (
+                <p className="text-xs text-muted-foreground">
+                  Para cambiar tus preguntas, usa «Solicitar cambio de datos» y elige «Preguntas de recuperación».
+                </p>
+              ) : (
+                <Button type="button" asChild variant="outline" className="w-full sm:w-auto">
+                  <Link href="/account-recovery/setup">Configurar preguntas de recuperación</Link>
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </aside>
 
+        <div className="flex min-w-0 flex-col gap-6 lg:col-span-8">
       {showGoVehicleCard ? (
         <>
           <div
             ref={vehicleSettingsSectionRef}
-            className={`mb-6 scroll-mt-24 rounded-xl transition-shadow duration-300 ${
+            className={`scroll-mt-24 rounded-xl transition-shadow duration-300 ${
               vehicleSectionHighlight ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
             }`}
           >
@@ -409,7 +452,8 @@ export default function Settings() {
                 aprobarla antes de que quede registrada, igual que con el cambio de datos de cuenta.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
+            <CardContent className="space-y-3 text-sm lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end lg:gap-6">
+              <div className="space-y-3 min-w-0">
               {providerVehicleLoading ? (
                 <p className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
@@ -452,7 +496,13 @@ export default function Settings() {
                   validar tu unidad y puedas operar con normalidad.
                 </p>
               )}
-              <Button type="button" variant="outline" className="w-full" onClick={() => setVehicleChangeOpen(true)}>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full shrink-0 lg:w-auto"
+                onClick={() => setVehicleChangeOpen(true)}
+              >
                 Solicitar cambio de vehículo
               </Button>
             </CardContent>
@@ -478,12 +528,15 @@ export default function Settings() {
                 Correo, nombre y teléfono se muestran aquí. Para cambiarlos necesitas una petición aprobada.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent>
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_min(17rem,34%)] xl:items-start">
+                <div className="space-y-4 min-w-0">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField
                 control={form.control}
                 name="email"
                 render={({ field }) => (
-                  <FormItem>
+                  <FormItem className="sm:col-span-2">
                     <FormLabel>Correo</FormLabel>
                     <FormControl>
                       <Input
@@ -532,7 +585,7 @@ export default function Settings() {
                 control={form.control}
                 name="phone"
                 render={({ field }) => (
-                  <FormItem>
+                  <FormItem className="sm:col-span-2">
                     <FormLabel>Teléfono</FormLabel>
                     <FormControl>
                       <Input placeholder="Ej. +593 99 123 4567" {...field} disabled={!grants.phone} />
@@ -541,40 +594,57 @@ export default function Settings() {
                   </FormItem>
                 )}
               />
-              {!grants.name || !grants.phone || !grants.email ? (
+              </div>
+              {showChangeRequestPanel ? (
                 <div className="rounded-lg border bg-muted/20 p-3">
                   <p className="text-sm font-medium">Solicitar cambio de datos</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Selecciona qué dato quieres cambiar y explica brevemente el motivo. Un admin revisará la solicitud.
                   </p>
-                  <div className="mt-3 grid grid-cols-1 gap-3">
+                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,40%)] lg:items-end">
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-muted-foreground">Quiero cambiar</p>
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant={changeReqField === "phone" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setChangeReqField("phone")}
-                        >
-                          Teléfono
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={changeReqField === "name" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setChangeReqField("name")}
-                        >
-                          Nombre
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={changeReqField === "email" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setChangeReqField("email")}
-                        >
-                          Correo
-                        </Button>
+                        {!grants.phone ? (
+                          <Button
+                            type="button"
+                            variant={changeReqField === "phone" ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setChangeReqField("phone")}
+                          >
+                            Teléfono
+                          </Button>
+                        ) : null}
+                        {!grants.name ? (
+                          <Button
+                            type="button"
+                            variant={changeReqField === "name" ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setChangeReqField("name")}
+                          >
+                            Nombre
+                          </Button>
+                        ) : null}
+                        {!grants.email ? (
+                          <Button
+                            type="button"
+                            variant={changeReqField === "email" ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setChangeReqField("email")}
+                          >
+                            Correo
+                          </Button>
+                        ) : null}
+                        {recoveryConfigured && !grants.recoveryQuestions ? (
+                          <Button
+                            type="button"
+                            variant={changeReqField === "recovery_questions" ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setChangeReqField("recovery_questions")}
+                          >
+                            Preguntas de recuperación
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -601,25 +671,25 @@ export default function Settings() {
                   </div>
                 </div>
               ) : null}
-              <FormField
-                control={form.control}
-                name="avatar"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>URL del avatar (opcional)</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://..." type="url" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                </div>
+              {user ? (
+                <SettingsAvatarEditor
+                  className="xl:sticky xl:top-6"
+                  name={String((user as { name?: string }).name ?? "")}
+                  lastName={String((user as { lastName?: string }).lastName ?? "")}
+                  avatarUrl={(user as { avatar?: string }).avatar}
+                  avatarLastChangedAt={
+                    (user as { avatarLastChangedAt?: string | null }).avatarLastChangedAt ?? null
+                  }
+                />
+              ) : null}
+              </div>
             </CardContent>
           </Card>
 
           {/* Sección banco oculta temporalmente */}
 
-          <div className="flex justify-end gap-3">
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" asChild>
               <Link href="/dashboard">Cancelar</Link>
             </Button>
@@ -636,6 +706,8 @@ export default function Settings() {
           </div>
         </form>
       </Form>
+        </div>
+      </div>
 
       {/* Confirmación: cambios sensibles (una sola vez) */}
       <AlertDialog
@@ -667,33 +739,30 @@ export default function Settings() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Card className="mt-12 border-destructive/20 shadow-sm transition-all hover:shadow-md bg-destructive/5">
-        <CardHeader>
-          <CardTitle className="text-destructive flex items-center gap-2">
-            <Trash2 className="h-5 w-5" />
-            Zona de Peligro
-          </CardTitle>
-          <CardDescription>
-            Acciones permanentes sobre tu cuenta.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center">
-          <div className="text-sm text-muted-foreground mb-6 leading-relaxed space-y-3 w-full max-w-lg">
-            <p className="text-center font-medium">
-              Perderás el acceso inmediato a tu panel.
-            </p>
-            <div className="bg-destructive/10 p-3 rounded-lg border border-destructive/20 text-xs text-left">
-              <strong>Qué se borrará:</strong> Todo tu perfil, avatar, ubicación e historial de mensajes.<br/>
-              <strong className="mt-2 block">Qué se conservará:</strong> Datos de facturas y reservas pasadas se mantienen por 12 meses por obligaciones fiscales y prevención de fraude en Ecuador.
+      <Card className="mt-8 border-destructive/20 bg-destructive/5 shadow-sm transition-all hover:shadow-md lg:mt-10">
+        <CardContent className="flex flex-col gap-6 p-6 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
+          <div className="min-w-0 flex-1 space-y-3">
+            <div>
+              <CardTitle className="text-destructive flex items-center gap-2 text-lg">
+                <Trash2 className="h-5 w-5 shrink-0" />
+                Zona de Peligro
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Acciones permanentes sobre tu cuenta. Perderás el acceso inmediato a tu panel.
+              </CardDescription>
             </div>
-            <p className="text-xs text-center text-destructive">
-              * Para proceder de forma permanente, haz clic en el botón inferior. La suspensión es inmediata.
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs leading-relaxed text-muted-foreground">
+              <strong className="text-foreground">Qué se borrará:</strong> Todo tu perfil, avatar, ubicación e historial de mensajes.
+              <strong className="mt-2 block text-foreground">Qué se conservará:</strong> Datos de facturas y reservas pasadas se mantienen por 12 meses por obligaciones fiscales y prevención de fraude en Ecuador.
+            </div>
+            <p className="text-xs text-destructive">
+              * La suspensión es inmediata al confirmar.
             </p>
           </div>
-          <Button 
-            variant="destructive" 
+          <Button
+            variant="destructive"
             onClick={() => setShowFirstConfirm(true)}
-            className="w-full sm:w-auto bg-destructive hover:bg-destructive/90 text-white font-medium px-8 h-12 rounded-lg shadow-lg shadow-destructive/20"
+            className="h-12 w-full shrink-0 rounded-lg bg-destructive px-8 font-medium text-white shadow-lg shadow-destructive/20 hover:bg-destructive/90 sm:w-auto lg:min-w-[12rem]"
           >
             Eliminar mi cuenta
           </Button>

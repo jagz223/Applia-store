@@ -40,7 +40,7 @@ const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set<string>(MOBILITY_GO_PROVIDER_SLU
 import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { isBeforeToday } from "@/lib/date-utils";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
-import { CategoryIcon } from "@/components/CategoryIcon";
+import { CategoryVisual } from "@/components/CategoryVisual";
 import { motion } from "framer-motion";
 import {
   AlertDialog,
@@ -597,7 +597,12 @@ export default function Booking() {
                                     `}
                                   >
                                     <span className={`flex shrink-0 p-2 rounded-lg ${selected ? "bg-primary/15" : "bg-muted/80"}`}>
-                                      <CategoryIcon name={cat.icon ?? "HelpCircle"} className="h-5 w-5" />
+                                      <CategoryVisual
+                                        iconName={cat.icon ?? "HelpCircle"}
+                                        imageUrl={cat.imageUrl}
+                                        className="h-5 w-5"
+                                        imgClassName="h-6 w-6"
+                                      />
                                     </span>
                                     {getCategoryDisplayName(cat)}
                                   </button>
@@ -645,7 +650,12 @@ export default function Booking() {
                                           : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"}
                                       `}
                                     >
-                                      <CategoryIcon name={sub.icon ?? "HelpCircle"} className="h-4 w-4 shrink-0" />
+                                      <CategoryVisual
+                                        iconName={sub.icon ?? "HelpCircle"}
+                                        imageUrl={sub.imageUrl}
+                                        className="h-4 w-4 shrink-0"
+                                        imgClassName="h-5 w-5"
+                                      />
                                       {sub.name}
                                     </button>
                                   );

@@ -18,6 +18,18 @@ export type AuthUser = User & {
   provider?: AuthUserProvider | null;
   /** Campo Firestore `acceptedProviderTermsOfUse`; solo aplica a profesionales (true = ya aceptó). */
   acceptedProviderTermsOfUse?: boolean;
+  /** Permisos efectivos del catálogo de roles (GET /api/auth/me). */
+  permissions?: Record<string, boolean>;
+  /** true cuando el usuario configuró las 3 preguntas de recuperación. */
+  recoveryQuestionsConfigured?: boolean;
+  profileEditGrants?: {
+    email?: boolean;
+    name?: boolean;
+    phone?: boolean;
+    recoveryQuestions?: boolean;
+  };
+  /** ISO o timestamp de la última vez que cambió la foto de perfil (cooldown 24 h). */
+  avatarLastChangedAt?: string | null;
 };
 
 async function fetchUser(): Promise<AuthUser | null> {

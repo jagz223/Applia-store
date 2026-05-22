@@ -1,29 +1,19 @@
 /**
  * Rutas de definición de roles (CRUD).
  * Rutas finas: validan con Zod y delegan en RoleService.
+ * Crear/editar/eliminar: solo administrador completo (no Soporte TI).
  */
 
 import type { Express } from "express";
 import { z } from "zod";
 import { authenticateJWT } from "./routes-auth";
-import { requireStaffFromDb } from "./middleware-roles";
+import { requireFullAdmin } from "./middleware-roles";
 import { roleService } from "./services";
 import type { NewRoleDefinition } from "./storage-genfeb";
-
-const createRoleSchema = z.object({
-  code: z.string().min(1, "El código es requerido").max(50),
-  name: z.string().min(1, "El nombre es requerido").max(100),
-  description: z.string().max(500).optional(),
-  isSystem: z.boolean().optional().default(false),
-  sortOrder: z.number().int().min(0).optional(),
-});
-
-const updateRoleSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  description: z.string().max(500).optional(),
-  sortOrder: z.number().int().min(0).optional(),
-});
-
+import {
+  createRoleCatalogSchema,
+  updateRoleCatalogSchema,
+} from "@shared/role-definition";
 
 export function registerRoleRoutes(app: Express): void {
   app.get("/api/roles", authenticateJWT, async (_req, res) => {
@@ -47,26 +37,34 @@ export function registerRoleRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/roles", authenticateJWT, requireStaffFromDb, async (req, res) => {
+  app.post("/api/roles", authenticateJWT, requireFullAdmin, async (req, res) => {
     try {
-      const data = createRoleSchema.parse(req.body);
-      const role = await roleService.createRole(data as NewRoleDefinition);
+      const data = createRoleCatalogSchema.parse(req.body);
+      const role = await roleService.createRole({
+        ...data,
+        isSystem: false,
+      } as NewRoleDefinition);
       res.status(201).json(role);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
       }
-      if (error instanceof Error && error.message.includes("Ya existe")) {
-        return res.status(409).json({ message: error.message });
+      if (error instanceof Error) {
+        if (error.message.includes("Ya existe")) {
+          return res.status(409).json({ message: error.message });
+        }
+        if (error.message.includes("administrador")) {
+          return res.status(403).json({ message: error.message });
+        }
       }
       console.error("Error creating role:", error);
       res.status(500).json({ message: "Error al crear rol" });
     }
   });
 
-  app.patch("/api/roles/:code", authenticateJWT, requireStaffFromDb, async (req, res) => {
+  app.patch("/api/roles/:code", authenticateJWT, requireFullAdmin, async (req, res) => {
     try {
-      const data = updateRoleSchema.parse(req.body);
+      const data = updateRoleCatalogSchema.parse(req.body);
       const role = await roleService.updateRole(req.params.code, data);
       if (!role) return res.status(404).json({ message: "Rol no encontrado" });
       res.json(role);
@@ -74,18 +72,23 @@ export function registerRoleRoutes(app: Express): void {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
       }
+      if (error instanceof Error && error.message.includes("administrador")) {
+        return res.status(403).json({ message: error.message });
+      }
       console.error("Error updating role:", error);
       res.status(500).json({ message: "Error al actualizar rol" });
     }
   });
 
-  app.delete("/api/roles/:code", authenticateJWT, requireStaffFromDb, async (req, res) => {
+  app.delete("/api/roles/:code", authenticateJWT, requireFullAdmin, async (req, res) => {
     try {
       await roleService.deleteRole(req.params.code);
       res.status(204).send();
     } catch (error) {
-      if (error instanceof Error && error.message.includes("No se puede eliminar")) {
-        return res.status(403).json({ message: error.message });
+      if (error instanceof Error) {
+        if (error.message.includes("No se puede eliminar") || error.message.includes("administrador")) {
+          return res.status(403).json({ message: error.message });
+        }
       }
       console.error("Error deleting role:", error);
       res.status(500).json({ message: "Error al eliminar rol" });

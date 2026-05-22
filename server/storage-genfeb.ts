@@ -1,3 +1,4 @@
+import { SYSTEM_ROLE_CATALOG_DEFAULTS } from "@shared/role-definition";
 import {
   users,
   categories,
@@ -47,6 +48,10 @@ export interface RoleDefinition {
   code: string;
   name: string;
   description?: string;
+  /** Función principal del rol en la plataforma. */
+  responsibilities?: string;
+  /** Permisos granulares (casillas) — clave → activo. */
+  permissions?: Record<string, boolean>;
   isSystem?: boolean;
   sortOrder?: number;
   createdAt?: Date;
@@ -126,7 +131,7 @@ export interface IStorage
   // Peticiones de cambio de cuenta (correo/nombre/teléfono/vehículo Go)
   createAccountChangeRequest(input: {
     userId: string;
-    field: "email" | "name" | "phone" | "vehicle";
+    field: "email" | "name" | "phone" | "vehicle" | "recovery_questions";
     reason: string;
     proposal?: unknown;
   }): Promise<any>;
@@ -1314,12 +1319,7 @@ export class InMemoryStorage implements IStorage {
   }
 
   // ============== DEFINICIÓN DE ROLES (CRUD) ==============
-  private roleDefinitions: RoleDefinition[] = [
-    { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
-    { code: "professional", name: "Profesional", description: "Asociado de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
-    { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
-    { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
-  ];
+  private roleDefinitions: RoleDefinition[] = [];
 
   async getRoles(): Promise<RoleDefinition[]> {
     return [...this.roleDefinitions].sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
@@ -1360,17 +1360,33 @@ export class InMemoryStorage implements IStorage {
   }
 
   async seedRoles(): Promise<void> {
-    const defaults: RoleDefinition[] = [
-      { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
-      { code: "professional", name: "Profesional", description: "Asociado de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
-      { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
-      { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
-    ];
-    const existing = new Set(this.roleDefinitions.map((r) => r.code));
-    for (const r of defaults) {
-      if (!existing.has(r.code)) {
-        this.roleDefinitions.push({ ...r, createdAt: new Date(), updatedAt: new Date() });
-        existing.add(r.code);
+    const byCode = new Map(this.roleDefinitions.map((r) => [r.code, r]));
+    for (const def of SYSTEM_ROLE_CATALOG_DEFAULTS) {
+      const { code, isSystem, sortOrder, ...fields } = def;
+      const existing = byCode.get(code);
+      if (!existing) {
+        const row: RoleDefinition = {
+          code,
+          ...fields,
+          isSystem: isSystem ?? true,
+          sortOrder: sortOrder ?? 99,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        this.roleDefinitions.push(row);
+        byCode.set(code, row);
+        continue;
+      }
+      const patch: Partial<RoleDefinition> = {};
+      if (!existing.description?.trim() && fields.description) patch.description = fields.description;
+      if (!existing.responsibilities?.trim() && fields.responsibilities) {
+        patch.responsibilities = fields.responsibilities;
+      }
+      if (!existing.permissions && fields.permissions) {
+        patch.permissions = fields.permissions;
+      }
+      if (Object.keys(patch).length > 0) {
+        Object.assign(existing, patch, { updatedAt: new Date() });
       }
     }
   }
@@ -1465,7 +1481,7 @@ export class InMemoryStorage implements IStorage {
 
   async createAccountChangeRequest(input: {
     userId: string;
-    field: "email" | "name" | "phone" | "vehicle";
+    field: "email" | "name" | "phone" | "vehicle" | "recovery_questions";
     reason: string;
     proposal?: unknown;
   }): Promise<any> {
@@ -1473,11 +1489,20 @@ export class InMemoryStorage implements IStorage {
     const field = input.field;
     const reason = String(input.reason ?? "").trim();
     if (!userId) throw new Error("userId requerido");
-    if (!["email", "name", "phone", "vehicle"].includes(field)) throw new Error("field inválido");
+    if (!["email", "name", "phone", "vehicle", "recovery_questions"].includes(field)) throw new Error("field inválido");
     if (!reason) throw new Error("reason requerido");
     if (field === "vehicle") {
       if (this.accountChangeRequests.some((r) => r.userId === userId && r.status === "pending" && r.field === "vehicle")) {
         throw new Error("Ya tienes una solicitud de vehículo pendiente.");
+      }
+    }
+    if (field === "recovery_questions") {
+      if (
+        this.accountChangeRequests.some(
+          (r) => r.userId === userId && r.status === "pending" && r.field === "recovery_questions",
+        )
+      ) {
+        throw new Error("Ya tienes una solicitud de preguntas de recuperación pendiente.");
       }
     }
 

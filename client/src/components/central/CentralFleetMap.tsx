@@ -6,15 +6,10 @@ import {
   Popup,
   useMap,
   ZoomControl,
-  Polyline,
-  CircleMarker,
-  GeoJSON,
 } from "react-leaflet";
 import L from "leaflet";
-import type { GeoJsonObject } from "geojson";
 import { Bookmark, Loader2, MapPinned, RefreshCw } from "lucide-react";
 import type { CentralServiceMapView } from "@shared/dispatch-company";
-import type { CentralActiveService } from "@shared/central-fleet";
 import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
 import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
@@ -42,7 +37,7 @@ function lineStringLatLngs(geometry: unknown): [number, number][] {
 }
 
 /**
- * Ajusta la cámara al conductor seguido (la ruta del servicio se muestra en modal desde el panel de detalle).
+ * Ajusta la cámara al conductor seguido en el mapa de flota.
  */
 function CentralMapCamera({
   followDriver,
@@ -148,11 +143,7 @@ type CentralFleetMapProps = {
   persistServiceMapPending?: boolean;
   /** Remount al cambiar de empresa (admin). */
   mapInstanceKey?: string;
-  /**
-   * Ruta A→B superpuesta en el mapa de flota (opcional; en central suele dejarse en null y usarse el modal de detalle).
-   */
-  highlightedService?: CentralActiveService | null;
-  /** Conductor seleccionado en el panel (datos en vivo); la cámara solo lo sigue si no hay ruta activa. */
+  /** Conductor seleccionado en el panel (datos en vivo); la cámara lo sigue en el mapa. */
   followDriver?: CentralFleetDriver | null;
   /** Vuelve a pedir la flota al servidor y actualiza marcadores. */
   onRefreshFleet?: () => void | Promise<unknown>;
@@ -169,7 +160,6 @@ export function CentralFleetMap({
   onPersistServiceMap,
   persistServiceMapPending = false,
   mapInstanceKey = "default",
-  highlightedService = null,
   followDriver = null,
   onRefreshFleet,
   fleetRefreshing = false,
@@ -192,9 +182,6 @@ export function CentralFleetMap({
 
   const center: [number, number] = [serviceMapView.lat, serviceMapView.lon];
   const initialZoom = serviceMapView.cityZoom;
-
-  const routeColor = highlightedService?.mode === "delivery" ? "#d97706" : "#2563eb";
-  const routeKey = highlightedService ? `${highlightedService.rideId}-${highlightedService.mode}` : "none";
 
   return (
     <div
@@ -268,55 +255,6 @@ export function CentralFleetMap({
               {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
               {...(raster.apiKey ? { apiKey: raster.apiKey } : {})}
             />
-            {highlightedService ? (
-              <>
-                <CircleMarker
-                  center={[highlightedService.start.lat, highlightedService.start.lon]}
-                  radius={10}
-                  pathOptions={{
-                    color: "#15803d",
-                    fillColor: "#22c55e",
-                    fillOpacity: 0.88,
-                    weight: 2,
-                  }}
-                />
-                <CircleMarker
-                  center={[highlightedService.end.lat, highlightedService.end.lon]}
-                  radius={10}
-                  pathOptions={{
-                    color: "#b91c1c",
-                    fillColor: "#ef4444",
-                    fillOpacity: 0.88,
-                    weight: 2,
-                  }}
-                />
-                {highlightedService.routeGeometry ? (
-                  <GeoJSON
-                    key={routeKey}
-                    data={highlightedService.routeGeometry as GeoJsonObject}
-                    style={{
-                      color: routeColor,
-                      weight: 5,
-                      opacity: 0.88,
-                    }}
-                  />
-                ) : (
-                  <Polyline
-                    positions={[
-                      [highlightedService.start.lat, highlightedService.start.lon],
-                      [highlightedService.end.lat, highlightedService.end.lon],
-                    ]}
-                    pathOptions={{
-                      color: routeColor,
-                      weight: 4,
-                      opacity: 0.85,
-                      dashArray: "8 12",
-                      lineCap: "round",
-                    }}
-                  />
-                )}
-              </>
-            ) : null}
             <CentralMapCamera followDriver={followDriver} />
             {drivers.map((d) => (
               <Marker

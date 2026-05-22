@@ -34,5 +34,12 @@ service firebase.storage {
       allow write: if request.resource.size < 9 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
+
+    // Iconos de categoría/subcategoría (admin, desde el panel) — solo PNG, máx. 2 MB
+    match /category-icons/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 2 * 1024 * 1024
+        && request.resource.contentType == 'image/png';
+    }
   }
 }

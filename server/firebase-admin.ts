@@ -191,4 +191,6 @@ export const FIRESTORE_COLLECTIONS = {
    * Usado para popularidad en la home (Explorar).
    */
   STATS_SUBCATEGORY_BOOKINGS_MONTHLY: "stats_subcategory_bookings_monthly",
+  /** Historial persistente de viajes Car Go / Pack Go (completados, cancelados, expirados). */
+  MOBILITY_RIDE_HISTORY: "mobility_ride_history",
 } as const;
