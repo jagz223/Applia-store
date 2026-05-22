@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import type { CargoDriverTripLog } from "@/lib/cargo-driver-storage";
 import { mobilityHistorySheetTitle, mobilityServiceLabel } from "@shared/mobility-ui-labels";
+import { useGoCompactViewport } from "@/lib/go-viewport-layout";
 
 function formatEnded(iso: string): string {
   try {
@@ -51,6 +52,7 @@ export function DriverTripHistorySheet({
   emptyHint,
 }: Props) {
   const isControlled = onOpenChange !== undefined;
+  const isGoCompact = useGoCompactViewport();
   const moduleLabel = (t: CargoDriverTripLog): string => mobilityServiceLabel(t.goSlug);
 
   return (
@@ -73,7 +75,15 @@ export function DriverTripHistorySheet({
           </Button>
         </SheetTrigger>
       )}
-      <SheetContent side="bottom" className="max-h-[min(85dvh,560px)] overflow-y-auto rounded-t-2xl">
+      <SheetContent
+        side={isGoCompact ? "bottom" : "right"}
+        className={cn(
+          "overflow-y-auto",
+          isGoCompact
+            ? "max-h-[min(85dvh,560px)] rounded-t-2xl"
+            : "w-full sm:max-w-md",
+        )}
+      >
         <SheetHeader>
           <SheetTitle>{mobilityHistorySheetTitle()}</SheetTitle>
         </SheetHeader>

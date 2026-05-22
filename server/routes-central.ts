@@ -8,6 +8,7 @@ import { genFebStorage } from "./storage-genfeb";
 import { catalogService } from "./services";
 import {
   createDispatchCompany,
+  findDispatchCompanyByName,
   getDispatchCompany,
   listDispatchCompanies,
   updateDispatchCompany,
@@ -96,6 +97,63 @@ function pickPresenceForDisplay(
 
 export function registerCentralRoutes(app: Express): void {
   app.get("/api/dispatch-companies/options", optionalAuthListCompanies);
+
+  const setupCompanySchema = z.object({
+    name: z.string().trim().min(2, "Mínimo 2 caracteres").max(120),
+  });
+
+  /** Operador central: crea su empresa despachadora con nombre único (tras cambio de rol). */
+  app.post("/api/central/setup-company", authenticateJWT, async (req: any, res) => {
+    if (!isCentralRole(req.user?.role)) {
+      return res.status(403).json({ message: "Solo usuarios Central pueden configurar una central" });
+    }
+    try {
+      const { name } = setupCompanySchema.parse(req.body);
+      const user = (await genFebStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+
+      const existingCompanyId = String(user.dispatchCompanyId ?? "").trim();
+      if (existingCompanyId && user.pendingCentralSetup !== true) {
+        const cur = await getDispatchCompany(existingCompanyId);
+        if (cur) {
+          return res.status(400).json({
+            message: "Ya tienes una central asignada.",
+            company: cur,
+          });
+        }
+      }
+
+      const duplicate = await findDispatchCompanyByName(name);
+      if (duplicate) {
+        return res.status(409).json({
+          message: "Ya existe una central con ese nombre. Elige otro.",
+          field: "name",
+        });
+      }
+
+      const company = await createDispatchCompany({
+        name,
+        ownerUserId: String(req.user.id),
+      });
+
+      await genFebStorage.updateUser(String(req.user.id), {
+        dispatchCompanyId: company.id,
+        pendingCentralSetup: false,
+      } as Record<string, unknown>);
+
+      return res.status(201).json({
+        message: "Central creada",
+        company: { id: company.id, name: company.name },
+        dispatchCompanyId: company.id,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error("Error en setup central:", error);
+      return res.status(500).json({ message: "Error al crear la central" });
+    }
+  });
 
   app.get("/api/central/companies", authenticateJWT, async (req: any, res) => {
     if (!canAccessCentralPanel(req.user?.role)) {

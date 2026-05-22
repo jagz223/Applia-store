@@ -182,6 +182,25 @@ export async function updateDispatchCompany(
   return updated;
 }
 
+export function normalizeDispatchCompanyName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Busca empresa por nombre (comparación normalizada, sin distinguir mayúsculas/espacios extra). */
+export async function findDispatchCompanyByName(
+  name: string,
+  excludeId?: string,
+): Promise<DispatchCompany | null> {
+  const norm = normalizeDispatchCompanyName(name);
+  if (!norm) return null;
+  const list = await listDispatchCompanies(false);
+  return (
+    list.find(
+      (c) => normalizeDispatchCompanyName(c.name) === norm && (!excludeId || c.id !== excludeId),
+    ) ?? null
+  );
+}
+
 export async function getDispatchCompanyForUser(userId: string): Promise<DispatchCompany | null> {
   const { genFebStorage } = await import("./storage-genfeb");
   const user = (await genFebStorage.getUserById(userId)) as { dispatchCompanyId?: string } | null;

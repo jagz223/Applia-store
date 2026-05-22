@@ -5,6 +5,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { resolveCentralServiceMapView } from "@shared/dispatch-company";
 import { useAuth } from "@/hooks/use-auth";
 import { canAccessCentralDashboard, hasAdminRole } from "@/lib/auth-utils";
+import { isCentralRole } from "@shared/roles";
+import { CENTRAL_SETUP_PATH } from "@shared/role-change-notification";
 import {
   useCentralCompaniesForAdmin,
   useCentralFleet,
@@ -190,6 +192,16 @@ export default function CentralDashboard() {
     return <Redirect to="/login" />;
   }
 
+  const needsCentralSetup =
+    !isAdmin &&
+    isCentralRole((user as { role?: string }).role) &&
+    ((user as { pendingCentralSetup?: boolean }).pendingCentralSetup === true ||
+      !String((user as { dispatchCompanyId?: string }).dispatchCompanyId ?? "").trim());
+
+  if (needsCentralSetup) {
+    return <Redirect to={CENTRAL_SETUP_PATH} />;
+  }
+
   if (isAdmin && !effectiveCompanyId) {
     return (
       <div className="container max-w-lg py-12">
@@ -209,30 +221,6 @@ export default function CentralDashboard() {
               search={companySearch}
               onSearchChange={setCompanySearch}
             />
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!effectiveCompanyId) {
-    return (
-      <div className="mx-auto max-w-lg px-4 py-12">
-        <Card className="border-amber-500/30 shadow-md">
-          <CardHeader>
-            <CardTitle className="text-lg">Sin empresa despachadora asignada</CardTitle>
-            <CardDescription>
-              Tu cuenta tiene acceso al panel central, pero no figura vinculada a ninguna empresa activa. Pide a un
-              administrador que asigne tu usuario a una central, o revisa que tu sesión esté actualizada.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button asChild variant="default">
-              <Link href="/">Volver al inicio</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href={CENTRAL_APP_SETTINGS_HREF}>Ir a configuración</Link>
-            </Button>
           </CardContent>
         </Card>
       </div>

@@ -19,6 +19,7 @@ import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { cn } from "@/lib/utils";
+import { isLeafletMapContainerLive, safeInvalidateSize } from "@/lib/safe-leaflet";
 import { Button } from "@/components/ui/button";
 import {
   MAP_PERSPECTIVE_CONTROLS_VISIBLE,
@@ -62,21 +63,19 @@ function FitRouteBounds({
   const map = useMap();
   useEffect(() => {
     if (!start || !end) return;
+    let cancelled = false;
     try {
-      const c = map.getContainer();
-      if (!c?.isConnected) return;
+      if (!isLeafletMapContainerLive(map)) return;
       const bounds = L.latLngBounds(L.latLng(start.lat, start.lon), L.latLng(end.lat, end.lon));
       for (const p of extra) bounds.extend(L.latLng(p.lat, p.lon));
       map.fitBounds(bounds, { padding: [52, 52], maxZoom: 15 });
-      requestAnimationFrame(() => {
-        try {
-          const cc = map.getContainer();
-          if (!cc?.isConnected) return;
-          map.invalidateSize({ animate: false });
-        } catch {
-          /* mapa desmontándose */
-        }
+      const raf = requestAnimationFrame(() => {
+        if (!cancelled) safeInvalidateSize(map);
       });
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(raf);
+      };
     } catch {
       /* mapa desmontándose (Leaflet panes/_leaflet_pos aún no listos) */
     }
@@ -88,10 +87,22 @@ function FocusSinglePoint({ point }: { point: MapPoint | null }) {
   const map = useMap();
   useEffect(() => {
     if (!point) return;
-    const ll = L.latLng(point.lat, point.lon);
-    const z = Math.max(map.getZoom(), 14);
-    map.setView(ll, z, { animate: true });
-    requestAnimationFrame(() => map.invalidateSize({ animate: false }));
+    let cancelled = false;
+    try {
+      if (!isLeafletMapContainerLive(map)) return;
+      const ll = L.latLng(point.lat, point.lon);
+      const z = Math.max(map.getZoom(), 14);
+      map.setView(ll, z, { animate: true });
+      const raf = requestAnimationFrame(() => {
+        if (!cancelled) safeInvalidateSize(map);
+      });
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(raf);
+      };
+    } catch {
+      /* mapa desmontándose */
+    }
   }, [map, point?.lat, point?.lon]);
   return null;
 }
@@ -100,9 +111,17 @@ function FocusSinglePoint({ point }: { point: MapPoint | null }) {
 function SyncBootstrapView({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useMap();
   useEffect(() => {
+    let cancelled = false;
     try {
+      if (!isLeafletMapContainerLive(map)) return;
       map.setView(L.latLng(center[0], center[1]), zoom, { animate: true });
-      requestAnimationFrame(() => map.invalidateSize({ animate: false }));
+      const raf = requestAnimationFrame(() => {
+        if (!cancelled) safeInvalidateSize(map);
+      });
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(raf);
+      };
     } catch {
       /* mapa desmontándose */
     }
@@ -152,7 +171,7 @@ function RecenterControl({
 
     const tryPlace = () => {
       if (done) return;
-      if (!col.isConnected) return;
+      if (!isLeafletMapContainerLive(map) || !col.isConnected) return;
       const zoom = col.querySelector(".leaflet-control-zoom, .leaflet-bar") as HTMLElement | null;
       if (zoom) {
         zoom.after(el);
@@ -206,11 +225,7 @@ function RecenterControl({
         onClick={(e) => {
           e.stopPropagation();
           onClick();
-          try {
-            requestAnimationFrame(() => map.invalidateSize({ animate: false }));
-          } catch {
-            /* mapa desmontándose */
-          }
+          requestAnimationFrame(() => safeInvalidateSize(map));
         }}
       >
         <Navigation className="h-5 w-5 text-foreground" strokeWidth={2.5} />

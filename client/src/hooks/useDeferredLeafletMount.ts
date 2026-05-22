@@ -55,6 +55,7 @@ export function useDeferredLeafletMount(options: DeferredLeafletMountOptions = {
 
     return () => {
       cancelled = true;
+      setReady(false);
       window.clearTimeout(minDelayId);
       window.clearTimeout(maxWaitId);
       ro?.disconnect();

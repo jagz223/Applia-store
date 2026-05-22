@@ -1,18 +1,27 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Loader2, KeyRound } from "lucide-react";
+import { Loader2, KeyRound, Mail, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import {
   RecoveryQuestionsForm,
   type RecoveryAnswerDraft,
 } from "@/components/account-recovery/RecoveryQuestionsForm";
 import { useNoIndex } from "@/hooks/use-no-index";
+import {
+  FORGOT_PASSWORD_NOT_REGISTERED_MSG,
+  FORGOT_PASSWORD_WRONG_RECOVERY_CODE,
+  FORGOT_PASSWORD_WRONG_RECOVERY_MSG,
+} from "@shared/account-recovery";
+import { normalizePhone } from "@shared/admin-user-registration";
+import { cn } from "@/lib/utils";
 
-type Step = "email" | "questions" | "password" | "done";
+type Step = "identifier" | "questions" | "password" | "done";
+type IdentifierMode = "email" | "phone";
 
 const emptyDraft = (): [RecoveryAnswerDraft, RecoveryAnswerDraft, RecoveryAnswerDraft] => [
   { questionId: "", answer: "" },
@@ -24,33 +33,62 @@ export default function ForgotPassword() {
   useNoIndex();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const [step, setStep] = useState<Step>("email");
+  const [step, setStep] = useState<Step>("identifier");
+  const [identifierMode, setIdentifierMode] = useState<IdentifierMode>("email");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
+  const [identifierHint, setIdentifierHint] = useState("");
+  const [identifierError, setIdentifierError] = useState("");
   const [draft, setDraft] = useState(emptyDraft);
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const lookupEmail = async () => {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) return;
+  const resetToIdentifier = (message: string) => {
+    setStep("identifier");
+    setDraft(emptyDraft());
+    setResetToken("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setIdentifierError(message);
+  };
+
+  const lookupIdentifier = async () => {
+    setIdentifierError("");
+    const body =
+      identifierMode === "email"
+        ? { email: email.trim().toLowerCase() }
+        : { phone: normalizePhone(phone) };
+
+    if (identifierMode === "email" && !email.trim()) return;
+    if (identifierMode === "phone" && !normalizePhone(phone)) return;
+
     setLoading(true);
     try {
       const res = await fetch("/api/auth/forgot-password/lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmed }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Error al buscar cuenta");
       if (!data.found) {
-        toast({
-          title: "Revisa tu correo",
-          description: data.message ?? "Si el correo está registrado, podrás continuar con las preguntas.",
-        });
+        setIdentifierError(String(data.message ?? FORGOT_PASSWORD_NOT_REGISTERED_MSG));
         return;
       }
+      const resolvedEmail = String(data.accountEmail ?? "").trim().toLowerCase();
+      if (!resolvedEmail) {
+        setIdentifierError(FORGOT_PASSWORD_NOT_REGISTERED_MSG);
+        return;
+      }
+      setAccountEmail(resolvedEmail);
+      setIdentifierHint(
+        identifierMode === "email"
+          ? email.trim().toLowerCase()
+          : normalizePhone(phone),
+      );
       setDraft(emptyDraft());
       setStep("questions");
     } catch (e: unknown) {
@@ -71,22 +109,32 @@ export default function ForgotPassword() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: email.trim().toLowerCase(),
+          email: accountEmail,
           answers: draft.map((d) => ({ questionId: d.questionId, answer: d.answer.trim() })),
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Preguntas o respuestas incorrectas");
+      if (!res.ok) {
+        const msg = String(data.message ?? FORGOT_PASSWORD_WRONG_RECOVERY_MSG);
+        if (data.code === FORGOT_PASSWORD_WRONG_RECOVERY_CODE || res.status === 401) {
+          resetToIdentifier(msg);
+          toast({
+            variant: "destructive",
+            title: "Datos incorrectos",
+            description: msg,
+          });
+          return;
+        }
+        throw new Error(msg);
+      }
       setResetToken(String(data.resetToken ?? ""));
+      setIdentifierError("");
       setStep("password");
     } catch (e: unknown) {
       toast({
         variant: "destructive",
-        title: "No coinciden",
-        description:
-          e instanceof Error
-            ? e.message
-            : "Debes elegir las mismas 3 preguntas que configuraste y escribir las respuestas correctas.",
+        title: "Error",
+        description: e instanceof Error ? e.message : "No se pudo verificar.",
       });
     } finally {
       setLoading(false);
@@ -127,6 +175,9 @@ export default function ForgotPassword() {
     }
   };
 
+  const canLookup =
+    identifierMode === "email" ? email.trim().length > 0 : normalizePhone(phone).length >= 8;
+
   const canVerify =
     draft.every((d) => d.questionId && d.answer.trim().length >= 2) &&
     new Set(draft.map((d) => d.questionId)).size === 3;
@@ -140,7 +191,7 @@ export default function ForgotPassword() {
           </div>
           <CardTitle>Recuperar contraseña</CardTitle>
           <CardDescription>
-            {step === "email" && "Ingresa el correo de tu cuenta."}
+            {step === "identifier" && "Ingresa el correo o el número de teléfono de tu cuenta."}
             {step === "questions" &&
               "Elige las 3 preguntas que configuraste al registrarte y escribe la misma respuesta que guardaste."}
             {step === "password" && "Elige una contraseña nueva."}
@@ -148,28 +199,81 @@ export default function ForgotPassword() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {step === "email" ? (
-            <div className="space-y-2">
-              <Label htmlFor="email">Correo electrónico</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="correo@ejemplo.com"
-                autoComplete="email"
-              />
+          {step === "identifier" ? (
+            <div className="space-y-3">
+              <Tabs
+                value={identifierMode}
+                onValueChange={(v) => {
+                  setIdentifierMode(v as IdentifierMode);
+                  setIdentifierError("");
+                }}
+              >
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="email" className="gap-2">
+                    <Mail className="h-4 w-4 shrink-0" aria-hidden />
+                    Correo
+                  </TabsTrigger>
+                  <TabsTrigger value="phone" className="gap-2">
+                    <Phone className="h-4 w-4 shrink-0" aria-hidden />
+                    Teléfono
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="email" className="mt-3 space-y-2">
+                  <Label htmlFor="forgot-email">Correo electrónico</Label>
+                  <Input
+                    id="forgot-email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setIdentifierError("");
+                    }}
+                    placeholder="correo@ejemplo.com"
+                    autoComplete="email"
+                  />
+                </TabsContent>
+                <TabsContent value="phone" className="mt-3 space-y-2">
+                  <Label htmlFor="forgot-phone">Número de teléfono</Label>
+                  <Input
+                    id="forgot-phone"
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => {
+                      setPhone(e.target.value);
+                      setIdentifierError("");
+                    }}
+                    placeholder="+593 99 123 4567"
+                    autoComplete="tel"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Usa el mismo número que registraste (con código de país si lo guardaste así).
+                  </p>
+                </TabsContent>
+              </Tabs>
+              {identifierError ? (
+                <p
+                  className={cn(
+                    "text-sm rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive",
+                  )}
+                  role="alert"
+                >
+                  {identifierError}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
           {step === "questions" ? (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Cuenta: <span className="font-medium text-foreground">{email}</span>
+                Cuenta verificada:{" "}
+                <span className="font-medium text-foreground">
+                  {identifierMode === "phone" ? identifierHint : accountEmail}
+                </span>
               </p>
               <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border/80 bg-muted/20 px-3 py-2">
-                No mostramos cuáles elegiste antes: selecciona tú las tres preguntas correctas del listado (por
-                ejemplo, «nombre de tu primera mascota») y responde exactamente como lo hiciste al configurarlas.
+                No mostramos cuáles elegiste antes: selecciona tú las tres preguntas correctas del listado y
+                responde exactamente como lo hiciste al configurarlas.
               </p>
               <RecoveryQuestionsForm value={draft} onChange={setDraft} disabled={loading} />
             </div>
@@ -205,8 +309,8 @@ export default function ForgotPassword() {
           ) : null}
         </CardContent>
         <CardFooter className="flex flex-col gap-3">
-          {step === "email" ? (
-            <Button className="w-full" onClick={lookupEmail} disabled={loading || !email.trim()}>
+          {step === "identifier" ? (
+            <Button className="w-full" onClick={lookupIdentifier} disabled={loading || !canLookup}>
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Continuar
             </Button>

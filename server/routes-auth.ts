@@ -13,14 +13,20 @@ import { resolveUserPermissions } from "./resolve-user-permissions";
 import {
   RECOVERY_QUESTION_OPTIONS,
   recoveryQuestionsSetupSchema,
-  forgotPasswordLookupSchema,
   forgotPasswordVerifySchema,
   forgotPasswordResetSchema,
   changePasswordWithRecoverySchema,
+  FORGOT_PASSWORD_NOT_REGISTERED_MSG,
+  FORGOT_PASSWORD_NO_RECOVERY_MSG,
+  FORGOT_PASSWORD_WRONG_RECOVERY_MSG,
+  FORGOT_PASSWORD_WRONG_RECOVERY_CODE,
+  SETTINGS_WRONG_RECOVERY_MSG,
 } from "@shared/account-recovery";
 import {
   generatePasswordResetToken,
   hashRecoveryQuestions,
+  parseForgotPasswordLookup,
+  resolveUserForForgotPassword,
   userHasRecoveryConfigured,
   verifyPasswordResetToken,
   verifyRecoveryQuestions,
@@ -127,6 +133,7 @@ async function buildAuthClientUser(
     recoveryQuestionsConfigured: userHasRecoveryConfigured(user as { recoveryQuestionsConfigured?: boolean; recoveryQuestions?: unknown }),
     acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
     dispatchCompanyId: (user as { dispatchCompanyId?: string | null }).dispatchCompanyId ?? null,
+    pendingCentralSetup: (user as { pendingCentralSetup?: boolean }).pendingCentralSetup === true,
     provider: provider ?? null,
     permissions,
   };
@@ -691,7 +698,7 @@ export async function registerAuthRoutes(
       const ok = await verifyRecoveryQuestions(stored, answers);
       if (!ok) {
         return res.status(401).json({
-          message: "Las preguntas seleccionadas o las respuestas no coinciden con tu configuración.",
+          message: SETTINGS_WRONG_RECOVERY_MSG,
         });
       }
       const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -757,30 +764,32 @@ export async function registerAuthRoutes(
     }
   });
 
-  // POST /api/auth/forgot-password/lookup — Comprueba si el correo puede usar recuperación (no revela las preguntas elegidas)
+  // POST /api/auth/forgot-password/lookup — Buscar cuenta por correo o teléfono
   app.post("/api/auth/forgot-password/lookup", async (req, res) => {
     try {
-      const { email } = forgotPasswordLookupSchema.parse(req.body);
-      const user = (await genFebStorage.getUserByEmail(email)) as Record<string, unknown> | null;
-      if (!user || (user as { deletedAt?: unknown }).deletedAt) {
+      const lookup = parseForgotPasswordLookup(req.body);
+      const resolved = await resolveUserForForgotPassword(lookup, genFebStorage);
+      if (!resolved) {
         return res.status(200).json({
           found: false,
-          message: "Si el correo está registrado, podrás continuar con las preguntas de seguridad.",
+          message: FORGOT_PASSWORD_NOT_REGISTERED_MSG,
         });
       }
+      const { user, email } = resolved;
       if (!userHasRecoveryConfigured(user)) {
         return res.status(200).json({
           found: false,
-          message: "Si el correo está registrado, podrás continuar con las preguntas de seguridad.",
+          message: FORGOT_PASSWORD_NO_RECOVERY_MSG,
         });
       }
       return res.status(200).json({
         found: true,
+        accountEmail: email,
         message: "Selecciona las 3 preguntas que configuraste y escribe tus respuestas.",
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Correo inválido", errors: error.errors });
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
       }
       console.error("forgot-password lookup:", error);
       return res.status(500).json({ message: "Error al buscar la cuenta" });
@@ -791,17 +800,23 @@ export async function registerAuthRoutes(
   app.post("/api/auth/forgot-password/verify", async (req, res) => {
     try {
       const { email, answers } = forgotPasswordVerifySchema.parse(req.body);
-      const user = (await genFebStorage.getUserByEmail(email)) as Record<string, unknown> | null;
-      if (!user || (user as { deletedAt?: unknown }).deletedAt) {
+      const resolved = await resolveUserForForgotPassword(
+        { kind: "email", email },
+        genFebStorage,
+      );
+      if (!resolved) {
         return res.status(401).json({
-          message: "Las preguntas seleccionadas o las respuestas no coinciden con tu configuración.",
+          code: FORGOT_PASSWORD_WRONG_RECOVERY_CODE,
+          message: FORGOT_PASSWORD_WRONG_RECOVERY_MSG,
         });
       }
+      const { user } = resolved;
       const stored = (user.recoveryQuestions ?? []) as { questionId: string; answerHash: string }[];
       const ok = await verifyRecoveryQuestions(stored, answers);
       if (!ok) {
         return res.status(401).json({
-          message: "Las preguntas seleccionadas o las respuestas no coinciden con tu configuración.",
+          code: FORGOT_PASSWORD_WRONG_RECOVERY_CODE,
+          message: FORGOT_PASSWORD_WRONG_RECOVERY_MSG,
         });
       }
       const resetToken = generatePasswordResetToken(String(user.id), email, effectiveSecret);

@@ -402,6 +402,26 @@ export function useRejectCentralAffiliation(companyId: string | null) {
   });
 }
 
+export function useSetupCentralCompany() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => {
+      const res = await fetch("/api/central/setup-company", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((j as { message?: string }).message ?? "No se pudo crear la central");
+      return j as { company: { id: string; name: string }; dispatchCompanyId: string };
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["user"] });
+      void qc.invalidateQueries({ queryKey: ["central"] });
+    },
+  });
+}
+
 export function useGrantCentralDataSharing() {
   const qc = useQueryClient();
   return useMutation({

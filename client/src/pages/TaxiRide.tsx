@@ -396,6 +396,21 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     if (isGoClient && isGoCompact && mapFullscreen) setMapFullscreen(false);
   }, [isGoClient, isGoCompact, mapFullscreen]);
 
+  /** Evita solapar dos instancias Leaflet al cruzar el breakpoint móvil ↔ escritorio. */
+  const goMapLayoutKey = isGoCompact ? "compact" : "wide";
+  const [goMapSwapPending, setGoMapSwapPending] = useState(false);
+  useEffect(() => {
+    if (!isGoClient) {
+      setGoMapSwapPending(false);
+      return;
+    }
+    setGoMapSwapPending(true);
+    const id = window.setTimeout(() => setGoMapSwapPending(false), 120);
+    return () => window.clearTimeout(id);
+  }, [isGoClient, goMapLayoutKey]);
+
+  const showGoLeafletMap = !isGoClient || !goMapSwapPending;
+
   const debounceStart = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounceEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchEndAtRef = useRef<number>(0);
@@ -1605,24 +1620,32 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           <div className={cn(goViewportClasses.mapStage, "w-full lg:hidden")}>
             <div className="pointer-events-auto absolute inset-0 z-0 overflow-hidden bg-muted/30">
               {/* Wallet/Recargar ahora viven en `GoBottomNav` (barra inferior). */}
-              <TaxiRouteMap
-                fullscreen
-                zoomPosition="bottomleft"
-                syncDefaultView={!start && !end}
-                defaultCenter={mapBootstrapCenter}
-                defaultZoom={mapBootstrapZoom}
-                start={matchedRideMap.mapStart}
-                end={end}
-                routeFocus={matchedRideMap.routeFocus}
-                routeGeometryKey={matchedRideMap.routeGeometryKey}
-                routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
-                onMapPick={onMapPick}
-                nearbyDemoVehicles={nearbyDriverMarkers}
-                markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
-                suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
-                onRecenter={goClientMapRecenter}
-                wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full"
-              />
+              {showGoLeafletMap ? (
+                <TaxiRouteMap
+                  key={goMapLayoutKey}
+                  fullscreen
+                  zoomPosition="bottomleft"
+                  syncDefaultView={!start && !end}
+                  defaultCenter={mapBootstrapCenter}
+                  defaultZoom={mapBootstrapZoom}
+                  start={matchedRideMap.mapStart}
+                  end={end}
+                  routeFocus={matchedRideMap.routeFocus}
+                  routeGeometryKey={matchedRideMap.routeGeometryKey}
+                  routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
+                  onMapPick={onMapPick}
+                  nearbyDemoVehicles={nearbyDriverMarkers}
+                  markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
+                  suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
+                  onRecenter={goClientMapRecenter}
+                  wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full"
+                />
+              ) : (
+                <div className="flex h-full min-h-[120px] w-full items-center justify-center gap-2 bg-muted/30 text-sm text-muted-foreground">
+                  <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+                  Preparando mapa…
+                </div>
+              )}
               {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
                 <div
                   style={{ bottom: goOffsetAboveBottomNav() }}
@@ -2379,24 +2402,32 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           {isGoClient && !isGoCompact ? (
             <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-muted/10 shadow-sm md:min-h-[min(480px,calc(100dvh-14rem))] md:h-full">
               <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
-                <TaxiRouteMap
-                  fullscreen
-                  zoomPosition="bottomleft"
-                  syncDefaultView={!start && !end}
-                  defaultCenter={mapBootstrapCenter}
-                  defaultZoom={mapBootstrapZoom}
-                  start={matchedRideMap.mapStart}
-                  end={end}
-                  routeFocus={matchedRideMap.routeFocus}
-                  routeGeometryKey={matchedRideMap.routeGeometryKey}
-                  routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
-                  onMapPick={onMapPick}
-                  nearbyDemoVehicles={nearbyDriverMarkers}
-                  markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
-                  suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
-                  onRecenter={goClientMapRecenter}
-                  wrapperClassName="!rounded-none !border-0 !shadow-none h-full min-h-0 w-full flex-1"
-                />
+                {showGoLeafletMap ? (
+                  <TaxiRouteMap
+                    key={goMapLayoutKey}
+                    fullscreen
+                    zoomPosition="bottomleft"
+                    syncDefaultView={!start && !end}
+                    defaultCenter={mapBootstrapCenter}
+                    defaultZoom={mapBootstrapZoom}
+                    start={matchedRideMap.mapStart}
+                    end={end}
+                    routeFocus={matchedRideMap.routeFocus}
+                    routeGeometryKey={matchedRideMap.routeGeometryKey}
+                    routeGeometry={matchedDriverInfo ? driverToPickupGeometry : routeGeometry}
+                    onMapPick={onMapPick}
+                    nearbyDemoVehicles={nearbyDriverMarkers}
+                    markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
+                    suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
+                    onRecenter={goClientMapRecenter}
+                    wrapperClassName="!rounded-none !border-0 !shadow-none h-full min-h-0 w-full flex-1"
+                  />
+                ) : (
+                  <div className="flex h-full min-h-[min(480px,50vh)] w-full flex-1 items-center justify-center gap-2 bg-muted/20 text-sm text-muted-foreground">
+                    <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+                    Preparando mapa…
+                  </div>
+                )}
                 {(reverseLoading || routeLoading) && (
                   <div className="absolute bottom-3 left-3 z-[55] flex items-center gap-2 rounded-lg border bg-background/90 px-3 py-2 text-xs shadow">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

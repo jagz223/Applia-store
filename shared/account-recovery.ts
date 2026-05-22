@@ -1,4 +1,17 @@
 import { z } from "zod";
+import { normalizePhone } from "./admin-user-registration";
+
+/** Mensajes de recuperación (forgot-password vs configuración). */
+export const FORGOT_PASSWORD_NOT_REGISTERED_MSG =
+  "Correo o número de teléfono no registrado.";
+export const FORGOT_PASSWORD_NO_RECOVERY_MSG =
+  "Esta cuenta no tiene preguntas de recuperación configuradas.";
+export const FORGOT_PASSWORD_WRONG_RECOVERY_MSG =
+  "Datos erróneos. Por favor, ingresa los correctos.";
+export const SETTINGS_WRONG_RECOVERY_MSG =
+  "Los datos ingresados no son correctos. Revisa las preguntas y respuestas e inténtalo de nuevo.";
+
+export const FORGOT_PASSWORD_WRONG_RECOVERY_CODE = "wrong_recovery";
 
 /** Preguntas frecuentes para recuperación de cuenta (el usuario elige 3 distintas). */
 export const RECOVERY_QUESTION_OPTIONS = [
@@ -65,16 +78,29 @@ export type RecoveryQuestionStored = {
   answerHash: string;
 };
 
-export const forgotPasswordLookupSchema = z.object({
+/** Buscar cuenta por correo o por teléfono (un solo campo por petición). */
+export const forgotPasswordLookupSchema = z.union([
+  z.object({
+    email: z
+      .string()
+      .min(1, "El correo es obligatorio")
+      .email("Correo inválido")
+      .transform((s) => s.trim().toLowerCase()),
+  }),
+  z.object({
+    phone: z
+      .string()
+      .min(1, "El teléfono es obligatorio")
+      .transform((s) => normalizePhone(s)),
+  }),
+]);
+
+export const forgotPasswordVerifySchema = z.object({
   email: z
     .string()
     .min(1)
     .email()
     .transform((s) => s.trim().toLowerCase()),
-});
-
-export const forgotPasswordVerifySchema = z.object({
-  email: forgotPasswordLookupSchema.shape.email,
   answers: recoveryQuestionsSetupSchema,
 });
 

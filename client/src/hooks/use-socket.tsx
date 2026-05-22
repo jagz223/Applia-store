@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { navigate } from "wouter/use-browser-location";
 import { useAuth } from "./use-auth";
 import { hasFullAdminRole } from "@/lib/auth-utils";
+import { NOTIFICATION_TYPE_ROLE_CHANGED } from "@shared/role-change-notification";
 import { useToast } from "@/hooks/use-toast";
 import { fetchNotificationsFromServer, type ClientNotification } from "@/lib/notifications-api";
 import {
@@ -310,6 +311,25 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
             variant: "destructive",
           });
         }
+      }
+      if (type === NOTIFICATION_TYPE_ROLE_CHANGED) {
+        queryClient.invalidateQueries({ queryKey: ["user"] });
+        debouncedRefetch(queryClient, ["user"]);
+        const title =
+          typeof notification?.title === "string" && notification.title.trim()
+            ? notification.title.trim()
+            : "Tu rol cambió";
+        const description =
+          typeof notification?.body === "string" && notification.body.trim()
+            ? notification.body.trim()
+            : notification?.data?.message;
+        toast({
+          title,
+          description:
+            typeof description === "string" && description.trim()
+              ? description.trim()
+              : "Revisa la notificación para los siguientes pasos.",
+        });
       }
       if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
         queryClient.invalidateQueries({ queryKey: ["user"] });

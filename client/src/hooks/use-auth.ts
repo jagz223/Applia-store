@@ -30,6 +30,9 @@ export type AuthUser = User & {
   };
   /** ISO o timestamp de la última vez que cambió la foto de perfil (cooldown 24 h). */
   avatarLastChangedAt?: string | null;
+  /** true si el usuario Central debe asignar el nombre de su empresa. */
+  pendingCentralSetup?: boolean;
+  dispatchCompanyId?: string | null;
 };
 
 async function fetchUser(): Promise<AuthUser | null> {

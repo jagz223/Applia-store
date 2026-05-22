@@ -3,7 +3,40 @@ import jwt from "jsonwebtoken";
 import {
   normalizeRecoveryAnswer,
   type RecoveryQuestionStored,
+  forgotPasswordLookupSchema,
 } from "@shared/account-recovery";
+
+export type ForgotPasswordLookupInput =
+  | { kind: "email"; email: string }
+  | { kind: "phone"; phone: string };
+
+export function parseForgotPasswordLookup(body: unknown): ForgotPasswordLookupInput {
+  const parsed = forgotPasswordLookupSchema.parse(body);
+  if ("email" in parsed) return { kind: "email", email: parsed.email };
+  return { kind: "phone", phone: parsed.phone };
+}
+
+export type ForgotPasswordStorage = {
+  getUserByEmail: (email: string, includeDeleted?: boolean) => Promise<unknown>;
+  getUserByPhone: (phone: string, includeDeleted?: boolean) => Promise<unknown>;
+};
+
+export async function resolveUserForForgotPassword(
+  lookup: ForgotPasswordLookupInput,
+  storage: ForgotPasswordStorage,
+): Promise<{ user: Record<string, unknown>; email: string } | null> {
+  const user =
+    lookup.kind === "email"
+      ? ((await storage.getUserByEmail(lookup.email)) as Record<string, unknown> | null | undefined)
+      : ((await storage.getUserByPhone(lookup.phone, true)) as Record<string, unknown> | null | undefined);
+
+  if (!user || (user as { deletedAt?: unknown }).deletedAt) return null;
+  const email = String(user.email ?? "")
+    .trim()
+    .toLowerCase();
+  if (!email) return null;
+  return { user, email };
+}
 
 const RESET_PURPOSE = "password_reset";
 
