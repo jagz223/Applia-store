@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { useAssociateOnboardingIncomplete } from "@/hooks/use-associate-onboarding-incomplete";
 import { hasAdminRole, canAccessAssociateActivityDashboard, canAccessCentralDashboard } from "@/lib/auth-utils";
+import { isCentralRole } from "@shared/roles";
 import { Button } from "@/components/ui/button";
 import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility, useProviderVehicle } from "@/hooks/use-mango-data";
 import { isCarGoProvider } from "@shared/provider-car-go";
@@ -160,6 +161,9 @@ export function Navigation() {
 
   const isAdmin = (user as { role?: string } | null)?.role === "admin";
   const showCentralNav = canAccessCentralDashboard(user);
+  const isCentralUser = isCentralRole((user as { role?: string } | null)?.role);
+  const homeNavHref = isCentralUser ? "/central" : "/";
+  const homeNavLabel = isCentralUser ? "Ir a tu Central" : "Inicio";
   /** Conductor Car Go (verificado o no): acceso a vista driver (recibir) en Go. */
   const isCarGoDriver = !!providerProfile && isCarGoProvider(providerProfile, categories);
   const isVerifiedCarGoDriver = providerProfile?.isVerified === true && isCarGoDriver;
@@ -179,8 +183,8 @@ export function Navigation() {
 
   const NavLinks = () => (
     <>
-      <Link href="/" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/') ? 'text-primary' : 'text-muted-foreground'}`}>
-        Inicio
+      <Link href={homeNavHref} className={`text-sm font-medium transition-colors hover:text-primary ${isActive(homeNavHref) || (homeNavHref === '/' && isActive('/')) ? 'text-primary' : 'text-muted-foreground'}`}>
+        {homeNavLabel}
       </Link>
       <Link href="/explore" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/explore') ? 'text-primary' : 'text-muted-foreground'}`}>
         Explorar
@@ -576,8 +580,8 @@ export function Navigation() {
                 <MobileDarkModePreference />
               </div>
               <div className="flex flex-col gap-4 mt-4">
-                <Link href="/" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
-                  Inicio
+                <Link href={homeNavHref} className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                  {homeNavLabel}
                 </Link>
                 <Link href="/explore" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Explorar Servicios

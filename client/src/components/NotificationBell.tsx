@@ -18,6 +18,7 @@ import {
   centralAffiliationApplicantNotificationPath,
   centralAffiliationNotificationPath,
 } from "@/lib/central-affiliation-notification-path";
+import { NOTIFICATION_TYPE_ROLE_CHANGED } from "@shared/role-change-notification";
 
 /** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificaci?n (con highlight para resaltar el elemento). */
 function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
@@ -151,6 +152,10 @@ function getNotificationPath(notification: { id?: string; type: string; data?: a
     case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED:
     case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED:
       return centralAffiliationApplicantNotificationPath(data);
+    case NOTIFICATION_TYPE_ROLE_CHANGED: {
+      const u = data.url ?? data.data?.url;
+      return typeof u === "string" && u.startsWith("/") ? u : "/settings";
+    }
     default:
       return "/dashboard";
   }

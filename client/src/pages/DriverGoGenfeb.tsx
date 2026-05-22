@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  History,
   Loader2,
   MessageSquare,
   Phone,
@@ -1667,16 +1668,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               {activeRideOffer ? activeServicePanel : controlsBlockMobile}
             </div>
           </div>
-          <DriverTripHistorySheet
-            trips={tripsForHistory}
-            open={historySheetOpen}
-            onOpenChange={setHistorySheetOpen}
-            emptyHint={
-              hasOnlyHiddenWalletTrips
-                ? "Solo se listan efectivo y transferencias. Viajes con otros medios no se muestran mientras la cartera no está activa."
-                : undefined
-            }
-          />
           {activeRideOffer && activeRidePanelCollapsed ? (
             <Button
               type="button"
@@ -1721,8 +1712,16 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           </div>
 
           <aside className="flex w-full min-w-0 shrink-0 flex-col gap-4 lg:max-w-[22rem] lg:flex-[0_1_340px] lg:sticky lg:top-20 xl:max-w-sm">
-            {activeRideOffer ? activeServicePanel : null}
-            {controlsBlockDesktopSlides}
+            {activeRideOffer ? activeServicePanel : controlsBlockDesktopSlides}
+            <Button
+              type="button"
+              variant="secondary"
+              className="hidden w-full lg:inline-flex"
+              onClick={() => setHistorySheetOpen(true)}
+            >
+              <History className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+              Historial de viajes
+            </Button>
             {FEATURE_WALLET_RECHARGE_UI_ENABLED ? (
               <button
                 type="button"
@@ -1735,6 +1734,17 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           </aside>
         </div>
       </div>
+
+      <DriverTripHistorySheet
+        trips={tripsForHistory}
+        open={historySheetOpen}
+        onOpenChange={setHistorySheetOpen}
+        emptyHint={
+          hasOnlyHiddenWalletTrips
+            ? "Solo se listan efectivo y transferencias. Viajes con otros medios no se muestran mientras la cartera no está activa."
+            : undefined
+        }
+      />
 
       <Dialog open={FEATURE_WALLET_RECHARGE_UI_ENABLED && driverWalletOpen} onOpenChange={setDriverWalletOpen}>
         <DialogContent className="max-w-[420px]">

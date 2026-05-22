@@ -73,6 +73,7 @@ export class AdminUserRegistrationService {
       });
       await this.storage.updateUser(String(user.id), {
         dispatchCompanyId: company.id,
+        pendingCentralSetup: false,
       } as Record<string, unknown>);
       user.dispatchCompanyId = company.id;
     }

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useMap } from "react-leaflet";
+import { isLeafletMapContainerLive, safeInvalidateSize } from "@/lib/safe-leaflet";
 
 /**
  * Leaflet calcula el tamaño del lienzo en el primer frame; tras recargar el servidor / Vite o cuando el
@@ -11,23 +12,12 @@ export function LeafletMapLayoutFix() {
 
   useEffect(() => {
     let alive = true;
-    let el: HTMLElement;
-    try {
-      el = map.getContainer();
-    } catch {
-      return;
-    }
-    if (!el) return;
+    if (!isLeafletMapContainerLive(map)) return;
+    const el = map.getContainer();
 
     const run = () => {
       if (!alive) return;
-      try {
-        const c = map.getContainer();
-        if (!c?.isConnected) return;
-        map.invalidateSize({ animate: false });
-      } catch {
-        // Mapa desmontado o Leaflet aún sin panes (_leaflet_pos) al cambiar móvil/desktop.
-      }
+      safeInvalidateSize(map);
     };
 
     const scheduleDelays = () => {

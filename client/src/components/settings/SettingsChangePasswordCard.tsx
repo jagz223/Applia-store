@@ -18,6 +18,7 @@ import {
   RecoveryQuestionsForm,
   type RecoveryAnswerDraft,
 } from "@/components/account-recovery/RecoveryQuestionsForm";
+import { SETTINGS_WRONG_RECOVERY_MSG } from "@shared/account-recovery";
 
 const emptyDraft = (): [RecoveryAnswerDraft, RecoveryAnswerDraft, RecoveryAnswerDraft] => [
   { questionId: "", answer: "" },
@@ -80,7 +81,18 @@ export function SettingsChangePasswordCard({ recoveryConfigured }: SettingsChang
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "No se pudo cambiar la contraseña");
+      if (!res.ok) {
+        if (res.status === 401) {
+          setDraft(emptyDraft());
+          toast({
+            variant: "destructive",
+            title: "Datos incorrectos",
+            description: SETTINGS_WRONG_RECOVERY_MSG,
+          });
+          return;
+        }
+        throw new Error(data.message || "No se pudo cambiar la contraseña");
+      }
       resetFormState(setDraft, setNewPassword, setConfirmPassword);
       setOpen(false);
       toast({
@@ -94,7 +106,7 @@ export function SettingsChangePasswordCard({ recoveryConfigured }: SettingsChang
         description:
           e instanceof Error
             ? e.message
-            : "Verifica las preguntas, las respuestas y la nueva contraseña.",
+            : "Verifica la nueva contraseña e inténtalo de nuevo.",
       });
     } finally {
       setLoading(false);

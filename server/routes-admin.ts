@@ -43,6 +43,7 @@ import {
   isRetiredProviderCategorySlug,
 } from "@shared/default-categories";
 import { SETTINGS_URL_AFTER_VEHICLE_CHANGE_RESOLVED } from "@shared/settings-notification-urls";
+import { applyRoleChangeSideEffects } from "./role-change-notify";
 import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
 import {
   getHiddenCategorySlugs,
@@ -422,15 +423,21 @@ export function registerAdminRoutes(app: Express): void {
       if (data.lastName !== undefined) update.lastName = data.lastName.trim();
       if (data.email !== undefined) update.email = data.email.trim();
       if (data.phone !== undefined) update.phone = data.phone?.trim() ?? null;
+      const previousRole = String((existing as { role?: string }).role ?? "");
+      let roleChanged = false;
       if (data.role !== undefined) {
         const newRole = data.role.trim();
         update.role = newRole;
-        if (newRole === "professional" && (existing as any).role !== "professional") {
+        roleChanged = newRole !== previousRole;
+        if (newRole === "professional" && previousRole !== "professional") {
           update.acceptedProviderTermsOfUse = false;
         }
       }
       if (Object.keys(update).length > 0) {
         await userService.updateUser(id, update);
+      }
+      if (roleChanged && data.role !== undefined) {
+        await applyRoleChangeSideEffects(id, previousRole, data.role.trim());
       }
       if (data.newPassword) {
         const hashed = await bcrypt.hash(data.newPassword, 10);
@@ -2211,14 +2218,20 @@ export function registerAdminRoutes(app: Express): void {
         if (body.user.lastName !== undefined) userPatch.lastName = body.user.lastName;
         if (body.user.email !== undefined) userPatch.email = body.user.email;
         if (body.user.phone !== undefined) userPatch.phone = body.user.phone;
+        const existingUser = await genFebStorage.getUserById(userId);
+        const previousRole = String((existingUser as { role?: string })?.role ?? "");
+        let roleChanged = false;
         if (body.user.role !== undefined) {
           userPatch.role = body.user.role;
-          const existingUser = await genFebStorage.getUserById(userId);
-          if (body.user.role === "professional" && (existingUser as { role?: string })?.role !== "professional") {
+          roleChanged = body.user.role !== previousRole;
+          if (body.user.role === "professional" && previousRole !== "professional") {
             userPatch.acceptedProviderTermsOfUse = false;
           }
         }
         if (Object.keys(userPatch).length > 0) await userService.updateUser(userId, userPatch);
+        if (roleChanged && body.user.role !== undefined) {
+          await applyRoleChangeSideEffects(userId, previousRole, body.user.role);
+        }
       }
 
       if (body.provider) {

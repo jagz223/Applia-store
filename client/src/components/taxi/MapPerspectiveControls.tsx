@@ -3,6 +3,7 @@ import { useMap } from "react-leaflet";
 import { Button } from "@/components/ui/button";
 import { RotateCcw, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { safeInvalidateSize } from "@/lib/safe-leaflet";
 
 const TILT_STEP = 4;
 const TILT_MAX = 22;
@@ -33,15 +34,7 @@ export function MapPaneBearing({ degrees }: { degrees: number }) {
 
     // Cuando el usuario “abusa” navegando, el mapa puede desmontarse en medio del frame.
     // Guardamos para no tocar internals de Leaflet si el container ya no existe.
-    const raf = requestAnimationFrame(() => {
-      try {
-        const c = map.getContainer();
-        if (!c?.isConnected) return;
-        map.invalidateSize({ animate: false });
-      } catch {
-        /* mapa desmontándose */
-      }
-    });
+    const raf = requestAnimationFrame(() => safeInvalidateSize(map));
     return () => {
       cancelAnimationFrame(raf);
       try {

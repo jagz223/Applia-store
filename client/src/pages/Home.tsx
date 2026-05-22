@@ -25,6 +25,7 @@ import {
 } from "@shared/default-categories";
 import { cn } from "@/lib/utils";
 import { hasAdminRole } from "@/lib/auth-utils";
+import { isCentralRole } from "@shared/roles";
 import { 
   ArrowRight, 
   Search, 
@@ -186,6 +187,10 @@ export default function HomePage() {
     if (isAuthenticated && providerProfileLoading) return "loading" as const;
 
     if (isAuthenticated && hasAdminRole(user)) return "admin_panel" as const;
+
+    if (isAuthenticated && isCentralRole((user as { role?: string } | null)?.role)) {
+      return "central_panel" as const;
+    }
 
     const hasProvider = !!providerProfile;
     const isCargoBrand = hasProvider && isCarGoProvider(providerProfile, categories);
@@ -426,6 +431,16 @@ export default function HomePage() {
                       className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
                     >
                       Ir al panel de administración
+                    </Button>
+                  </Link>
+                ) : heroAssociateKind === "central_panel" ? (
+                  <Link href="/central" className="w-full sm:w-auto">
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="font-marketing h-14 w-full rounded-full border-2 border-secondary px-8 text-lg text-secondary transition-all duration-300 hover:bg-secondary hover:text-secondary-foreground sm:w-auto"
+                    >
+                      Ir a tu Central
                     </Button>
                   </Link>
                 ) : heroAssociateKind === "professional_panel" ? (
