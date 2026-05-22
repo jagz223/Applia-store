@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Car, History, Menu, Package, Store, MessageSquare, Settings, Bell, TrendingUp, Tags } from "lucide-react";
@@ -10,7 +11,8 @@ import { mobilityHistorySheetTitle, mobilityServiceLabel } from "@shared/mobilit
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DriverEarningsPanel } from "@/components/go/DriverEarningsPanel";
-import { loadRiderTripLog } from "@/lib/cargo-rider-trip-log";
+import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
+import { historyToRiderTripLog } from "@/lib/mobility-ride-history-mappers";
 import { useSocket } from "@/hooks/use-socket";
 import { useGoNotifications } from "@/contexts/GoNotificationsContext";
 import { loadGoDriverActiveRideId } from "@/lib/cargo-driver-storage";
@@ -77,10 +79,24 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   // Preferir email para evitar colisiones si el backend cambia el tipo de id.
   const riderTripAccountId =
     (user as any)?.email != null ? String((user as any).email) : user?.id != null ? String(user.id) : null;
+  const queryClient = useQueryClient();
+  const { data: riderHistoryRows = [], isLoading: riderHistoryLoading } = useQuery({
+    queryKey: ["mobility-ride-history", "rider", user?.id],
+    queryFn: () => fetchMobilityRideHistoryForUser(50, "rider"),
+    enabled: isAuthenticated && riderHistoryOpen,
+  });
   const riderTripEntries = useMemo(
-    () => loadRiderTripLog(riderTripAccountId),
-    [riderTripAccountId, riderHistoryOpen, location]
+    () => riderHistoryRows.map(historyToRiderTripLog),
+    [riderHistoryRows]
   );
+
+  useEffect(() => {
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: ["mobility-ride-history"] });
+    };
+    window.addEventListener("mobility-ride-history-changed", invalidate);
+    return () => window.removeEventListener("mobility-ride-history-changed", invalidate);
+  }, [queryClient]);
 
   /** En escritorio: barra compacta centrada tipo “dock”, sin estirar 6 ítems a todo el ancho. */
   const [desktopNav, setDesktopNav] = useState(() =>
@@ -445,9 +461,11 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
             <SheetTitle>{mobilityHistorySheetTitle()}</SheetTitle>
           </SheetHeader>
           <div className="mt-4 space-y-3 pb-6">
-            {riderTripEntries.length === 0 ? (
+            {riderHistoryLoading ? (
+              <p className="text-sm text-muted-foreground">Cargando historial…</p>
+            ) : riderTripEntries.length === 0 ? (
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Aún no hay servicios registrados. Cuando completes un servicio de Taxi o Delivery, aquí verás la fecha, duración y el conductor.
+                Aún no hay servicios en tu historial. Aquí verás viajes completados, cancelados o expirados de Taxi y Delivery.
               </p>
             ) : (
               <ul className="space-y-3">
@@ -455,9 +473,22 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
                   <li key={t.id} className="rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-sm">
                     <div className="flex items-start justify-between gap-2">
                       <span className="font-medium text-foreground">{new Date(t.endedAt).toLocaleString("es-EC")}</span>
-                      <span className="text-xs font-medium text-muted-foreground">
-                        Oferta enviada: <span className="font-semibold tabular-nums text-foreground">{formatUsd(t.amountUsd ?? 0)}</span>
-                      </span>
+                      {t.statusLabel ? (
+                        <span
+                          className={cn(
+                            "text-xs font-medium shrink-0",
+                            t.outcome === "cancelled" || t.outcome === "expired"
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          {t.statusLabel}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-medium text-muted-foreground">
+                          Oferta: <span className="font-semibold tabular-nums text-foreground">{formatUsd(t.amountUsd ?? 0)}</span>
+                        </span>
+                      )}
                     </div>
                     <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground text-xs">
                       <span>

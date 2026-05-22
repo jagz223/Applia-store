@@ -13,7 +13,7 @@ import { Search, Loader2, Sparkles, X, ArrowLeft, ChevronDown, ChevronUp, Bookma
 import { ExploreFilterCollapsedSummary } from "@/components/explore/ExploreFilterCollapsedSummary";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CategoryIcon } from "@/components/CategoryIcon";
+import { CategoryVisual } from "@/components/CategoryVisual";
 import { motion } from "framer-motion";
 
 const providerSlugs = new Set(
@@ -382,7 +382,12 @@ export default function Explore() {
                           : "bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      <CategoryIcon name={(cat as { icon?: string }).icon ?? "HelpCircle"} className="h-4 w-4" />
+                      <CategoryVisual
+                        iconName={(cat as { icon?: string }).icon ?? "HelpCircle"}
+                        imageUrl={(cat as { imageUrl?: string | null }).imageUrl}
+                        className="h-4 w-4"
+                        imgClassName="h-5 w-5"
+                      />
                       {(cat as any).name}
                     </button>
                   ))}

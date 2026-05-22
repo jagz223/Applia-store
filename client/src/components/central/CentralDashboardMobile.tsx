@@ -11,6 +11,7 @@ import { CentralFaresPanel } from "@/components/central/CentralFaresPanel";
 import { CentralMemberRegisterForm } from "@/components/central/CentralMemberRegisterForm";
 import { CentralMembersPanel } from "@/components/central/CentralMembersPanel";
 import { CentralAffiliationRequestsPanel } from "@/components/central/CentralAffiliationRequestsPanel";
+import { CentralCargoGoHistoryPanel } from "@/components/central/CentralCargoGoHistoryPanel";
 import { CompanyCombobox } from "@/components/central/CompanyCombobox";
 import {
   centralViewportClasses,
@@ -222,6 +223,15 @@ export function CentralDashboardMobile({
               </h1>
               <p className="mb-4 text-sm text-muted-foreground">{companyName}</p>
               <CentralMembersPanel companyId={companyId} variant="embedded" />
+            </>
+          )}
+          {tab === "history" && (
+            <>
+              <h1 className="mb-1 text-lg font-bold">Historial Car Go</h1>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Completados y cancelados de conductores de {companyName}
+              </p>
+              <CentralCargoGoHistoryPanel companyId={companyId} embedded />
             </>
           )}
           {tab === "fares" && (

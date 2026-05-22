@@ -10,7 +10,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { authenticateJWT } from "./routes-auth";
 import { requireAdminStaff, requireFullAdmin, requireStaffFromDb } from "./middleware-roles";
-import { userService } from "./services";
+import { adminUserRegistrationService, userService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
 import { maybeVerifyProfessional } from "./maybe-verify-professional";
 import { catalogService, promotionalCodeService } from "./services";
@@ -26,6 +26,13 @@ import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
 import { getMobilityFares, setMobilityFares } from "./mobility-fares";
 import { getPackFares, setPackFares } from "./pack-fares";
+import { listCargoGoActiveRidesForAdmin } from "./mobility-rides";
+import {
+  countMobilityRideHistoryByOutcome,
+  listMobilityRideHistoryForAdmin,
+} from "./mobility-ride-history-store";
+import { mobilityHistoryAdminBucket } from "@shared/mobility-ride-history";
+import { categoryIconUrlLooksLikePng } from "@shared/category-icon-image";
 import { getSubscriptionFeesByCategorySlug, setSubscriptionFeesByCategorySlug } from "./subscription-fees";
 import { commissionDisplayPercents } from "@shared/platform-commission";
 import { getDashboardStatsRange, type AdminDashboardStatsPreset } from "./admin-dashboard-stats";
@@ -327,6 +334,34 @@ export function registerAdminRoutes(app: Express): void {
 
   const adminUsersRouter = express.Router({ mergeParams: true });
 
+  /** POST /api/admin/users — Crear usuario (staff; central y roles admin solo administrador completo). */
+  adminUsersRouter.post("/", async (req, res) => {
+    try {
+      const creatorRole = String((req as { user?: { role?: string } }).user?.role ?? "");
+      const created = await adminUserRegistrationService.createUser(req.body, creatorRole);
+      return res.status(201).json(toPlainUser(created));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      if (error instanceof Error) {
+        const status = (error as Error & { statusCode?: number }).statusCode;
+        const field = (error as Error & { field?: string }).field;
+        if (status === 409) {
+          return res.status(409).json({ message: error.message, field });
+        }
+        if (status === 400) {
+          return res.status(400).json({ message: error.message, field });
+        }
+        if (error.message.includes("Solo el administrador") || error.message.includes("administración")) {
+          return res.status(403).json({ message: error.message });
+        }
+      }
+      console.error("Error creating user:", error);
+      return res.status(500).json({ message: "Error al crear usuario" });
+    }
+  });
+
   /** GET /api/admin/users — Listado con paginación y filtros. (Antes que /:id para no capturar "users" como id.) */
   adminUsersRouter.get("/", async (req, res) => {
     try {
@@ -353,7 +388,7 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  /** GET /api/admin/users/:id — Un usuario por ID (sin contraseña). */
+  /** GET /api/admin/users/:id — Un usuario por ID (sin contraseña). Incluye providerId si es asociado. */
   adminUsersRouter.get("/:id", async (req, res) => {
     try {
       const id = req.params.id;
@@ -361,7 +396,12 @@ export function registerAdminRoutes(app: Express): void {
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
-      return res.status(200).json(toPlainUser(user));
+      const provider = await catalogService.getProviderByUserId(id);
+      const providerId = (provider as { id?: number } | undefined)?.id;
+      return res.status(200).json({
+        ...toPlainUser(user),
+        providerId: typeof providerId === "number" && providerId > 0 ? providerId : null,
+      });
     } catch (error) {
       console.error("Error fetching user:", error);
       return res.status(500).json({ message: "Error al obtener usuario" });
@@ -804,6 +844,7 @@ export function registerAdminRoutes(app: Express): void {
       const userId = String((resolved as any)?.userId ?? "");
       const field = String((resolved as any)?.field ?? "");
       const allowed = field === "email" || field === "name" || field === "phone";
+      const allowedRecoveryQuestions = field === "recovery_questions";
       const allowedVehicle = field === "vehicle";
 
       const accountFieldLabelEs = (f: string) =>
@@ -815,11 +856,73 @@ export function registerAdminRoutes(app: Express): void {
               ? "teléfono"
               : f === "vehicle"
                 ? "vehículo"
-                : "perfil";
+                : f === "recovery_questions"
+                  ? "preguntas de recuperación"
+                  : "perfil";
       const capLabel = (f: string) => {
         const s = accountFieldLabelEs(f);
         return s.charAt(0).toUpperCase() + s.slice(1);
       };
+
+      // Notificar y habilitar reconfiguración de preguntas de recuperación
+      if (userId && allowedRecoveryQuestions && body.action === "approve") {
+        const u = (await genFebStorage.getUserById(userId, true)) as any;
+        const current = u ?? {};
+        const grants = (current.profileEditGrants ?? {}) as Record<string, boolean>;
+        const next = { ...grants, recoveryQuestions: true };
+        await genFebStorage.updateUser(userId, { profileEditGrants: next } as any);
+
+        const title = "Preguntas de recuperación: aprobado";
+        const bodyText = "Ya puedes actualizar tus preguntas de seguridad en Configuración o desde esta notificación.";
+        const notifData = { field: "recovery_questions", url: "/account-recovery/setup?reconfigure=1", message: bodyText, title };
+        const created = await genFebStorage.createNotification({
+          userId,
+          type: "account_change_request_approved",
+          data: notifData,
+        });
+
+        const io = getIO();
+        if (io) {
+          io.to(`user:${userId}`).emit("notification", {
+            id: (created as any)?.id,
+            type: "account_change_request_approved",
+            title,
+            body: bodyText,
+            data: notifData,
+          });
+        }
+        void notificationService
+          .sendPushToUser(userId, {
+            title,
+            body: bodyText,
+            data: { url: "/account-recovery/setup?reconfigure=1" },
+          })
+          .catch((err) => console.error("[push-account-change] recovery_questions:", err));
+      }
+
+      if (userId && allowedRecoveryQuestions && body.action === "reject") {
+        const title = "Preguntas de recuperación: rechazado";
+        const bodyText = `Tu solicitud fue rechazada. Motivo: ${rejectReason}`;
+        const notifData = { field: "recovery_questions", url: "/settings", message: bodyText, title, reason: rejectReason };
+        const created = await genFebStorage.createNotification({
+          userId,
+          type: "account_change_request_rejected",
+          data: notifData,
+        });
+        const io = getIO();
+        if (io) {
+          io.to(`user:${userId}`).emit("notification", {
+            id: (created as any)?.id,
+            type: "account_change_request_rejected",
+            title,
+            body: bodyText,
+            data: notifData,
+          });
+        }
+        void notificationService
+          .sendPushToUser(userId, { title, body: bodyText, data: { url: "/settings" } })
+          .catch((err) => console.error("[push-account-change] recovery_questions reject:", err));
+      }
 
       // Notificar y habilitar edición (grants) si se aprueba
       if (userId && allowed && body.action === "approve") {
@@ -2218,6 +2321,68 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   /**
+   * GET /api/admin/cargo-go/rides
+   * Servicios Car Go en curso / completados / cancelados (estado en memoria del proceso).
+   */
+  app.get("/api/admin/cargo-go/rides", authenticateJWT, requireStaffFromDb, async (req, res) => {
+    try {
+      const bucketRaw = String(req.query.bucket ?? "active").trim().toLowerCase();
+      const bucket =
+        bucketRaw === "completed" || bucketRaw === "cancelled" ? bucketRaw : "active";
+      const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+      const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
+
+      let list: Awaited<ReturnType<typeof listCargoGoActiveRidesForAdmin>>;
+      if (bucket === "active") {
+        list = await listCargoGoActiveRidesForAdmin();
+      } else {
+        const history = await listMobilityRideHistoryForAdmin(bucket);
+        list = history.map((h) => ({
+          id: h.id,
+          bucket: mobilityHistoryAdminBucket(h.outcome),
+          status: h.outcome,
+          statusLabel: h.statusLabel,
+          riderUserId: "",
+          riderName: h.riderName,
+          driverUserId: null,
+          driverName: h.driverName,
+          vehicleType: "auto" as const,
+          vehicleLabel: h.vehicleLabel,
+          startLabel: h.startLabel,
+          endLabel: h.endLabel,
+          createdAt: h.endedAt,
+        }));
+      }
+
+      const total = list.length;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const safePage = Math.min(totalPages, page);
+      const start = (safePage - 1) * limit;
+      const rides = list.slice(start, start + limit);
+
+      const historyCounts = await countMobilityRideHistoryByOutcome();
+      const activeCount = (await listCargoGoActiveRidesForAdmin()).length;
+
+      return res.status(200).json({
+        rides,
+        bucket,
+        page: safePage,
+        limit,
+        total,
+        totalPages,
+        counts: {
+          active: activeCount,
+          completed: historyCounts.completed,
+          cancelled: historyCounts.cancelled,
+        },
+      });
+    } catch (error) {
+      console.error("Error listing admin cargo-go rides:", error);
+      return res.status(500).json({ message: "Error al listar servicios Car Go" });
+    }
+  });
+
+  /**
    * GET /api/admin/bookings
    * Lista todas las reservas (admin), enriquecidas con service + provider + client (cuando el storage lo provee).
    * Estrategia: iterar todos los proveedores y unir sus bookings (cada booking pertenece a 1 providerId).
@@ -2591,10 +2756,25 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   // ==================== CATEGORÍAS Y SUBCATEGORÍAS ====================
+  const categoryImageUrlSchema = z
+    .union([z.string().trim().max(2000), z.literal(""), z.null()])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      if (v === null || v === "") return null;
+      const t = String(v).trim();
+      return t || null;
+    })
+    .refine(
+      (v) => v === undefined || v === null || categoryIconUrlLooksLikePng(v),
+      { message: "El archivo no es exclusivamente PNG. Usa una URL que termine en .png" },
+    );
+
   const updateCategorySchema = z.object({
     name: z.string().min(1).max(200).optional(),
     slug: z.string().max(200).optional(),
     icon: z.string().max(100).optional(),
+    imageUrl: categoryImageUrlSchema,
   });
 
   /** Lista completa de categorías (incluye legacy tipo legal/financial en `categories`) para gestión en admin. */
@@ -2630,6 +2810,7 @@ export function registerAdminRoutes(app: Express): void {
     categoryId: z.number().int().positive(),
     categorySlug: z.string().optional(),
     icon: z.string().optional(),
+    imageUrl: categoryImageUrlSchema,
   });
 
   app.post("/api/admin/subcategories", authenticateJWT, requireFullAdmin, async (req: any, res) => {
@@ -2650,6 +2831,7 @@ export function registerAdminRoutes(app: Express): void {
     categoryId: z.number().int().positive().optional(),
     categorySlug: z.string().optional(),
     icon: z.string().optional(),
+    imageUrl: categoryImageUrlSchema,
   });
 
   app.patch("/api/admin/subcategories/:id", authenticateJWT, requireFullAdmin, async (req: any, res) => {

@@ -43,6 +43,7 @@ import {
   notifyApplicantAffiliationRejected,
   notifyApplicantDataAccessRequested,
 } from "./central-affiliation-notify";
+import { listMobilityRideHistoryForCentral } from "./mobility-ride-history-store";
 
 const PRESENCE_TTL_MS = 45_000;
 
@@ -219,8 +220,8 @@ export function registerCentralRoutes(app: Express): void {
         rating: Number(user?.rating ?? 5),
         vehicleType: pres?.vehicleType ?? vehicle?.vehicle_type ?? "car",
         isPetFriendly: taxiPres?.isPetFriendly ?? false,
-        lat: pres?.lat ?? activeService?.start.lat ?? null,
-        lon: pres?.lon ?? activeService?.start.lon ?? null,
+        lat: pres?.lat ?? null,
+        lon: pres?.lon ?? null,
         receivingTaxi: !!(taxiPres && !taxiPres.idleOnMapDuringRide),
         receivingDelivery: !!(packPres && !packPres.idleOnMapDuringRide),
         receiving: !!(
@@ -233,6 +234,56 @@ export function registerCentralRoutes(app: Express): void {
       });
     }
     res.json({ drivers });
+  });
+
+  /**
+   * GET /api/central/cargo-go/rides
+   * Historial de servicios Car Go / Pack de conductores de la central (completados y cancelados).
+   */
+  app.get("/api/central/cargo-go/rides", authenticateJWT, async (req: any, res) => {
+    if (!canAccessCentralPanel(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const resolved = await resolveCompanyIdForRequest(req, req.query.companyId as string);
+    if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
+
+    try {
+      const bucketRaw = String(req.query.bucket ?? "completed").trim().toLowerCase();
+      const bucket = bucketRaw === "cancelled" ? "cancelled" : "completed";
+      const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+      const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
+
+      const result = await listMobilityRideHistoryForCentral(resolved.companyId, bucket, { page, limit });
+      const rides = result.rides.map((h) => ({
+        id: h.id,
+        module: h.module,
+        moduleLabel: h.module === "pack" ? "Delivery" : "Taxi",
+        bucket: result.bucket,
+        status: h.outcome,
+        statusLabel: h.statusLabel,
+        driverName: h.driverName,
+        vehicleLabel: h.vehicleLabel,
+        startLabel: h.startLabel,
+        endLabel: h.endLabel,
+        endedAt: h.endedAt,
+        durationMin: h.durationMin,
+        amountUsd: h.amountUsd,
+        payment: h.payment,
+      }));
+
+      return res.status(200).json({
+        rides,
+        bucket: result.bucket,
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages,
+        counts: result.counts,
+      });
+    } catch (error) {
+      console.error("Error listing central cargo-go rides:", error);
+      return res.status(500).json({ message: "Error al cargar historial de servicios" });
+    }
   });
 
   app.get("/api/central/members", authenticateJWT, async (req: any, res) => {

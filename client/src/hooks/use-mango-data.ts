@@ -57,6 +57,7 @@ export interface Subcategory {
   categoryId: number;
   categorySlug?: string;
   icon?: string | null;
+  imageUrl?: string | null;
 }
 
 /** Subcategorías de una categoría (ej. Servicios Legales y Consultoría Financiera bajo Servicios Profesionales). */
@@ -76,7 +77,7 @@ export function useUpdateCategory() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: async (data: { id: number; name?: string; slug?: string; icon?: string }) => {
+    mutationFn: async (data: { id: number; name?: string; slug?: string; icon?: string; imageUrl?: string | null }) => {
       const { id, ...payload } = data;
       const token = getToken();
       const res = await fetch(`/api/admin/categories/${id}`, {

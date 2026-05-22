@@ -73,7 +73,7 @@ const MAX_ID_DOC_SIZE_MB = 5;
 const MAX_CHAT_PAYMENT_PROOF_MB = 8;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
-/** Documento de identidad en verificación: solo JPG o PNG. */
+/** Documento de identidad en verificaci?n: solo JPG o PNG. */
 const ALLOWED_VERIFICATION_ID_TYPES = ["image/jpeg", "image/png"] as const;
 
 /**
@@ -85,10 +85,10 @@ export async function uploadProfileImage(file: File): Promise<string> {
     throw new Error(`La imagen no debe superar ${MAX_AVATAR_SIZE_MB} MB`);
   }
   if (!ALLOWED_TYPES.includes(file.type)) {
-    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+    throw new Error("Formato no v?lido. Usa JPG, PNG, WebP o GIF.");
   }
   const storage = getFirebaseStorage();
-  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+  if (!storage) throw new Error("Firebase Storage no est? configurado. Revisa las variables VITE_FIREBASE_*.");
 
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
   const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
@@ -97,6 +97,37 @@ export async function uploadProfileImage(file: File): Promise<string> {
 
   await new Promise<void>((resolve, reject) => {
     const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on(
+      "state_changed",
+      () => {},
+      (err) => reject(err),
+      () => resolve()
+    );
+  });
+
+  return getDownloadURL(storageRef);
+}
+
+const MAX_CATEGORY_ICON_SIZE_MB = 2;
+
+/**
+ * Sube un icono de categor?a/subcategor?a (solo PNG) a Firebase Storage.
+ */
+export async function uploadCategoryIconImage(file: File): Promise<string> {
+  if (file.size > MAX_CATEGORY_ICON_SIZE_MB * 1024 * 1024) {
+    throw new Error(`La imagen no debe superar ${MAX_CATEGORY_ICON_SIZE_MB} MB`);
+  }
+  if (file.type !== "image/png") {
+    throw new Error("Solo se permiten archivos PNG.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no est? configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const path = `category-icons/${crypto.randomUUID()}_${Date.now()}.png`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: "image/png" });
     task.on(
       "state_changed",
       () => {},
@@ -117,10 +148,10 @@ export async function uploadChatPaymentProof(userId: string, conversationId: num
     throw new Error(`La imagen no debe superar ${MAX_CHAT_PAYMENT_PROOF_MB} MB`);
   }
   if (!ALLOWED_TYPES.includes(file.type)) {
-    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+    throw new Error("Formato no v?lido. Usa JPG, PNG, WebP o GIF.");
   }
   const storage = getFirebaseStorage();
-  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+  if (!storage) throw new Error("Firebase Storage no est? configurado. Revisa las variables VITE_FIREBASE_*.");
 
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
   const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
@@ -141,7 +172,7 @@ export async function uploadChatPaymentProof(userId: string, conversationId: num
 }
 
 /**
- * Sube documento de identificación para verificación de profesional.
+ * Sube documento de identificaci?n para verificaci?n de profesional.
  * - No pasa por el servidor: se sube directo desde el navegador.
  * - Storage path: `verification_ids/{userId}/{uuid}.{ext}`
  * - Devuelve la URL de descarga para guardarla en Firestore.
@@ -151,11 +182,11 @@ export async function uploadVerificationIdImage(userId: string, file: File): Pro
     throw new Error(`El archivo no debe superar ${MAX_ID_DOC_SIZE_MB} MB`);
   }
   if (!ALLOWED_VERIFICATION_ID_TYPES.includes(file.type as (typeof ALLOWED_VERIFICATION_ID_TYPES)[number])) {
-    throw new Error("Formato no válido. Usa JPG o PNG.");
+    throw new Error("Formato no v?lido. Usa JPG o PNG.");
   }
 
   const storage = getFirebaseStorage();
-  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+  if (!storage) throw new Error("Firebase Storage no est? configurado. Revisa las variables VITE_FIREBASE_*.");
 
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
   const safeExt = ["jpg", "jpeg", "png"].includes(ext) ? ext : "jpg";
@@ -176,9 +207,9 @@ export async function uploadVerificationIdImage(userId: string, file: File): Pro
 }
 
 /**
- * Sube documento que avala la profesión (PDF o imagen).
+ * Sube documento que avala la profesi?n (PDF o imagen).
  * - Storage path: `professional_credentials/{userId}/{uuid}_{timestamp}.{ext}`
- * - Las reglas de Firebase Storage deben permitir `application/pdf` en esa ruta (ver `storage.rules` en la raíz del repo).
+ * - Las reglas de Firebase Storage deben permitir `application/pdf` en esa ruta (ver `storage.rules` en la ra?z del repo).
  */
 export async function uploadProfessionalCredential(userId: string, file: File): Promise<string> {
   const maxMb = 12;
@@ -187,10 +218,10 @@ export async function uploadProfessionalCredential(userId: string, file: File): 
     throw new Error(`El archivo no debe superar ${maxMb} MB`);
   }
   if (!allowed.includes(file.type as (typeof allowed)[number])) {
-    throw new Error("Formato no válido. Usa JPG, PNG o PDF.");
+    throw new Error("Formato no v?lido. Usa JPG, PNG o PDF.");
   }
   const storage = getFirebaseStorage();
-  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+  if (!storage) throw new Error("Firebase Storage no est? configurado. Revisa las variables VITE_FIREBASE_*.");
 
   const ext = file.name.split(".").pop()?.toLowerCase() || (file.type === "application/pdf" ? "pdf" : "jpg");
   const safeExt = ["pdf", "jpg", "jpeg", "png"].includes(ext) ? ext : "pdf";

@@ -3,8 +3,13 @@
  * Encapsula lógica de negocio y asegura que los roles por defecto existan.
  */
 
+import { isImmutableRoleCode } from "@shared/role-definition";
+import { isHiddenCatalogRoleCode } from "@shared/role-permissions";
 import type { IRoleStorage } from "../storage-contracts";
 import type { RoleDefinition, NewRoleDefinition } from "../storage-genfeb";
+
+const IMMUTABLE_ROLE_MESSAGE =
+  "El rol administrador no puede crearse ni modificarse desde el catálogo.";
 
 export class RoleService {
   constructor(private readonly storage: IRoleStorage) {}
@@ -15,7 +20,8 @@ export class RoleService {
 
   async getRoles(): Promise<RoleDefinition[]> {
     await this.ensureRolesSeeded();
-    return this.storage.getRoles() as Promise<RoleDefinition[]>;
+    const all = (await this.storage.getRoles()) as RoleDefinition[];
+    return all.filter((r) => !isHiddenCatalogRoleCode(r.code));
   }
 
   async getRoleByCode(code: string): Promise<RoleDefinition | undefined> {
@@ -23,14 +29,24 @@ export class RoleService {
   }
 
   async createRole(role: NewRoleDefinition): Promise<RoleDefinition> {
-    return this.storage.createRole(role) as Promise<RoleDefinition>;
+    const code = role.code.trim().toLowerCase().replace(/\s+/g, "_");
+    if (isImmutableRoleCode(code)) {
+      throw new Error(IMMUTABLE_ROLE_MESSAGE);
+    }
+    return this.storage.createRole({ ...role, code }) as Promise<RoleDefinition>;
   }
 
   async updateRole(code: string, data: Partial<RoleDefinition>): Promise<RoleDefinition | undefined> {
+    if (isImmutableRoleCode(code)) {
+      throw new Error(IMMUTABLE_ROLE_MESSAGE);
+    }
     return this.storage.updateRole(code, data) as Promise<RoleDefinition | undefined>;
   }
 
   async deleteRole(code: string): Promise<void> {
+    if (isImmutableRoleCode(code)) {
+      throw new Error(IMMUTABLE_ROLE_MESSAGE);
+    }
     await this.storage.deleteRole(code);
   }
 }

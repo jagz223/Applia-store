@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AlertTriangle, Calendar, HandCoins, TrendingUp, Wallet } from "lucide-react";
 import { api } from "@shared/routes";
@@ -8,7 +8,9 @@ import { PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { useAuth } from "@/hooks/use-auth";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED, FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { useWallet, useWithdraw } from "@/hooks/use-mango-data";
-import { loadTripLog, type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
+import { type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
+import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
+import { historyToDriverTripLog } from "@/lib/mobility-ride-history-mappers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -80,14 +82,19 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
+  const { data: historyRows = [] } = useQuery({
+    queryKey: ["mobility-ride-history", "driver-earnings", user?.id],
+    queryFn: () => fetchMobilityRideHistoryForUser(100, "driver"),
+    enabled: open && !!user?.id,
+  });
+
   const tripsForPanel = useMemo(() => {
-    // Preferir email para evitar colisiones si el backend cambia el tipo de id.
-    const accountKey =
-      (user as any)?.email != null ? String((user as any).email) : (user as any)?.id != null ? String((user as any).id) : null;
-    const all = open ? loadTripLog(accountKey) : [];
-    if (FEATURE_WALLET_RECHARGE_UI_ENABLED) return all;
-    return all.filter((t) => t.payment === "cash" || t.payment === "bank_transfer");
-  }, [open, user?.id, (user as any)?.email]);
+    const completed = historyRows
+      .filter((r) => r.outcome === "completed")
+      .map(historyToDriverTripLog);
+    if (FEATURE_WALLET_RECHARGE_UI_ENABLED) return completed;
+    return completed.filter((t) => t.payment === "cash" || t.payment === "bank_transfer");
+  }, [historyRows]);
   const byDay = useMemo(() => groupTripsByLocalDay(tripsForPanel), [tripsForPanel]);
   const localTotal = useMemo(
     () => tripsForPanel.reduce((a, t) => a + (typeof t.amountUsd === "number" ? t.amountUsd : 0), 0),

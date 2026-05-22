@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Switch, Route, useLocation, Redirect } from "wouter";
 import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { AdminRechargeRoute } from "@/components/AdminRechargeRoute";
@@ -35,10 +36,13 @@ import Payments from "@/pages/Payments";
 import Chat from "@/pages/Chat";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
-import Admin from "@/pages/Admin";
 import CreateRole from "@/pages/CreateRole";
 import EditUser from "@/pages/EditUser";
+import AdminCreateUser from "@/pages/AdminCreateUser";
 import AdminProviderDetailPage from "@/pages/AdminProviderDetailPage";
+import { AccessGateLoading } from "@/components/AccessGateLoading";
+
+const Admin = lazy(() => import("@/pages/Admin"));
 import ProfessionalDashboard from "@/pages/ProfessionalDashboard";
 import PaymentVoucher from "@/pages/PaymentVoucher";
 import Bookings from "@/pages/Bookings";
@@ -52,6 +56,9 @@ import Notifications from "@/pages/Notifications";
 import { ProfessionalVerificationBanner } from "@/components/ProfessionalVerificationBanner";
 import { ListingSubscriptionRibbon } from "@/components/ListingSubscriptionRibbon";
 import { ProviderTermsGate } from "@/components/ProviderTermsGate";
+import { AccountRecoveryGate } from "@/components/AccountRecoveryGate";
+import AccountRecoverySetup from "@/pages/AccountRecoverySetup";
+import ForgotPassword from "@/pages/ForgotPassword";
 import VerifyProfessional from "@/pages/VerifyProfessional";
 import VerifyProfessionalPayment from "@/pages/VerifyProfessionalPayment";
 import { GoShellLayout } from "@/components/go/GoShellLayout";
@@ -79,7 +86,9 @@ function MainRouter() {
       <Route path="/driver/go-genfeb/configuracion" component={CargoDriverSettings} />
       <Route path="/service/:id" component={ServiceDetails} />
       <Route path="/login" component={Login} />
+      <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/register" component={Register} />
+      <Route path="/account-recovery/setup" component={AccountRecoverySetup} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/become-pro" component={BecomePro} />
       <Route path="/become-driver" component={BecomeDriver} />
@@ -91,10 +100,17 @@ function MainRouter() {
       <Route path="/vault" component={Vault} />
       {SHOW_PAYMENTS && <Route path="/payments" component={Payments} />}
       <Route path="/chat" component={Chat} />
-      <Route path="/admin" component={Admin} />
-      <Route path="/admin/create-role" component={CreateRole} />
+      <Route path="/admin/users/create" component={AdminCreateUser} />
       <Route path="/admin/users/:id/edit" component={EditUser} />
+      <Route path="/admin/create-role" component={CreateRole} />
       <Route path="/admin/providers/:providerId" component={AdminProviderDetailPage} />
+      <Route path="/admin">
+        {() => (
+          <Suspense fallback={<AccessGateLoading message="Cargando panel de administración…" />}>
+            <Admin />
+          </Suspense>
+        )}
+      </Route>
       <Route path="/professional-dashboard" component={ProfessionalDashboard} />
       {/* wouter: `component` recibe props de ruta; render inline evita mismatch de props */}
       <Route path="/payment-voucher">{() => <PaymentVoucher />}</Route>
@@ -218,6 +234,7 @@ function App() {
             </div>
             <GoActiveRideResume />
             <RatingGate />
+            <AccountRecoveryGate />
             <ProviderTermsGate />
             {inGoShell ? (
               <GoShellLayout>

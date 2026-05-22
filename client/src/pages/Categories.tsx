@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCategories, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
 import { effectiveHiddenCategorySlugs, getCategoryDisplayName, MAN_GO_CATEGORY_SLUG } from "@shared/default-categories";
 import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
-import { CategoryIcon } from "@/components/CategoryIcon";
+import { CategoryVisual } from "@/components/CategoryVisual";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { api } from "@shared/routes";
@@ -52,7 +52,7 @@ export default function Categories() {
   }, [monthlyPopularSubcategories]);
 
   const allItems = useMemo(() => {
-    const items: { key: string; name: string; icon: string; parentName: string; href: string }[] = [];
+    const items: { key: string; name: string; icon: string; imageUrl?: string | null; parentName: string; href: string }[] = [];
 
     for (const { cat, subs } of [
       { cat: manGoCat, subs: manGoSubs },
@@ -66,7 +66,8 @@ export default function Categories() {
         items.push({
           key: `sub-${(sub as any).id}`,
           name: (sub as any).name,
-          icon: def?.icon ?? "HelpCircle",
+          icon: (sub as any).icon ?? def?.icon ?? "HelpCircle",
+          imageUrl: (sub as any).imageUrl ?? (cat as any).imageUrl ?? null,
           parentName,
           href: `/explore?providerCategoryId=${catId}&subcategoryId=${(sub as any).id}`,
         });
@@ -77,7 +78,8 @@ export default function Categories() {
       items.push({
         key: "transport",
         name: (transportCat as any).name,
-        icon: "Car",
+        icon: (transportCat as any).icon ?? "Car",
+        imageUrl: (transportCat as any).imageUrl ?? null,
         parentName: "Conductores disponibles",
         href: "/go/taxi",
       });
@@ -142,7 +144,12 @@ export default function Categories() {
                         whileHover={{ scale: 1.05 }}
                         className="p-2.5 rounded-xl bg-primary/10 text-primary group-hover:scale-110 transition-transform"
                       >
-                        <CategoryIcon name={item.icon} className="w-5 h-5 sm:w-6 sm:h-6" />
+                        <CategoryVisual
+                          iconName={item.icon}
+                          imageUrl={item.imageUrl}
+                          className="w-5 h-5 sm:w-6 sm:h-6"
+                          imgClassName="h-8 w-8 sm:h-9 sm:w-9"
+                        />
                       </motion.div>
                       <motion.div className="min-w-0 w-full" whileHover={{ scale: 1.02 }}>
                         <p className="text-xs sm:text-sm font-semibold leading-tight">{item.name}</p>

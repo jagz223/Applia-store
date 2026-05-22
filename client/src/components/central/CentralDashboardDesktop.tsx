@@ -15,6 +15,7 @@ import { CentralMembersPanel } from "@/components/central/CentralMembersPanel";
 import { CompanyCombobox } from "@/components/central/CompanyCombobox";
 import { CentralAffiliationRequestsPanel } from "@/components/central/CentralAffiliationRequestsPanel";
 import { CentralActiveServicePanel } from "@/components/central/CentralActiveServicePanel";
+import { CentralCargoGoHistoryPanel } from "@/components/central/CentralCargoGoHistoryPanel";
 import { NotificationBell } from "@/components/NotificationBell";
 import { CENTRAL_APP_SETTINGS_HREF } from "@/lib/central-dashboard-hrefs";
 
@@ -187,7 +188,7 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
     fleetRefreshing,
   } = props;
 
-  const [lowerTab, setLowerTab] = useState<"fares" | "register" | "requests">("fares");
+  const [lowerTab, setLowerTab] = useState<"fares" | "register" | "requests" | "history">("fares");
   useEffect(() => {
     if (highlightAffiliationRequestId) setLowerTab("requests");
   }, [highlightAffiliationRequestId]);
@@ -247,8 +248,8 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                   <CardTitle className="text-lg">Mapa de flota</CardTitle>
                   <CardDescription>
                     Vista fija de tu ciudad; los marcadores se actualizan solos o con «Actualizar mapa». Elige un
-                    conductor para seguirlo en el mapa; si tiene viaje activo, abre el detalle y pulsa «Mapa» para ver la
-                    ruta (como en regateo del conductor).
+                    conductor para seguirlo en el mapa; si tiene viaje activo, el detalle muestra punto A → B sin ruta ni
+                    datos del cliente.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -271,8 +272,8 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg">Detalle</CardTitle>
                   <CardDescription>
-                    Al elegir un conductor, la cámara lo sigue en el mapa. Si está en servicio, en este panel ves el
-                    detalle del viaje y el botón «Mapa» para la ruta recogida → destino.
+                    Al elegir un conductor, la cámara lo sigue en el mapa. Si está en servicio, aquí ves el resumen del
+                    viaje (punto A → B) sin datos del cliente ni trazado de ruta.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -288,9 +289,10 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
             </div>
 
             <Tabs value={lowerTab} onValueChange={(v) => setLowerTab(v as typeof lowerTab)} className="space-y-4">
-              <TabsList className="mx-auto grid w-full max-w-2xl grid-cols-3">
+              <TabsList className="mx-auto grid w-full max-w-3xl grid-cols-2 sm:grid-cols-4">
                 <TabsTrigger value="fares">Tarifas</TabsTrigger>
                 <TabsTrigger value="register">Registrar</TabsTrigger>
+                <TabsTrigger value="history">Historial</TabsTrigger>
                 <TabsTrigger value="requests" className="relative">
                   Solicitudes
                   {pendingAffiliationCount > 0 ? (
@@ -312,6 +314,9 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
               </TabsContent>
               <TabsContent value="register">
                 <CentralMemberRegisterForm companyId={companyId} onRegistered={onMemberRegistered} />
+              </TabsContent>
+              <TabsContent value="history">
+                <CentralCargoGoHistoryPanel companyId={companyId} embedded />
               </TabsContent>
               <TabsContent value="requests">
                 <CentralAffiliationRequestsPanel

@@ -1,13 +1,14 @@
-import { Map, Tags, UserPlus, Users, ClipboardList } from "lucide-react";
+import { Map, Tags, UserPlus, Users, ClipboardList, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { centralViewportClasses } from "@/lib/central-viewport-layout";
 
-export type CentralMobileTab = "map" | "team" | "fares" | "register" | "requests";
+export type CentralMobileTab = "map" | "team" | "fares" | "register" | "history" | "requests";
 
 const TABS: { id: CentralMobileTab; label: string; icon: typeof Map }[] = [
   { id: "map", label: "Mapa", icon: Map },
   { id: "team", label: "Equipo", icon: Users },
+  { id: "history", label: "Historial", icon: History },
   { id: "fares", label: "Tarifas", icon: Tags },
   { id: "register", label: "Registrar", icon: UserPlus },
   { id: "requests", label: "Solicitudes", icon: ClipboardList },

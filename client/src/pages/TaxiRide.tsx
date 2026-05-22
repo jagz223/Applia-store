@@ -49,7 +49,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { goOffsetAboveBottomNav, goViewportClasses, useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
-import { appendRiderTripLog } from "@/lib/cargo-rider-trip-log";
+import { notifyMobilityRideHistoryChanged } from "@/lib/mobility-ride-history-events";
 import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 import { RIDER_DRIVER_NOT_AVAILABLE_MESSAGE } from "@shared/mobility-negotiation";
 import { fallbackDrivingRoute, haversineM } from "@shared/maps-route-math";
@@ -1091,22 +1091,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         }
       }
 
-      // Guardar historial del pasajero antes de limpiar estado.
+      notifyMobilityRideHistoryChanged();
       if (matchedDriverInfoRef.current) {
-        appendRiderTripLog(
-          {
-            id: p.rideId,
-            endedAt: new Date().toISOString(),
-            durationMin: Math.max(1, Math.round(durationSec / 60)),
-            amountUsd,
-            payment,
-            driverName: matchedDriverInfoRef.current.driver?.name ?? "Conductor",
-            goSlug: goSlug === "pack" ? "pack" : "cargo",
-          },
-          ((user as any)?.email ?? (user as any)?.id ?? null) != null
-            ? String(((user as any)?.email ?? (user as any)?.id) as any)
-            : null
-        );
         rateTargetRef.current = {
           rideId: p.rideId,
           target: "driver",
@@ -1139,6 +1125,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           description: "El servicio ya no está activo.",
         });
       }
+      window.setTimeout(() => notifyMobilityRideHistoryChanged(), 600);
     };
     socket.on(`${rideSocketPrefix}matched`, onMatched);
     socket.on(`${rideSocketPrefix}driver_location`, onDriverLoc);

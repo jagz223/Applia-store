@@ -9,7 +9,9 @@ import { resolveVehicleKind } from "@/components/driver/cargo-map-markers";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { loadTripLog, type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
+import { type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
+import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
+import { historyToDriverTripLog } from "@/lib/mobility-ride-history-mappers";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton";
 import { ProviderVehicleChangeRequestDialog } from "@/components/provider/ProviderVehicleChangeRequestDialog";
@@ -49,12 +51,15 @@ export default function CargoDriverSettings() {
     enabled: isAuthenticated && !authLoading,
   });
 
+  const { data: historyRows = [] } = useQuery({
+    queryKey: ["mobility-ride-history", "driver-settings", user?.id],
+    queryFn: () => fetchMobilityRideHistoryForUser(50, "driver"),
+    enabled: isAuthenticated && !authLoading,
+  });
+
   useEffect(() => {
-    // Preferir email para evitar colisiones si el backend cambia el tipo de id.
-    const accountKey =
-      (user as any)?.email != null ? String((user as any).email) : (user as any)?.id != null ? String((user as any).id) : null;
-    setLocalTrips(loadTripLog(accountKey));
-  }, [user?.id, user?.email]);
+    setLocalTrips(historyRows.map(historyToDriverTripLog));
+  }, [historyRows]);
 
   useEffect(() => {
     if (authLoading) return;

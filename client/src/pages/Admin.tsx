@@ -39,7 +39,9 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { useAuth } from "@/hooks/use-auth";
-import { hasAdminRole, hasFullAdminRole } from "@/lib/auth-utils";
+import { hasAdminRole } from "@/lib/auth-utils";
+import { canAccessAdminPanel, userCan } from "@/lib/user-permissions";
+import { filterVisibleCatalogRoles } from "@/lib/role-catalog-utils";
 import {
   useAdminWalletTransfers,
   useUpdateTransferStatus,
@@ -63,7 +65,6 @@ import {
   usePlatformSubscriptionFees,
   usePatchPlatformSubscriptionFees,
 } from "@/hooks/use-mango-data";
-import { calcCommission, calcProviderNet, PLATFORM_COMMISSION_RATE } from "@shared/platform-commission";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -74,6 +75,16 @@ import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
 import { fetchAdminProviderDetail } from "@/components/admin/admin-provider-detail-lib";
 import { AdminPromotionalCodesPanel } from "@/components/admin/AdminPromotionalCodesPanel";
+import { AdminRolesPanel } from "@/components/admin/AdminRolesPanel";
+import { AdminRegisterUserForm } from "@/components/admin/AdminRegisterUserForm";
+import { AdminCargoGoRidesPanel } from "@/components/admin/AdminCargoGoRidesPanel";
+import { AdminEditUserDialog } from "@/components/admin/AdminEditUserDialog";
+import { fetchAdminJson } from "@/lib/admin-api";
+import {
+  adminProviderEditHref,
+  isAssociateUserRole,
+  type AdminUserDetail,
+} from "@/lib/admin-user-edit";
 import { formatSubscriptionPaymentAuditSummary } from "@shared/admin-audit-payment-meta";
 import { AnimatePresence, motion } from "framer-motion";
 import { DEFAULT_CATEGORIES, getCategoryDisplayName, CATEGORY_DISPLAY_NAMES } from "@shared/default-categories";
@@ -87,6 +98,9 @@ import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 import { firstAvailableSubcategoryIcon } from "@shared/subcategory-lucide-picklist";
 import { SubcategoryIconPicker } from "@/components/admin/SubcategoryIconPicker";
 import { CategoryIcon } from "@/components/CategoryIcon";
+import { CategoryVisual } from "@/components/CategoryVisual";
+import { CategoryImageUrlInput } from "@/components/admin/CategoryImageUrlInput";
+import { verifyCategoryIconImageUrl } from "@/lib/category-icon-image-verify";
 import { AccessGateLoading } from "@/components/AccessGateLoading";
 import {
   sanitizeDecimalUsdInput,
@@ -97,6 +111,7 @@ import {
 } from "@/lib/decimal-usd-input";
 
 const USERS_PAGE_SIZE = 10;
+const BOOKINGS_PAGE_SIZE = 10;
 
 /** Coinciden con `DEFAULT_*` del servidor (merge al guardar si falta un campo en el borrador). */
 const MOBILITY_PATCH_DEFAULTS = {
@@ -324,6 +339,7 @@ const SALDO_DEBOUNCE_MS = 1000;
 const ROLE_LABELS: Record<string, string> = {
   client: "Cliente",
   professional: "Asociado",
+  central: "Central",
   admin: "Administrador",
   tiSupport: "Soporte TI",
 };
@@ -750,6 +766,7 @@ function AdminCategoriesTab() {
   const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
   const [editCategoryOpen, setEditCategoryOpen] = useState(false);
   const [categoryNameDraft, setCategoryNameDraft] = useState("");
+  const [categoryImageUrlDraft, setCategoryImageUrlDraft] = useState("");
   
   // Subcategories
   const { data: subcategories = [], isLoading: isLoadingSubcategories } = useSubcategories(selectedCategory?.id);
@@ -757,9 +774,11 @@ function AdminCategoriesTab() {
   const [newSubcatName, setNewSubcatName] = useState("");
   const [newSubcatSlug, setNewSubcatSlug] = useState("");
   const [newSubcatIcon, setNewSubcatIcon] = useState("");
+  const [newSubcatImageUrl, setNewSubcatImageUrl] = useState("");
   const [editingSubcatId, setEditingSubcatId] = useState<number | null>(null);
   const [editingSubcatName, setEditingSubcatName] = useState("");
   const [editingSubcatIcon, setEditingSubcatIcon] = useState("");
+  const [editingSubcatImageUrl, setEditingSubcatImageUrl] = useState("");
   const newSubcatDefaultsInitialized = useRef(false);
 
   const iconsTakenByOtherSubs = useMemo(() => {
@@ -795,19 +814,46 @@ function AdminCategoriesTab() {
   const handleEditCategory = (category: any) => {
     setSelectedCategory(category);
     setCategoryNameDraft(category.name || "");
+    setCategoryImageUrlDraft(String(category.imageUrl ?? "").trim());
     setNewSubcatName("");
     setNewSubcatSlug("");
+    setNewSubcatImageUrl("");
     setEditingSubcatId(null);
     setEditingSubcatName("");
     setEditingSubcatIcon("");
+    setEditingSubcatImageUrl("");
     setEditCategoryOpen(true);
   };
 
-  const handleSaveCategory = () => {
+  const normalizeCategoryImageUrl = (raw: string) => {
+    const t = raw.trim();
+    return t || null;
+  };
+
+  const rejectInvalidCategoryImage = async (raw: string): Promise<string | null | false> => {
+    const t = raw.trim();
+    if (!t) return null;
+    const check = await verifyCategoryIconImageUrl(t);
+    if (!check.ok) {
+      toast({
+        variant: "destructive",
+        title: "Imagen no válida",
+        description: check.message,
+      });
+      return false;
+    }
+    return t;
+  };
+
+  const handleSaveCategory = async () => {
     if (!selectedCategory || !categoryNameDraft.trim()) return;
+    const validated = await rejectInvalidCategoryImage(categoryImageUrlDraft);
+    if (validated === false) return;
+    const imageUrl = validated;
     updateCategory.mutate({
       id: selectedCategory.id,
-      name: categoryNameDraft.trim()
+      name: categoryNameDraft.trim(),
+      imageUrl,
     }, {
       onSuccess: () => {
         setEditCategoryOpen(false);
@@ -815,7 +861,7 @@ function AdminCategoriesTab() {
     });
   };
 
-  const handleCreateSubcategory = () => {
+  const handleCreateSubcategory = async () => {
     if (!selectedCategory || !newSubcatName.trim() || !newSubcatSlug.trim()) return;
     const icon = newSubcatIcon.trim();
     if (icon && takenForNewSubcategory.has(icon)) {
@@ -826,6 +872,9 @@ function AdminCategoriesTab() {
       });
       return;
     }
+    const validated = await rejectInvalidCategoryImage(newSubcatImageUrl);
+    if (validated === false) return;
+    const imageUrl = validated;
     createSubcategory.mutate(
       {
         name: newSubcatName.trim(),
@@ -833,11 +882,13 @@ function AdminCategoriesTab() {
         categoryId: selectedCategory.id,
         categorySlug: selectedCategory.slug,
         ...(icon ? { icon } : {}),
+        ...(imageUrl ? { imageUrl } : {}),
       },
       {
         onSuccess: async (_, variables) => {
           setNewSubcatName("");
           setNewSubcatSlug("");
+          setNewSubcatImageUrl("");
           await queryClient.refetchQueries({ queryKey: ["/api/subcategories", variables.categoryId] });
           const fresh =
             queryClient.getQueryData<Subcategory[]>(["/api/subcategories", variables.categoryId]) ?? [];
@@ -848,7 +899,7 @@ function AdminCategoriesTab() {
     );
   };
 
-  const handleSaveSubcategory = (id: number) => {
+  const handleSaveSubcategory = async (id: number) => {
     if (!selectedCategory || !editingSubcatName.trim()) return;
     const icon = editingSubcatIcon.trim();
     if (
@@ -862,17 +913,22 @@ function AdminCategoriesTab() {
       });
       return;
     }
+    const validated = await rejectInvalidCategoryImage(editingSubcatImageUrl);
+    if (validated === false) return;
+    const imageUrl = validated;
     updateSubcategory.mutate(
       {
         id,
         categoryId: selectedCategory.id,
         name: editingSubcatName.trim(),
         ...(icon ? { icon } : {}),
+        imageUrl,
       },
       {
         onSuccess: () => {
           setEditingSubcatId(null);
           setEditingSubcatIcon("");
+          setEditingSubcatImageUrl("");
         },
       }
     );
@@ -982,13 +1038,26 @@ function AdminCategoriesTab() {
                 />
                 <Button 
                   onClick={handleSaveCategory}
-                  disabled={updateCategory.isPending || categoryNameDraft.trim() === selectedCategory?.name}
+                  disabled={
+                    updateCategory.isPending ||
+                    (categoryNameDraft.trim() === selectedCategory?.name &&
+                      normalizeCategoryImageUrl(categoryImageUrlDraft) ===
+                        normalizeCategoryImageUrl(String(selectedCategory?.imageUrl ?? "")))
+                  }
                 >
                   {updateCategory.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Guardar
                 </Button>
               </div>
             </div>
+
+            <CategoryImageUrlInput
+              label="Imagen de la categoría (URL)"
+              hint="Opcional. Sube un PNG desde tu equipo o pega una URL .png con fondo transparente. Si no es válida, en la web se usa el icono."
+              value={categoryImageUrlDraft}
+              onChange={setCategoryImageUrlDraft}
+              iconName={(selectedCategory as { icon?: string })?.icon ?? "HelpCircle"}
+            />
 
             <div className="border-t pt-4 space-y-4">
               <h3 className="font-semibold text-lg">Subcategorías</h3>
@@ -1022,6 +1091,12 @@ function AdminCategoriesTab() {
                 value={newSubcatIcon}
                 onChange={setNewSubcatIcon}
                 takenIconNames={takenForNewSubcategory}
+                disabled={createSubcategory.isPending}
+              />
+              <CategoryImageUrlInput
+                value={newSubcatImageUrl}
+                onChange={setNewSubcatImageUrl}
+                iconName={newSubcatIcon || "HelpCircle"}
                 disabled={createSubcategory.isPending}
               />
 
@@ -1058,6 +1133,12 @@ function AdminCategoriesTab() {
                         takenIconNames={iconsTakenByOtherSubs}
                         disabled={updateSubcategory.isPending}
                       />
+                      <CategoryImageUrlInput
+                        value={editingSubcatImageUrl}
+                        onChange={setEditingSubcatImageUrl}
+                        iconName={editingSubcatIcon || "HelpCircle"}
+                        disabled={updateSubcategory.isPending}
+                      />
                       <div className="flex flex-wrap gap-2 justify-end">
                         <Button
                           size="sm"
@@ -1066,6 +1147,7 @@ function AdminCategoriesTab() {
                           onClick={() => {
                             setEditingSubcatId(null);
                             setEditingSubcatIcon("");
+                            setEditingSubcatImageUrl("");
                           }}
                         >
                           Cancelar
@@ -1099,13 +1181,14 @@ function AdminCategoriesTab() {
                             className={`border-b ${editingSubcatId === sub.id ? "bg-primary/5" : ""}`}
                           >
                             <td className="p-2 align-middle">
-                              {sub.icon ? (
-                                <span className="inline-flex rounded-md border border-border bg-background p-1.5">
-                                  <CategoryIcon name={sub.icon} className="h-4 w-4 text-foreground" />
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground text-xs">—</span>
-                              )}
+                              <span className="inline-flex rounded-md border border-border bg-background p-1.5">
+                                <CategoryVisual
+                                  iconName={sub.icon ?? "HelpCircle"}
+                                  imageUrl={sub.imageUrl}
+                                  className="h-4 w-4 text-foreground"
+                                  imgClassName="h-5 w-5"
+                                />
+                              </span>
                             </td>
                             <td className="p-2 align-middle font-medium">{sub.name}</td>
                             <td className="p-2 text-muted-foreground align-middle">{sub.slug}</td>
@@ -1125,6 +1208,7 @@ function AdminCategoriesTab() {
                                   );
                                   const cur = (sub.icon ?? "").trim();
                                   setEditingSubcatIcon(cur || firstAvailableSubcategoryIcon(used));
+                                  setEditingSubcatImageUrl(String(sub.imageUrl ?? "").trim());
                                 }}
                               >
                                 Editar
@@ -1255,11 +1339,24 @@ function formatVehicleChangeProposalSummary(
 }
 
 /** Pestañas solo para administrador (no Soporte TI). */
-const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts", "services", "promotional-codes"] as const;
+const TI_FORBIDDEN_TABS = ["overview", "estadisticas", "recargas", "saldo", "payouts", "services", "promotional-codes", "roles"] as const;
 
 export default function AdminPanel() {
   const { user, isLoading: authLoading } = useAuth();
-  const fullAdmin = hasFullAdminRole(user);
+  const canPanel = canAccessAdminPanel(user);
+  const canStats = userCan(user, "admin.stats");
+  const canOverview = userCan(user, "admin.overview");
+  const canUsers = userCan(user, "admin.users.view");
+  const canUsersCreate = userCan(user, "admin.users.create");
+  const canUsersEdit = userCan(user, "admin.users.edit");
+  const canProviders = userCan(user, "admin.providers.view");
+  const canBookings = userCan(user, "admin.bookings.view");
+  const canPromo = userCan(user, "admin.promo_codes");
+  const canCategories = userCan(user, "admin.categories");
+  const canServices = userCan(user, "admin.services");
+  const canRolesTab = userCan(user, "admin.roles.view");
+  const canSettings = userCan(user, "admin.settings.view");
+  const fullAdmin = canStats;
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: adminCategoriesRaw = [] } = useAdminCategories();
@@ -1271,7 +1368,6 @@ export default function AdminPanel() {
   const patchSubscriptionFees = usePatchPlatformSubscriptionFees();
   // Comisión oculta: mantenemos variables por compatibilidad con JSX existente,
   // pero la UI no mostrará ni editará comisión.
-  const platformCommissionRate = PLATFORM_COMMISSION_RATE;
   const patchPlatformCommission = useMemo(
     () => ({ isPending: false, mutateAsync: async (_p: number) => ({}) }),
     []
@@ -1296,10 +1392,26 @@ export default function AdminPanel() {
       if (tab === "recargas" || tab === "saldo" || tab === "payouts") return "estadisticas";
       if (tab === "services") return "services";
       if (tab === "promotional-codes") return "promotional-codes";
+      if (tab === "users" || tab === "roles") return tab;
     }
     return "overview";
   });
   const [promoCreateModalOpen, setPromoCreateModalOpen] = useState(false);
+  const [userRegisterOpen, setUserRegisterOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const p = new URLSearchParams(window.location.search);
+    return p.get("tab") === "users" && p.get("register") === "1";
+  });
+  const [editUserOpen, setEditUserOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const p = new URLSearchParams(window.location.search);
+    return p.get("tab") === "users" && !!p.get("editUser") && p.get("register") !== "1";
+  });
+  const [editUserId, setEditUserId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const p = new URLSearchParams(window.location.search);
+    return p.get("tab") === "users" && p.get("register") !== "1" ? p.get("editUser") : null;
+  });
   const [userPage, setUserPage] = useState(1);
   const [providersPage, setProvidersPage] = useState(1);
   /** Carga documentos de verificación al abrir el visor desde la pestaña Asociados (sin ir a editar). */
@@ -1325,7 +1437,7 @@ export default function AdminPanel() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user || !hasAdminRole(user)) {
+    if (!user || !canAccessAdminPanel(user)) {
       setLocation("/");
     }
   }, [authLoading, user, setLocation]);
@@ -1342,6 +1454,23 @@ export default function AdminPanel() {
     }
     if (tab === "services") setActiveTab("services");
     if (tab === "promotional-codes") setActiveTab("promotional-codes");
+    if (tab === "users") setActiveTab("users");
+    if (tab === "roles") setActiveTab("roles");
+    if (tab === "users" && q.get("register") === "1") {
+      setActiveTab("users");
+      setUserRegisterOpen(true);
+      setEditUserOpen(false);
+      setEditUserId(null);
+    } else if (tab === "users" && q.get("editUser")) {
+      setActiveTab("users");
+      setUserRegisterOpen(false);
+      setEditUserId(q.get("editUser"));
+      setEditUserOpen(true);
+    } else if (tab === "users") {
+      setUserRegisterOpen(false);
+      setEditUserOpen(false);
+      setEditUserId(null);
+    }
     const highlight = q.get("highlight");
     if (highlight) {
       const id = parseInt(highlight, 10);
@@ -1372,7 +1501,7 @@ export default function AdminPanel() {
   // Escuchar evento al hacer clic en notificación de recarga (incluso si ya estamos en /admin)
   useEffect(() => {
     const handler = (e: Event) => {
-      if (!hasFullAdminRole(user)) return;
+      if (!canStats) return;
       const detail = (e as CustomEvent<{ transferId?: number | null }>).detail;
       setActiveTab("estadisticas");
       if (typeof window !== "undefined" && window.history.replaceState) {
@@ -1392,7 +1521,7 @@ export default function AdminPanel() {
   // Escuchar evento al hacer clic en notificación de solicitud de retiro (abrir pestaña Payouts)
   useEffect(() => {
     const handler = () => {
-      if (!hasFullAdminRole(user)) return;
+      if (!canStats) return;
       setActiveTab("estadisticas");
       if (typeof window !== "undefined" && window.history.replaceState) {
         const params = new URLSearchParams(window.location.search);
@@ -1520,9 +1649,77 @@ export default function AdminPanel() {
   const { data: rolesData } = useQuery({
     queryKey: ["roles"],
     queryFn: () => fetchWithAuth("/api/roles"),
-    enabled: hasAdminRole(user),
+    enabled: canPanel,
   });
-  const roles = rolesData ?? [];
+  const roles = filterVisibleCatalogRoles((rolesData ?? []) as { code: string; name: string }[]);
+
+  const openUserRegister = () => {
+    setActiveTab("users");
+    setUserRegisterOpen(true);
+    if (typeof window !== "undefined" && window.history.replaceState) {
+      const u = new URL(window.location.href);
+      u.searchParams.set("tab", "users");
+      u.searchParams.set("register", "1");
+      window.history.replaceState(null, "", u.pathname + u.search);
+    }
+  };
+
+  const closeUserRegister = () => {
+    setUserRegisterOpen(false);
+    if (typeof window !== "undefined" && window.history.replaceState) {
+      const u = new URL(window.location.href);
+      u.searchParams.set("tab", "users");
+      u.searchParams.delete("register");
+      window.history.replaceState(null, "", u.pathname + u.search);
+    }
+  };
+
+  const openEditUserModal = (userId: string) => {
+    setActiveTab("users");
+    setUserRegisterOpen(false);
+    setEditUserId(userId);
+    setEditUserOpen(true);
+    if (typeof window !== "undefined" && window.history.replaceState) {
+      const u = new URL(window.location.href);
+      u.searchParams.set("tab", "users");
+      u.searchParams.delete("register");
+      u.searchParams.set("editUser", userId);
+      window.history.replaceState(null, "", u.pathname + u.search);
+    }
+  };
+
+  const closeEditUserModal = () => {
+    setEditUserOpen(false);
+    setEditUserId(null);
+    if (typeof window !== "undefined" && window.history.replaceState) {
+      const u = new URL(window.location.href);
+      u.searchParams.set("tab", "users");
+      u.searchParams.delete("editUser");
+      window.history.replaceState(null, "", u.pathname + u.search);
+    }
+  };
+
+  const handleEditUserClick = async (u: { id: string; role?: string }) => {
+    if (isAssociateUserRole(u.role)) {
+      try {
+        const detail = await fetchAdminJson<AdminUserDetail>(`/api/admin/users/${u.id}`);
+        const providerId = detail.providerId;
+        if (providerId != null && providerId > 0) {
+          setLocation(adminProviderEditHref(providerId, "/admin?tab=users"));
+          return;
+        }
+      } catch (e: unknown) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description:
+            e instanceof Error ? e.message : "No se pudo abrir la ficha del asociado.",
+        });
+        return;
+      }
+    }
+    openEditUserModal(u.id);
+  };
 
   const usersQueryParams = new URLSearchParams({
     page: String(userPage),
@@ -1536,7 +1733,7 @@ export default function AdminPanel() {
   const { data: usersData, isLoading: usersLoading } = useQuery({
     queryKey: ["admin-users", userPage, userFilters],
     queryFn: () => fetchWithAuth(`/api/admin/users?${usersQueryParams.toString()}`),
-    enabled: hasAdminRole(user),
+    enabled: canPanel && canUsers,
   });
   const usersList = usersData?.users ?? [];
   const usersTotal = usersData?.total ?? 0;
@@ -1563,7 +1760,7 @@ export default function AdminPanel() {
       const qs = params.toString();
       return fetchWithAuth(`/api/admin/services/active${qs ? `?${qs}` : ""}`);
     },
-    enabled: hasAdminRole(user) && activeTab === "providers",
+    enabled: canPanel && canProviders && activeTab === "providers",
     staleTime: 10_000,
   });
   const activeProviderRows: AdminActiveProviderRow[] = adminActiveServicesData?.providers ?? [];
@@ -1885,7 +2082,7 @@ export default function AdminPanel() {
   const { data: adminBookingsData, isLoading: adminBookingsLoading } = useQuery({
     queryKey: ["admin-bookings"],
     queryFn: () => fetchWithAuth("/api/admin/bookings"),
-    enabled: hasAdminRole(user) && activeTab === "bookings",
+    enabled: canPanel && canBookings && activeTab === "bookings",
   });
   const adminBookings: AdminBookingItem[] = adminBookingsData?.bookings ?? [];
   const [bookingSubTab, setBookingSubTab] = useState<"pending" | "in_progress" | "ready" | "history">("pending");
@@ -1895,7 +2092,9 @@ export default function AdminPanel() {
     ready: 1,
     history: 1,
   });
-  const [bookingEdits, setBookingEdits] = useState<Record<number, { cost?: string; scheduleDate?: string; scheduleTime?: string; status?: string }>>({});
+  const [bookingEdits, setBookingEdits] = useState<
+    Record<number, { scheduleDate?: string; scheduleTime?: string; status?: string }>
+  >({});
   const [pendingAdminChange, setPendingAdminChange] = useState<null | { bookingId: number; payload: Record<string, unknown>; summary: string }>(null);
 
   const updateAdminBooking = useMutation({
@@ -1939,7 +2138,7 @@ export default function AdminPanel() {
   if (authLoading) {
     return <AccessGateLoading message="Cargando panel de administración…" />;
   }
-  if (!user || !hasAdminRole(user)) {
+  if (!user || !canAccessAdminPanel(user)) {
     return <AccessGateLoading message="Redirigiendo al inicio…" />;
   }
 
@@ -2013,35 +2212,45 @@ export default function AdminPanel() {
                     <span className="min-[380px]:hidden">Stats</span>
                   </TabsTrigger>
                 )}
-                {fullAdmin && (
+                {canOverview && (
                   <TabsTrigger value="overview" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">
                     <span className="sm:hidden">Asociados</span>
                     <span className="hidden sm:inline">Gestión de asociados</span>
                   </TabsTrigger>
                 )}
-                <TabsTrigger value="users" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">Usuarios</TabsTrigger>
-                <TabsTrigger value="providers" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">
-                  <span className="sm:hidden">Asoc.</span>
-                  <span className="hidden sm:inline">Asociados</span>
-                </TabsTrigger>
-                <TabsTrigger value="bookings" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">Reservas</TabsTrigger>
-                {fullAdmin && (
+                {canUsers && (
+                  <TabsTrigger value="users" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">Usuarios</TabsTrigger>
+                )}
+                {canProviders && (
+                  <TabsTrigger value="providers" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">
+                    <span className="sm:hidden">Asoc.</span>
+                    <span className="hidden sm:inline">Asociados</span>
+                  </TabsTrigger>
+                )}
+                {canBookings && (
+                  <TabsTrigger value="bookings" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">Reservas</TabsTrigger>
+                )}
+                {canPromo && (
                   <TabsTrigger value="promotional-codes" className="shrink-0 gap-1.5">
                     <Ticket className="h-4 w-4 shrink-0 opacity-80" />
                     Códigos
                   </TabsTrigger>
                 )}
-                {fullAdmin && (
+                {canCategories && (
                   <TabsTrigger value="categories" className="shrink-0">Categorías</TabsTrigger>
                 )}
-                {fullAdmin && (
+                {canServices && (
                   <TabsTrigger value="services" className="gap-1.5 shrink-0">
                     <Layers className="h-4 w-4 shrink-0" />
                     Servicios
                   </TabsTrigger>
                 )}
-                <TabsTrigger value="roles" className="shrink-0">Roles</TabsTrigger>
-                <TabsTrigger value="settings" className="shrink-0">Configuración</TabsTrigger>
+                {canRolesTab && (
+                  <TabsTrigger value="roles" className="shrink-0">Roles</TabsTrigger>
+                )}
+                {canSettings && (
+                  <TabsTrigger value="settings" className="shrink-0">Configuración</TabsTrigger>
+                )}
               </TabsList>
             </div>
           </div>
@@ -2100,7 +2309,9 @@ export default function AdminPanel() {
                                     ? "número de teléfono"
                                     : r.field === "vehicle"
                                       ? "vehículo (Go)"
-                                      : r.field;
+                                      : r.field === "recovery_questions"
+                                        ? "preguntas de recuperación"
+                                        : r.field;
                             const vehicleSummary =
                               r.field === "vehicle"
                                 ? formatVehicleChangeProposalSummary(r.proposal, adminCategoriesRaw)
@@ -2654,10 +2865,30 @@ export default function AdminPanel() {
           </TabsContent>
 
           <TabsContent value="users" className="min-w-0">
+            {userRegisterOpen ? (
+              <AdminRegisterUserForm
+                showCard
+                title="Registrar usuario"
+                description="Mismo flujo que el registro público: datos de cuenta, foto opcional y rol del catálogo (cliente, asociado, central, admin, Soporte TI o roles personalizados)."
+                onSuccess={() => {
+                  closeUserRegister();
+                  queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+                }}
+                onCancel={closeUserRegister}
+              />
+            ) : (
             <Card className="min-w-0 overflow-hidden">
-              <CardHeader className="p-4 sm:p-6 space-y-1">
-                <CardTitle className="text-lg sm:text-xl">Gestión de Usuarios</CardTitle>
-                <CardDescription className="text-sm">Lista real de usuarios con filtros y paginación (10 por página)</CardDescription>
+              <CardHeader className="p-4 sm:p-6 space-y-1 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="text-lg sm:text-xl">Gestión de Usuarios</CardTitle>
+                  <CardDescription className="text-sm">Lista real de usuarios con filtros y paginación (10 por página)</CardDescription>
+                </div>
+                {canUsersCreate && (
+                  <Button type="button" className="shrink-0" onClick={openUserRegister}>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Registrar usuario
+                  </Button>
+                )}
               </CardHeader>
               <CardContent className="space-y-4 min-w-0 p-4 sm:p-6 pt-0">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -2737,9 +2968,17 @@ export default function AdminPanel() {
                                 ? toDate(u.createdAt).toLocaleDateString()
                                 : "—"}
                             </p>
-                            <Button size="sm" variant="outline" className="shrink-0" asChild>
-                              <Link href={`/admin/users/${u.id}/edit`}>Editar</Link>
-                            </Button>
+                            {canUsersEdit && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="shrink-0"
+                                onClick={() => void handleEditUserClick(u)}
+                              >
+                                Editar
+                              </Button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -2775,6 +3014,7 @@ export default function AdminPanel() {
                 )}
               </CardContent>
             </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="providers">
@@ -2901,9 +3141,16 @@ export default function AdminPanel() {
                                       Editar
                                     </Link>
                                   </Button>
-                                  <Button size="sm" variant="outline" asChild>
-                                    <Link href={`/admin/users/${p.userId}/edit`}>Usuario</Link>
-                                  </Button>
+                                  {canUsersEdit && (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => openEditUserModal(p.userId)}
+                                    >
+                                      Usuario
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             ))}
@@ -3324,15 +3571,9 @@ export default function AdminPanel() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {(roles as any[])
-                          .filter((r: any) => {
-                            const code = String(r?.code ?? "");
-                            if (!code) return false;
-                            if (code === "admin") return false;
-                            if (code === "_seed") return false;
-                            return true;
-                          })
-                          .map((r: any) => (
+                        {roles
+                          .filter((r) => r.code !== "admin")
+                          .map((r) => (
                             <SelectItem key={String(r.code)} value={String(r.code)}>
                               {String(r.name ?? r.code)}
                             </SelectItem>
@@ -3467,17 +3708,8 @@ export default function AdminPanel() {
                           ? [providerUser.firstName ?? providerUser.name, providerUser.lastName].filter(Boolean).join(" ") || "Asociado"
                           : "Asociado";
                         const serviceTitle = b.service?.title ?? "Servicio";
-                        const savedCost = typeof b.cost === "number" ? b.cost : Number(b.cost) || 0;
-                        const refPrice = b.service?.price != null ? Number(b.service.price) : 0;
-                        const currentCost = savedCost > 0 ? savedCost : refPrice;
-                        const currentCostNum = Number(currentCost || 0);
 
                         const edits = bookingEdits[id] ?? {};
-                        const costValue = edits.cost ?? String(currentCost || "");
-                        const costValueNum = Number(costValue);
-                        const costForCalc = Number.isFinite(costValueNum) ? costValueNum : currentCostNum;
-                        const commission = calcCommission(costForCalc, platformCommissionRate);
-                        const providerNet = calcProviderNet(costForCalc, platformCommissionRate);
                         const schedDate = edits.scheduleDate ?? dateStr;
                         const schedTime = edits.scheduleTime ?? timeStr;
                         const statusValue = edits.status ?? String(b.status ?? "");
@@ -3500,21 +3732,12 @@ export default function AdminPanel() {
                                   Cliente: {clientName} · Asociado: {providerName}
                                 </p>
                               </div>
-                              <div className="flex flex-col items-end gap-1 shrink-0">
+                              <div className="flex flex-col items-end shrink-0">
                                 <Badge variant={badgeVariant}>{statusLabel(String(b.status ?? ""))}</Badge>
-                                <span className="text-sm font-semibold tabular-nums">
-                                  {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(currentCost || 0)}
-                                </span>
-                                <p className="text-xs text-muted-foreground">
-                                  Comisión:{" "}
-                                  {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(commission)} ·
-                                  Neto asociado:{" "}
-                                  {new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(providerNet)}
-                                </p>
                               </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Estado</Label>
                                 <Select
@@ -3534,18 +3757,6 @@ export default function AdminPanel() {
                                     ))}
                                   </SelectContent>
                                 </Select>
-                              </div>
-
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Costo</Label>
-                                <Input
-                                  className="h-9"
-                                  value={costValue}
-                                  onChange={(e) =>
-                                    setBookingEdits((prev) => ({ ...prev, [id]: { ...prev[id], cost: e.target.value } }))
-                                  }
-                                  inputMode="decimal"
-                                />
                               </div>
 
                               <div className="space-y-1">
@@ -3602,31 +3813,6 @@ export default function AdminPanel() {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => {
-                                      const n = Number(costValue);
-                                      if (!Number.isFinite(n)) {
-                                        toast({ title: "Costo inválido", description: "Ingresa un número válido.", variant: "destructive" });
-                                        return;
-                                      }
-                                      setPendingAdminChange({
-                                        bookingId: id,
-                                        payload: { cost: n },
-                                        summary: `Actualizar costo de la reserva #${id} a $${n.toFixed(2)}`,
-                                      });
-                                    }}
-                                  >
-                                    <DollarSign className="h-4 w-4 mr-2" />
-                                    Guardar costo
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Actualiza el costo de la reserva. Requiere confirmación.</TooltipContent>
-                              </Tooltip>
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
                                       if (!scheduleIso) return;
                                       setPendingAdminChange({
                                         bookingId: id,
@@ -3648,7 +3834,13 @@ export default function AdminPanel() {
 
                       return (
                         <div className="space-y-4">
-                          <Tabs value={bookingSubTab} onValueChange={(v) => setBookingSubTab(v as any)} className="w-full">
+                          <Tabs
+                            value={bookingSubTab}
+                            onValueChange={(v) => {
+                              setBookingSubTab(v as "pending" | "in_progress" | "ready" | "history");
+                            }}
+                            className="w-full"
+                          >
                             <TabsList className="flex w-full flex-nowrap items-stretch gap-1 h-auto p-1 bg-muted/50 overflow-x-auto">
                               <TabsTrigger value="pending" className="gap-2 py-2.5 data-[state=active]:bg-background">
                                 <Inbox className="h-4 w-4" />
@@ -3674,7 +3866,7 @@ export default function AdminPanel() {
                           </Tabs>
 
                           {(() => {
-                            const pageSize = USERS_PAGE_SIZE;
+                            const pageSize = BOOKINGS_PAGE_SIZE;
                             const currentPage = bookingPageBySubTab[bookingSubTab] ?? 1;
                             const totalPages = Math.max(1, Math.ceil(activeList.length / pageSize));
                             const safePage = Math.min(totalPages, Math.max(1, currentPage));
@@ -3686,43 +3878,44 @@ export default function AdminPanel() {
                             ) : (
                               <>
                                 <div className="space-y-4">{pagedList.map(bookingRow)}</div>
-                                {totalPages > 1 && (
-                                  <div className="flex items-center justify-between pt-4 border-t mt-4">
-                                    <p className="text-sm text-muted-foreground">
-                                      Página {safePage} de {totalPages}
-                                    </p>
-                                    <div className="flex gap-2">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={safePage <= 1}
-                                        onClick={() =>
-                                          setBookingPageBySubTab((prev) => ({
-                                            ...prev,
-                                            [bookingSubTab]: Math.max(1, safePage - 1),
-                                          }))
-                                        }
-                                      >
-                                        <ChevronLeft className="h-4 w-4" />
-                                        Anterior
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={safePage >= totalPages}
-                                        onClick={() =>
-                                          setBookingPageBySubTab((prev) => ({
-                                            ...prev,
-                                            [bookingSubTab]: Math.min(totalPages, safePage + 1),
-                                          }))
-                                        }
-                                      >
-                                        Siguiente
-                                        <ChevronRight className="h-4 w-4" />
-                                      </Button>
-                                    </div>
+                                <div className="flex flex-col gap-3 border-t pt-4 mt-4 sm:flex-row sm:items-center sm:justify-between">
+                                  <p className="text-xs sm:text-sm text-muted-foreground">
+                                    {activeList.length} reserva{activeList.length !== 1 ? "s" : ""} · Página{" "}
+                                    {safePage} de {totalPages}
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="flex-1 sm:flex-none"
+                                      disabled={safePage <= 1}
+                                      onClick={() =>
+                                        setBookingPageBySubTab((prev) => ({
+                                          ...prev,
+                                          [bookingSubTab]: Math.max(1, safePage - 1),
+                                        }))
+                                      }
+                                    >
+                                      <ChevronLeft className="h-4 w-4" />
+                                      Anterior
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="flex-1 sm:flex-none"
+                                      disabled={safePage >= totalPages}
+                                      onClick={() =>
+                                        setBookingPageBySubTab((prev) => ({
+                                          ...prev,
+                                          [bookingSubTab]: Math.min(totalPages, safePage + 1),
+                                        }))
+                                      }
+                                    >
+                                      Siguiente
+                                      <ChevronRight className="h-4 w-4" />
+                                    </Button>
                                   </div>
-                                )}
+                                </div>
                               </>
                             );
                           })()}
@@ -3737,7 +3930,7 @@ export default function AdminPanel() {
                           <DialogDescription>
                             {pendingAdminChange?.summary}
                             <br />
-                            Esto puede afectar el flujo normal y balances (pagos seguros / cartera) si cambias estados como “Completada” o “Cancelada”.
+                            Esto puede afectar el flujo normal del servicio si cambias estados como «Completada» o «Cancelada».
                           </DialogDescription>
                         </DialogHeader>
                         <DialogFooter className="gap-2 sm:gap-0">
@@ -3774,6 +3967,8 @@ export default function AdminPanel() {
                 )}
               </CardContent>
             </Card>
+
+            <AdminCargoGoRidesPanel enabled={canPanel && canBookings && activeTab === "bookings"} />
           </TabsContent>
 
           <TabsContent value="recargas">
@@ -4275,24 +4470,11 @@ export default function AdminPanel() {
             <AdminCategoriesTab />
           </TabsContent>
 
-          <TabsContent value="roles">
-            <Card>
-              <CardHeader>
-                <CardTitle>Gestión de roles</CardTitle>
-                <CardDescription>
-                  Crea y administra los roles que puedes asignar a los usuarios (admin, professional, client y personalizados).
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button asChild>
-                  <Link href="/admin/create-role" className="inline-flex items-center gap-2">
-                    <UserPlus className="h-4 w-4" />
-                    Crear nuevo rol
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
+          {canRolesTab && (
+            <TabsContent value="roles">
+              <AdminRolesPanel />
+            </TabsContent>
+          )}
 
           <TabsContent value="settings">
             <div className="grid grid-cols-1 gap-6">
@@ -4950,6 +5132,18 @@ export default function AdminPanel() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <AdminEditUserDialog
+          open={editUserOpen}
+          userId={editUserId}
+          onOpenChange={(open) => {
+            if (open) setEditUserOpen(true);
+            else closeEditUserModal();
+          }}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+          }}
+        />
 
       </div>
     </div>

@@ -56,6 +56,7 @@ export interface Subcategory {
   categoryId: number;
   categorySlug?: string;
   icon?: string | null;
+  imageUrl?: string | null;
 }
 
 /** Datos parciales para actualizar un proveedor (solo campos editables). */

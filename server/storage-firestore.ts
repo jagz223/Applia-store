@@ -27,6 +27,7 @@ import type {
   ServiceWithProvider,
 } from "@shared/schema";
 import type { InsertProviderVehicle } from "@shared/vehicle-schema";
+import { SYSTEM_ROLE_CATALOG_DEFAULTS } from "@shared/role-definition";
 import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
 import { calcCommission, calcProviderNet, roundToCents } from "@shared/platform-commission";
 import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
@@ -513,6 +514,7 @@ class FirestoreStorageImpl implements IStorage {
     if (data.name !== undefined) updates.name = data.name;
     if (data.slug !== undefined) updates.slug = data.slug;
     if (data.icon !== undefined) updates.icon = data.icon;
+    if (data.imageUrl !== undefined) updates.imageUrl = data.imageUrl;
     
     if (Object.keys(updates).length > 0) {
       await docRef.update(updates);
@@ -537,6 +539,7 @@ class FirestoreStorageImpl implements IStorage {
         categoryId: (d?.categoryId ?? d?.categoria) as number,
         categorySlug: d?.categorySlug as string | undefined,
         icon: d?.icon ?? null,
+        imageUrl: d?.imageUrl != null ? String(d.imageUrl) : null,
       } as import("./storage-contracts").Subcategory;
     });
   }
@@ -553,6 +556,7 @@ class FirestoreStorageImpl implements IStorage {
       categoryId: (d?.categoryId ?? d?.categoria) as number,
       categorySlug: d?.categorySlug as string | undefined,
       icon: d?.icon ?? null,
+      imageUrl: d?.imageUrl != null ? String(d.imageUrl) : null,
     } as import("./storage-contracts").Subcategory;
   }
 
@@ -568,6 +572,7 @@ class FirestoreStorageImpl implements IStorage {
     };
     if (data.categorySlug) newSub.categorySlug = data.categorySlug;
     if (data.icon) newSub.icon = data.icon;
+    if (data.imageUrl != null && String(data.imageUrl).trim()) newSub.imageUrl = String(data.imageUrl).trim();
     
     await docRef.set(newSub);
     return newSub as import("./storage-contracts").Subcategory;
@@ -585,6 +590,10 @@ class FirestoreStorageImpl implements IStorage {
     if (data.categoryId !== undefined) updates.categoryId = data.categoryId;
     if (data.categorySlug !== undefined) updates.categorySlug = data.categorySlug;
     if (data.icon !== undefined) updates.icon = data.icon;
+    if (data.imageUrl !== undefined) {
+      const trimmed = data.imageUrl != null ? String(data.imageUrl).trim() : "";
+      updates.imageUrl = trimmed || null;
+    }
     
     if (Object.keys(updates).length > 0) {
       await docRef.update(updates);
@@ -598,6 +607,7 @@ class FirestoreStorageImpl implements IStorage {
       categoryId: (d?.categoryId ?? d?.categoria) as number,
       categorySlug: d?.categorySlug as string | undefined,
       icon: d?.icon ?? null,
+      imageUrl: d?.imageUrl != null ? String(d.imageUrl) : null,
     } as import("./storage-contracts").Subcategory;
   }
 
@@ -3012,7 +3022,7 @@ class FirestoreStorageImpl implements IStorage {
   // ============ PETICIONES DE CAMBIO DE CUENTA ============
   async createAccountChangeRequest(input: {
     userId: string;
-    field: "email" | "name" | "phone" | "vehicle";
+    field: "email" | "name" | "phone" | "vehicle" | "recovery_questions";
     reason: string;
     proposal?: unknown;
   }): Promise<any> {
@@ -3021,7 +3031,7 @@ class FirestoreStorageImpl implements IStorage {
     const field = input.field;
     const reason = String(input.reason ?? "").trim();
     if (!userId) throw new Error("userId requerido");
-    if (!["email", "name", "phone", "vehicle"].includes(field)) throw new Error("field inválido");
+    if (!["email", "name", "phone", "vehicle", "recovery_questions"].includes(field)) throw new Error("field inválido");
     if (!reason) throw new Error("reason requerido");
     if (field === "vehicle" && (input.proposal == null || typeof input.proposal !== "object")) {
       throw new Error("proposal requerido para cambio de vehículo");
@@ -3036,6 +3046,9 @@ class FirestoreStorageImpl implements IStorage {
       const f = String((d.data() as any)?.field ?? "");
       if (field === "vehicle" && f === "vehicle") {
         throw new Error("Ya tienes una solicitud de vehículo pendiente.");
+      }
+      if (field === "recovery_questions" && f === "recovery_questions") {
+        throw new Error("Ya tienes una solicitud de preguntas de recuperación pendiente.");
       }
     }
 
@@ -4140,18 +4153,33 @@ class FirestoreStorageImpl implements IStorage {
 
   async seedRoles(): Promise<void> {
     if (!this.db) return;
-    const defaults: RoleDefinition[] = [
-      { code: "admin", name: "Administrador", description: "Acceso total al sistema", isSystem: true, sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
-      { code: "professional", name: "Profesional", description: "Asociado de servicios", isSystem: true, sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
-      { code: "client", name: "Cliente", description: "Usuario que contrata servicios", isSystem: true, sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
-      { code: "tiSupport", name: "Soporte TI", description: "Soporte técnico interno", isSystem: true, sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
-    ];
     const col = this.db.collection(FIRESTORE_COLLECTIONS.ROLES);
-    for (const r of defaults) {
+    for (const r of SYSTEM_ROLE_CATALOG_DEFAULTS) {
       const ref = col.doc(r.code);
       const snap = await ref.get();
+      const { code, isSystem, sortOrder, ...fields } = r;
       if (!snap.exists) {
-        await ref.set(r);
+        await ref.set({
+          code,
+          ...fields,
+          isSystem: isSystem ?? true,
+          sortOrder: sortOrder ?? 99,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        continue;
+      }
+      const existing = snap.data() as RoleDefinition;
+      const patch: Partial<RoleDefinition> = {};
+      if (!existing.description?.trim() && fields.description) patch.description = fields.description;
+      if (!existing.responsibilities?.trim() && fields.responsibilities) {
+        patch.responsibilities = fields.responsibilities;
+      }
+      if (!existing.permissions && fields.permissions) {
+        patch.permissions = fields.permissions;
+      }
+      if (Object.keys(patch).length > 0) {
+        await ref.update({ ...patch, updatedAt: new Date() });
       }
     }
   }

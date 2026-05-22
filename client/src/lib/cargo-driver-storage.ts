@@ -19,6 +19,8 @@ export type CargoDriverTripLog = {
   payment: "genfeb" | "cash" | "bank_transfer";
   /** Módulo Go: transport (Car Go) o delivery (Pack Go). */
   goSlug?: "cargo" | "pack";
+  outcome?: "completed" | "cancelled" | "expired";
+  statusLabel?: string;
 };
 
 export function loadReceiving(): boolean {

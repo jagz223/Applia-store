@@ -40,8 +40,6 @@ import {
   loadGoDriverActiveRideId,
   loadGoReceiving,
   loadReceiving,
-  loadTripLog,
-  appendDriverTripLog,
   saveDriverActiveRideId,
   saveGoDriverActiveRideId,
   saveReceiving,
@@ -53,6 +51,9 @@ import { GoChatProvider, useGoChat } from "@/contexts/GoChatContext";
 import { GoDriverUiProvider } from "@/contexts/GoDriverUiContext";
 import { GoRideRatingDialog, goSlugToRatingModule } from "@/components/go/GoRideRatingDialog";
 import { GoPanicFloatingButton } from "@/components/go/GoPanicFloatingButton";
+import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
+import { historyToDriverTripLog } from "@/lib/mobility-ride-history-mappers";
+import { notifyMobilityRideHistoryChanged } from "@/lib/mobility-ride-history-events";
 import { GoChatDrawer } from "@/components/go/GoChatDrawer";
 import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
 import { useSocket } from "@/hooks/use-socket";
@@ -265,12 +266,16 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     setReceivingPack(loadGoReceiving("pack"));
   }, []);
 
+  const { data: serverTripHistory = [] } = useQuery({
+    queryKey: ["mobility-ride-history", "driver", user?.id],
+    queryFn: () => fetchMobilityRideHistoryForUser(50, "driver"),
+    enabled: !!user?.id,
+  });
+
   useEffect(() => {
-    // Preferir email para evitar colisiones si el backend cambia el tipo de id.
-    const accountKey =
-      (user as any)?.email != null ? String((user as any).email) : (user as any)?.id != null ? String((user as any).id) : null;
-    setTrips(loadTripLog(accountKey));
-  }, [user?.id, user?.email]);
+    const rows = serverTripHistory.map(historyToDriverTripLog);
+    setTrips(rows);
+  }, [serverTripHistory]);
 
   useEffect(() => {
     if (!goDriverUi) return;
@@ -593,31 +598,10 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       if (p.rideId !== activeRideIdRef.current) return;
       const snap = activeRideOfferRef.current;
       if (snap) {
-        appendDriverTripLog(
-          {
-            id: p.rideId,
-            endedAt: new Date().toISOString(),
-            durationMin: Math.max(1, Math.round((snap.durationSec ?? 0) / 60)),
-            amountUsd: snap.estimatedUsd ?? 0,
-            payment:
-              snap.paymentMethod === "genfeb"
-                ? "genfeb"
-                : snap.paymentMethod === "bank_transfer"
-                  ? "bank_transfer"
-                  : "cash",
-            goSlug: goSlug === "pack" ? "pack" : "cargo",
-          },
-          (((user as any)?.email ?? (user as any)?.id ?? null) != null
-            ? String(((user as any)?.email ?? (user as any)?.id) as any)
-            : null) as any
-        );
-        setTrips(
-          loadTripLog(
-            (((user as any)?.email ?? (user as any)?.id ?? null) != null
-              ? String(((user as any)?.email ?? (user as any)?.id) as any)
-              : null) as any
-          )
-        );
+        window.setTimeout(() => {
+          notifyMobilityRideHistoryChanged();
+          void queryClient.invalidateQueries({ queryKey: ["mobility-ride-history"] });
+        }, 600);
         rateTargetRef.current = { rideId: p.rideId, targetName: snap.rider?.name ?? "Cliente" };
         setRateStars(5);
         setRateDialogOpen(true);
@@ -680,6 +664,10 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           variant: "destructive",
         });
       }
+      window.setTimeout(() => {
+        notifyMobilityRideHistoryChanged();
+        void queryClient.invalidateQueries({ queryKey: ["mobility-ride-history"] });
+      }, 600);
     };
     socket.on(`${rideSocketPrefix}payment_confirmed`, onPay);
     socket.on(`${rideSocketPrefix}completed`, onCompleted);

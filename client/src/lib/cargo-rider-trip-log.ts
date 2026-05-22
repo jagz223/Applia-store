@@ -14,6 +14,9 @@ export type CargoRiderTripLog = {
   driverName: string;
   /** Módulo: taxi (`cargo`) o delivery (`pack`). */
   goSlug?: "cargo" | "pack";
+  /** Desde historial del servidor (completado, cancelado, expirado). */
+  outcome?: "completed" | "cancelled" | "expired";
+  statusLabel?: string;
 };
 
 function normalizeAccountId(accountId: string | null | undefined): string | null {
