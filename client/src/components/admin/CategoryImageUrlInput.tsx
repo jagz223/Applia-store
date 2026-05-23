@@ -23,7 +23,7 @@ type CategoryImageUrlInputProps = {
 
 export function CategoryImageUrlInput({
   label = "Imagen del icono (opcional)",
-  hint = "Sube un PNG desde tu equipo o pega una URL que termine en .png. Debe tener fondo transparente real (sin blanco, gris ni cuadrícula).",
+  hint = "Opcional. Sube una imagen PNG o pega una URL que termine en .png.",
   value,
   onChange,
   iconName,
@@ -109,7 +109,7 @@ export function CategoryImageUrlInput({
         />
       </div>
 
-      <p className="text-[11px] text-muted-foreground">Máximo 2 MB. Solo formato PNG.</p>
+      <p className="text-[11px] text-muted-foreground">Máximo 2 MB. Formato PNG.</p>
 
       {status === "checking" && value.trim() ? (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -131,7 +131,7 @@ export function CategoryImageUrlInput({
             />
           </div>
           <span className="text-xs text-muted-foreground">
-            {displayUrl ? "Vista previa (PNG válido)" : "Vista previa: icono por defecto"}
+            {displayUrl ? "Vista previa (PNG)" : "Vista previa: icono por defecto"}
           </span>
         </div>
       ) : null}

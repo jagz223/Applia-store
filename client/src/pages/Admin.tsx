@@ -1053,7 +1053,7 @@ function AdminCategoriesTab() {
 
             <CategoryImageUrlInput
               label="Imagen de la categoría (URL)"
-              hint="Opcional. Sube un PNG desde tu equipo o pega una URL .png con fondo transparente. Si no es válida, en la web se usa el icono."
+              hint="Opcional. Imagen PNG (.png). Si no cargas una, se muestra el icono por defecto."
               value={categoryImageUrlDraft}
               onChange={setCategoryImageUrlDraft}
               iconName={(selectedCategory as { icon?: string })?.icon ?? "HelpCircle"}
