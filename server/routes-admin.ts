@@ -2780,7 +2780,7 @@ export function registerAdminRoutes(app: Express): void {
     })
     .refine(
       (v) => v === undefined || v === null || categoryIconUrlLooksLikePng(v),
-      { message: "El archivo no es exclusivamente PNG. Usa una URL que termine en .png" },
+      { message: "Debe ser una imagen PNG (.png)." },
     );
 
   const updateCategorySchema = z.object({
