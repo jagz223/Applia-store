@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+﻿import { cn } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
@@ -131,6 +131,7 @@ export function Navigation() {
     return cat ? getCategoryDisplayName(cat) : null;
   })();
   const exploreCategoryDisplayName = exploreCategoryFromContext ?? exploreCategoryFromUrl;
+  const navbarBrandLabel = exploreCategoryDisplayName?.trim() || "GENFEB";
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -196,16 +197,16 @@ export function Navigation() {
   const associateActivityHref = "/professional-dashboard";
 
   const NavLinks = () => (
-    <>
-      <Link href={homeNavHref} className={`text-sm font-medium transition-colors hover:text-primary ${isActive(homeNavHref) || (homeNavHref === '/' && isActive('/')) ? 'text-primary' : 'text-muted-foreground'}`}>
+    <div className="flex items-center gap-4 xl:gap-5 flex-nowrap">
+      <Link href={homeNavHref} className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary ${isActive(homeNavHref) || (homeNavHref === '/' && isActive('/')) ? 'text-primary' : 'text-muted-foreground'}`}>
         {homeNavLabel}
       </Link>
-      <Link href="/explore" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/explore') ? 'text-primary' : 'text-muted-foreground'}`}>
+      <Link href="/explore" className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary ${isActive('/explore') ? 'text-primary' : 'text-muted-foreground'}`}>
         Explorar
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive("/my-services") || isActive("/services") || isActive("/booking") ? "text-primary" : "text-muted-foreground"}`}>
+          <button className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary flex items-center gap-1 ${isActive("/my-services") || isActive("/services") || isActive("/booking") ? "text-primary" : "text-muted-foreground"}`}>
             Servicios <ChevronDown className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
@@ -261,20 +262,20 @@ export function Navigation() {
       {showPromocionesNav && (
         <Link
           href="/promociones"
-          className={`text-sm font-medium transition-colors hover:text-primary ${isActive("/promociones") ? "text-primary" : "text-muted-foreground"}`}
+          className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary ${isActive("/promociones") ? "text-primary" : "text-muted-foreground"}`}
         >
           Promociones
         </Link>
       )}
       {isAuthenticated && (
         <>
-          <Link href="/vault" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/vault') ? 'text-primary' : 'text-muted-foreground'}`}>
+          <Link href="/vault" className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary ${isActive('/vault') ? 'text-primary' : 'text-muted-foreground'}`}>
             Documentos
           </Link>
           {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className={`text-sm font-medium transition-colors hover:text-primary flex items-center gap-1 ${isActive('/recharge') || isActive('/movimientos') ? 'text-primary' : 'text-muted-foreground'}`}>
+                <button className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary flex items-center gap-1 ${isActive('/recharge') || isActive('/movimientos') ? 'text-primary' : 'text-muted-foreground'}`}>
                   Movimientos <ChevronDown className="h-4 w-4" />
                 </button>
               </DropdownMenuTrigger>
@@ -296,7 +297,7 @@ export function Navigation() {
           )}
         </>
       )}
-    </>
+    </div>
   );
 
   return (
@@ -305,10 +306,11 @@ export function Navigation() {
       <div className="container flex h-14 min-[400px]:h-16 max-w-7xl items-center justify-between gap-1 px-2 min-[400px]:px-4 sm:px-6 lg:px-8 mx-auto min-w-0">
         
         {/* Logo & Desktop Nav */}
-        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4 lg:gap-8">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center lg:gap-4">
           <Link
             href={exploreCategoryDisplayName ? "/explore" : "/"}
-            className="flex min-w-0 items-center gap-1.5 min-[400px]:gap-2 overflow-hidden"
+            className="flex w-max shrink-0 items-center gap-1.5 min-[400px]:gap-2"
+            title={navbarBrandLabel}
           >
             <span
               className="flex h-7 w-7 min-[400px]:h-8 min-[400px]:w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background p-0.5 ring-1 ring-border"
@@ -323,12 +325,11 @@ export function Navigation() {
                 decoding="async"
               />
             </span>
-            <span className="sr-only">GenFeb, inicio</span>
-            <span className="hidden min-w-0 max-w-[11rem] truncate text-left text-base font-bold font-display text-primary tracking-wider min-[400px]:text-xl sm:inline-block sm:max-w-[13rem] md:max-w-[16rem] lg:max-w-[20rem]">
-              {exploreCategoryDisplayName ?? <>GENFEB</>}
+            <span className="inline-block whitespace-nowrap text-left text-sm font-bold font-display text-primary tracking-wider min-[400px]:text-base sm:text-lg lg:text-xl">
+              {navbarBrandLabel}
             </span>
           </Link>
-          <div className="hidden lg:flex items-center gap-6">
+          <div className="hidden lg:flex min-w-0 items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <NavLinks />
           </div>
         </div>

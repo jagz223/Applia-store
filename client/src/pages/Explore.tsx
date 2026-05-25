@@ -182,7 +182,11 @@ export default function Explore() {
   const categoryDisplayName = hasCategorySelected ? ((selectedProviderCategoryData as any)?.name ?? "") : null;
 
   useEffect(() => {
-    setExploreCategoryDisplayName(categoryDisplayName);
+    setExploreCategoryDisplayName(
+      typeof categoryDisplayName === "string" && categoryDisplayName.trim()
+        ? categoryDisplayName.trim()
+        : null,
+    );
     return () => setExploreCategoryDisplayName(null);
   }, [categoryDisplayName, setExploreCategoryDisplayName]);
 
