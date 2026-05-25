@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Car, History, Menu, Package, MessageSquare, Settings, Bell, TrendingUp, Tags } from "lucide-react";
+import { Car, History, Menu, Package, MessageSquare, Settings, Bell, TrendingUp, Tags, Ticket } from "lucide-react";
 import { useGoChat } from "@/contexts/GoChatContext";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
-import { useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
+import { useCategories, useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
+import { canAccessPromocionesPanel } from "@/lib/auth-utils";
+import { isGoVehicleProvider } from "@shared/provider-car-go";
 import { effectiveHiddenCategorySlugs } from "@shared/default-categories";
 import { mobilityHistorySheetTitle, mobilityServiceLabel } from "@shared/mobility-ui-labels";
 import { cn } from "@/lib/utils";
@@ -61,8 +63,17 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   const goDriverUi = useGoDriverUi();
   const { notifications } = useSocket();
   const { toast } = useToast();
+  const { data: categories = [] } = useCategories();
   const { data: currentProvider } = useCurrentProvider();
   const isAdmin = user?.role === "admin";
+  const hasProvider =
+    !!currentProvider || !!(user as { provider?: unknown } | null)?.provider;
+  const showPromocionesNav =
+    isAuthenticated &&
+    canAccessPromocionesPanel(user, hasProvider, {
+      isGoVehicleProvider:
+        !!currentProvider && isGoVehicleProvider(currentProvider, categories),
+    });
   const providerSubscriptionEndsAt = (
     currentProvider as { visibilitySubscriptionEndsAt?: string | null } | null | undefined
   )?.visibilitySubscriptionEndsAt;
@@ -416,6 +427,25 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
                 <span className="block text-xs text-muted-foreground">Cartera y actividad</span>
               </span>
             </Button>
+            {showPromocionesNav ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 w-full justify-start gap-3 px-3 text-left font-normal"
+                onClick={() => {
+                  setDriverMoreMenuOpen(false);
+                  setLocation("/promociones");
+                }}
+              >
+                <Ticket className="h-5 w-5 shrink-0 text-mango-orange" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium text-foreground">Promociones</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Códigos activos para tu mensualidad
+                  </span>
+                </span>
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"

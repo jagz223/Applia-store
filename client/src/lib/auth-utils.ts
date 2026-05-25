@@ -47,6 +47,20 @@ export function canAccessAssociateActivityDashboard(
 }
 
 /**
+ * Panel /promociones: admins, asociados con proveedor, profesionales y conductores Go (Car Go / delivery).
+ */
+export function canAccessPromocionesPanel(
+  user: { role?: string; provider?: unknown } | null | undefined,
+  hasProviderProfile: boolean,
+  options?: { isGoVehicleProvider?: boolean },
+): boolean {
+  if (hasAdminPrivileges(user?.role)) return true;
+  if (canAccessAssociateActivityDashboard(user, hasProviderProfile)) return true;
+  if (options?.isGoVehicleProvider === true) return true;
+  return false;
+}
+
+/**
  * Indica si el usuario es "invitado" (no autenticado).
  * Útil para rutas que solo deben mostrarse a usuarios no registrados (p. ej. registro, login).
  */

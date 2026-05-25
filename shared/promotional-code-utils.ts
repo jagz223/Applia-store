@@ -11,7 +11,42 @@ export type PromotionalCodeRecord = {
   benefitType: PromotionalCodeBenefitType | string;
   benefitValue: string | number;
   isActive?: boolean | null;
+  /** Visible en panel Promociones y elegible para notificaciones push públicas. */
+  isPublic?: boolean | null;
+  createdAt?: Date | string | null;
+  publicAnnouncementDueAt?: Date | string | null;
+  publicAnnouncementSentAt?: Date | string | null;
+  publicUserReminders?: Record<string, string> | null;
+  /** Marca de aviso único al expirar o agotar un código público. */
+  publicExpiredNotifiedAt?: Date | string | null;
 };
+
+/** Indica si el código sigue vigente (activo, no agotado ni vencido). */
+export function isPromotionalCodeCurrentlyActive(
+  row: Pick<
+    PromotionalCodeRecord,
+    "isActive" | "expirationType" | "expiresAt" | "maxUses" | "usedCount"
+  >,
+  nowMs: number = Date.now(),
+): boolean {
+  if (row.isActive === false) return false;
+  const now = new Date(nowMs);
+
+  if (row.expirationType === "por_tiempo") {
+    const end = parsePromotionalExpiresAt(row.expiresAt);
+    if (!end) return false;
+    if (now > end) return false;
+  }
+
+  if (row.expirationType === "por_usos") {
+    const maxUses = row.maxUses ?? 0;
+    const usedCount = row.usedCount ?? 0;
+    if (maxUses < 1) return false;
+    if (usedCount >= maxUses) return false;
+  }
+
+  return true;
+}
 
 /** Un canje por cuenta (regla fija del producto). */
 export const PROMOTIONAL_CODE_MAX_USES_PER_USER = 1;

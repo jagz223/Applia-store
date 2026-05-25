@@ -1,14 +1,25 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Bell, Check, ChevronRight, Info, MessageSquare, X } from "lucide-react";
+import { Bell, Check, ChevronRight, Info, MessageSquare, Ticket, X } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSocket } from "@/hooks/use-socket";
 import { useGoNotifications } from "@/contexts/GoNotificationsContext";
+import {
+  PUBLIC_PROMO_NOTIFICATION_CTA,
+  getPublicPromoNotificationDescription,
+  getPublicPromoNotificationPath,
+  getPublicPromoNotificationTitle,
+  isPublicPromoNotificationType,
+  shouldShowPublicPromoInNotificationList,
+} from "@/lib/public-promo-notification-ui";
 
 function getNotificationHref(notification: { id?: string; type: string; data?: any }): string | null {
   const data = notification.data ?? {};
+  if (isPublicPromoNotificationType(notification.type)) {
+    return getPublicPromoNotificationPath(data);
+  }
   const url = data?.url ?? data?.data?.url;
   if (typeof url === "string" && url.trim()) return url.startsWith("/") ? url : `/${url}`;
 
@@ -31,6 +42,9 @@ function getNotificationHref(notification: { id?: string; type: string; data?: a
 
 function getTitle(notification: { type: string; data?: any }): string {
   const data = notification.data ?? {};
+  if (isPublicPromoNotificationType(notification.type)) {
+    return getPublicPromoNotificationTitle(notification.type, data);
+  }
   if (notification.type === "message") return "Nuevo mensaje";
   if (notification.type === "admin" && data?.type === "go_panic") return "Pánico Genfeb Go";
   if (notification.type === "admin") return "Aviso del administrador";
@@ -44,6 +58,9 @@ function getTitle(notification: { type: string; data?: any }): string {
 
 function getDescription(notification: { type: string; data?: any }): string | null {
   const data = notification.data ?? {};
+  if (isPublicPromoNotificationType(notification.type)) {
+    return getPublicPromoNotificationDescription(notification.type, data);
+  }
   if (data?.type === "go_panic") {
     const nested = data?.data ?? {};
     const det = typeof data?.details === "string" ? data.details : typeof nested.details === "string" ? nested.details : "";
@@ -63,10 +80,15 @@ export function GoNotificationsDrawer() {
   const [, setLocation] = useLocation();
   const [unreadOnly, setUnreadOnly] = useState(false);
 
-  const list = useMemo(
-    () => (unreadOnly ? notifications.filter((n) => !n.read) : notifications),
-    [notifications, unreadOnly]
-  );
+  const list = useMemo(() => {
+    const base = notifications.filter((n) => {
+      if (isPublicPromoNotificationType(n.type)) {
+        return shouldShowPublicPromoInNotificationList(n.type);
+      }
+      return true;
+    });
+    return unreadOnly ? base.filter((n) => !n.read) : base;
+  }, [notifications, unreadOnly]);
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => (!open ? closeNotifications() : undefined)}>
@@ -114,6 +136,7 @@ export function GoNotificationsDrawer() {
             ) : (
               <ul className="space-y-2 pb-4">
                 {list.map((n) => {
+                  const isPromo = isPublicPromoNotificationType(n.type);
                   const href = getNotificationHref(n as any);
                   const title = getTitle(n as any);
                   const detail = getDescription(n as any);
@@ -123,7 +146,8 @@ export function GoNotificationsDrawer() {
                         type="button"
                         className={cn(
                           "w-full rounded-xl border border-border bg-card px-3 py-3 text-left shadow-sm transition-colors",
-                          "hover:bg-muted/40 active:bg-muted/60"
+                          "hover:bg-muted/40 active:bg-muted/60",
+                          isPromo && "border-orange-500/40 bg-orange-500/10",
                         )}
                         onClick={() => {
                           markNotificationAsRead(String(n.id));
@@ -136,15 +160,30 @@ export function GoNotificationsDrawer() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              {!n.read ? (
+                              {isPromo ? (
+                                <Ticket className="h-4 w-4 shrink-0 text-orange-500" aria-hidden />
+                              ) : !n.read ? (
                                 <span className="inline-flex h-2 w-2 rounded-full bg-amber-500" aria-hidden />
                               ) : (
                                 <Check className="h-4 w-4 text-muted-foreground" aria-hidden />
                               )}
-                              <p className="truncate font-semibold text-foreground">{title}</p>
+                              <p
+                                className={cn(
+                                  "truncate font-semibold",
+                                  isPromo ? "text-orange-600 dark:text-orange-400" : "text-foreground",
+                                )}
+                              >
+                                {title}
+                              </p>
                             </div>
                             {detail ? (
                               <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{detail}</p>
+                            ) : null}
+                            {isPromo ? (
+                              <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-orange-600 dark:text-orange-400">
+                                <Ticket className="h-3.5 w-3.5" />
+                                {PUBLIC_PROMO_NOTIFICATION_CTA}
+                              </p>
                             ) : null}
                             {n.type === "message" ? (
                               <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-primary">

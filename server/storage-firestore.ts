@@ -44,6 +44,7 @@ import {
   PROMO_CODE_MSG_NO_LONGER_AVAILABLE,
   userHasRedeemedPromotionalCode,
 } from "@shared/promotional-code-utils";
+import { PUBLIC_PROMO_ANNOUNCE_DELAY_MS } from "@shared/public-promotional-notifications";
 import {
   computeListingPublished,
   listingSubscriptionDaysRemaining,
@@ -3376,6 +3377,7 @@ class FirestoreStorageImpl implements IStorage {
     maxUses?: number | null;
     benefitType: string;
     benefitValue: string;
+    isPublic?: boolean;
   }): Promise<any> {
     if (!this.db) throw new Error("Firestore no configurado");
 
@@ -3385,6 +3387,8 @@ class FirestoreStorageImpl implements IStorage {
 
     const id = await this.getNextId("promotional_codes");
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES).doc(id.toString());
+    const isPublic = data.isPublic === true;
+    const now = new Date();
     const record = {
       id,
       code: normalizedCode,
@@ -3395,9 +3399,14 @@ class FirestoreStorageImpl implements IStorage {
       usedByUserCounts: {},
       benefitType: data.benefitType,
       benefitValue: data.benefitValue,
+      isPublic,
       isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
+      publicAnnouncementDueAt: isPublic ? new Date(now.getTime() + PUBLIC_PROMO_ANNOUNCE_DELAY_MS) : null,
+      publicAnnouncementSentAt: null,
+      publicUserReminders: {},
+      publicExpiredNotifiedAt: null,
     };
     await docRef.set(record);
     const snap = await docRef.get();
@@ -3414,6 +3423,7 @@ class FirestoreStorageImpl implements IStorage {
       maxUses?: number | null;
       benefitType: string;
       benefitValue: string;
+      isPublic?: boolean;
     },
   ): Promise<any | undefined> {
     if (!this.db) return undefined;
@@ -3421,15 +3431,29 @@ class FirestoreStorageImpl implements IStorage {
     const doc = await docRef.get();
     if (!doc.exists) return undefined;
 
-    const patch = {
+    const existing = doc.data() as {
+      isPublic?: boolean;
+      publicAnnouncementSentAt?: unknown;
+      publicUserReminders?: Record<string, string>;
+    };
+    const isPublic = data.isPublic === true;
+    const becamePublic = isPublic && existing.isPublic !== true;
+    const now = new Date();
+    const patch: Record<string, unknown> = {
       code: data.code.trim().toUpperCase(),
       expirationType: data.expirationType,
       expiresAt: data.expiresAt ?? null,
       maxUses: data.maxUses ?? null,
       benefitType: data.benefitType,
       benefitValue: data.benefitValue,
-      updatedAt: new Date(),
+      isPublic,
+      updatedAt: now,
     };
+    if (becamePublic && !existing.publicAnnouncementSentAt) {
+      patch.publicAnnouncementDueAt = new Date(now.getTime() + PUBLIC_PROMO_ANNOUNCE_DELAY_MS);
+      patch.publicAnnouncementSentAt = null;
+      patch.publicUserReminders = existing.publicUserReminders ?? {};
+    }
     await docRef.update(patch);
     const updated = await docRef.get();
     if (!updated.exists) return undefined;
@@ -3473,6 +3497,45 @@ class FirestoreStorageImpl implements IStorage {
     const updated = await docRef.get();
     if (!updated.exists) return undefined;
     return this.mapPromotionalCodeFromFirestore(updated.id, (updated.data() ?? {}) as Record<string, unknown>);
+  }
+
+  async listPublicPromoNotificationRecipientUserIds(): Promise<string[]> {
+    if (!this.db) return [];
+    const roles = ["admin", "tiSupport", "professional"];
+    const ids = new Set<string>();
+    for (const role of roles) {
+      const snap = await this.db.collection(FIRESTORE_COLLECTIONS.USERS).where("role", "==", role).get();
+      snap.docs.forEach((d) => {
+        const data = d.data() as { deletedAt?: unknown };
+        if (!data.deletedAt) ids.add(d.id);
+      });
+    }
+    return [...ids];
+  }
+
+  async patchPromotionalCodePublicNotifyFields(
+    id: number,
+    patch: {
+      publicAnnouncementDueAt?: Date | null;
+      publicAnnouncementSentAt?: Date | null;
+      publicUserReminders?: Record<string, string>;
+      publicExpiredNotifiedAt?: Date | null;
+    },
+  ): Promise<void> {
+    if (!this.db) return;
+    const docRef = this.db.collection(FIRESTORE_COLLECTIONS.PROMOTIONAL_CODES).doc(id.toString());
+    const doc = await docRef.get();
+    if (!doc.exists) return;
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.publicAnnouncementDueAt !== undefined) update.publicAnnouncementDueAt = patch.publicAnnouncementDueAt;
+    if (patch.publicAnnouncementSentAt !== undefined) update.publicAnnouncementSentAt = patch.publicAnnouncementSentAt;
+    if (patch.publicUserReminders !== undefined) {
+      const existing = (doc.data()?.publicUserReminders ?? {}) as Record<string, string>;
+      update.publicUserReminders = { ...existing, ...patch.publicUserReminders };
+    }
+    if (patch.publicExpiredNotifiedAt !== undefined) update.publicExpiredNotifiedAt = patch.publicExpiredNotifiedAt;
+    await docRef.update(update);
   }
 
   // ============ CUPONES ============

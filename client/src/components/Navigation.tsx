@@ -3,7 +3,13 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { useAssociateOnboardingIncomplete } from "@/hooks/use-associate-onboarding-incomplete";
-import { hasAdminRole, canAccessAssociateActivityDashboard, canAccessCentralDashboard } from "@/lib/auth-utils";
+import {
+  hasAdminRole,
+  canAccessAssociateActivityDashboard,
+  canAccessPromocionesPanel,
+  canAccessCentralDashboard,
+} from "@/lib/auth-utils";
+import { isGoVehicleProvider } from "@shared/provider-car-go";
 import { isCentralRole } from "@shared/roles";
 import { Button } from "@/components/ui/button";
 import { useCurrentProvider, useMyServices, useWallet, useCategories, useCategoryVisibility, useProviderVehicle } from "@/hooks/use-mango-data";
@@ -35,6 +41,7 @@ import {
   Smartphone,
   AlertTriangle,
   Building2,
+  Ticket,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -144,7 +151,14 @@ export function Navigation() {
   const isProfessional = !!providerProfile || (user as { role?: string } | null)?.role === "professional";
   const hasProviderForDashboard =
     !!providerProfile || !!(user as { provider?: unknown } | null)?.provider;
+  const isGoAssociateDriver =
+    !!providerProfile && isGoVehicleProvider(providerProfile, categories);
   const canAccessActivityDashboard = canAccessAssociateActivityDashboard(user, hasProviderForDashboard);
+  const showPromocionesNav =
+    isAuthenticated &&
+    canAccessPromocionesPanel(user, hasProviderForDashboard, {
+      isGoVehicleProvider: isGoAssociateDriver,
+    });
   /** Asociado con perfil: siempre puede abrir Mis servicios (aunque la suscripción de catálogo haya vencido). */
   const showMyServicesNav = isProfessional && hasProviderForDashboard;
 
@@ -244,6 +258,14 @@ export function Navigation() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {showPromocionesNav && (
+        <Link
+          href="/promociones"
+          className={`text-sm font-medium transition-colors hover:text-primary ${isActive("/promociones") ? "text-primary" : "text-muted-foreground"}`}
+        >
+          Promociones
+        </Link>
+      )}
       {isAuthenticated && (
         <>
           <Link href="/vault" className={`text-sm font-medium transition-colors hover:text-primary ${isActive('/vault') ? 'text-primary' : 'text-muted-foreground'}`}>
@@ -461,6 +483,14 @@ export function Navigation() {
                     </Link>
                   </DropdownMenuItem>
                   )}
+                  {showPromocionesNav && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/promociones" className="flex items-center">
+                        <Ticket className="mr-2 h-4 w-4" />
+                        Promociones
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem asChild>
                     <Link href="/bookings" className="flex items-center">
                       <Calendar className="mr-2 h-4 w-4" />
@@ -594,6 +624,11 @@ export function Navigation() {
                     <Link href="/bookings" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Mis Reservas
                     </Link>
+                    {showPromocionesNav && (
+                      <Link href="/promociones" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
+                        Promociones
+                      </Link>
+                    )}
                   </>
                 )}
                 {showAssociatePanelButton && (

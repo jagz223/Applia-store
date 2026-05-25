@@ -16,6 +16,7 @@ import { maybeVerifyProfessional } from "./maybe-verify-professional";
 import { catalogService, promotionalCodeService } from "./services";
 import {
   PromotionalCodeConflictError,
+  PromotionalCodeLockedError,
   PromotionalCodeNotFoundError,
 } from "./services/promotional-code.service";
 import { createPromotionalCodeSchema, updatePromotionalCodeSchema } from "@shared/promotional-code-schema";
@@ -2916,6 +2917,9 @@ export function registerAdminRoutes(app: Express): void {
         return res.status(404).json({ message: error.message });
       }
       if (error instanceof PromotionalCodeConflictError) {
+        return res.status(409).json({ message: error.message });
+      }
+      if (error instanceof PromotionalCodeLockedError) {
         return res.status(409).json({ message: error.message });
       }
       if (error instanceof z.ZodError) {

@@ -21,6 +21,8 @@ const benefitValueField = z.coerce
 
 const basePromotionalCodeFields = z.object({
   code: codeField,
+  /** Si es true, aparece en /promociones y dispara notificaciones push a admins/asociados. */
+  isPublic: z.boolean().optional().default(false),
   expirationType: z.enum(PROMOTIONAL_CODE_EXPIRATION_TYPES, {
     required_error: "El tipo de expiración es obligatorio",
     invalid_type_error: "Tipo de expiración inválido",

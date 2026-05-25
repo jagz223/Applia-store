@@ -20,6 +20,7 @@ import {
 import { calcCommission, calcProviderNet, roundToCents } from "@shared/platform-commission";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { hasAdminPrivileges } from "@shared/roles";
+import { PUBLIC_PROMO_ANNOUNCE_DELAY_MS } from "@shared/public-promotional-notifications";
 import { eq, and, like, desc } from "drizzle-orm";
 import type { IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage } from "./storage-contracts";
 import type { ProfessionalVerification, VerifyingStatus, ProfessionalVerificationState } from "@shared/professional-verification";
@@ -178,6 +179,7 @@ export interface IStorage
     maxUses?: number | null;
     benefitType: string;
     benefitValue: string;
+    isPublic?: boolean;
   }): Promise<any>;
   updatePromotionalCode(
     id: number,
@@ -188,10 +190,22 @@ export interface IStorage
       maxUses?: number | null;
       benefitType: string;
       benefitValue: string;
+      isPublic?: boolean;
     },
   ): Promise<any | undefined>;
   deletePromotionalCode(id: number): Promise<void>;
   incrementPromotionalCodeUsedCount(id: number, userId?: string): Promise<any | undefined>;
+  /** IDs de usuarios admin, soporte TI y asociados (professional) para avisos de promos públicas. */
+  listPublicPromoNotificationRecipientUserIds(): Promise<string[]>;
+  patchPromotionalCodePublicNotifyFields(
+    id: number,
+    patch: {
+      publicAnnouncementDueAt?: Date | null;
+      publicAnnouncementSentAt?: Date | null;
+      publicUserReminders?: Record<string, string>;
+      publicExpiredNotifiedAt?: Date | null;
+    },
+  ): Promise<void>;
 
   // Cupones/Descuentos
   getCoupons(userId: string): Promise<any[]>;
@@ -1956,9 +1970,13 @@ export class InMemoryStorage implements IStorage {
     maxUses?: number | null;
     benefitType: string;
     benefitValue: string;
+    isPublic?: boolean;
   }): Promise<any> {
     const existing = await this.getPromotionalCodeByCode(data.code);
     if (existing) throw new Error("Ya existe un código promocional con este identificador");
+
+    const isPublic = data.isPublic === true;
+    const now = new Date();
 
     const newCode = {
       id: this.promotionalCodeIdCounter++,
@@ -1970,9 +1988,14 @@ export class InMemoryStorage implements IStorage {
       usedByUserCounts: {} as Record<string, number>,
       benefitType: data.benefitType,
       benefitValue: data.benefitValue,
+      isPublic,
       isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
+      publicAnnouncementDueAt: isPublic ? new Date(now.getTime() + PUBLIC_PROMO_ANNOUNCE_DELAY_MS) : null,
+      publicAnnouncementSentAt: null,
+      publicUserReminders: {} as Record<string, string>,
+      publicExpiredNotifiedAt: null,
     };
     this.promotionalCodes.push(newCode);
     return newCode;
@@ -1987,10 +2010,16 @@ export class InMemoryStorage implements IStorage {
       maxUses?: number | null;
       benefitType: string;
       benefitValue: string;
+      isPublic?: boolean;
     },
   ): Promise<any | undefined> {
     const index = this.promotionalCodes.findIndex((p) => p.id === id);
     if (index === -1) return undefined;
+
+    const prev = this.promotionalCodes[index] as { isPublic?: boolean; publicAnnouncementSentAt?: unknown };
+    const isPublic = data.isPublic === true;
+    const becamePublic = isPublic && prev.isPublic !== true;
+    const now = new Date();
 
     this.promotionalCodes[index] = {
       ...this.promotionalCodes[index],
@@ -2000,9 +2029,50 @@ export class InMemoryStorage implements IStorage {
       maxUses: data.maxUses ?? null,
       benefitType: data.benefitType,
       benefitValue: data.benefitValue,
-      updatedAt: new Date(),
+      isPublic,
+      updatedAt: now,
+      ...(becamePublic && !prev.publicAnnouncementSentAt
+        ? {
+            publicAnnouncementDueAt: new Date(now.getTime() + PUBLIC_PROMO_ANNOUNCE_DELAY_MS),
+            publicAnnouncementSentAt: null,
+            publicUserReminders: (prev as { publicUserReminders?: Record<string, string> }).publicUserReminders ?? {},
+          }
+        : {}),
     };
     return this.promotionalCodes[index];
+  }
+
+  async listPublicPromoNotificationRecipientUserIds(): Promise<string[]> {
+    const roles = new Set(["admin", "tisupport", "professional"]);
+    return this.users
+      .filter((u) => {
+        const id = String((u as { id?: string }).id ?? "");
+        if (!id || (u as { deletedAt?: unknown }).deletedAt) return false;
+        const role = String((u as { role?: string }).role ?? "").toLowerCase().replace(/[\s_-]/g, "");
+        return roles.has(role);
+      })
+      .map((u) => String((u as { id: string }).id));
+  }
+
+  async patchPromotionalCodePublicNotifyFields(
+    id: number,
+    patch: {
+      publicAnnouncementDueAt?: Date | null;
+      publicAnnouncementSentAt?: Date | null;
+      publicUserReminders?: Record<string, string>;
+      publicExpiredNotifiedAt?: Date | null;
+    },
+  ): Promise<void> {
+    const index = this.promotionalCodes.findIndex((p) => p.id === id);
+    if (index === -1) return;
+    const row = this.promotionalCodes[index] as Record<string, unknown>;
+    if (patch.publicAnnouncementDueAt !== undefined) row.publicAnnouncementDueAt = patch.publicAnnouncementDueAt;
+    if (patch.publicAnnouncementSentAt !== undefined) row.publicAnnouncementSentAt = patch.publicAnnouncementSentAt;
+    if (patch.publicUserReminders !== undefined) {
+      row.publicUserReminders = { ...(row.publicUserReminders as Record<string, string> | undefined), ...patch.publicUserReminders };
+    }
+    if (patch.publicExpiredNotifiedAt !== undefined) row.publicExpiredNotifiedAt = patch.publicExpiredNotifiedAt;
+    row.updatedAt = new Date();
   }
 
   async deletePromotionalCode(id: number): Promise<void> {

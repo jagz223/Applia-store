@@ -1,6 +1,13 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Loader2, Pencil, Plus, Trash2, Ticket } from "lucide-react";
+import { CalendarIcon, Info, Loader2, Pencil, Plus, Trash2, Ticket, Globe } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  PUBLIC_PROMO_ADMIN_CREATE_HINT,
+  formatPublicPromoInitialWindowRemaining,
+  getPublicPromoAdminEditRestrictions,
+} from "@shared/public-promotional-notifications";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -60,6 +67,7 @@ import type {
 
 type FormState = {
   code: string;
+  isPublic: boolean;
   expirationType: PromotionalCodeExpirationType;
   expiresAt: Date | undefined;
   maxUses: string;
@@ -69,6 +77,7 @@ type FormState = {
 
 const EMPTY_FORM: FormState = {
   code: "",
+  isPublic: false,
   expirationType: "por_tiempo",
   expiresAt: undefined,
   maxUses: "",
@@ -81,6 +90,7 @@ function recordToForm(row: PromotionalCodeRecord): FormState {
   const parsedExpires = parsePromotionalExpiresAt(row.expiresAt);
   return {
     code: row.code,
+    isPublic: row.isPublic === true,
     expirationType,
     expiresAt: expirationType === "por_tiempo" ? (parsedExpires ?? undefined) : undefined,
     maxUses: row.maxUses != null ? String(row.maxUses) : "",
@@ -195,6 +205,29 @@ export function AdminPromotionalCodesPanel({
   );
 
   const expiryNowMs = usePromotionalExpiryClock(enabled, sortedCodes);
+  const [modalNowMs, setModalNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!modalOpen || !editing?.isPublic) return;
+    const tick = () => setModalNowMs(Date.now());
+    tick();
+    const id = window.setInterval(tick, 10_000);
+    return () => window.clearInterval(id);
+  }, [modalOpen, editing?.id, editing?.isPublic]);
+
+  const editNowMs = modalOpen && editing?.isPublic === true ? modalNowMs : expiryNowMs;
+
+  const publicEditRestrictions = useMemo(() => {
+    if (!isEditMode || !editing || editing.isPublic !== true) return null;
+    return getPublicPromoAdminEditRestrictions(editing, editNowMs);
+  }, [isEditMode, editing, editNowMs]);
+
+  const publicOnlyBenefitEditable = publicEditRestrictions?.onlyBenefitEditable ?? false;
+  const publicCodeNameLocked = publicEditRestrictions?.codeNameLocked ?? false;
+  const publicInitialWindowRemaining = useMemo(() => {
+    if (!editing || editing.isPublic !== true || publicCodeNameLocked) return null;
+    return formatPublicPromoInitialWindowRemaining(editing, editNowMs);
+  }, [editing, editNowMs, publicCodeNameLocked]);
 
   const openCreateModal = useCallback(() => {
     setEditing(null);
@@ -233,6 +266,7 @@ export function AdminPromotionalCodesPanel({
 
   const buildPayload = () => ({
     code: form.code.trim(),
+    isPublic: form.isPublic,
     expirationType: form.expirationType,
     expiresAt: form.expirationType === "por_tiempo" ? form.expiresAt : null,
     maxUses:
@@ -315,6 +349,7 @@ export function AdminPromotionalCodesPanel({
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="text-left p-3 font-medium">Código</th>
+                    <th className="text-left p-3 font-medium">Público</th>
                     <th className="text-left p-3 font-medium">Beneficio</th>
                     <th className="text-left p-3 font-medium">Vence en</th>
                     <th className="text-right p-3 font-medium">Acción</th>
@@ -324,6 +359,16 @@ export function AdminPromotionalCodesPanel({
                   {sortedCodes.map((row) => (
                       <tr key={row.id} className="border-b border-border hover:bg-muted/30">
                         <td className="p-3 font-mono font-semibold tracking-wide">{row.code}</td>
+                        <td className="p-3">
+                          {row.isPublic ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+                              <Globe className="h-3.5 w-3.5" />
+                              Sí
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">No</span>
+                          )}
+                        </td>
                         <td className="p-3">{formatPromotionalCodeBenefit(row)}</td>
                         <PromotionalCodeExpiresCell row={row} nowMs={expiryNowMs} />
                         <td className="p-3 text-right">
@@ -370,12 +415,64 @@ export function AdminPromotionalCodesPanel({
             <DialogTitle>{isEditMode ? "Editar código" : "Crear código"}</DialogTitle>
             <DialogDescription>
               {isEditMode
-                ? "Modifica los datos del código promocional."
-                : "Define el código, expiración y beneficio para los clientes."}
+                ? publicOnlyBenefitEditable
+                  ? "Código público: solo puedes ajustar el beneficio (descuento o meses)."
+                  : "Modifica los datos del código promocional."
+                : "Define el código, expiración y beneficio. Si es público, revisa las reglas de edición y notificaciones."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5 py-2">
+            {form.isPublic && !isEditMode ? (
+              <Alert className="border-primary/30 bg-primary/5">
+                <Info className="h-4 w-4 text-primary" />
+                <AlertTitle className="text-sm">Reglas del código público</AlertTitle>
+                <AlertDescription className="text-xs leading-relaxed">
+                  {PUBLIC_PROMO_ADMIN_CREATE_HINT}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {isEditMode && editing?.isPublic === true ? (
+              <Alert
+                className={
+                  publicOnlyBenefitEditable
+                    ? "border-amber-500/35 bg-amber-500/10"
+                    : "border-primary/30 bg-primary/5"
+                }
+              >
+                <Info className="h-4 w-4 shrink-0" />
+                <AlertTitle className="text-sm">
+                  {publicOnlyBenefitEditable ? "Edición limitada" : "Ventana de edición completa"}
+                </AlertTitle>
+                <AlertDescription className="text-xs leading-relaxed space-y-1">
+                  {publicOnlyBenefitEditable ? (
+                    <>
+                      <p>
+                        Pasaron los primeros 15 minutos: el nombre{" "}
+                        <strong className="font-mono">{editing.code}</strong> ya no se puede cambiar.
+                        Solo puedes modificar el beneficio (qué ofrece el código).
+                      </p>
+                      <p className="text-muted-foreground">
+                        Las notificaciones ya se programaron o enviaron a admins y asociados.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        Te quedan <strong>{publicInitialWindowRemaining ?? "pocos minutos"}</strong> para
+                        editar el nombre, la expiración y el beneficio. Después solo podrás cambiar el
+                        beneficio.
+                      </p>
+                      <p className="text-muted-foreground">
+                        A los 15 minutos del alta se envían las notificaciones del panel Promociones.
+                      </p>
+                    </>
+                  )}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
             <div className="space-y-2">
               <Label htmlFor="promo-code">Código</Label>
               <Input
@@ -385,12 +482,53 @@ export function AdminPromotionalCodesPanel({
                 onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
                 className="font-mono uppercase"
                 autoComplete="off"
+                disabled={publicCodeNameLocked}
+                readOnly={publicCodeNameLocked}
               />
+              {publicCodeNameLocked ? (
+                <p className="text-xs text-muted-foreground">
+                  El nombre quedó fijo tras los primeros 15 minutos (código público).
+                </p>
+              ) : null}
               {fieldErrors.code ? (
                 <p className="text-xs text-destructive">{fieldErrors.code}</p>
               ) : null}
             </div>
 
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3">
+              <Checkbox
+                id="promo-is-public"
+                checked={form.isPublic}
+                disabled={isEditMode && editing?.isPublic === true}
+                onCheckedChange={(checked) =>
+                  setForm((f) => ({ ...f, isPublic: checked === true }))
+                }
+              />
+              <div className="space-y-0.5">
+                <Label
+                  htmlFor="promo-is-public"
+                  className={cn(
+                    "font-medium",
+                    isEditMode && editing?.isPublic === true ? "" : "cursor-pointer",
+                  )}
+                >
+                  Código público
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {isEditMode && editing?.isPublic === true
+                    ? "Este código ya es público y no se puede revertir."
+                    : "Visible en Promociones. Notificación a los 15 min; luego solo edición del beneficio."}
+                </p>
+              </div>
+            </div>
+
+            <fieldset
+              disabled={publicOnlyBenefitEditable}
+              className={cn(
+                "space-y-5 min-w-0 border-0 p-0 m-0",
+                publicOnlyBenefitEditable && "opacity-60 pointer-events-none",
+              )}
+            >
             <div className="space-y-3">
               <Label>Tipo de expiración</Label>
               <RadioGroup
@@ -495,6 +633,7 @@ export function AdminPromotionalCodesPanel({
                 ) : null}
               </div>
             )}
+            </fieldset>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
               <div className="space-y-2">
