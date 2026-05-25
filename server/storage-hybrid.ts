@@ -254,4 +254,13 @@ export class HybridStorage {
   incrementPromotionalCodeUsedCount(id: number, userId?: string) {
     return this.memory.incrementPromotionalCodeUsedCount(id, userId);
   }
+  listPublicPromoNotificationRecipientUserIds() {
+    return this.memory.listPublicPromoNotificationRecipientUserIds();
+  }
+  patchPromotionalCodePublicNotifyFields(
+    id: number,
+    patch: Parameters<typeof this.memory.patchPromotionalCodePublicNotifyFields>[1],
+  ) {
+    return this.memory.patchPromotionalCodePublicNotifyFields(id, patch);
+  }
 }

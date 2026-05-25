@@ -27,7 +27,7 @@ import {
 } from "./service-booking-chat";
 import { calcCommission, calcProviderNet, commissionDisplayPercents } from "@shared/platform-commission";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
-import { isFullAdmin } from "@shared/roles";
+import { hasAdminPrivileges, isFullAdmin, normalizeRoleCode } from "@shared/roles";
 import { isWalletAtOrBelowDebtCap, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { isOffPlatformServiceBookingPayment, serviceBookingPaymentLabel } from "@shared/booking-payment";
 import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
@@ -2078,6 +2078,39 @@ export async function registerGenFebRoutes(
   });
   
   // ---------- CÓDIGOS PROMOCIONALES / TICKETS ----------
+
+  // GET /api/promotional-codes/public — Vitrina de códigos públicos activos (admin / asociado)
+  app.get("/api/promotional-codes/public", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = req.user?.id as string | undefined;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const role = req.user?.role as string | undefined;
+      const canAdmin = hasAdminPrivileges(role);
+      const isProfessional = normalizeRoleCode(role) === "professional";
+      let hasProvider = false;
+      if (!canAdmin && !isProfessional) {
+        const provider = await genFebStorage.getProviderByUserId(userId);
+        hasProvider = !!provider;
+      }
+      if (!canAdmin && !isProfessional && !hasProvider) {
+        return res.status(403).json({ message: "No tienes acceso al panel de promociones" });
+      }
+
+      const highlightRaw = req.query.promo ?? req.query.highlight;
+      const highlightPromoId =
+        highlightRaw != null && String(highlightRaw).trim() !== ""
+          ? Number(highlightRaw)
+          : undefined;
+      const promos = await promotionalCodeService.listPublicPromotionalCodesForDisplay(
+        Number.isFinite(highlightPromoId) && highlightPromoId! > 0 ? highlightPromoId : undefined,
+      );
+      return res.json(promos);
+    } catch (error) {
+      console.error("Error listing public promotional codes:", error);
+      return res.status(500).json({ message: "Error al cargar promociones" });
+    }
+  });
 
   // POST /api/promotional-codes/validate — Validar código en flujo de pago (cliente)
   app.post("/api/promotional-codes/validate", authenticateJWT, async (req: any, res) => {

@@ -97,8 +97,12 @@ app.use((req, res, next) => {
     }
     const projectId = process.env.FIREBASE_PROJECT_ID || "(no set)";
     log(`Firestore en uso: proyecto "${projectId}" (cuenta: ${process.env.FIREBASE_CLIENT_EMAIL || "?"})`);
+    const { startPublicPromotionalCodeNotificationScheduler } = await import("./public-promotional-code-notify");
+    startPublicPromotionalCodeNotificationScheduler();
   } else {
     log("Firestore no configurado — almacenamiento en memoria (usuarios, wallet y reservas se pierden al reiniciar el servidor)");
+    const { startPublicPromotionalCodeNotificationScheduler } = await import("./public-promotional-code-notify");
+    startPublicPromotionalCodeNotificationScheduler();
   }
 
   await registerRoutes(httpServer, app);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, Link, useSearch } from "wouter";
 import { navigate } from "wouter/use-browser-location";
-import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield, ShieldCheck, ShieldAlert, Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,15 @@ import {
   centralAffiliationNotificationPath,
 } from "@/lib/central-affiliation-notification-path";
 import { NOTIFICATION_TYPE_ROLE_CHANGED } from "@shared/role-change-notification";
+import { cn } from "@/lib/utils";
+import {
+  PUBLIC_PROMO_NOTIFICATION_CTA,
+  getPublicPromoNotificationDescription,
+  getPublicPromoNotificationPath,
+  getPublicPromoNotificationTitle,
+  isPublicPromoNotificationType,
+  shouldShowPublicPromoInNotificationList,
+} from "@/lib/public-promo-notification-ui";
 
 const PAGE_SIZE = 10;
 
@@ -163,6 +172,9 @@ function getNotificationPath(notification: { id?: string; type: string; data?: a
       return typeof u === "string" && u.startsWith("/") ? u : "/settings";
     }
     default:
+      if (isPublicPromoNotificationType(notification.type)) {
+        return getPublicPromoNotificationPath(data);
+      }
       return "/dashboard";
   }
 }
@@ -209,6 +221,9 @@ function getIcon(type: string, data?: any) {
     case "vehicle_change_request_rejected":
       return <Bell className="h-4 w-4 text-amber-500" />;
     default:
+      if (isPublicPromoNotificationType(type)) {
+        return <Ticket className="h-4 w-4 text-orange-500" />;
+      }
       return <Bell className="h-4 w-4 text-gray-500" />;
   }
 }
@@ -220,6 +235,9 @@ function truncateText(s: string, max: number) {
 
 function getTitle(type: string, data?: any, conversationSenderName?: string): string {
   const d = data ?? {};
+  if (isPublicPromoNotificationType(type)) {
+    return getPublicPromoNotificationTitle(type, d);
+  }
   if (type === "booking" && d.type === "new_booking") return "Nueva solicitud de reserva";
   if (type === "booking" && d.type === "booking_update") {
     const status = (d.booking?.status ?? d.booking?.status) as string | undefined;
@@ -290,6 +308,9 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
 
 function getDescription(type: string, data?: any, conversationSenderName?: string): string | null {
   const d = data ?? {};
+  if (isPublicPromoNotificationType(type)) {
+    return getPublicPromoNotificationDescription(type, d);
+  }
   // Booking update (Socket.io) con estado real
   if (type === "booking" && d.type === "booking_update") {
     const status = d.booking?.status as string | undefined;
@@ -524,7 +545,15 @@ export default function Notifications() {
     navigate("/notifications", { replace: true });
   };
 
-  const filtered = useMemo(() => (unreadOnly ? notifications.filter((n) => !n.read) : notifications), [notifications, unreadOnly]);
+  const filtered = useMemo(() => {
+    const base = notifications.filter((n) => {
+      if (isPublicPromoNotificationType(n.type)) {
+        return shouldShowPublicPromoInNotificationList(n.type);
+      }
+      return true;
+    });
+    return unreadOnly ? base.filter((n) => !n.read) : base;
+  }, [notifications, unreadOnly]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(Math.max(1, page), totalPages);
 
@@ -625,6 +654,7 @@ export default function Notifications() {
                       ? senderNameByConversationId.get(Number(convId))
                       : undefined;
                   })();
+                const isPromo = isPublicPromoNotificationType(notification.type);
                 const title = getTitle(notification.type, data, conversationSenderName);
                 const detail = getDescription(notification.type, data, conversationSenderName) ?? undefined;
 
@@ -633,15 +663,25 @@ export default function Notifications() {
                     key={notification.id}
                     type="button"
                     onClick={() => handleOpenNotification(notification)}
-                    className={`w-full text-left p-3 rounded-lg border transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-primary/20 ${
-                      notification.read ? "bg-muted/50" : "bg-muted"
-                    }`}
+                    className={cn(
+                      "w-full text-left p-3 rounded-lg border transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-primary/20",
+                      notification.read ? "bg-muted/50" : "bg-muted",
+                      isPromo && "border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/15 focus:ring-orange-500/30",
+                      isPromo && !notification.read && "ring-1 ring-orange-500/35",
+                    )}
                   >
                     <div className="flex items-start gap-2">
                       {getIcon(notification.type, data)}
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm">{title}</p>
+                        <p className={cn("font-medium text-sm", isPromo && "text-orange-600 dark:text-orange-400")}>
+                          {title}
+                        </p>
                         {detail && <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>}
+                        {isPromo && (
+                          <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 mt-1.5">
+                            {PUBLIC_PROMO_NOTIFICATION_CTA}
+                          </p>
+                        )}
                         <p className="text-xs text-muted-foreground mt-1">
                           {notification.timestamp instanceof Date
                             ? notification.timestamp.toLocaleString()

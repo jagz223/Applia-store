@@ -186,6 +186,7 @@ export const promotionalCodes = pgTable("promotional_codes", {
   usedByUserCounts: jsonb("used_by_user_counts").$type<Record<string, number>>().default({}),
   benefitType: varchar("benefit_type", { length: 20 }).notNull(), // descuento | meses_gratuitos
   benefitValue: decimal("benefit_value", { precision: 10, scale: 2 }).notNull(),
+  isPublic: boolean("is_public").default(false),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

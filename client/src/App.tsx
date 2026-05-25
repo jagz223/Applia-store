@@ -47,6 +47,7 @@ const Admin = lazy(() => import("@/pages/Admin"));
 import ProfessionalDashboard from "@/pages/ProfessionalDashboard";
 import PaymentVoucher from "@/pages/PaymentVoucher";
 import Bookings from "@/pages/Bookings";
+import Promociones from "@/pages/Promociones";
 import Recharge from "@/pages/Recharge";
 import RechargeConfirm from "@/pages/RechargeConfirm";
 import Movimientos from "@/pages/Movimientos";
@@ -146,6 +147,7 @@ function MainRouter() {
       )}
       <Route path="/settings" component={Settings} />
       <Route path="/notifications" component={Notifications} />
+      <Route path="/promociones" component={Promociones} />
       <Route path="/professional/verify" component={VerifyProfessional} />
       <Route path="/professional/verify/payment" component={VerifyProfessionalPayment} />
       <Route path="/politics" component={Politics} />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2, Building2 } from "lucide-react";
+import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2, Building2, Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,15 @@ import {
   centralAffiliationNotificationPath,
 } from "@/lib/central-affiliation-notification-path";
 import { NOTIFICATION_TYPE_ROLE_CHANGED } from "@shared/role-change-notification";
+import { cn } from "@/lib/utils";
+import {
+  PUBLIC_PROMO_NOTIFICATION_CTA,
+  getPublicPromoNotificationDescription,
+  getPublicPromoNotificationPath,
+  getPublicPromoNotificationTitle,
+  isPublicPromoNotificationType,
+  shouldShowPublicPromoInNotificationList,
+} from "@/lib/public-promo-notification-ui";
 
 /** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificaci?n (con highlight para resaltar el elemento). */
 function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
@@ -157,6 +166,9 @@ function getNotificationPath(notification: { id?: string; type: string; data?: a
       return typeof u === "string" && u.startsWith("/") ? u : "/settings";
     }
     default:
+      if (isPublicPromoNotificationType(notification.type)) {
+        return getPublicPromoNotificationPath(data);
+      }
       return "/dashboard";
   }
 }
@@ -170,7 +182,16 @@ export function NotificationBell() {
   const [page, setPage] = useState(1);
 
   const PAGE_SIZE = 10;
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(notifications.length / PAGE_SIZE)), [notifications.length]);
+
+  const visibleNotifications = useMemo(
+    () => notifications.filter((n) => shouldShowPublicPromoInNotificationList(n.type)),
+    [notifications],
+  );
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(visibleNotifications.length / PAGE_SIZE)),
+    [visibleNotifications.length],
+  );
   const currentPage = Math.min(Math.max(1, page), totalPages);
 
   const { data: conversations } = useConversations(!!isAuthenticated);
@@ -188,8 +209,8 @@ export function NotificationBell() {
   const pageNotifications = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
     const end = start + PAGE_SIZE;
-    return notifications.slice(start, end);
-  }, [notifications, currentPage]);
+    return visibleNotifications.slice(start, end);
+  }, [visibleNotifications, currentPage]);
 
   useEffect(() => {
     if (!open) return;
@@ -247,7 +268,7 @@ export function NotificationBell() {
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = visibleNotifications.filter((n) => !n.read).length;
 
   const getIcon = (type: string) => {
     switch (type) {
@@ -292,11 +313,17 @@ export function NotificationBell() {
       case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED:
         return <Building2 className="h-4 w-4 text-amber-600" />;
       default:
+        if (isPublicPromoNotificationType(type)) {
+          return <Ticket className="h-4 w-4 text-orange-500" />;
+        }
         return <Bell className="h-4 w-4 text-gray-500" />;
     }
   };
 
   const getDescription = (type: string, data?: any) => {
+    if (isPublicPromoNotificationType(type)) {
+      return getPublicPromoNotificationDescription(type, data);
+    }
     if (type === "booking" && data?.type === "new_booking") {
       return "Tienes una nueva solicitud de reserva. Revisa el detalle en tu Panel Asociado.";
     }
@@ -440,6 +467,9 @@ export function NotificationBell() {
   };
 
   const getTitle = (type: string, data?: any) => {
+    if (isPublicPromoNotificationType(type)) {
+      return getPublicPromoNotificationTitle(type, data);
+    }
     if (type === "booking" && data?.type === "new_booking") return "Nueva solicitud de reserva";
     if (type === "booking" && data?.type === "booking_update") {
       const status = (data as any)?.booking?.status as string | undefined;
@@ -543,7 +573,7 @@ export function NotificationBell() {
       <PopoverContent className="w-80" align="end" sideOffset={8}>
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-semibold">Notificaciones</h3>
-          {notifications.length > 0 && (
+          {visibleNotifications.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
@@ -556,7 +586,7 @@ export function NotificationBell() {
           )}
         </div>
 
-        {notifications.length === 0 ? (
+        {visibleNotifications.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Bell className="h-8 w-8 mx-auto mb-2 opacity-50" />
             <p className="text-sm">No hay notificaciones</p>
@@ -564,24 +594,36 @@ export function NotificationBell() {
           </div>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {pageNotifications.map((notification) => (
+            {pageNotifications.map((notification) => {
+              const isPromo = isPublicPromoNotificationType(notification.type);
+              const title = getTitle(notification.type, notification.data);
+              const description = getDescription(notification.type, notification.data);
+              return (
               <button
                 key={notification.id}
                 type="button"
                 onClick={() => handleNotificationClick(notification)}
-                className={`w-full text-left p-3 rounded-lg border transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-primary/20 ${
-                  notification.read ? "bg-muted/50" : "bg-muted"
-                }`}
+                className={cn(
+                  "w-full text-left p-3 rounded-lg border transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-primary/20",
+                  notification.read ? "bg-muted/50" : "bg-muted",
+                  isPromo && "border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/15 focus:ring-orange-500/30",
+                  isPromo && !notification.read && "ring-1 ring-orange-500/35",
+                )}
               >
                 <div className="flex items-start gap-2">
                   {getIcon(notification.type)}
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm">
-                      {getTitle(notification.type, notification.data)}
+                    <p className={cn("font-medium text-sm", isPromo && "text-orange-600 dark:text-orange-400")}>
+                      {title}
                     </p>
-                    {getDescription(notification.type, notification.data) && (
+                    {description && (
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {getDescription(notification.type, notification.data)}
+                        {description}
+                      </p>
+                    )}
+                    {isPromo && (
+                      <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 mt-1.5">
+                        {PUBLIC_PROMO_NOTIFICATION_CTA}
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground mt-1">
@@ -595,11 +637,12 @@ export function NotificationBell() {
                   )}
                 </div>
               </button>
-            ))}
+            );
+            })}
           </div>
         )}
 
-        {notifications.length > PAGE_SIZE && currentPage === 1 && (
+        {visibleNotifications.length > PAGE_SIZE && currentPage === 1 && (
           <div className="mt-2 flex items-center justify-center">
             <button
               type="button"
@@ -607,12 +650,12 @@ export function NotificationBell() {
               className="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
               aria-label="Ver mas notificaciones"
             >
-              +{notifications.length - PAGE_SIZE} notificaciones mas
+              +{visibleNotifications.length - PAGE_SIZE} notificaciones mas
             </button>
           </div>
         )}
 
-        {notifications.length > PAGE_SIZE && totalPages > 1 && (
+        {visibleNotifications.length > PAGE_SIZE && totalPages > 1 && (
           <div className="mt-3 flex items-center justify-between gap-2">
             <Button variant="ghost" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
               Anterior
