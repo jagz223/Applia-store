@@ -197,7 +197,7 @@ export function Navigation() {
   const associateActivityHref = "/professional-dashboard";
 
   const NavLinks = () => (
-    <div className="flex items-center gap-4 xl:gap-5 flex-nowrap">
+    <div className="flex items-center gap-6 flex-nowrap">
       <Link href={homeNavHref} className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary ${isActive(homeNavHref) || (homeNavHref === '/' && isActive('/')) ? 'text-primary' : 'text-muted-foreground'}`}>
         {homeNavLabel}
       </Link>
@@ -303,10 +303,10 @@ export function Navigation() {
   return (
     <>
     <nav className="sticky top-0 z-50 w-full border-b border-primary/20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="container flex h-14 min-[400px]:h-16 max-w-7xl items-center justify-between gap-1 px-2 min-[400px]:px-4 sm:px-6 lg:px-8 mx-auto min-w-0">
+      <div className="mx-auto flex h-14 min-[400px]:h-16 w-full max-w-[100rem] min-w-0 items-center justify-between gap-2 px-2 min-[400px]:px-4 sm:px-5 xl:px-6">
         
-        {/* Logo & Desktop Nav */}
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center lg:gap-4">
+        {/* Marca + enlaces (agrupados como el diseño original) */}
+        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4 lg:gap-8">
           <Link
             href={exploreCategoryDisplayName ? "/explore" : "/"}
             className="flex w-max shrink-0 items-center gap-1.5 min-[400px]:gap-2"
@@ -325,7 +325,7 @@ export function Navigation() {
                 decoding="async"
               />
             </span>
-            <span className="inline-block whitespace-nowrap text-left text-sm font-bold font-display text-primary tracking-wider min-[400px]:text-base sm:text-lg lg:text-xl">
+            <span className="inline-block whitespace-nowrap text-left text-sm font-bold font-display text-primary tracking-wider min-[400px]:text-base lg:text-lg xl:text-xl">
               {navbarBrandLabel}
             </span>
           </Link>
@@ -334,13 +334,13 @@ export function Navigation() {
           </div>
         </div>
 
-        {/* Right Side Actions */}
-        <div className="flex items-center gap-1 min-[400px]:gap-2 sm:gap-3 shrink-0 min-w-0">
+        {/* Acciones derecha */}
+        <div className="flex shrink-0 items-center gap-1 min-[400px]:gap-1.5 sm:gap-2 lg:justify-end">
           
           {/* Language Selector */}
-          <Button variant="ghost" size="sm" className="hidden sm:flex items-center gap-2 text-muted-foreground hover:text-primary">
-                <Globe className="h-4 w-4" />
-                <span>ES</span>
+          <Button variant="ghost" size="sm" className="hidden sm:flex items-center gap-1.5 px-2 text-muted-foreground hover:text-primary" title="Idioma: español">
+                <Globe className="h-4 w-4 shrink-0" />
+                <span className="hidden xl:inline">ES</span>
               </Button>
 
           <ThemeToggleHeaderButton className="hidden lg:flex" />
@@ -374,6 +374,17 @@ export function Navigation() {
           
           {isAuthenticated && <NotificationBell />}
           
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className={`hidden lg:flex xl:hidden items-center gap-2 transition-colors ${isDownloading ? 'text-green-500 bg-green-500/10' : 'text-mango-orange hover:bg-mango-orange/10'}`}
+              asChild
+              onClick={handleDownloadClick}
+            >
+              <a href="/Genfeb.apk" download="Genfeb.apk" title="Descargar app Android">
+                <Smartphone className="h-4 w-4" />
+              </a>
+            </Button>
           <motion.div
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -381,7 +392,7 @@ export function Navigation() {
             <Button 
               variant="ghost" 
               size="sm" 
-              className={`hidden sm:flex items-center gap-2 transition-colors ${isDownloading ? 'text-green-500 bg-green-500/10' : 'text-mango-orange hover:bg-mango-orange/10'}`}
+              className={`hidden xl:flex items-center gap-2 transition-colors ${isDownloading ? 'text-green-500 bg-green-500/10' : 'text-mango-orange hover:bg-mango-orange/10'}`}
               asChild
               onClick={handleDownloadClick}
             >
