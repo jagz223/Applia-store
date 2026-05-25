@@ -3,12 +3,8 @@
 export const GO_THREE_SERVICES_REMINDER_TITLE = "Car Go";
 
 export const GO_THREE_SERVICES_REMINDER_LEAD =
-  "Si eliges Car Go, con la misma cuenta puedes hacer servicios de taxi, delivery y marketplace.";
+  "Si eliges Car Go, con la misma cuenta puedes ofrecer servicios de taxi y de envíos (delivery).";
 
 export const GO_THREE_SERVICE_TAXI = "Taxi";
 
 export const GO_THREE_SERVICE_DELIVERY = "Delivery";
-
-export const GO_THREE_SERVICE_MARKETPLACE = "Marketplace";
-
-export const GO_THREE_SERVICE_MARKETPLACE_NOTE = "(próximamente)";

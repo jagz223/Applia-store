@@ -2,18 +2,12 @@ import {
   GO_THREE_SERVICES_REMINDER_LEAD,
   GO_THREE_SERVICES_REMINDER_TITLE,
   GO_THREE_SERVICE_DELIVERY,
-  GO_THREE_SERVICE_MARKETPLACE,
-  GO_THREE_SERVICE_MARKETPLACE_NOTE,
   GO_THREE_SERVICE_TAXI,
 } from "@shared/go-three-services-reminder-copy";
 
 /** Qué incluye Car Go al registrarse como conductor (solo informativo). */
 export function GoThreeServicesReminder() {
-  const items = [
-    GO_THREE_SERVICE_TAXI,
-    GO_THREE_SERVICE_DELIVERY,
-    `${GO_THREE_SERVICE_MARKETPLACE} ${GO_THREE_SERVICE_MARKETPLACE_NOTE}`,
-  ];
+  const items = [GO_THREE_SERVICE_TAXI, GO_THREE_SERVICE_DELIVERY];
   return (
     <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-2">
       <p className="font-semibold text-foreground">{GO_THREE_SERVICES_REMINDER_TITLE}</p>

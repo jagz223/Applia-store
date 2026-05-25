@@ -426,7 +426,7 @@ export function AdminPromotionalCodesPanel({
             {form.expirationType === "por_tiempo" ? (
               <div className="space-y-2">
                 <Label>Fecha y hora de expiración</Label>
-                <Popover>
+                <Popover modal>
                   <PopoverTrigger asChild>
                     <Button
                       type="button"
@@ -442,7 +442,11 @@ export function AdminPromotionalCodesPanel({
                         : "Elegir fecha y hora"}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 bg-popover border-border" align="start">
+                  <PopoverContent
+                    layer="modal"
+                    className="w-auto p-0 bg-popover border-border"
+                    align="start"
+                  >
                     <Calendar
                       mode="single"
                       selected={

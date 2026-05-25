@@ -12,8 +12,8 @@ export type ProviderCategoryRef = {
 export type CategorySlugRow = { id: number; slug?: string | null };
 
 /**
- * Conductor Go con vehículo: categoría o marcas taxi (`transport`), delivery o marketplace.
- * @see MOBILITY_GO_PROVIDER_SLUGS
+ * Conductor Go con vehículo: categoría o marcas Car Go (`transport`, `delivery`).
+ * @see CAR_GO_BRAND_SLUGS
  */
 export function isGoVehicleProvider(
   provider: ProviderCategoryRef | null | undefined,

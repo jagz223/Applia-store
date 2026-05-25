@@ -66,7 +66,7 @@ import { GoShellLayout } from "@/components/go/GoShellLayout";
 import { useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { GoCategoryGate } from "@/components/go/GoCategoryGate";
 import { GoActiveRideResume } from "@/components/go/GoActiveRideResume";
-import GoShop from "@/pages/go/GoShop";
+import Marketplace from "@/pages/Marketplace";
 import GoPack from "@/pages/go/GoPack";
 import PackRide from "@/pages/PackRide";
 import DriverPackGenfeb from "@/pages/DriverPackGenfeb";
@@ -81,6 +81,14 @@ function MainRouter() {
       <Route path="/" component={HomePage} />
       <Route path="/explore" component={Explore} />
       <Route path="/categories" component={Categories} />
+      <Route path="/marketplace">
+        {() => (
+          <GoCategoryGate slug="marketplace">
+            <Marketplace />
+          </GoCategoryGate>
+        )}
+      </Route>
+      <Route path="/go/shop">{() => <Redirect to="/marketplace" />}</Route>
       <Route path="/taxi">{() => <TaxiRide />}</Route>
       {/* Rutas legacy (mantener por compatibilidad, pero el shell nuevo vive en /go/*). */}
       <Route path="/driver/go-genfeb" component={DriverGoGenfebWithGoChat} />
@@ -172,11 +180,6 @@ function GoRouter() {
       <PackDriverSettings />
     </GoCategoryGate>
   );
-  const GoShopRoute = () => (
-    <GoCategoryGate slug="marketplace">
-      <GoShop />
-    </GoCategoryGate>
-  );
   const GoPackRoute = () => (
     <GoCategoryGate slug="delivery">
       <PackRide />
@@ -196,7 +199,6 @@ function GoRouter() {
       <Route path="/go/cargo/driver">{() => <Redirect to="/go/taxi/driver" />}</Route>
       <Route path="/go/cargo/driver/settings">{() => <Redirect to="/go/taxi/driver/settings" />}</Route>
 
-      <Route path="/go/shop" component={GoShopRoute} />
       {/* Delivery canonical */}
       <Route path="/go/delivery" component={GoPackRoute} />
       <Route path="/go/delivery/driver" component={GoPackDriver} />
@@ -214,7 +216,11 @@ function GoRouter() {
 
 function App() {
   const [location] = useLocation();
-  const inGoShell = location === "/go" || location.startsWith("/go/");
+  const pathnameForShell = location.split("?")[0] ?? location;
+  const inGoShell =
+    (pathnameForShell === "/go" || pathnameForShell.startsWith("/go/")) &&
+    pathnameForShell !== "/go/shop" &&
+    !pathnameForShell.startsWith("/go/shop/");
   const pathname = location.split("?")[0] ?? location;
   const inCentralPanel = pathname === "/central" || pathname.startsWith("/central/");
   const compactViewport = useGoCompactViewport();

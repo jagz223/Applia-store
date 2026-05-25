@@ -242,8 +242,8 @@ export default function BecomePro() {
       : undefined;
   const isCarGo = selectedCategorySlug === "transport";
   const isPackGo = selectedCategorySlug === "delivery";
-  const isShopGo = selectedCategorySlug === "marketplace";
-  const isGoDriverCategory = isCarGo || isPackGo || isShopGo;
+  const isMarketplaceCategory = selectedCategorySlug === "marketplace";
+  const isGoDriverCategory = isCarGo || isPackGo;
   const isTradeCategory = isTradeListingCategorySlug(selectedCategorySlug);
   const isProfessionalCategory = selectedCategorySlug === "professional";
   const isFocusCatalogCategory = isProfessionalCategory || isTradeCategory;
@@ -404,8 +404,7 @@ export default function BecomePro() {
 
   async function onSubmit(data: BecomeProForm) {
     const slug = data.categoryId != null ? categories?.find((c) => c.id === data.categoryId)?.slug : undefined;
-    const goDriver =
-      slug === "transport" || slug === "delivery" || slug === "marketplace";
+    const goDriver = slug === "transport" || slug === "delivery";
 
     if (goDriver && belongToCentral && !pendingCentralCompanyId) {
       toast({
@@ -483,7 +482,8 @@ export default function BecomePro() {
           category: slug ?? data.category ?? undefined,
           ...(goDriver
             ? {
-                goBrands: ["transport", "delivery", "marketplace"],
+                goBrands:
+                  slug === "delivery" ? (["delivery"] as const) : (["transport", "delivery"] as const),
               }
             : {}),
           subcategoryId: data.subcategoryId ?? undefined,
@@ -535,7 +535,7 @@ export default function BecomePro() {
             ? `Registro · ${getCategoryDisplayName({ slug: "transport" })}`
             : isPackGo
               ? `Registro · ${getCategoryDisplayName({ slug: "delivery" })}`
-              : isShopGo
+              : isMarketplaceCategory
                 ? `Registro · ${getCategoryDisplayName({ slug: "marketplace" })}`
                 : "Datos de asociado"}
         </h1>

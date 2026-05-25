@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { insertProviderVehicleSchema, type VehicleType } from "@shared/vehicle-schema";
-import { isMobilityGoDriverVehicleCategorySlug, MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
+import { CAR_GO_BRAND_SLUGS, isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categories";
 import { useCategories, useCurrentProvider } from "@/hooks/use-mango-data";
 import { useNhtsaMakes, useNhtsaModelsForMake, useNhtsaYearsForMakeModel } from "@/hooks/use-nhtsa-vpic";
 import { VehicleSearchCombobox } from "@/components/vehicle/VehicleSearchCombobox";
@@ -122,7 +122,7 @@ export function ProviderVehicleChangeRequestDialog({ open, onOpenChange, vehicle
   const [sending, setSending] = useState(false);
 
   const goCategories = useMemo(() => {
-    const allowed = new Set(MOBILITY_GO_PROVIDER_SLUGS.map((s) => s.toLowerCase()));
+    const allowed = new Set(CAR_GO_BRAND_SLUGS.map((s) => s.toLowerCase()));
     return categories.filter((c) => allowed.has(String(c.slug ?? "").trim().toLowerCase()));
   }, [categories]);
 
@@ -147,8 +147,7 @@ export function ProviderVehicleChangeRequestDialog({ open, onOpenChange, vehicle
   );
   const isTransport = selectedSlug === "transport";
   const isDelivery = selectedSlug === "delivery";
-  const isMarketplace = selectedSlug === "marketplace";
-  const useMobilityVehicleCatalog = isTransport || isDelivery || isMarketplace;
+  const useMobilityVehicleCatalog = isTransport || isDelivery;
 
   const { data: nhtsaMakes = [], isLoading: nhtsaMakesLoading, isError: nhtsaMakesError } = useNhtsaMakes();
   const { data: nhtsaModels = [], isLoading: nhtsaModelsLoading, isError: nhtsaModelsError } =
@@ -228,8 +227,6 @@ export function ProviderVehicleChangeRequestDialog({ open, onOpenChange, vehicle
     } else if (slug === "delivery") {
       brands.add("delivery");
       if (alsoOtherGo) brands.add("transport");
-    } else if (slug === "marketplace") {
-      brands.add("marketplace");
     }
     return Array.from(brands);
   };
@@ -253,7 +250,7 @@ export function ProviderVehicleChangeRequestDialog({ open, onOpenChange, vehicle
       toast({
         variant: "destructive",
         title: "Categoría inválida",
-        description: "Elige taxi, delivery o marketplace.",
+        description: "Elige taxi o delivery.",
       });
       return;
     }
@@ -323,7 +320,7 @@ export function ProviderVehicleChangeRequestDialog({ open, onOpenChange, vehicle
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            {(isTransport || isDelivery || isMarketplace) && (
+            {(isTransport || isDelivery) && (
               <FormItem>
                 <FormLabel>Tipo de oferta (subcategoría)</FormLabel>
                 <Select

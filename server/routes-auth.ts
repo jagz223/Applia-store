@@ -361,13 +361,13 @@ export async function registerAuthRoutes(
         const categories = await genFebStorage.getCategories();
         if (!isGoVehicleProvider(provider, categories)) {
           return res.status(403).json({
-            message: "Solo conductores taxi, delivery o marketplace pueden solicitar cambio de vehículo.",
+            message: "Solo conductores taxi o delivery pueden solicitar cambio de vehículo.",
           });
         }
         const cat = categories.find((c) => c.id === data.proposal.categoryId);
         const slug = String((cat as { slug?: string } | undefined)?.slug ?? "");
         if (!isMobilityGoDriverVehicleCategorySlug(slug)) {
-          return res.status(400).json({ message: "La categoría debe ser taxi, delivery o marketplace." });
+          return res.status(400).json({ message: "La categoría debe ser taxi o delivery." });
         }
       }
       const created = await genFebStorage.createAccountChangeRequest(
