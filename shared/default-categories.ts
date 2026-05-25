@@ -21,13 +21,22 @@ export function effectiveHiddenCategorySlugs(apiHidden: string[] | undefined | n
 }
 
 /** Nombres de marca para mostrar en la UI (Familia GenFeb). Solo afecta la visualización. */
-/** Car / Shop / Pack Go tienen vistas propias (Go); no deben mezclarse en el catálogo general de Explorar. */
-export const MOBILITY_GO_PROVIDER_SLUGS = ["transport", "marketplace", "delivery"] as const;
+/** Slug de categoría Marketplace (plataforma propia; no forma parte de Car Go). */
+export const MARKETPLACE_CATEGORY_SLUG = "marketplace" as const;
 
-/** Taxi, delivery o marketplace: categorías de proveedor Go que llevan datos de vehículo / flota. */
+/**
+ * Marcas dentro de Car Go (misma familia conductor: taxi + envíos).
+ * Marketplace quedó fuera; ver {@link MARKETPLACE_CATEGORY_SLUG}.
+ */
+export const CAR_GO_BRAND_SLUGS = ["transport", "delivery"] as const;
+
+/** @deprecated Usar {@link CAR_GO_BRAND_SLUGS}. */
+export const MOBILITY_GO_PROVIDER_SLUGS = CAR_GO_BRAND_SLUGS;
+
+/** Taxi o delivery: categorías de proveedor Go que llevan datos de vehículo / flota. */
 export function isMobilityGoDriverVehicleCategorySlug(slug: string | null | undefined): boolean {
   const s = String(slug ?? "").trim().toLowerCase();
-  return (MOBILITY_GO_PROVIDER_SLUGS as readonly string[]).includes(s);
+  return (CAR_GO_BRAND_SLUGS as readonly string[]).includes(s);
 }
 
 /**
@@ -86,7 +95,7 @@ export const CATEGORY_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   technical: "Man Go",
   professional: "Pro Go",
   delivery: "Delivery",
-  marketplace: "Shop Go",
+  marketplace: "Marketplace",
   transport: "Car Go",
 } as const;
 

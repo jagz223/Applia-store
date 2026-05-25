@@ -180,8 +180,8 @@ export function buildProviderDetailPatchBody(
       thirdCategoryId: p.thirdCategoryId,
       subcategoryId: p.subcategoryId,
       goBrands: p.goBrands.length
-        ? p.goBrands.filter((b): b is "transport" | "delivery" | "marketplace" =>
-            b === "transport" || b === "delivery" || b === "marketplace",
+        ? p.goBrands.filter((b): b is "transport" | "delivery" =>
+            b === "transport" || b === "delivery",
           )
         : null,
       preparationLevel: p.preparationLevel || null,

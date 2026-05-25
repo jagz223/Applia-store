@@ -1,13 +1,14 @@
 /**
- * Módulos Go habilitados para un proveedor.
+ * Marcas Car Go habilitadas para un proveedor (`transport`, `delivery`).
  *
  * Modelo:
- * - Históricamente, `providers.category/categoryId` era UNA sola categoría (ej. transport = Car Go).
- * - Para permitir que un conductor Taxi también use Delivery / Pedidos, guardamos un arreglo opcional
- *   `goBrands: string[]` en el perfil del proveedor (Firestore/memoria; no requiere migración SQL).
+ * - `providers.category/categoryId` = categoría principal (p. ej. transport, delivery, marketplace).
+ * - `goBrands` = módulos Car Go activos (taxi y/o envíos). Marketplace no va en `goBrands`.
  *
- * La UI arma la navegación y permisos usando esta función.
+ * La UI arma la navegación y permisos usando estas funciones.
  */
+import { CAR_GO_BRAND_SLUGS, MARKETPLACE_CATEGORY_SLUG } from "./default-categories";
+import { sanitizeCarGoBrands, type CarGoBrandSlug } from "./go-brands";
 export type ProviderGoRef = {
   category?: string | null;
   categoryId?: number | null;
@@ -22,13 +23,25 @@ function normalizeSlug(v: unknown): string {
 
 export function providerHasGoBrand(
   provider: ProviderGoRef | null | undefined,
-  slug: "transport" | "delivery" | "marketplace",
+  slug: CarGoBrandSlug,
   categories?: readonly CategorySlugRow[]
 ): boolean {
   if (!provider) return false;
   const target = normalizeSlug(slug);
+  if (target === MARKETPLACE_CATEGORY_SLUG) {
+    const direct = normalizeSlug(provider.category);
+    if (direct === MARKETPLACE_CATEGORY_SLUG) return true;
+    if (categories != null && provider.categoryId != null) {
+      const id = Number(provider.categoryId);
+      if (Number.isFinite(id)) {
+        const row = categories.find((c) => c.id === id);
+        if (normalizeSlug(row?.slug) === MARKETPLACE_CATEGORY_SLUG) return true;
+      }
+    }
+    return false;
+  }
 
-  const brands = Array.isArray(provider.goBrands) ? provider.goBrands.map(normalizeSlug).filter(Boolean) : [];
+  const brands = sanitizeCarGoBrands(provider.goBrands).map(normalizeSlug);
   if (brands.includes(target)) return true;
 
   const direct = normalizeSlug(provider.category);

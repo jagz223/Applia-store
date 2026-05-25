@@ -29,14 +29,18 @@ import { useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
   DEFAULT_CATEGORIES,
-  MOBILITY_GO_PROVIDER_SLUGS,
+  CAR_GO_BRAND_SLUGS,
+  MARKETPLACE_CATEGORY_SLUG,
   effectiveHiddenCategorySlugs,
   getCategoryDisplayName,
 } from "@shared/default-categories";
 import { FEATURE_WALLET_RECHARGE_UI_ENABLED, FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 
 /** Marcas con flujo propio (p. ej. taxi / mapa); no se reservan desde esta página. */
-const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set<string>(MOBILITY_GO_PROVIDER_SLUGS);
+const BOOKING_EXCLUDED_CATEGORY_SLUGS = new Set<string>([
+  ...CAR_GO_BRAND_SLUGS,
+  MARKETPLACE_CATEGORY_SLUG,
+]);
 import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { isBeforeToday } from "@/lib/date-utils";
 import { getProviderUserAvatarUrl } from "@/lib/user-avatar";
@@ -150,7 +154,11 @@ export default function Booking() {
     [hiddenSlugs]
   );
   const anyMobilityAllowed = mobilityAllowed.transport || mobilityAllowed.marketplace || mobilityAllowed.delivery;
-  const mobilityHref = mobilityAllowed.transport ? "/go/taxi" : mobilityAllowed.marketplace ? "/go/shop" : "/go/delivery";
+  const mobilityHref = mobilityAllowed.transport
+    ? "/go/taxi"
+    : mobilityAllowed.marketplace
+      ? "/marketplace"
+      : "/go/delivery";
   const visibleCategories = useMemo(() => {
     const providerSlugs = new Set(DEFAULT_CATEGORIES.map((c) => c.slug));
     const hidden = new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs));

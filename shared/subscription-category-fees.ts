@@ -9,8 +9,8 @@ export const SUBSCRIPTION_FEE_ADMIN_SLUGS = [
 
 export type SubscriptionFeeAdminSlug = (typeof SUBSCRIPTION_FEE_ADMIN_SLUGS)[number];
 
-/** Pack Go y Shop Go comparten la mensualidad de Car Go (`transport`). */
-export const MOBILITY_SUBSCRIPTION_FEE_ALIAS_SLUGS = ["delivery", "marketplace"] as const;
+/** Pack Go comparte la mensualidad de Car Go (`transport`). Marketplace tiene tarifa propia (futuro). */
+export const MOBILITY_SUBSCRIPTION_FEE_ALIAS_SLUGS = ["delivery"] as const;
 
 export function subscriptionFeeLookupSlug(slug: string | null | undefined): string {
   const s = String(slug ?? "").trim();
@@ -18,7 +18,7 @@ export function subscriptionFeeLookupSlug(slug: string | null | undefined): stri
   return s;
 }
 
-/** Al guardar tarifas, replica el valor de Car Go en delivery y marketplace. */
+/** Al guardar tarifas, replica el valor de Car Go en delivery. */
 export function expandSubscriptionFeesBySlugForStorage(fees: Record<string, number>): Record<string, number> {
   const out = { ...fees };
   const carGo = out.transport;
@@ -38,7 +38,7 @@ export function subscriptionFeeAdminLabel(slug: SubscriptionFeeAdminSlug): strin
 }
 
 export function subscriptionFeeAdminHint(slug: SubscriptionFeeAdminSlug): string | undefined {
-  if (slug === "transport") return "La misma tarifa aplica a Delivery y Shop Go.";
+  if (slug === "transport") return "La misma tarifa aplica a Delivery (Pack Go).";
   return undefined;
 }
 

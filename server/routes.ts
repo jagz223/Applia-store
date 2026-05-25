@@ -49,7 +49,8 @@ import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
 import { ensureGoPanicAllowed, markGoPanicSent, notifyGoPanicAdmins } from "./mobility-panic-notify";
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
-import { filterCategoriesExcludedFromPublicApi, MOBILITY_GO_PROVIDER_SLUGS } from "@shared/default-categories";
+import { CAR_GO_BRAND_SLUGS, filterCategoriesExcludedFromPublicApi } from "@shared/default-categories";
+import { defaultGoBrandsForProviderCategory, sanitizeCarGoBrands } from "@shared/go-brands";
 import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
 import { catalogServiceMutationBlockedResponse } from "./provider-listing-catalog-guard";
 import {
@@ -249,7 +250,7 @@ export async function registerRoutes(
         });
       }
 
-      const ALLOWED = new Set(["transport", "delivery", "marketplace"]);
+      const ALLOWED = new Set(["transport", "delivery"]);
       const rawBrands = (provider as { goBrands?: unknown }).goBrands;
       const current = Array.isArray(rawBrands)
         ? rawBrands.map((s: unknown) => String(s).trim().toLowerCase()).filter(Boolean)
@@ -267,8 +268,8 @@ export async function registerRoutes(
         .trim()
         .toLowerCase();
       if (direct && ALLOWED.has(direct)) extra.push(direct);
-      const merged = Array.from(new Set([...current, ...extra, "transport", "delivery"])).filter((b) =>
-        ALLOWED.has(b)
+      const merged = sanitizeCarGoBrands(
+        Array.from(new Set([...current, ...extra, "transport", "delivery"])),
       );
 
       const categoryPatch = buildGoDriverEnrollmentCategoryPatch(
@@ -859,7 +860,7 @@ export async function registerRoutes(
     /** Vista general: ocultar fichas Go por categoría del servicio, no por categoría principal del proveedor (perfiles mixtos Pro Go + conductor). */
     const isGeneralCatalogExplore = categoryId == null && providerCategoryId == null;
     if (isGeneralCatalogExplore && list?.length) {
-      const mobilitySlugs = new Set(MOBILITY_GO_PROVIDER_SLUGS.map((s) => String(s).toLowerCase()));
+      const mobilitySlugs = new Set(CAR_GO_BRAND_SLUGS.map((s) => String(s).toLowerCase()));
       const cats = await catalogService.getCategoriesForPublicCatalog();
       list = list.filter((s: any) => {
         const serviceSlug = serviceListingCategorySlug(s, cats);
@@ -1181,7 +1182,7 @@ export async function registerRoutes(
       bio: z.string().trim().max(700),
       skills: providerSkillsSchema,
       /** Módulos Go extra habilitados (Pack/Shop). */
-      goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).optional(),
+      goBrands: z.array(z.enum(["transport", "delivery"])).optional(),
       serviceTitle: z.string().trim().max(500).optional(),
       serviceDescription: z.string().trim().max(5000).optional(),
       vehicle: z.any().optional(),
@@ -1205,7 +1206,7 @@ export async function registerRoutes(
     .extend({
       bio: professionalBioFieldSchema,
       skills: providerSkillsSchema,
-      goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).optional(),
+      goBrands: z.array(z.enum(["transport", "delivery"])).optional(),
       /** Título público del único servicio (listado / edición). Si no se envía, se deriva de profesión o nombre. */
       serviceTitle: z.string().trim().max(500).optional(),
       /** Qué incluye la oferta; si no se envía o va vacío, se usa la biografía como texto inicial del servicio. */
@@ -1229,7 +1230,7 @@ export async function registerRoutes(
     preparationLevel: z.string().trim().max(8000).optional(),
     coursesCompleted: z.string().trim().max(8000).optional(),
     certifications: z.string().trim().max(8000).optional(),
-    goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).optional(),
+    goBrands: z.array(z.enum(["transport", "delivery"])).optional(),
   });
 
   app.post(api.providers.create.path, authenticateJWT, async (req: any, res) => {
@@ -1307,10 +1308,8 @@ export async function registerRoutes(
         ...(isGoDriverCategory
           ? {
               goBrands: Array.isArray(goBrands)
-                ? Array.from(new Set(goBrands))
-                : catForSignup?.slug === "delivery"
-                  ? ["delivery"]
-                  : ["transport"],
+                ? sanitizeCarGoBrands(goBrands)
+                : defaultGoBrandsForProviderCategory(catForSignup?.slug),
             }
           : {}),
         profession: providerInsert.profession,

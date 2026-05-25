@@ -304,7 +304,7 @@ export default function HomePage() {
         icon: Store,
         countKey: "shopGo",
         color: "text-secondary",
-        href: "/go/shop",
+        href: "/marketplace",
       });
     }
 
@@ -863,7 +863,7 @@ export default function HomePage() {
                           variant="secondary"
                           onClick={() => {
                             setGoQuickOpen(false);
-                            setLocation("/go/shop");
+                            setLocation("/marketplace");
                           }}
                         >
                           <Store className="h-4 w-4" /> Pedidos

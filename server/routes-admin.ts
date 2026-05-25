@@ -818,7 +818,7 @@ export function registerAdminRoutes(app: Express): void {
         const cat = categories.find((c) => c.id === parsed.data.categoryId);
         const slug = String((cat as { slug?: string })?.slug ?? "");
         if (!isMobilityGoDriverVehicleCategorySlug(slug)) {
-          return res.status(400).json({ message: "La categoría debe ser taxi, delivery o marketplace." });
+          return res.status(400).json({ message: "La categoría debe ser taxi o delivery." });
         }
         parsedVehicleProposal = parsed.data;
       }
@@ -1985,7 +1985,7 @@ export function registerAdminRoutes(app: Express): void {
     secondCategoryId: z.number().int().positive().nullable().optional(),
     thirdCategoryId: z.number().int().positive().nullable().optional(),
     subcategoryId: z.number().int().positive().nullable().optional(),
-    goBrands: z.array(z.enum(["transport", "delivery", "marketplace"])).nullable().optional(),
+    goBrands: z.array(z.enum(["transport", "delivery"])).nullable().optional(),
     preparationLevel: z.string().trim().max(8000).optional().nullable(),
     certifications: z.string().trim().max(8000).optional().nullable(),
     subscriptionCategorySlug: z.string().trim().max(80).optional().nullable(),

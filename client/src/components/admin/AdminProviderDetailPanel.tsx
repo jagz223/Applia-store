@@ -148,7 +148,7 @@ export function AdminProviderDetailPanel({
 
   const hasVerificationDocuments = verificationSlides.some((s) => Boolean(s.src));
 
-  const toggleGoBrand = (brand: "transport" | "delivery" | "marketplace") => {
+  const toggleGoBrand = (brand: "transport" | "delivery") => {
     if (!draft) return;
     const next = new Set(goBrandSet);
     if (next.has(brand)) next.delete(brand);
@@ -513,7 +513,7 @@ export function AdminProviderDetailPanel({
                     ))}
                   </div>
                   <div className="flex flex-wrap gap-2 pt-1">
-                    {(["transport", "delivery", "marketplace"] as const).map((b) => (
+                    {(["transport", "delivery"] as const).map((b) => (
                       <Button
                         key={b}
                         type="button"

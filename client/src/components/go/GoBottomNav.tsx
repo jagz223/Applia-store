@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Car, History, Menu, Package, Store, MessageSquare, Settings, Bell, TrendingUp, Tags } from "lucide-react";
+import { Car, History, Menu, Package, MessageSquare, Settings, Bell, TrendingUp, Tags } from "lucide-react";
 import { useGoChat } from "@/contexts/GoChatContext";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
@@ -113,7 +113,6 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   }, []);
   const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
-  const showShop = !hiddenSlugs.has("marketplace");
   const showPack = !hiddenSlugs.has("delivery");
   const isCargoDriverView =
     location === "/go/taxi/driver" ||
@@ -181,7 +180,6 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
       [
         { href: cargoHref, label: "Taxi", icon: <Car className="h-5 w-5" aria-hidden /> },
         showPack ? { href: packHref, label: "Delivery", icon: <Package className="h-5 w-5" aria-hidden /> } : null,
-        showShop ? { href: "/go/shop", label: "Pedidos", icon: <Store className="h-5 w-5" aria-hidden /> } : null,
         !isDriverView && isRiderGoView
           ? {
               href: "__go_rider_history__",
@@ -243,7 +241,6 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
       user?.role,
       isCargoDriverView,
       isPackDriverView,
-      showShop,
       showPack,
       goDriverUi,
       isRiderGoView,
