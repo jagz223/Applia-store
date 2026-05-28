@@ -1,6 +1,7 @@
 ﻿import { useMemo, useState } from "react";
 import { Link, Redirect, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import {
   useCategories,
   useCategoryVisibility,
@@ -56,13 +57,13 @@ export default function MyServices() {
 
   const provider = (user as { provider?: unknown } | null)?.provider ?? providerFromApi ?? null;
   const isProfessional =
-    provider != null || (user as { role?: string } | null)?.role === "professional";
+    provider != null || userCanActAsAssociate(user);
 
   const shouldFetchMyServices =
     isAuthenticated &&
     (!!provider ||
       !!(user as { provider?: unknown } | null)?.provider ||
-      (user as { role?: string } | null)?.role === "professional");
+      userCanActAsAssociate(user));
 
   const { data: services = [], isLoading: servicesLoading } = useMyServices({
     enabled: shouldFetchMyServices && !authLoading,
@@ -279,16 +280,10 @@ export default function MyServices() {
                     </Button>
                   ) : null}
                   <Button variant="outline" size="sm" asChild>
-                    <Link href="/go/taxi/driver">Panel taxi</Link>
-                  </Button>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href="/go/delivery/driver">Panel delivery</Link>
+                    <Link href="/go/driver">Panel conductor</Link>
                   </Button>
                   <Button variant="ghost" size="sm" asChild>
-                    <Link href="/go/taxi/driver/settings">Ajustes taxi</Link>
-                  </Button>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href="/go/delivery/driver/settings">Ajustes delivery</Link>
+                    <Link href="/go/driver/settings">Ajustes conductor</Link>
                   </Button>
                   {canRequestCentralAffiliation ? (
                     centralAffiliationPending ? (

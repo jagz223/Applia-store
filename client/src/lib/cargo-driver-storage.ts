@@ -5,6 +5,10 @@
 
 export const CARGO_DRIVER_RECEIVING_KEY = "cargo-driver-receiving";
 export const PACK_DRIVER_RECEIVING_KEY = "pack-driver-receiving";
+/** Modo unificado: `off` | `taxi` | `delivery` (vista `/go/driver`). */
+export const GO_DRIVER_RECEIVE_MODE_KEY = "go-driver-receive-mode";
+
+export type GoDriverReceiveMode = "off" | "taxi" | "delivery" | "both";
 /** Prefijo base; las entradas efectivas son `cargo-driver-trip-log:user:<id>` o `:guest`. */
 export const CARGO_DRIVER_TRIP_LOG_KEY = "cargo-driver-trip-log";
 /** Viaje Car Go activo (matched / in_progress) para reanudar al reabrir la app. */
@@ -57,10 +61,34 @@ export function saveGoReceiving(goSlug: "cargo" | "pack", on: boolean): void {
   }
 }
 
+export function loadGoDriverReceiveMode(): GoDriverReceiveMode {
+  try {
+    const v = localStorage.getItem(GO_DRIVER_RECEIVE_MODE_KEY);
+    if (v === "off" || v === "taxi" || v === "delivery" || v === "both") return v;
+    const cargo = localStorage.getItem(CARGO_DRIVER_RECEIVING_KEY) === "1";
+    const pack = localStorage.getItem(PACK_DRIVER_RECEIVING_KEY) === "1";
+    if (cargo && pack) return "both";
+    if (cargo && !pack) return "taxi";
+    if (pack && !cargo) return "delivery";
+    return "off";
+  } catch {
+    return "off";
+  }
+}
+
+export function saveGoDriverReceiveMode(mode: GoDriverReceiveMode): void {
+  try {
+    localStorage.setItem(GO_DRIVER_RECEIVE_MODE_KEY, mode);
+    saveGoReceiving("cargo", mode === "taxi" || mode === "both");
+    saveGoReceiving("pack", mode === "delivery" || mode === "both");
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Apaga taxi y delivery en localStorage (p. ej. al perder el socket por reinicio del servidor). */
 export function clearAllGoReceiving(): void {
-  saveGoReceiving("cargo", false);
-  saveGoReceiving("pack", false);
+  saveGoDriverReceiveMode("off");
 }
 
 export function loadDriverActiveRideId(): string | null {

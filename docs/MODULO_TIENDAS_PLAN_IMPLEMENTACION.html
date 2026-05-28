@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GenFeb — Módulo Tiendas: plan por prompts</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --border: #2d3a4d;
+      --text: #e8eef5;
+      --muted: #9aa8bc;
+      --accent: #3d9cf0;
+      --ok: #34c759;
+      --warn: #f5a623;
+      --danger: #ff6b6b;
+      --phase-p0: #ff6b6b;
+      --phase-p1: #f5a623;
+      --phase-p2: #3d9cf0;
+      --phase-p3: #a78bfa;
+      --phase-p4: #34c759;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      font-size: 15px;
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 2rem 1.5rem;
+      background: linear-gradient(180deg, #152028 0%, var(--bg) 100%);
+    }
+    header h1 { margin: 0 0 0.5rem; font-size: 1.65rem; font-weight: 700; }
+    header p { margin: 0; color: var(--muted); max-width: 62rem; }
+    main { max-width: 62rem; margin: 0 auto; padding: 1.5rem; }
+    nav.toc {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+    }
+    nav.toc h2 { margin: 0 0 0.75rem; font-size: 1rem; color: var(--accent); }
+    nav.toc ol { margin: 0; padding-left: 1.25rem; }
+    nav.toc li { margin: 0.35rem 0; }
+    nav.toc a { color: var(--accent); text-decoration: none; }
+    nav.toc a:hover { text-decoration: underline; }
+    section {
+      margin-bottom: 2rem;
+      padding: 1.25rem 1.5rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    h2 {
+      margin: 0 0 1rem;
+      font-size: 1.2rem;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+    h3 { margin: 1.25rem 0 0.5rem; font-size: 1.05rem; color: #c5d4e8; }
+    h4 { margin: 1rem 0 0.35rem; font-size: 0.98rem; color: #b8c9de; }
+    ul, ol { margin: 0.35rem 0 0.75rem; padding-left: 1.25rem; }
+    li { margin: 0.35rem 0; }
+    .muted { color: var(--muted); font-size: 0.92rem; }
+    .note {
+      margin-top: 0.75rem;
+      padding: 0.75rem 1rem;
+      border-left: 4px solid var(--ok);
+      background: rgba(52, 199, 89, 0.08);
+      border-radius: 0 8px 8px 0;
+      font-size: 0.95rem;
+    }
+    .warn-box {
+      border-left-color: var(--warn);
+      background: rgba(245, 166, 35, 0.08);
+    }
+    .danger-box {
+      border-left-color: var(--danger);
+      background: rgba(255, 107, 107, 0.08);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      margin-top: 0.5rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.65rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #243044; color: #dbe7f5; }
+    code {
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 0.88em;
+      color: #7ec8ff;
+    }
+    pre.prompt {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: #c9d1d9;
+      white-space: pre-wrap;
+      margin: 0.75rem 0;
+    }
+    .phase-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.15rem;
+      margin: 1rem 0;
+      background: rgba(0,0,0,0.15);
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.2em 0.55em;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-right: 0.35rem;
+    }
+    .badge-p0 { background: var(--phase-p0); color: #1a0a0a; }
+    .badge-p1 { background: var(--phase-p1); color: #1a1408; }
+    .badge-p2 { background: var(--phase-p2); color: #081018; }
+    .badge-p3 { background: var(--phase-p3); color: #100818; }
+    .badge-p4 { background: var(--phase-p4); color: #081408; }
+    .req-map td:first-child { font-weight: 600; white-space: nowrap; }
+    footer {
+      text-align: center;
+      padding: 2rem 1rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+      border-top: 1px solid var(--border);
+    }
+    .diagram {
+      font-family: ui-monospace, monospace;
+      font-size: 0.8rem;
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      overflow-x: auto;
+      line-height: 1.4;
+      color: #9aa8bc;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Módulo Tiendas — Plan de implementación por prompts</h1>
+    <p>
+      Desglose del requerimiento de tiendas online en GenFeb, ordenado de <strong>fundamentos</strong> a <strong>capas superficiales</strong>.
+      Cada bloque es un prompt independiente que puedes pegar al asistente cuando corresponda.
+      <strong>No implementar todo en un solo prompt.</strong>
+    </p>
+    <p class="muted" style="margin-top:0.75rem;">
+      Última actualización: mayo 2026 · Estado: planificación (sin código de tiendas en el repo aún).
+    </p>
+  </header>
+
+  <main>
+    <nav class="toc" aria-label="Tabla de contenidos">
+      <h2>Contenido</h2>
+      <ol>
+        <li><a href="#vision">Visión y reglas de negocio</a></li>
+        <li><a href="#mapa-reqs">Mapa requisito → fase</a></li>
+        <li><a href="#modelo">Modelo de datos y referencias al código actual</a></li>
+        <li><a href="#orden">Orden recomendado de prompts (resumen)</a></li>
+        <li><a href="#prompt-1">Prompt 1 — Fundamentos backend</a></li>
+        <li><a href="#prompt-2">Prompt 2 — Mensualidad tienda (config + estado)</a></li>
+        <li><a href="#prompt-3">Prompt 3 — Pagos, admin y notificaciones</a></li>
+        <li><a href="#prompt-4">Prompt 4 — Onboarding UI (configuración → tienda)</a></li>
+        <li><a href="#prompt-5">Prompt 5 — Panel dueño (shell + menú)</a></li>
+        <li><a href="#prompt-6">Prompt 6 — Productos e ingredientes/materiales</a></li>
+        <li><a href="#prompt-7">Prompt 7 — Catálogo público y visibilidad cruzada</a></li>
+        <li><a href="#futuro">Fases diferidas (punto 8)</a></li>
+        <li><a href="#checklist">Checklist global de aceptación</a></li>
+      </ol>
+    </nav>
+
+    <section id="vision">
+      <h2>Visión y reglas de negocio</h2>
+      <ul>
+        <li><strong>Tienda ≠ rol.</strong> Cualquier usuario autenticado puede ser dueño de una tienda (cliente, profesional o ambos). No reemplaza el rol de profesional ni el de cliente.</li>
+        <li><strong>Mensualidad independiente.</strong> Si eres profesional pagas la de profesional <em>y</em>, si tienes tienda, la de tienda. Son dos suscripciones de visibilidad distintas.</li>
+        <li><strong>Flujo sin bloqueo duro en creación.</strong> Se puede crear la tienda y ver la vista pública sin haber pagado; la gestión (tuerca) y la publicación en el catálogo quedan condicionadas al pago.</li>
+        <li><strong>Ingredientes/materiales globales.</strong> Una sola colección compartida por todas las tiendas; los productos referencian ítems de esa colección.</li>
+        <li><strong>Visibilidad cruzada (punto 14).</strong>
+          <ul>
+            <li>Sin mensualidad de tienda → tienda oculta en listado, sin acceso por link directo (pantalla «Tienda inactiva por el momento»).</li>
+            <li>Con tienda pagada pero sin mensualidad profesional → servicios del profesional ocultos en búsqueda (comportamiento ya existente vía <code>computeListingPublished</code>).</li>
+          </ul>
+        </li>
+      </ul>
+      <div class="diagram">
+Usuario ──► Configuración ──► "Crear Tienda" ──► Alta (nombre + aviso precio)
+                │
+                ▼
+         Vista pública tienda (/tienda/:slug)
+                │
+    ┌───────────┴───────────┐
+    │ Sin pago mensualidad  │ Con pago aprobado
+    ▼                       ▼
+ Banner + pago            Tuerca → Panel (Productos, …)
+ Inactiva en catálogo      Visible en navbar Tiendas
+      </div>
+    </section>
+
+    <section id="mapa-reqs">
+      <h2>Mapa requisito → fase</h2>
+      <table class="req-map">
+        <thead>
+          <tr><th>#</th><th>Requisito (resumen)</th><th>Prompt</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>Botón «Crear Tienda» vistoso en configuración de todos</td><td>4</td></tr>
+          <tr><td>2</td><td>Vista creación: nombre + precio desde config mensualidades</td><td>2, 4</td></tr>
+          <tr><td>3</td><td>Vista tienda; tuerca solo dueño; bloqueada sin pago</td><td>4</td></tr>
+          <tr><td>4</td><td>Tienda para todos; mensualidad aparte de profesional</td><td>1, 2</td></tr>
+          <tr><td>5</td><td>Tras pago, tuerca → panel vertical (5 secciones)</td><td>5</td></tr>
+          <tr><td>6</td><td>Pantalla productos: lista + crear + acciones ojo/lápiz/papelera</td><td>6</td></tr>
+          <tr><td>7</td><td>Crear producto + ingredientes/materiales globales con select paginado</td><td>1, 6</td></tr>
+          <tr><td>8</td><td>Categorías, promociones, códigos, config tienda — después</td><td>Futuro</td></tr>
+          <tr><td>9</td><td>Notificación «Activa tu tienda…» → pago</td><td>3, 4</td></tr>
+          <tr><td>10</td><td>Vista pago igual a la existente (QR, transferencia, comprobante)</td><td>3</td></tr>
+          <tr><td>11</td><td>Admin: revisar/aprobar/rechazar pagos de tienda</td><td>3</td></tr>
+          <tr><td>12</td><td>Rechazo → notificación + opción chat con staff</td><td>3</td></tr>
+          <tr><td>13</td><td>Navbar GenFeb: sección Tiendas, grid de cartas</td><td>7</td></tr>
+          <tr><td>14</td><td>Inactiva sin pago tienda; servicios ocultos sin pago pro</td><td>2, 7</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="modelo">
+      <h2>Modelo de datos y referencias al código actual</h2>
+
+      <h3>Nuevas colecciones Firestore (propuesta)</h3>
+      <p>Registrar en <code>server/firebase-admin.ts</code> → <code>FIRESTORE_COLLECTIONS</code>:</p>
+      <table>
+        <thead>
+          <tr><th>Colección</th><th>Ámbito</th><th>Notas</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>stores</code></td><td>1+ por usuario (definir: ¿1 tienda por userId?)</td><td><code>ownerUserId</code>, <code>name</code>, <code>slug</code>, <code>visibilitySubscriptionEndsAt</code>, <code>createdAt</code>, imagen (fase posterior)</td></tr>
+          <tr><td><code>store_products</code></td><td>Por tienda</td><td><code>storeId</code>, nombre, descripción, precio, <code>categoryIds[]</code></td></tr>
+          <tr><td><code>store_categories</code></td><td>Por tienda</td><td>Implementación diferida (punto 8)</td></tr>
+          <tr><td><code>store_promotions</code></td><td>Por tienda</td><td>Diferida</td></tr>
+          <tr><td><code>store_discount_codes</code></td><td>Por tienda</td><td>Diferida</td></tr>
+          <tr><td><code>ingredients_materials</code></td><td><strong>Global</strong></td><td>Sin <code>storeId</code>; nombre normalizado; usado por productos de cualquier tienda</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Mensualidad tienda en admin</h3>
+      <p>Extender el sistema existente de tarifas:</p>
+      <ul>
+        <li><code>shared/subscription-category-fees.ts</code> — añadir slug <code>store</code> (o <code>tienda</code>) a <code>SUBSCRIPTION_FEE_ADMIN_SLUGS</code>, etiqueta «Tienda», hint de visibilidad con productos publicados.</li>
+        <li><code>server/subscription-fees.ts</code> — lectura/escritura Firestore como el resto de categorías.</li>
+        <li>UI admin: pestaña Configuración → Suscripción mensual (ya filtra por <code>isSubscriptionFeeVisibleInAdminSettings</code>).</li>
+      </ul>
+
+      <h3>Patrones a reutilizar (no reinventar)</h3>
+      <table>
+        <thead>
+          <tr><th>Área</th><th>Referencia en el repo</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Ventana de suscripción / publicado</td>
+            <td><code>shared/professional-listing-subscription.ts</code> — <code>isVisibilitySubscriptionWindowActive</code>, <code>computeListingPublished</code></td>
+          </tr>
+          <tr>
+            <td>Comprobante + transferencia</td>
+            <td><code>server/routes.ts</code> (alta profesional), <code>server/routes-admin.ts</code> (aprobar/rechazar), <code>verification_fee</code> en reportes financieros</td>
+          </tr>
+          <tr>
+            <td>UI facturas / pagos usuario</td>
+            <td><code>client/src/components/subscription/SubscriptionInvoicesPanel.tsx</code>, <code>BecomePro.tsx</code></td>
+          </tr>
+          <tr>
+            <td>Notificaciones pago rechazado</td>
+            <td><code>subscription_payment_rejected</code> en <code>server/routes-admin.ts</code></td>
+          </tr>
+          <tr>
+            <td>Configuración usuario</td>
+            <td><code>client/src/pages/Settings.tsx</code>, <code>QuickSettingsPanel.tsx</code></td>
+          </tr>
+          <tr>
+            <td>Rutas SPA</td>
+            <td><code>client/src/App.tsx</code></td>
+          </tr>
+          <tr>
+            <td>Navbar</td>
+            <td><code>client/src/components/Navigation.tsx</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Nuevo <code>paymentKind</code> sugerido</h3>
+      <p>En <code>shared/subscription-invoice.ts</code> ampliar <code>SubscriptionInvoicePaymentKind</code> con por ejemplo <code>store_subscription_transfer</code> para distinguir comprobantes de tienda en admin y en listados de facturas.</p>
+
+      <div class="note warn-box">
+        <strong>Decisión pendiente (resolver en Prompt 1):</strong> ¿Un usuario = una tienda máxima? El flujo de UI sugiere sí (botón «Crear Tienda» singular). Documentar en API y validar en <code>POST /api/stores</code>.
+      </div>
+    </section>
+
+    <section id="orden">
+      <h2>Orden recomendado de prompts (resumen)</h2>
+      <ol>
+        <li><span class="badge badge-p0">P0</span> <strong>Prompt 1</strong> — Modelo, colecciones, APIs CRUD mínimas de tienda y catálogo global de ingredientes.</li>
+        <li><span class="badge badge-p0">P0</span> <strong>Prompt 2</strong> — Tarifa mensual «tienda» en admin + campo de vigencia en tienda + helpers de «tienda activa».</li>
+        <li><span class="badge badge-p1">P1</span> <strong>Prompt 3</strong> — Flujo de pago (reutilizar UI), revisión admin, notificaciones y chat tras rechazo.</li>
+        <li><span class="badge badge-p1">P1</span> <strong>Prompt 4</strong> — Botón en Settings, crear tienda, vista pública, tuerca bloqueada, banner de activación.</li>
+        <li><span class="badge badge-p2">P2</span> <strong>Prompt 5</strong> — Shell del panel dueño con menú vertical (Productos funcional; resto placeholder).</li>
+        <li><span class="badge badge-p2">P2</span> <strong>Prompt 6</strong> — Productos completos + selector de ingredientes/materiales.</li>
+        <li><span class="badge badge-p3">P3</span> <strong>Prompt 7</strong> — Navbar Tiendas, grid público, reglas de visibilidad cruzada con profesional.</li>
+      </ol>
+    </section>
+
+    <!-- PROMPT 1 -->
+    <section id="prompt-1">
+      <h2>Prompt 1 — Fundamentos backend y contratos</h2>
+      <div class="phase-card">
+        <span class="badge badge-p0">Prioridad máxima</span>
+        <span class="muted">Cubre bases de puntos 4, 7 (colección global) y habilita todo lo demás.</span>
+      </div>
+
+      <h3>Objetivo</h3>
+      <p>Dejar el «esqueleto» de tiendas en servidor y tipos compartidos, sin UI compleja.</p>
+
+      <h3>Tareas</h3>
+      <ul>
+        <li>Añadir constantes de colección en <code>FIRESTORE_COLLECTIONS</code>.</li>
+        <li>Tipos Zod/shared: <code>Store</code>, <code>StoreProduct</code>, <code>IngredientMaterial</code>.</li>
+        <li>Métodos en <code>storage-genfeb.ts</code> / <code>storage-firestore.ts</code>: crear tienda, obtener por slug, por owner, listar tiendas activas (para fase 7).</li>
+        <li>API REST (ejemplo):
+          <ul>
+            <li><code>POST /api/stores</code> — crear (auth)</li>
+            <li><code>GET /api/stores/mine</code> — tienda del usuario</li>
+            <li><code>GET /api/stores/:slug</code> — pública (respeta estado activo en fase 7)</li>
+            <li><code>GET /api/ingredients-materials?q=&amp;page=</code> — listado paginado 20, filtro por nombre</li>
+            <li><code>POST /api/ingredients-materials</code> — crear global (auth; validar nombre único case-insensitive)</li>
+          </ul>
+        </li>
+        <li>Slug único derivado del nombre + sufijo si colisión.</li>
+      </ul>
+
+      <h3>Texto sugerido para el asistente</h3>
+      <pre class="prompt">Implementa el módulo backend de Tiendas en GenFeb según docs/MODULO_TIENDAS_PLAN_IMPLEMENTACION.html — Prompt 1.
+
+Incluye colecciones Firestore (stores, store_products, ingredients_materials), tipos shared, storage y rutas API mínimas. Un usuario solo puede tener una tienda. Ingredientes/materiales son globales con paginación de 20 y búsqueda por nombre. No hagas UI todavía.</pre>
+
+      <h3>Criterios de aceptación</h3>
+      <ul>
+        <li>Se puede crear tienda vía API y leerla por slug y por dueño.</li>
+        <li>Ingredientes listables y creables sin <code>storeId</code>.</li>
+        <li>Tests manuales con curl o cliente REST documentados en comentario breve.</li>
+      </ul>
+    </section>
+
+    <!-- PROMPT 2 -->
+    <section id="prompt-2">
+      <h2>Prompt 2 — Mensualidad de tienda en configuración y estado de vigencia</h2>
+      <div class="phase-card">
+        <span class="badge badge-p0">Prioridad máxima</span>
+        <span class="muted">Puntos 2, 4, 14 (lógica de activo).</span>
+      </div>
+
+      <h3>Objetivo</h3>
+      <p>Variable de precio en admin y campo <code>visibilitySubscriptionEndsAt</code> en documento de tienda, análogo al profesional.</p>
+
+      <h3>Tareas</h3>
+      <ul>
+        <li>Slug <code>store</code> en <code>SUBSCRIPTION_FEE_ADMIN_SLUGS</code> + etiquetas en español.</li>
+        <li><code>subscriptionMonthlyUsdForProvider</code> o función hermana <code>subscriptionMonthlyUsdForStore()</code> que lea la tarifa <code>store</code>.</li>
+        <li>Helper <code>isStoreVisibilityActive(store, now)</code> reutilizando <code>isVisibilitySubscriptionWindowActive</code>.</li>
+        <li>Endpoint <code>GET /api/stores/subscription-quote</code> → <code>{ monthlyUsd, label }</code> para la pantalla de creación.</li>
+        <li>Al aprobar pago (Prompt 3) se extenderá <code>endsAt</code>; en esta fase dejar hook/listener preparado.</li>
+      </ul>
+
+      <pre class="prompt">Según docs/MODULO_TIENDAS_PLAN_IMPLEMENTACION.html — Prompt 2: agrega mensualidad "Tienda" en admin (subscription-category-fees), lectura de precio USD y campo visibilitySubscriptionEndsAt en stores con helper isStoreVisibilityActive. Expón GET /api/stores/subscription-quote. Sin UI de pago aún.</pre>
+
+      <h3>Criterios de aceptación</h3>
+      <ul>
+        <li>Admin puede editar precio mensual de tienda como las demás categorías.</li>
+        <li>API de cotización devuelve el monto configurado.</li>
+        <li>Tienda sin fecha de fin se considera inactiva para catálogo (definir política explícita: sin pago = no publicada).</li>
+      </ul>
+    </section>
+
+    <!-- PROMPT 3 -->
+    <section id="prompt-3">
+      <h2>Prompt 3 — Pagos, administración y notificaciones</h2>
+      <div class="phase-card">
+        <span class="badge badge-p1">Alta</span>
+        <span class="muted">Puntos 9, 10, 11, 12.</span>
+      </div>
+
+      <h3>Objetivo</h3>
+      <p>Mismo flujo de transferencia + comprobante que profesional/Marketplace, pero scoped a tienda.</p>
+
+      <h3>Tareas</h3>
+      <ul>
+        <li>Nuevo <code>paymentKind: store_subscription_transfer</code> en metadata de transferencia / reporte (<code>verification_fee</code> o tipo dedicado <code>store_subscription_fee</code> — elegir uno y ser consistente).</li>
+        <li><code>POST /api/stores/:id/subscription-payment</code> — subir comprobante (código, fecha, monto, archivo).</li>
+        <li>Página cliente <code>/tienda/pago</code> o <code>/my-store/subscription</code>: copiar layout de pago existente (QR bancario, datos transferencia, formulario comprobante).</li>
+        <li>Admin: nueva pestaña o subsección «Pagos tiendas» en <code>Admin.tsx</code> (filtrar transferencias por kind/storeId).</li>
+        <li>Aprobar → extender <code>visibilitySubscriptionEndsAt</code> N meses; rechazar → notificación + payload para abrir chat staff (reutilizar conversaciones soporte si existe, o canal staff genérico).</li>
+        <li>Banner en vista tienda dueño: «Activa tu tienda haciendo el pago correspondiente» con link a vista de pago (punto 9).</li>
+      </ul>
+
+      <pre class="prompt">Implementa Prompt 3 del plan de tiendas: flujo de pago por transferencia/comprobante igual al de suscripción profesional, paymentKind store, aprobación/rechazo en admin, notificación al rechazar con opción de chat con staff. Incluye ruta de pago en cliente y banner de activación.</pre>
+
+      <h3>Criterios de aceptación</h3>
+      <ul>
+        <li>Dueño sube comprobante; admin aprueba/rechaza; al aprobar la tuerca podrá desbloquearse (Prompt 4).</li>
+        <li>Rechazo dispara notificación accionable.</li>
+        <li>UI de pago visualmente alineada con flujos de suscripción existentes.</li>
+      </ul>
+    </section>
+
+    <!-- PROMPT 4 -->
+    <section id="prompt-4">
+      <h2>Prompt 4 — Onboarding y vista pública (dueño vs visitante)</h2>
+      <div class="phase-card">
+        <span class="badge badge-p1">Alta</span>
+        <span class="muted">Puntos 1, 2, 3, 9 (banner).</span>
+      </div>
+
+      <h3>Objetivo</h3>
+      <p>Recorrer el camino usuario: Configuración → Crear → Vista tienda, con tuerca bloqueada hasta pago.</p>
+
+      <h3>Tareas UI</h3>
+      <ul>
+        <li><strong>Settings + QuickSettingsPanel:</strong> botón destacado «Crear Tienda» (gradiente/icono Store). Si ya tiene tienda → «Mi tienda» / «Ver tienda».</li>
+        <li><strong><code>/tienda/crear</code>:</strong> formulario nombre; texto «Tener una tienda con objetos publicados cuesta <strong>USD {monthlyUsd}</strong>/mes» desde API quote; botón continuar sin exigir pago.</li>
+        <li><strong><code>/tienda/:slug</code>:</strong> vista pública placeholder de catálogo; esquina superior derecha botón tuerca (<code>Settings</code> icon) solo si <code>user.id === ownerUserId</code>.</li>
+        <li>Tuerca <code>disabled</code> + tooltip si <code>!isStoreVisibilityActive</code>; click en banner de activación → ruta de pago.</li>
+        <li>Registrar rutas en <code>App.tsx</code>.</li>
+      </ul>
+
+      <pre class="prompt">Prompt 4 tiendas: botón vistoso "Crear Tienda" en Settings y QuickSettingsPanel, pantalla crear con nombre y precio mensual desde API, vista /tienda/:slug con tuerca solo para dueño bloqueada sin suscripción activa, banner a pago. Usa componentes shadcn existentes.</pre>
+
+      <h3>Criterios de aceptación</h3>
+      <ul>
+        <li>Cualquier usuario logueado ve el CTA en configuración.</li>
+        <li>Tras crear, redirige a su tienda.</li>
+        <li>Visitante no ve tuerca; dueño sí, bloqueada sin pago.</li>
+      </ul>
+    </section>
+
+    <!-- PROMPT 5 -->
+    <section id="prompt-5">
+      <h2>Prompt 5 — Panel de gestión (shell + menú vertical)</h2>
+      <div class="phase-card">
+        <span class="badge badge-p2">Media</span>
+        <span class="muted">Punto 5 (estructura); acciones de producto en Prompt 6.</span>
+      </div>
+
+      <h3>Objetivo</h3>
+      <p>Layout persistente al entrar desde la tuerca (solo con suscripción activa).</p>
+
+      <h3>Tareas</h3>
+      <ul>
+        <li>Ruta <code>/tienda/:slug/admin</code> o <code>/mi-tienda/admin</code> con guard de dueño + suscripción.</li>
+        <li>Sidebar vertical: Productos, Categorías, Promociones, Códigos de descuento, Configuraciones de tienda.</li>
+        <li>Outlet interno; secciones 2–5 muestran «Próximamente» (punto 8).</li>
+        <li>Sección Productos: tabla vacía + botón «Crear producto» (sin formulario completo aún si se divide).</li>
+      </ul>
+
+      <pre class="prompt">Prompt 5: panel admin de tienda con menú vertical fijo (5 opciones), solo dueño con suscripción activa. Productos con lista vacía y botón crear; resto placeholder "Próximamente".</pre>
+    </section>
+
+    <!-- PROMPT 6 -->
+    <section id="prompt-6">
+      <h2>Prompt 6 — Productos e ingredientes/materiales</h2>
+      <div class="phase-card">
+        <span class="badge badge-p2">Media</span>
+        <span class="muted">Puntos 6 y 7 completos.</span>
+      </div>
+
+      <h3>Pantalla productos (punto 6)</h3>
+      <ul>
+        <li>Columnas: Nombre, Precio, Acciones.</li>
+        <li>Acciones: iconos ojo (vista/detalle), lápiz (editar), papelera (eliminar con confirmación).</li>
+        <li>API CRUD <code>/api/stores/:storeId/products</code>.</li>
+      </ul>
+
+      <h3>Crear / editar producto (punto 7)</h3>
+      <ul>
+        <li>Campos: nombre, descripción, precio, categorías opcionales (multi-select si ya hay categorías; si no, campo oculto hasta fase 8).</li>
+        <li>Toggle «¿Tiene ingredientes o materiales?» → muestra bloque de selección.</li>
+        <li>Combobox con búsqueda, paginación 20, botón <code>+</code> al lado.</li>
+        <li>Si el texto no tiene coincidencia exacta (normalizar trim + lower), habilitar <code>+</code> para crear en colección global y añadir a lista local.</li>
+        <li>Lista chips debajo con <code>×</code> para quitar de la selección del producto.</li>
+      </ul>
+
+      <pre class="prompt">Prompt 6 tiendas: CRUD productos en panel admin (lista con ojo/editar/borrar) y formulario crear/editar con selector de ingredientes/materiales globales (paginación 20, filtro, crear con + si no hay match exacto). Backend store_products con array ingredientMaterialIds.</pre>
+    </section>
+
+    <!-- PROMPT 7 -->
+    <section id="prompt-7">
+      <h2>Prompt 7 — Catálogo público, navbar y visibilidad cruzada</h2>
+      <div class="phase-card">
+        <span class="badge badge-p3">Superficial / descubrimiento</span>
+        <span class="muted">Puntos 13 y 14.</span>
+      </div>
+
+      <h3>Tareas</h3>
+      <ul>
+        <li><strong>Navigation:</strong> enlace «Tienda» / «Tiendas» → <code>/tiendas</code>.</li>
+        <li>Grid responsive de cartas cuadradas (CSS <code>aspect-square</code>), nombre como título, imagen default (<code>/placeholder-store.png</code> o avatar genérico).</li>
+        <li><code>GET /api/stores</code> solo devuelve tiendas con <code>isStoreVisibilityActive</code>.</li>
+        <li>Acceso directo <code>/tienda/:slug</code> con suscripción vencida: mensaje «Tienda inactiva por el momento» (HTTP 200 con flag o 404 según producto — preferible 200 + UI clara para no filtrar slugs).</li>
+        <li>Profesional sin pago tienda: su tienda no aparece en grid ni es navegable.</li>
+        <li>Profesional con tienda pagada pero sin mensualidad pro: servicios ocultos (no tocar lógica existente de listing).</li>
+      </ul>
+
+      <pre class="prompt">Prompt 7 tiendas: página /tiendas en navbar con grid de cartas, imagen default, API solo tiendas activas. Ruta pública inactiva muestra "Tienda inactiva por el momento". Respetar visibilidad cruzada profesional vs tienda según plan.</pre>
+    </section>
+
+    <section id="futuro">
+      <h2>Fases diferidas (punto 8 — cuando indiques)</h2>
+      <p>Implementar en prompts futuros separados, no mezclar con 1–7:</p>
+      <ul>
+        <li><strong>Categorías de tienda</strong> — CRUD + asignación múltiple en productos.</li>
+        <li><strong>Promociones de tienda</strong> — reglas y vigencia.</li>
+        <li><strong>Códigos de descuento de tienda</strong> — distintos de <code>promotional_codes</code> globales de plataforma.</li>
+        <li><strong>Configuraciones de tienda</strong> — horarios, políticas, imagen de portada, etc.</li>
+      </ul>
+      <div class="note">
+        Cada ítem anterior debe tener su propia colección Firestore y pantalla en el mismo shell del Prompt 5.
+      </div>
+    </section>
+
+    <section id="checklist">
+      <h2>Checklist global de aceptación (UAT)</h2>
+      <table>
+        <thead>
+          <tr><th>Escenario</th><th>Resultado esperado</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Cliente sin tienda</td><td>Ve «Crear Tienda» en Settings; puede crear y ver vista sin pagar.</td></tr>
+          <tr><td>Dueño sin pago</td><td>Tuerca visible pero deshabilitada; banner lleva a pago; catálogo público inactivo.</td></tr>
+          <tr><td>Pago pendiente admin</td><td>Comprobante en cola admin tiendas; usuario ve estado «en revisión».</td></tr>
+          <tr><td>Pago aprobado</td><td>Tuerca abre panel; tienda en <code>/tiendas</code>; productos publicables.</td></tr>
+          <tr><td>Pago rechazado</td><td>Notificación + abrir chat staff.</td></tr>
+          <tr><td>Profesional solo paga pro</td><td>Servicios visibles si aplica; tienda inactiva/oculta.</td></tr>
+          <tr><td>Profesional paga tienda, no pro</td><td>Tienda visible; servicios no en búsqueda.</td></tr>
+          <tr><td>Ingrediente nuevo</td><td><code>+</code> crea global; aparece en select y en lista del producto.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Rutas SPA propuestas</h2>
+      <table>
+        <thead><tr><th>Ruta</th><th>Descripción</th></tr></thead>
+        <tbody>
+          <tr><td><code>/settings</code></td><td>CTA Crear Tienda / Mi tienda</td></tr>
+          <tr><td><code>/tienda/crear</code></td><td>Alta con aviso de precio</td></tr>
+          <tr><td><code>/tienda/:slug</code></td><td>Vitrina pública</td></tr>
+          <tr><td><code>/tienda/:slug/pago</code></td><td>Pago mensualidad tienda</td></tr>
+          <tr><td><code>/tienda/:slug/admin/*</code></td><td>Panel dueño</td></tr>
+          <tr><td><code>/tiendas</code></td><td>Explorar tiendas (navbar)</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer>
+    GenFeb · <code>docs/MODULO_TIENDAS_PLAN_IMPLEMENTACION.html</code> · Plan de prompts para módulo Tiendas
+  </footer>
+</body>
+</html>

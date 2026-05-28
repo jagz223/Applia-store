@@ -31,9 +31,8 @@ export default function CargoDriverSettings() {
   const [localTrips, setLocalTrips] = useState<CargoDriverTripLog[]>([]);
   const [vehicleChangeOpen, setVehicleChangeOpen] = useState(false);
 
-  const isDeliveryUi = loc.includes("/delivery/");
-  const goDriverBase = isDeliveryUi ? "/go/delivery/driver" : "/go/taxi/driver";
-  const goModuleLabel = isDeliveryUi ? "Delivery" : "Taxi";
+  const goDriverBase = "/go/driver";
+  const goModuleLabel = "Conductor";
 
   const allowed = !!provider?.isVerified && isGoVehicleProvider(provider, categories);
 
@@ -128,7 +127,7 @@ export default function CargoDriverSettings() {
               {goModuleLabel} — Configuración
             </h1>
             <p className="text-sm text-muted-foreground">
-              Tu panel como conductor {isDeliveryUi ? "de reparto" : "de taxi"} (no el panel general de asociado).
+              Tu panel como conductor de taxi y delivery (no el panel general de asociado).
             </p>
           </div>
           <Button

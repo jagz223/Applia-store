@@ -70,8 +70,6 @@ import { GoActiveRideResume } from "@/components/go/GoActiveRideResume";
 import Marketplace from "@/pages/Marketplace";
 import GoPack from "@/pages/go/GoPack";
 import PackRide from "@/pages/PackRide";
-import DriverPackGenfeb from "@/pages/DriverPackGenfeb";
-import PackDriverSettings from "@/pages/PackDriverSettings";
 
 // Oculta pagos temporalmente (se configurará en el futuro).
 const SHOW_PAYMENTS = false;
@@ -162,26 +160,12 @@ function GoRouter() {
       <TaxiRide />
     </GoCategoryGate>
   );
-  const GoCargoDriver = () => (
-    <GoCategoryGate slug="transport">
-      <DriverGoGenfeb />
-    </GoCategoryGate>
-  );
-  const GoCargoDriverSettings = () => (
-    <GoCategoryGate slug="transport">
-      <CargoDriverSettings />
-    </GoCategoryGate>
-  );
-  const GoPackDriver = () => (
-    <GoCategoryGate slug="delivery">
-      <DriverPackGenfeb />
-    </GoCategoryGate>
-  );
-  const GoPackDriverSettings = () => (
-    <GoCategoryGate slug="delivery">
-      <PackDriverSettings />
-    </GoCategoryGate>
-  );
+  const GoUnifiedDriver = () => <DriverGoGenfeb />;
+  const GoUnifiedDriverSettings = () => <CargoDriverSettings />;
+  const GoCargoDriver = () => <Redirect to="/go/driver" />;
+  const GoCargoDriverSettings = () => <Redirect to="/go/driver/settings" />;
+  const GoPackDriver = () => <Redirect to="/go/driver" />;
+  const GoPackDriverSettings = () => <Redirect to="/go/driver/settings" />;
   const GoPackRoute = () => (
     <GoCategoryGate slug="delivery">
       <PackRide />
@@ -192,14 +176,17 @@ function GoRouter() {
       {/* Canonical (rebrand) */}
       {/* Cliente (pedir servicio) */}
       <Route path="/go/taxi" component={GoCargoClient} />
-      {/* Conductor (recibir viajes) */}
+      {/* Conductor unificado (taxi o delivery, una URL) */}
+      <Route path="/go/driver" component={GoUnifiedDriver} />
+      <Route path="/go/driver/settings" component={GoUnifiedDriverSettings} />
+      {/* Legacy conductor */}
       <Route path="/go/taxi/driver" component={GoCargoDriver} />
       <Route path="/go/taxi/driver/settings" component={GoCargoDriverSettings} />
 
       {/* Legacy (compat): mantener por links/vistas ya configuradas */}
       <Route path="/go/cargo">{() => <Redirect to="/go/taxi" />}</Route>
-      <Route path="/go/cargo/driver">{() => <Redirect to="/go/taxi/driver" />}</Route>
-      <Route path="/go/cargo/driver/settings">{() => <Redirect to="/go/taxi/driver/settings" />}</Route>
+      <Route path="/go/cargo/driver">{() => <Redirect to="/go/driver" />}</Route>
+      <Route path="/go/cargo/driver/settings">{() => <Redirect to="/go/driver/settings" />}</Route>
 
       {/* Delivery canonical */}
       <Route path="/go/delivery" component={GoPackRoute} />
@@ -208,8 +195,8 @@ function GoRouter() {
 
       {/* Legacy (compat) */}
       <Route path="/go/pack">{() => <Redirect to="/go/delivery" />}</Route>
-      <Route path="/go/pack/driver">{() => <Redirect to="/go/delivery/driver" />}</Route>
-      <Route path="/go/pack/driver/settings">{() => <Redirect to="/go/delivery/driver/settings" />}</Route>
+      <Route path="/go/pack/driver">{() => <Redirect to="/go/driver" />}</Route>
+      <Route path="/go/pack/driver/settings">{() => <Redirect to="/go/driver/settings" />}</Route>
 
       <Route component={NotFound} />
     </Switch>

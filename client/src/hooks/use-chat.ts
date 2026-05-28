@@ -6,6 +6,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAuth } from "./use-auth";
+import { findConversationForServiceScope } from "@shared/chat-conversation-scope";
 import { useSocket, useSocketChat } from "./use-socket";
 import { chatApi } from "@/lib/chat-api";
 import { toDate } from "@/lib/date-utils";
@@ -145,21 +146,23 @@ export function useGetOrCreateConversation() {
       participantId,
       serviceId,
       bookingId,
+      mobilityRideId,
     }: {
       participantId: string;
       serviceId?: number;
-      /** Si se indica, solo coincide conversaciones de esa reserva (marketplace). */
+      /** Solo reutiliza el hilo de esa reserva (Pro Go / Man Go). */
       bookingId?: number;
+      /** Solo reutiliza el hilo de ese viaje (Car Go / Delivery). */
+      mobilityRideId?: string;
     }) => {
       const list = await chatApi.getConversations();
-      const matchesPeer = (c: (typeof list)[number]) =>
-        c.otherParticipant?.id === participantId || c.participant1Id === participantId || c.participant2Id === participantId;
-      const existing =
-        bookingId != null && Number.isFinite(bookingId)
-          ? list.find((c) => matchesPeer(c) && Number(c.bookingId) === bookingId)
-          : list.find(matchesPeer);
+      const existing = findConversationForServiceScope(list, {
+        participantId,
+        bookingId,
+        mobilityRideId,
+      });
       if (existing) return existing.id;
-      const created = await chatApi.createConversation({ participantId, serviceId });
+      const created = await chatApi.createConversation({ participantId, serviceId, bookingId });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });
       debouncedRefetch(queryClient, QUERY_KEYS.conversations);
       return created.id;

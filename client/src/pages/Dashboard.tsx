@@ -16,86 +16,66 @@ import {
   Filter,
   CheckCircle,
   Clock,
-  XCircle,
   Receipt,
-  Banknote,
   Settings,
   Loader2,
-  ShieldCheck,
+  ClipboardList,
 } from "lucide-react";
+import {
+  buildAssociateDashboardActivity,
+  filterActivityByListTab,
+  type AssociateDashboardActivityItem,
+} from "@shared/associate-dashboard-activity";
+import { AssociateActivityDetailSheet } from "@/components/dashboard/AssociateActivityDetailSheet";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
-import { useWalletTransfers, useCurrentProvider } from "@/hooks/use-mango-data";
+import { useWalletTransfers, useCurrentProvider, useBookingsByProvider, useBookings } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
-import { downloadInvoicePdf, getTransferTypeLabel } from "@/lib/invoice-pdf";
 import { SubscriptionInvoicesPanel } from "@/components/subscription/SubscriptionInvoicesPanel";
-import { SubscriptionInvoiceRow } from "@/components/subscription/SubscriptionInvoiceRow";
 import type { SubscriptionInvoiceListItem } from "@shared/subscription-invoice";
-import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
+import { AssociateActivityFeed } from "@/components/dashboard/AssociateActivityFeed";
+import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
+import { normalizeProviderCategorySlug } from "@shared/default-categories";
+import {
+  dashboardActivityPageSubtitle,
+  dashboardActivityTransactionsDescription,
+  dashboardClientDetailHint,
+  dashboardOverviewDescription,
+  dashboardProfessionalDetailHint,
+  dashboardServiceHistoryDescription,
+  resolveDashboardActivityViewer,
+} from "@shared/dashboard-activity-copy";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { QuickSettingsPanel } from "@/components/settings/QuickSettingsPanel";
-import {
-  canAccessAssociateActivityDashboard,
-  hasFullAdminRole,
-} from "@/lib/auth-utils";
+import { canAccessActivityDashboard, hasFullAdminRole } from "@/lib/auth-utils";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import { normalizeRoleCode } from "@shared/roles";
-import { cn } from "@/lib/utils";
 
 const SHOW_DASHBOARD_KPI_CARDS = false;
 const SHOW_DASHBOARD_HEADER_ACTIONS = false;
 
-/** Monto del único movimiento de activación de visibilidad de servicios en este panel. */
-const ACTIVATION_VISIBILITY_USD = 15;
-
-const ACTIVATION_MOVEMENT_LABEL = "Abono por activar servicios visibles";
-
-/**
- * Historial de pago único: cargo de verificación / activación para que tus servicios sean visibles (cuota mensual).
- */
-function isActivationVisibilityTransfer(t: {
-  transferType?: string;
-  amount?: unknown;
-  description?: string | null;
-}): boolean {
-  const tt = String(t.transferType ?? "").toLowerCase();
-  if (tt === "verification_fee") return true;
-  const amt = typeof t.amount === "number" ? t.amount : parseFloat(String(t.amount ?? ""));
-  if (!Number.isFinite(amt) || Math.abs(amt - ACTIVATION_VISIBILITY_USD) > 0.02) return false;
-  const desc = (t.description ?? "").toLowerCase();
-  return (
-    desc.includes("verific") ||
-    desc.includes("visibil") ||
-    desc.includes("activ") ||
-    tt.includes("verif")
-  );
-}
-
-function movementDisplayLabel(t: { transferType?: string }): string {
-  if (String(t.transferType ?? "").toLowerCase() === "verification_fee") return ACTIVATION_MOVEMENT_LABEL;
-  return getTransferTypeLabel(String(t.transferType ?? ""));
-}
-
 export default function Dashboard() {
   const [timeRange, setTimeRange] = useState("6m");
   const [dashboardSettingsOpen, setDashboardSettingsOpen] = useState(false);
+  const [activityDetailItem, setActivityDetailItem] = useState<AssociateDashboardActivityItem | null>(null);
+  const [activityDetailOpen, setActivityDetailOpen] = useState(false);
   const [locationPath, setLocation] = useLocation();
 
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const { data: providerProfile, isLoading: providerLoading } = useCurrentProvider();
-  const { monthlyUsd } = useProviderSubscriptionMonthlyUsd({
-    enabled: isAuthenticated && canAccessAssociateActivityDashboard(user, !!providerProfile),
-  });
-
   const hasProvider =
     !!providerProfile || !!(user as { provider?: unknown } | null)?.provider;
-  const allowed = canAccessAssociateActivityDashboard(user, hasProvider);
+  const allowed = canAccessActivityDashboard(user, hasProvider);
+  const viewer = resolveDashboardActivityViewer(hasProvider);
+  const isClientOnly = viewer === "client_only";
+  const showProfessionalHint = hasProvider;
+  const showClientHint = isClientOnly || viewer === "both";
 
   const earlyAllowed =
     hasFullAdminRole(user ?? null) ||
-    normalizeRoleCode(user?.role) === "professional" ||
-    !!(user as { provider?: unknown } | null)?.provider;
+    userCanActAsAssociate(user) ||
+    !!(user as { provider?: unknown } | null)?.provider ||
+    normalizeRoleCode(user?.role) === "client";
 
   const stillResolving =
     isAuthenticated && !earlyAllowed && providerLoading;
@@ -187,17 +167,6 @@ export default function Dashboard() {
     enabled: isAuthenticated && allowed,
   });
 
-  const activationTransfers = useMemo(() => {
-    const raw = walletTransfersData?.transfers ?? [];
-    const filtered = raw.filter(isActivationVisibilityTransfer);
-    return filtered.sort((a, b) => {
-      const da = parseTransferDateForSort(a.createdAt)?.getTime() ?? 0;
-      const db = parseTransferDateForSort(b.createdAt)?.getTime() ?? 0;
-      return db - da;
-    });
-  }, [walletTransfersData?.transfers]);
-
-  /** Misma fuente que el panel de asociados: facturas de suscripción / verificación (mensualidad). */
   const { data: invoiceList, isLoading: invoicesLoading } = useQuery({
     queryKey: ["/api/invoices", "list"],
     queryFn: async () => {
@@ -208,13 +177,134 @@ export default function Dashboard() {
       if (!res.ok) throw new Error("No se pudieron cargar las facturas");
       return res.json() as Promise<SubscriptionInvoiceListItem[]>;
     },
-    enabled: isAuthenticated && allowed,
+    enabled: isAuthenticated && allowed && !isClientOnly,
   });
 
   const verificationInvoiceRows = useMemo(
     () => (Array.isArray(invoiceList) ? invoiceList : []).filter((inv) => inv.type === "verification"),
     [invoiceList],
   );
+
+  const { data: providerBookings, isLoading: providerBookingsLoading } = useBookingsByProvider();
+  const { data: clientBookings, isLoading: clientBookingsLoading } = useBookings({
+    enabled: isAuthenticated && allowed,
+  });
+
+  const { data: mobilityDriverHistory, isLoading: mobilityDriverLoading } = useQuery({
+    queryKey: ["/api/mobility/rides/history", "dashboard", "driver", String(user?.id ?? "")],
+    enabled: isAuthenticated && allowed && !!user?.id && hasProvider,
+    queryFn: () => fetchMobilityRideHistoryForUser(80, "driver"),
+    staleTime: 60_000,
+  });
+
+  const { data: mobilityRiderHistory, isLoading: mobilityRiderLoading } = useQuery({
+    queryKey: ["/api/mobility/rides/history", "dashboard", "rider", String(user?.id ?? "")],
+    enabled: isAuthenticated && allowed && !!user?.id,
+    queryFn: () => fetchMobilityRideHistoryForUser(80, "rider"),
+    staleTime: 60_000,
+  });
+
+  const completedBookingsAsProvider = useMemo(
+    () =>
+      hasProvider
+        ? (Array.isArray(providerBookings) ? providerBookings : []).filter(
+            (b: { status?: string }) => String(b.status ?? "").toLowerCase() === "completed",
+          )
+        : [],
+    [providerBookings, hasProvider],
+  );
+
+  const completedBookingsAsClient = useMemo(
+    () =>
+      (Array.isArray(clientBookings) ? clientBookings : []).filter(
+        (b: { status?: string }) => String(b.status ?? "").toLowerCase() === "completed",
+      ),
+    [clientBookings],
+  );
+
+  const mobilityAsDriver = useMemo(
+    () => (mobilityDriverHistory ?? []).filter((r) => r.outcome === "completed"),
+    [mobilityDriverHistory],
+  );
+
+  const mobilityAsRider = useMemo(
+    () => (mobilityRiderHistory ?? []).filter((r) => r.outcome === "completed"),
+    [mobilityRiderHistory],
+  );
+
+  const providerCategorySlug = normalizeProviderCategorySlug(
+    (providerProfile as { category?: string; categorySlug?: string } | null)?.categorySlug ??
+      (providerProfile as { category?: string } | null)?.category,
+  );
+
+  const activityItems = useMemo(
+    () =>
+      buildAssociateDashboardActivity(
+        {
+          transfers: walletTransfersData?.transfers ?? [],
+          completedBookingsAsProvider,
+          completedBookingsAsClient,
+          mobilityAsDriver,
+          mobilityAsRider,
+          verificationInvoices: verificationInvoiceRows,
+          providerCategorySlug,
+        },
+        {
+          includeSubscriptions: !isClientOnly,
+          includeWalletTransactions: true,
+        },
+      ),
+    [
+      walletTransfersData?.transfers,
+      completedBookingsAsProvider,
+      completedBookingsAsClient,
+      mobilityAsDriver,
+      mobilityAsRider,
+      verificationInvoiceRows,
+      providerCategorySlug,
+      isClientOnly,
+    ],
+  );
+
+  const serviceHistoryItems = useMemo(
+    () => filterActivityByListTab(activityItems, "services"),
+    [activityItems],
+  );
+
+  const transactionItems = useMemo(
+    () => filterActivityByListTab(activityItems, "transactions"),
+    [activityItems],
+  );
+
+  const overviewItems = useMemo(() => activityItems.slice(0, 8), [activityItems]);
+
+  const activityLoading =
+    transfersLoading ||
+    (isClientOnly ? false : invoicesLoading) ||
+    providerBookingsLoading ||
+    clientBookingsLoading ||
+    (hasProvider && mobilityDriverLoading) ||
+    mobilityRiderLoading;
+
+  const serviceEmptyMessage = isClientOnly
+    ? "Aún no tienes servicios completados como cliente."
+    : "Aún no hay servicios registrados en tu historial.";
+
+  const transactionEmptyMessage = isClientOnly
+    ? "Aún no tienes pagos registrados (viajes Car Go o cargos en wallet)."
+    : "Aún no hay transacciones de mensualidad o pagos Car Go.";
+
+  const openActivityDetail = (item: AssociateDashboardActivityItem) => {
+    setActivityDetailItem(item);
+    setActivityDetailOpen(true);
+  };
+
+  const handleActivityDetailOpenChange = (open: boolean) => {
+    setActivityDetailOpen(open);
+    if (!open) {
+      window.setTimeout(() => setActivityDetailItem(null), 220);
+    }
+  };
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -229,48 +319,6 @@ export default function Dashboard() {
     visible: { opacity: 1, y: 0 },
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "completed":
-        return (
-          <Badge className="badge-success">
-            <CheckCircle className="mr-1 h-3 w-3" />
-            Completado
-          </Badge>
-        );
-      case "pending_approval":
-        return (
-          <Badge className="badge-warning">
-            <Clock className="mr-1 h-3 w-3" />
-            Pendiente
-          </Badge>
-        );
-      case "rejected":
-        return (
-          <Badge className="badge-danger">
-            <XCircle className="mr-1 h-3 w-3" />
-            Rechazado
-          </Badge>
-        );
-      case "pending":
-        return (
-          <Badge className="badge-warning">
-            <Clock className="mr-1 h-3 w-3" />
-            Pendiente
-          </Badge>
-        );
-      case "cancelled":
-        return (
-          <Badge className="badge-danger">
-            <XCircle className="mr-1 h-3 w-3" />
-            Cancelado
-          </Badge>
-        );
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
-
   const formatAmount = (amount: number) =>
     new Intl.NumberFormat("es-EC", {
       style: "currency",
@@ -278,71 +326,6 @@ export default function Dashboard() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
-
-  function parseTransferDate(value: unknown): Date | null {
-    if (value == null) return null;
-    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
-    if (typeof value === "string") {
-      const d = new Date(value);
-      return Number.isFinite(d.getTime()) ? d : null;
-    }
-    if (typeof value === "number") {
-      const d = new Date(value);
-      return Number.isFinite(d.getTime()) ? d : null;
-    }
-    if (typeof value === "object" && value !== null && "seconds" in value) {
-      const d = new Date((value as { seconds: number }).seconds * 1000);
-      return Number.isFinite(d.getTime()) ? d : null;
-    }
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      "toDate" in value &&
-      typeof (value as { toDate: () => Date }).toDate === "function"
-    ) {
-      const d = (value as { toDate: () => Date }).toDate();
-      return Number.isFinite(d.getTime()) ? d : null;
-    }
-    const d = new Date(String(value));
-    return Number.isFinite(d.getTime()) ? d : null;
-  }
-
-  function parseTransferDateForSort(value: unknown): Date | null {
-    return parseTransferDate(value);
-  }
-
-  const getTransferMeta = (t: any) => {
-    const type = t.transferType as string | undefined;
-    const status = t.status as "pending_approval" | "completed" | "rejected" | undefined;
-    const isPending = status === "pending_approval";
-
-    const isActivation = String(type ?? "").toLowerCase() === "verification_fee" || isActivationVisibilityTransfer(t);
-
-    const isCredit =
-      status === "completed" &&
-      (type === "recharge" || type === "service_payment");
-    const isDebit =
-      status === "completed" && (type === "withdrawal" || type === "payment" || type === "verification_fee");
-
-    let amountColor = "text-foreground";
-    if (isPending) {
-      amountColor = "text-muted-foreground";
-    } else if (isActivation && status === "completed") {
-      amountColor = "text-foreground";
-    } else if (isCredit) {
-      amountColor = "text-emerald-600";
-    } else if (isDebit) {
-      amountColor = "text-red-600";
-    }
-
-    const label = movementDisplayLabel(t);
-
-    const createdAt = parseTransferDate(t.createdAt);
-    const dateStr = createdAt ? format(createdAt, "dd MMM yyyy HH:mm", { locale: es }) : "";
-
-    return { isCredit, isDebit, isPending, amountColor, label, dateStr };
-  };
-
 
   if (authLoading || stillResolving) {
     return (
@@ -381,8 +364,7 @@ export default function Dashboard() {
                 Mi <span className="text-gradient-primary">actividad</span>
               </h1>
               <p className="mt-1.5 text-sm leading-snug text-muted-foreground sm:text-base">
-                Resumen, historial y factura del abono de USD {ACTIVATION_VISIBILITY_USD} para activar la visibilidad de
-                tus servicios
+                {dashboardActivityPageSubtitle(viewer)}
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-3 md:justify-end">
@@ -495,19 +477,28 @@ export default function Dashboard() {
                     Resumen
                   </TabsTrigger>
                   <TabsTrigger
+                    value="services"
+                    className="shrink-0 px-2.5 py-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground min-[380px]:text-sm sm:px-3"
+                  >
+                    <ClipboardList className="h-4 w-4 max-[420px]:hidden sm:mr-2" />
+                    Historial
+                  </TabsTrigger>
+                  <TabsTrigger
                     value="transactions"
                     className="shrink-0 px-2.5 py-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground min-[380px]:text-sm sm:px-3"
                   >
                     <Receipt className="h-4 w-4 max-[420px]:hidden sm:mr-2" />
                     Transacciones
                   </TabsTrigger>
-                  <TabsTrigger
-                    value="invoices"
-                    className="shrink-0 px-2.5 py-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground min-[380px]:text-sm sm:px-3"
-                  >
-                    <FileText className="h-4 w-4 max-[420px]:hidden sm:mr-2" />
-                    Facturas
-                  </TabsTrigger>
+                  {!isClientOnly ? (
+                    <TabsTrigger
+                      value="invoices"
+                      className="shrink-0 px-2.5 py-2 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground min-[380px]:text-sm sm:px-3"
+                    >
+                      <FileText className="h-4 w-4 max-[420px]:hidden sm:mr-2" />
+                      Facturas
+                    </TabsTrigger>
+                  ) : null}
                 </TabsList>
               </div>
 
@@ -530,6 +521,26 @@ export default function Dashboard() {
             </div>
 
             <TabsContent value="overview" className="space-y-6">
+              {(showProfessionalHint || showClientHint) && (
+                <div className="space-y-2">
+                  {showProfessionalHint ? (
+                    <p className="rounded-xl border border-border/80 bg-muted/30 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+                      {dashboardProfessionalDetailHint()}{" "}
+                      <Link href="/professional-dashboard" className="font-medium text-primary underline-offset-2 hover:underline">
+                        Ir al panel profesional
+                      </Link>
+                    </p>
+                  ) : null}
+                  {showClientHint ? (
+                    <p className="rounded-xl border border-border/80 bg-muted/30 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+                      {dashboardClientDetailHint()}{" "}
+                      <Link href="/bookings" className="font-medium text-primary underline-offset-2 hover:underline">
+                        Mis reservas
+                      </Link>
+                    </p>
+                  ) : null}
+                </div>
+              )}
               <div className="grid gap-6 lg:grid-cols-1">
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
@@ -541,98 +552,26 @@ export default function Dashboard() {
                       <div className="min-w-0">
                         <CardTitle className="flex items-center justify-center gap-2 text-base font-semibold leading-snug min-[380px]:text-lg sm:justify-start sm:text-xl md:text-2xl">
                           <Receipt className="h-4 w-4 shrink-0 text-primary sm:h-5 sm:w-5" />
-                          <span className="text-balance">Historial de pago</span>
+                          <span className="text-balance">Actividad reciente</span>
                         </CardTitle>
                         <CardDescription className="text-xs text-balance sm:text-sm">
-                          Pagos de suscripción de visibilidad: monto, fecha de aprobación y si usaste código promocional.
+                          {dashboardOverviewDescription(viewer)}
                         </CardDescription>
                       </div>
                     </CardHeader>
                     <CardContent className="px-3 pb-4 pt-0 sm:px-6 sm:pb-6">
-                      {transfersLoading || invoicesLoading ? (
+                      {activityLoading ? (
                         <div className="flex flex-col items-center justify-center gap-3 py-10">
                           <Receipt className="h-8 w-8 animate-pulse text-muted-foreground" />
                           <p className="text-sm text-muted-foreground">Cargando…</p>
                         </div>
-                      ) : activationTransfers.length === 0 && verificationInvoiceRows.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
-                          <Receipt className="h-8 w-8 opacity-60" />
-                          <p className="max-w-md text-center text-sm">
-                            Aún no hay un pago registrado. Cuando completes el abono de activación, verás aquí el
-                            movimiento y podrás descargar la factura en la pestaña Facturas.
-                          </p>
-                        </div>
-                      ) : verificationInvoiceRows.length > 0 ? (
-                        <div className="space-y-3">
-                          {verificationInvoiceRows.map((inv) => (
-                            <SubscriptionInvoiceRow
-                              key={`overview-ver-${inv.reportId ?? inv.id}`}
-                              invoice={inv}
-                              monthlyUsdFallback={monthlyUsd}
-                              userForInvoice={
-                                user
-                                  ? {
-                                      firstName: user.firstName,
-                                      lastName: user.lastName,
-                                      name: (user as { name?: string }).name,
-                                      email: user.email,
-                                    }
-                                  : null
-                              }
-                            />
-                          ))}
-                        </div>
                       ) : (
-                        <motion.div className="space-y-5">
-                          {activationTransfers.map((t: any) => {
-                            const { amountColor, label, dateStr } = getTransferMeta(t);
-                            return (
-                              <div
-                                key={t.id}
-                                className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-background/50 p-3 transition-colors hover:border-primary/30 min-[380px]:gap-4 min-[380px]:p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-5"
-                              >
-                                <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
-                                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 sm:mt-0 sm:h-10 sm:w-10">
-                                    <Banknote className="h-4 w-4 text-primary sm:h-5 sm:w-5" />
-                                  </div>
-                                  <div className="min-w-0 flex-1 space-y-1">
-                                    <p className="break-words text-sm font-medium text-foreground sm:text-base">
-                                      {label}
-                                    </p>
-                                    <p className="hyphens-auto break-words text-xs text-muted-foreground sm:text-sm">
-                                      {t.description ||
-                                        `Pago único (USD ${ACTIVATION_VISIBILITY_USD}) para activar la visibilidad de tus servicios.`}
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="flex w-full min-w-0 flex-col gap-3 border-t border-border/60 pt-3 sm:max-w-[50%] sm:w-auto sm:items-end sm:border-0 sm:pt-0">
-                                  <div className="flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-1 sm:w-auto sm:flex-col sm:items-end sm:text-right">
-                                    <p
-                                      className={`text-sm font-bold tabular-nums sm:text-base ${amountColor}`}
-                                    >
-                                      {formatAmount(t.amount)}
-                                    </p>
-                                    <p className="text-right text-[11px] text-muted-foreground break-all sm:break-normal sm:text-xs">
-                                      {dateStr}
-                                    </p>
-                                  </div>
-                                  <div className="flex w-full flex-col gap-2 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:justify-end sm:w-auto">
-                                    <Badge
-                                      variant="secondary"
-                                      className="w-full shrink-0 justify-center gap-1 py-1.5 text-xs min-[400px]:w-auto sm:py-1"
-                                    >
-                                      <FileText className="h-3 w-3 shrink-0" />
-                                      Comprobante
-                                    </Badge>
-                                    <div className="flex w-full justify-center min-[400px]:w-auto min-[400px]:justify-end">
-                                      {getStatusBadge(t.status)}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </motion.div>
+                        <AssociateActivityFeed
+                          items={overviewItems}
+                          formatUsd={formatAmount}
+                          emptyMessage={serviceEmptyMessage}
+                          onSelectItem={openActivityDetail}
+                        />
                       )}
                     </CardContent>
                   </Card>
@@ -640,72 +579,75 @@ export default function Dashboard() {
               </div>
             </TabsContent>
 
-            <TabsContent value="transactions">
+            <TabsContent value="services">
               <Card className="card-industrial">
                 <CardHeader className="p-4 sm:p-6">
-                  <CardTitle className="text-base min-[380px]:text-lg sm:text-2xl">Transacciones</CardTitle>
+                  <CardTitle className="text-base min-[380px]:text-lg sm:text-2xl">
+                    Historial de servicios
+                  </CardTitle>
                   <CardDescription className="text-xs sm:text-sm">
-                    Historial del abono de USD {ACTIVATION_VISIBILITY_USD} (visibilidad de servicios)
+                    {dashboardServiceHistoryDescription(viewer)}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="px-3 pb-4 sm:px-6 sm:pb-6">
-                  {transfersLoading ? (
+                  {activityLoading ? (
                     <div className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
-                      <Receipt className="h-8 w-8 animate-pulse" />
+                      <ClipboardList className="h-8 w-8 animate-pulse" />
                       <p className="text-sm">Cargando…</p>
                     </div>
-                  ) : activationTransfers.length === 0 ? (
-                    <div className="py-10 text-center text-muted-foreground">
-                      <Receipt className="mx-auto mb-3 h-10 w-10 opacity-60" />
-                      <p>No hay transacciones para mostrar.</p>
-                    </div>
                   ) : (
-                    <div className="space-y-4">
-                      {activationTransfers.map((t: any) => {
-                        const { amountColor, label, dateStr } = getTransferMeta(t);
-                        return (
-                          <div
-                            key={t.id}
-                            className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-background/40 p-3 min-[380px]:p-4 sm:flex-row sm:items-center sm:justify-between"
-                          >
-                            <div className="flex min-w-0 flex-1 items-start gap-3">
-                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                                <Banknote className="h-4 w-4 text-primary" />
-                              </div>
-                              <div className="min-w-0 flex-1 space-y-1">
-                                <p className="break-words text-sm font-medium">{label}</p>
-                                <p className="break-words text-xs text-muted-foreground">
-                                  {t.description ||
-                                    `Abono único para servicios visibles (USD ${ACTIVATION_VISIBILITY_USD}).`}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex w-full shrink-0 flex-row flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-3 sm:w-auto sm:flex-col sm:items-end sm:border-0 sm:pt-0">
-                              <div className="min-w-0 text-left sm:text-right">
-                                <p className={`text-sm font-semibold tabular-nums ${amountColor}`}>
-                                  {formatAmount(t.amount)}
-                                </p>
-                                <p className="text-[11px] text-muted-foreground break-all sm:break-normal sm:text-xs">
-                                  {dateStr}
-                                </p>
-                              </div>
-                              <div className="ml-auto sm:ml-0">{getStatusBadge(t.status)}</div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <AssociateActivityFeed
+                      items={serviceHistoryItems}
+                      formatUsd={formatAmount}
+                      emptyMessage={serviceEmptyMessage}
+                      onSelectItem={openActivityDetail}
+                    />
                   )}
                 </CardContent>
               </Card>
             </TabsContent>
 
-            <TabsContent value="invoices">
-              <SubscriptionInvoicesPanel cardClassName="card-industrial" enabled={allowed} />
+            <TabsContent value="transactions">
+              <Card className="card-industrial">
+                <CardHeader className="p-4 sm:p-6">
+                  <CardTitle className="text-base min-[380px]:text-lg sm:text-2xl">Transacciones</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
+                    {dashboardActivityTransactionsDescription(viewer)}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="px-3 pb-4 sm:px-6 sm:pb-6">
+                  {activityLoading ? (
+                    <div className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
+                      <Receipt className="h-8 w-8 animate-pulse" />
+                      <p className="text-sm">Cargando…</p>
+                    </div>
+                  ) : (
+                    <AssociateActivityFeed
+                      items={transactionItems}
+                      formatUsd={formatAmount}
+                      emptyMessage={transactionEmptyMessage}
+                      onSelectItem={openActivityDetail}
+                    />
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
+
+            {!isClientOnly ? (
+              <TabsContent value="invoices">
+                <SubscriptionInvoicesPanel cardClassName="card-industrial" enabled={allowed} />
+              </TabsContent>
+            ) : null}
           </Tabs>
         </div>
       </section>
+
+      <AssociateActivityDetailSheet
+        item={activityDetailItem}
+        open={activityDetailOpen}
+        onOpenChange={handleActivityDetailOpenChange}
+        formatUsd={formatAmount}
+      />
     </div>
   );
 }

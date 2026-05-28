@@ -23,7 +23,7 @@ export function SubscriptionInvoicesPanel({
   const [location] = useLocation();
   const [pulseReportId, setPulseReportId] = useState<number | null>(null);
   const autoVerificationPdfDone = useRef(false);
-  const { monthlyUsd, monthlyUsdLabel } = useProviderSubscriptionMonthlyUsd({ enabled: !!user });
+  const { monthlyUsd } = useProviderSubscriptionMonthlyUsd({ enabled: !!user });
 
   const { data: invoiceList, isLoading } = useQuery({
     queryKey: ["/api/invoices", "list"],
@@ -142,7 +142,7 @@ export function SubscriptionInvoicesPanel({
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
           <CardDescription>
-            Historial y descarga en PDF del pago mensual ({monthlyUsdLabel}) para ser asociado
+            Historial y descarga en PDF de tus pagos de mensualidad (visibilidad como asociado).
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
@@ -159,7 +159,7 @@ export function SubscriptionInvoicesPanel({
         <CardHeader>
           <CardTitle>Facturas</CardTitle>
           <CardDescription>
-            Historial y descarga en PDF del pago mensual ({monthlyUsdLabel}) para ser asociado
+            Historial y descarga en PDF de tus pagos de mensualidad (visibilidad como asociado).
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
@@ -178,7 +178,8 @@ export function SubscriptionInvoicesPanel({
       <CardHeader>
         <CardTitle>Facturas</CardTitle>
         <CardDescription>
-          Suscripción de visibilidad ({monthlyUsdLabel}): monto, fechas, código promocional y PDF sin impuestos.
+          Pagos de mensualidad de visibilidad: monto según tu categoría, fechas, código promocional y PDF sin
+          impuestos.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

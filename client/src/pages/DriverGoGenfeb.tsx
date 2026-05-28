@@ -19,7 +19,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
+import { useGoDriverUi, type GoDriverQueuedOffer } from "@/contexts/GoDriverUiContext";
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider, useWallet } from "@/hooks/use-mango-data";
 import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
@@ -31,27 +31,34 @@ import {
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { providerHasGoBrand } from "@shared/provider-go";
 import { DriverCargoMap } from "@/components/driver/DriverCargoMap";
-import { SlideToCargoOnline } from "@/components/driver/SlideToCargoOnline";
+import { SlideToGoReceiveMode } from "@/components/driver/SlideToGoReceiveMode";
 import { DriverTripHistorySheet } from "@/components/driver/DriverTripHistorySheet";
 import {
-  clearAllGoReceiving,
   clearDriverActiveRideId,
   clearGoDriverActiveRideId,
   loadDriverActiveRideId,
   loadGoDriverActiveRideId,
-  loadGoReceiving,
   loadReceiving,
   saveDriverActiveRideId,
   saveGoDriverActiveRideId,
   saveReceiving,
-  saveGoReceiving,
   type CargoDriverTripLog,
+  type GoDriverReceiveMode,
 } from "@/lib/cargo-driver-storage";
+import {
+  isReceivingDeliveryMode,
+  isReceivingTaxiMode,
+  receiveModeToGoSlug,
+} from "@/lib/go-driver-receive-mode";
+import { extractUserPublicPhone } from "@/lib/user-public-phone";
+import { useGoDriverSession } from "@/contexts/GoDriverSessionContext";
 import { Button } from "@/components/ui/button";
 import { GoChatProvider, useGoChat } from "@/contexts/GoChatContext";
 import { GoDriverUiProvider } from "@/contexts/GoDriverUiContext";
+import { GoDriverSessionProvider } from "@/contexts/GoDriverSessionContext";
 import { GoRideRatingDialog, goSlugToRatingModule } from "@/components/go/GoRideRatingDialog";
 import { GoPanicFloatingButton } from "@/components/go/GoPanicFloatingButton";
+import { GoUserRideStatsBadges } from "@/components/go/GoUserRideStatsBadges";
 import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
 import { historyToDriverTripLog } from "@/lib/mobility-ride-history-mappers";
 import { notifyMobilityRideHistoryChanged } from "@/lib/mobility-ride-history-events";
@@ -75,7 +82,13 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { GoDriverNegotiationBoardPanel } from "@/components/go/GoDriverNegotiationBoardPanel";
 import { goOffsetAboveBottomNav, goViewportClasses, useGoCompactViewport } from "@/lib/go-viewport-layout";
-import { estimateDurationSecFromDistanceM, haversineM } from "@shared/maps-route-math";
+import {
+  buildStoredDrivingRoute,
+  geoJsonLineFromCoords,
+  isRoadRouteApiPayload,
+  trimRouteAtDriver,
+  type StoredDrivingRoute,
+} from "@/lib/driving-route-geometry";
 import {
   GO_DRIVER_SUBSCRIPTION_INACTIVE_DRIVER_BANNER,
   GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT,
@@ -83,18 +96,11 @@ import {
   isGoDriverSubscriptionActive,
 } from "@shared/go-driver-subscription";
 
-function lineGeoJson(from: { lat: number; lon: number }, to: { lat: number; lon: number }): GeoJsonObject {
-  return {
-    type: "Feature",
-    properties: { source: "fallback" },
-    geometry: {
-      type: "LineString",
-      coordinates: [
-        [from.lon, from.lat],
-        [to.lon, to.lat],
-      ],
-    },
-  } as unknown as GeoJsonObject;
+const DRIVER_ROUTE_DEVIATION_M = 80;
+const DRIVER_ROUTE_DEVIATION_REFETCH_MS = 25_000;
+
+function serviceNavTargetKey(target: { lat: number; lon: number }): string {
+  return `${target.lat.toFixed(5)},${target.lon.toFixed(5)}`;
 }
 
 type MobilityRideHydration = {
@@ -137,14 +143,34 @@ function mapApiRideToOffer(ride: MobilityRideHydration): CargoRideOfferPayload {
   };
 }
 
-export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" | "pack" } = {}) {
+export default function DriverGoGenfeb() {
   const queryClient = useQueryClient();
-  const { openChat, resetChat, isOpen: chatOpen, closeChat, setMobilityChatReminder } = useGoChat();
+  const { geoPos, geoPosRef, receiveMode, setReceiveMode, stopReceiving } = useGoDriverSession();
+  const [activeServiceModule, setActiveServiceModule] = useState<"cargo" | "pack" | null>(() => {
+    const cargo = loadGoDriverActiveRideId("cargo");
+    const pack = loadGoDriverActiveRideId("pack");
+    return cargo ? "cargo" : pack ? "pack" : null;
+  });
+  const serviceModule: "cargo" | "pack" = activeServiceModule ?? receiveModeToGoSlug(receiveMode);
+  const goSlug = serviceModule;
+  const receiveModeRef = useRef(receiveMode);
+  receiveModeRef.current = receiveMode;
+  const activeServiceModuleRef = useRef(activeServiceModule);
+  activeServiceModuleRef.current = activeServiceModule;
+  const {
+    openChat,
+    resetChat,
+    isOpen: chatOpen,
+    closeChat,
+    setMobilityChatReminder,
+    primeCarGoConversation,
+    openChatWithConversation,
+  } = useGoChat();
   const { socket } = useSocket();
-  const rideApiBase = goSlug === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
-  const rideSocketPrefix = goSlug === "pack" ? "pack:ride:" : "cargo:ride:";
-  const presenceEvent = goSlug === "pack" ? "pack:driver:presence" : "cargo:driver:presence";
-  const locationEvent = goSlug === "pack" ? "pack:ride:location" : "cargo:ride:location";
+  const rideApiBase = serviceModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+  const rideSocketPrefix = serviceModule === "pack" ? "pack:ride:" : "cargo:ride:";
+  const presenceEvent = serviceModule === "pack" ? "pack:driver:presence" : "cargo:driver:presence";
+  const locationEvent = serviceModule === "pack" ? "pack:ride:location" : "cargo:ride:location";
   const { toast } = useToast();
   const goDriverUi = useGoDriverUi();
   const [, setLocation] = useLocation();
@@ -154,8 +180,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const { data: categories = [] } = useCategories();
   const { data: walletData } = useWallet({ enabled: isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED });
   const [driverWalletOpen, setDriverWalletOpen] = useState(false);
-  const [receivingCargo, setReceivingCargo] = useState(false);
-  const [receivingPack, setReceivingPack] = useState(false);
   const [trips, setTrips] = useState<CargoDriverTripLog[]>([]);
   const tripsForHistory = useMemo(() => {
     if (FEATURE_WALLET_RECHARGE_UI_ENABLED) return trips;
@@ -164,12 +188,16 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const hasOnlyHiddenWalletTrips =
     !FEATURE_WALLET_RECHARGE_UI_ENABLED && trips.length > 0 && tripsForHistory.length === 0;
   const [historySheetOpen, setHistorySheetOpen] = useState(false);
-  const [geoPos, setGeoPos] = useState<{ lat: number; lon: number } | null>(null);
-  const incomingOffer = goDriverUi?.currentOffer?.offer ?? null;
-  const incomingModule = goDriverUi?.currentOffer?.module ?? null;
+  /** Mantiene la oferta visible mientras el backend confirma aceptar (evita parpadeo del modal). */
+  const [pinnedOfferEntry, setPinnedOfferEntry] = useState<GoDriverQueuedOffer | null>(null);
+  const acceptingRideIdRef = useRef<string | null>(null);
+  const modalOfferEntry = pinnedOfferEntry ?? goDriverUi?.currentOffer ?? null;
+  const incomingOffer = modalOfferEntry?.offer ?? null;
+  const incomingModule = modalOfferEntry?.module ?? null;
   const incomingOpen = incomingOffer != null;
   const [respondBusy, setRespondBusy] = useState(false);
   const [negotiationBoardOpen, setNegotiationBoardOpen] = useState(false);
+  const [negotiationViewModule, setNegotiationViewModule] = useState<"cargo" | "pack">("cargo");
   /** Tras enviar oferta de regateo: recordatorio compacto hasta match / retiro / servicio activo. */
   const [driverNegotiationSent, setDriverNegotiationSent] = useState<{
     rideId: string;
@@ -179,13 +207,28 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const [activeRideOffer, setActiveRideOffer] = useState<CargoRideOfferPayload | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
-  const receiving = goSlug === "pack" ? receivingPack : receivingCargo;
+  const receiving = receiveMode !== "off";
+  const receivingCargo = isReceivingTaxiMode(receiveMode);
+  const receivingPack = isReceivingDeliveryMode(receiveMode);
   const activeRideIdRef = useRef<string | null>(null);
   activeRideIdRef.current = activeRideId;
   const activeRideOfferRef = useRef<CargoRideOfferPayload | null>(null);
   useEffect(() => {
     activeRideOfferRef.current = activeRideOffer;
   }, [activeRideOffer]);
+
+  /** Enlaza el hilo Go al drawer de chat y refresca la lista (el pasajero ya hacía primeCarGoConversation). */
+  const syncRideConversation = useCallback(
+    (conversationId: number | null | undefined) => {
+      if (conversationId == null || !Number.isFinite(Number(conversationId))) return;
+      const id = Number(conversationId);
+      setActiveConversationId(id);
+      primeCarGoConversation(id);
+      void queryClient.invalidateQueries({ queryKey: ["chat", "conversations"] });
+      void queryClient.refetchQueries({ queryKey: ["chat", "conversations"] });
+    },
+    [queryClient, primeCarGoConversation],
+  );
 
   useEffect(() => {
     if (activeRideId && activeRideOffer) {
@@ -221,12 +264,10 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const [serviceRouteGeometry, setServiceRouteGeometry] = useState<GeoJsonObject | null>(null);
   const [serviceEtaSec, setServiceEtaSec] = useState<number | null>(null);
   const [serviceRouteLoading, setServiceRouteLoading] = useState(false);
-  const [serviceRouteRenderKey, setServiceRouteRenderKey] = useState(0);
   const [activeRidePanelCollapsed, setActiveRidePanelCollapsed] = useState(false);
-  const lastServiceRouteFetchRef = useRef<{ lat: number; lon: number; at: number } | null>(null);
-  const geoPosRef = useRef(geoPos);
-  geoPosRef.current = geoPos;
-
+  const activeServiceRouteRef = useRef<StoredDrivingRoute | null>(null);
+  const serviceRouteTrimIndexRef = useRef(0);
+  const lastServiceRouteDeviationFetchRef = useRef<{ at: number; targetKey: string } | null>(null);
   const isGoCompact = useGoCompactViewport();
 
   const { data: providerVehicle } = useQuery({
@@ -248,11 +289,11 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     ?.visibilitySubscriptionEndsAt;
   const isCarGoDriver = !!provider && isCarGoProvider(provider, categories);
   const isPackGoDriver = !!provider && providerHasGoBrand(provider as any, "delivery", categories);
-  const canSeeDriverView = isAdmin || (goSlug === "pack" ? isPackGoDriver || isCarGoDriver : isCarGoDriver);
+  const canSeeDriverView = isAdmin || isCarGoDriver || isPackGoDriver;
   const hasVehicle = !!providerVehicle?.vehicle_type;
   const hasActiveSubscription = isAdmin || isGoDriverSubscriptionActive(providerSubscriptionEndsAt);
   const meetsDriverBasics =
-    !!provider?.isVerified && (goSlug === "pack" ? isPackGoDriver || isCarGoDriver : isCarGoDriver) && hasVehicle;
+    !!provider?.isVerified && (isCarGoDriver || isPackGoDriver) && hasVehicle;
   const canReceive = meetsDriverBasics && hasActiveSubscription;
   const canUseDriverNegotiation =
     (isAdmin || provider?.isVerified === true) && hasActiveSubscription;
@@ -260,12 +301,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     meetsDriverBasics && !hasActiveSubscription ? GO_DRIVER_SUBSCRIPTION_INACTIVE_SLIDE_HINT : undefined;
 
   const slideDockRef = useRef<HTMLDivElement>(null);
-
-  /** Restaurar sliders al montar (p. ej. al cambiar entre taxi y delivery). */
-  useEffect(() => {
-    setReceivingCargo(loadGoReceiving("cargo"));
-    setReceivingPack(loadGoReceiving("pack"));
-  }, []);
 
   const { data: serverTripHistory = [] } = useQuery({
     queryKey: ["mobility-ride-history", "driver", user?.id],
@@ -314,38 +349,19 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   }, [negotiationBoardOpen, canOpenDriverNegotiationBoard]);
 
   useEffect(() => {
-    if (!navigator.geolocation) return;
-    let cancelled = false;
-    const apply = (p: GeolocationPosition) => {
-      if (cancelled) return;
-      setGeoPos({ lat: p.coords.latitude, lon: p.coords.longitude });
-    };
-    navigator.geolocation.getCurrentPosition(
-      apply,
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 25_000 },
-    );
-    const id = navigator.geolocation.watchPosition(
-      apply,
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 60_000 },
-    );
-    return () => {
-      cancelled = true;
-      navigator.geolocation.clearWatch(id);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!socket) return;
     const onCargoOffer = (p: CargoRideOfferPayload) => {
       // Si ya hay un servicio activo, ignorar ofertas nuevas (evita modal pegado/sonido).
       if (activeRideIdRef.current) return;
+      if (acceptingRideIdRef.current) return;
+      if (!isReceivingTaxiMode(receiveModeRef.current)) return;
       if (p?.isNegotiated) return;
       goDriverUi?.pushOffer("cargo", p);
     };
     const onPackOffer = (p: CargoRideOfferPayload) => {
       if (activeRideIdRef.current) return;
+      if (acceptingRideIdRef.current) return;
+      if (!isReceivingDeliveryMode(receiveModeRef.current)) return;
       if (p?.isNegotiated) return;
       goDriverUi?.pushOffer("pack", p);
     };
@@ -397,6 +413,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     ) => {
       if (!p?.rideId) return;
       if (activeRideIdRef.current === p.rideId) return;
+      acceptingRideIdRef.current = null;
+      setPinnedOfferEntry(null);
       const token = localStorage.getItem("token");
       if (!token) return;
       const base = serviceModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
@@ -411,7 +429,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setNegotiationBoardOpen(false);
         goDriverUi?.clearOffers?.();
         setDriverNegotiationSent(null);
-        setActiveConversationId(p.conversationId ?? ride.conversationId ?? null);
+        syncRideConversation(p.conversationId ?? ride.conversationId ?? null);
+        setActiveServiceModule(serviceModule);
         setActiveRideId(ride.id);
         setActiveRideOffer(mapApiRideToOffer(ride));
         setActiveRideStarted(ride.status === "in_progress");
@@ -420,10 +439,10 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
         );
         saveGoDriverActiveRideId(serviceModule === "pack" ? "pack" : "cargo", ride.id);
-        lastServiceRouteFetchRef.current = null;
-        setReceivingCargo(false);
-        setReceivingPack(false);
-        clearAllGoReceiving();
+        activeServiceRouteRef.current = null;
+        serviceRouteTrimIndexRef.current = 0;
+        lastServiceRouteDeviationFetchRef.current = null;
+        stopReceiving();
       } catch {
         /* ignore */
       }
@@ -437,7 +456,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       socket.off("cargo:ride:accepted", onCargoAccepted);
       socket.off("pack:ride:accepted", onPackAccepted);
     };
-  }, [socket, user?.id, goDriverUi]);
+  }, [socket, user?.id, goDriverUi, syncRideConversation]);
 
   useEffect(() => {
     if (!socket) return;
@@ -488,42 +507,49 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     };
   }, [socket, goDriverUi, toast]);
 
-  // Recovery: si el driver estaba en otra vista cuando llegó la oferta, al abrir esta vista consultamos el backend.
+  // Recovery: oferta pendiente del modo activo (taxi, delivery o híbrido).
   useEffect(() => {
     if (!goDriverUi) return;
+    const mode = receiveModeRef.current;
+    if (mode === "off") return;
     let cancelled = false;
     const run = async () => {
       try {
         const auth = localStorage.getItem("token");
         const headers: Record<string, string> = auth ? { Authorization: `Bearer ${auth}` } : {};
-        const [cargoRes, packRes] = await Promise.all([
-          fetch("/api/mobility/driver/pending-offer", { headers }),
-          fetch("/api/pack/driver/pending-offer", { headers }),
-        ]);
-        const cargo = cargoRes.ok ? await cargoRes.json().catch(() => null) : null;
-        const pack = packRes.ok ? await packRes.json().catch(() => null) : null;
-        if (cancelled) return;
-        const cargoOffer = cargo?.offer ?? null;
-        const packOffer = pack?.offer ?? null;
-        if (cargoOffer && !cargoOffer.isNegotiated && !activeRideIdRef.current) {
-          goDriverUi.pushOffer("cargo", cargoOffer);
-        } else if (packOffer && !packOffer.isNegotiated && !activeRideIdRef.current) {
-          goDriverUi.pushOffer("pack", packOffer);
+        const fetchPending = async (module: "cargo" | "pack") => {
+          if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
+          const url =
+            module === "pack"
+              ? "/api/pack/driver/pending-offer"
+              : "/api/mobility/driver/pending-offer";
+          const res = await fetch(url, { headers });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
+          const offer = body?.offer ?? null;
+          if (offer && !offer.isNegotiated) goDriverUi.pushOffer(module, offer);
+        };
+        if (mode === "both") {
+          await Promise.all([fetchPending("cargo"), fetchPending("pack")]);
+        } else if (mode === "delivery") {
+          await fetchPending("pack");
+        } else {
+          await fetchPending("cargo");
         }
       } catch {
-        // silencio: solo es recovery
+        /* recovery silencioso */
       }
     };
     void run();
     return () => {
       cancelled = true;
     };
-  }, [goDriverUi]);
+  }, [goDriverUi, receiveMode]);
 
   /** Al activar “recibir pedidos” con una búsqueda de regateo ya en curso, traer oferta pendiente al instante. */
   useEffect(() => {
     if (!goDriverUi) return;
-    if (!receivingCargo && !receivingPack) return;
+    if (receiveMode === "off") return;
     if (!canReceive || !providerVehicle?.vehicle_type) return;
     if (activeRideIdRef.current) return;
     let cancelled = false;
@@ -531,17 +557,25 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       try {
         const auth = localStorage.getItem("token");
         const headers: Record<string, string> = auth ? { Authorization: `Bearer ${auth}` } : {};
-        const [cargoRes, packRes] = await Promise.all([
-          fetch("/api/mobility/driver/pending-offer", { headers }),
-          fetch("/api/pack/driver/pending-offer", { headers }),
-        ]);
-        const cargo = cargoRes.ok ? await cargoRes.json().catch(() => null) : null;
-        const pack = packRes.ok ? await packRes.json().catch(() => null) : null;
-        if (cancelled || activeRideIdRef.current) return;
-        const cargoOffer = cargo?.offer ?? null;
-        const packOffer = pack?.offer ?? null;
-        if (cargoOffer && !cargoOffer.isNegotiated) goDriverUi.pushOffer("cargo", cargoOffer);
-        else if (packOffer && !packOffer.isNegotiated) goDriverUi.pushOffer("pack", packOffer);
+        const tryPush = async (module: "cargo" | "pack") => {
+          const url =
+            module === "pack"
+              ? "/api/pack/driver/pending-offer"
+              : "/api/mobility/driver/pending-offer";
+          const res = await fetch(url, { headers });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
+          const offer = body?.offer ?? null;
+          if (!offer || offer.isNegotiated) return;
+          goDriverUi.pushOffer(module, offer);
+        };
+        if (receiveMode === "both") {
+          await Promise.all([tryPush("cargo"), tryPush("pack")]);
+        } else if (receiveMode === "delivery") {
+          await tryPush("pack");
+        } else {
+          await tryPush("cargo");
+        }
       } catch {
         /* ignore */
       }
@@ -550,7 +584,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     return () => {
       cancelled = true;
     };
-  }, [goDriverUi, receivingCargo, receivingPack, canReceive, providerVehicle?.vehicle_type]);
+  }, [goDriverUi, receiveMode, canReceive, providerVehicle?.vehicle_type]);
 
   useEffect(() => {
     if (!classicOfferModalOpen) return;
@@ -564,15 +598,6 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     if (!chatOpen) return;
     closeChat();
   }, [classicOfferModalOpen, chatOpen, closeChat]);
-
-  // Si llega una oferta del otro módulo, cambiar de pestaña automáticamente.
-  useEffect(() => {
-    if (!classicOfferModalOpen || !incomingModule) return;
-    if (activeRideIdRef.current) return;
-    const target = incomingModule === "pack" ? "/go/delivery/driver" : "/go/taxi/driver";
-    const cur = goSlug === "pack" ? "/go/delivery/driver" : "/go/taxi/driver";
-    if (target !== cur) setLocation(target);
-  }, [classicOfferModalOpen, incomingModule, setLocation, goSlug]);
 
   useEffect(() => {
     if (!socket) return;
@@ -607,15 +632,12 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setRateStars(5);
         setRateDialogOpen(true);
       } else if (canReceive && providerVehicle?.vehicle_type) {
-        if (goSlug === "pack") {
-          setReceivingPack(true);
-          saveGoReceiving("pack", true);
-        } else {
-          setReceivingCargo(true);
-          saveGoReceiving("cargo", true);
-        }
+        const mod = activeServiceModuleRef.current ?? receiveModeToGoSlug(receiveModeRef.current);
+        setReceiveMode(mod === "pack" ? "delivery" : "taxi");
       }
-      clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+      const endedMod = activeServiceModuleRef.current ?? receiveModeToGoSlug(receiveModeRef.current);
+      clearGoDriverActiveRideId(endedMod === "pack" ? "pack" : "cargo");
+      setActiveServiceModule(null);
       setActiveRideId(null);
       setActiveRideOffer(null);
       setActiveRideStarted(false);
@@ -623,7 +645,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setDriverNegotiationSent(null);
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
-      lastServiceRouteFetchRef.current = null;
+      activeServiceRouteRef.current = null;
+      serviceRouteTrimIndexRef.current = 0;
+      lastServiceRouteDeviationFetchRef.current = null;
       if (activeConversationId != null) addHiddenConversationId(activeConversationId);
       if (activeConversationId != null) purgeConversationCache(queryClient, activeConversationId);
       resetChat();
@@ -645,7 +669,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         }
         return;
       }
-      clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+      const cancelledMod = activeServiceModuleRef.current ?? receiveModeToGoSlug(receiveModeRef.current);
+      clearGoDriverActiveRideId(cancelledMod === "pack" ? "pack" : "cargo");
+      setActiveServiceModule(null);
       setActiveRideId(null);
       setActiveRideOffer(null);
       setActiveRideStarted(false);
@@ -653,7 +679,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setDriverNegotiationSent(null);
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
-      lastServiceRouteFetchRef.current = null;
+      activeServiceRouteRef.current = null;
+      serviceRouteTrimIndexRef.current = 0;
+      lastServiceRouteDeviationFetchRef.current = null;
       if (activeConversationId != null) addHiddenConversationId(activeConversationId);
       if (activeConversationId != null) purgeConversationCache(queryClient, activeConversationId);
       resetChat();
@@ -709,13 +737,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setRateDialogOpen(false);
       rateTargetRef.current = null;
       if (canReceive && providerVehicle?.vehicle_type) {
-        if (goSlug === "pack") {
-          setReceivingPack(true);
-          saveGoReceiving("pack", true);
-        } else {
-          setReceivingCargo(true);
-          saveGoReceiving("cargo", true);
-        }
+        setReceiveMode(serviceModule === "pack" ? "delivery" : "taxi");
       }
       toast({ title: "¡Gracias!", description: "Calificación enviada." });
     } catch (e) {
@@ -733,23 +755,17 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     socket.emit("pack:driver:presence", { receiving: false, vehicleType: "", lat: 0, lon: 0 });
   }, [socket]);
 
-  const stopAllReceiving = useCallback(() => {
-    setReceivingCargo(false);
-    setReceivingPack(false);
-    clearAllGoReceiving();
-  }, []);
-
   /** Tras terminar o cancelar un viaje: si la suscripción ya no está activa, dejar de recibir pedidos. */
   const disconnectReceivingIfSubscriptionLapsed = useCallback(() => {
     if (isAdmin || hasActiveSubscription) return;
-    stopAllReceiving();
+    stopReceiving();
     emitDriverPresenceOffline();
-  }, [isAdmin, hasActiveSubscription, stopAllReceiving, emitDriverPresenceOffline]);
+  }, [isAdmin, hasActiveSubscription, stopReceiving, emitDriverPresenceOffline]);
 
   const resetReceivingAfterSocketLoss = useCallback(() => {
-    stopAllReceiving();
+    stopReceiving();
     emitDriverPresenceOffline();
-  }, [emitDriverPresenceOffline, stopAllReceiving]);
+  }, [emitDriverPresenceOffline, stopReceiving]);
 
   /** Tras caída del socket (reinicio servidor) el conductor debe deslizar otra vez. */
   useEffect(() => {
@@ -774,8 +790,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       if (!pos || !vehicleType) return false;
 
       if (canReceive) {
-        const cargoReceiving = receivingCargo;
-        const packReceiving = receivingPack;
+        const mode = receiveModeRef.current;
+        const cargoReceiving = isReceivingTaxiMode(mode);
+        const packReceiving = isReceivingDeliveryMode(mode);
         socket.emit("cargo:driver:presence", {
           receiving: cargoReceiving,
           vehicleType: cargoReceiving ? vehicleType : "",
@@ -793,19 +810,23 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       }
 
       if (activeRideIdRef.current) {
-        socket.emit("cargo:driver:presence", {
-          receiving: false,
-          vehicleType: goSlug === "cargo" ? vehicleType : "",
-          isPetFriendly: pet,
-          lat: pos.lat,
-          lon: pos.lon,
-        });
-        socket.emit("pack:driver:presence", {
-          receiving: false,
-          vehicleType: goSlug === "pack" ? vehicleType : "",
-          lat: pos.lat,
-          lon: pos.lon,
-        });
+        const mod = activeServiceModuleRef.current ?? "cargo";
+        if (mod === "cargo") {
+          socket.emit("cargo:driver:presence", {
+            receiving: false,
+            vehicleType,
+            isPetFriendly: pet,
+            lat: pos.lat,
+            lon: pos.lon,
+          });
+        } else {
+          socket.emit("pack:driver:presence", {
+            receiving: false,
+            vehicleType,
+            lat: pos.lat,
+            lon: pos.lon,
+          });
+        }
         return true;
       }
 
@@ -827,15 +848,14 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     };
   }, [
     socket,
-    receivingCargo,
-    receivingPack,
+    receiveMode,
     canReceive,
     providerVehicle?.vehicle_type,
     providerVehicle?.is_pet_friendly,
     geoPos,
     emitDriverPresenceOffline,
-    goSlug,
     activeRideId,
+    activeServiceModule,
   ]);
 
   useEffect(() => {
@@ -853,9 +873,10 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   }, [socket, activeRideId, geoPos, locationEvent]);
 
   const respondToOffer = async (accept: boolean) => {
-    if (!incomingOffer) return;
-    const snapOffer = incomingOffer;
-    const snapModule = incomingModule;
+    const entry = pinnedOfferEntry ?? goDriverUi?.currentOffer ?? null;
+    if (!entry) return;
+    const snapOffer = entry.offer;
+    const snapModule = entry.module;
     const token = localStorage.getItem("token");
     if (!token) {
       toast({
@@ -896,9 +917,12 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       return;
     }
 
-    // UX: cerrar el modal enseguida en flujo clásico (la respuesta al backend puede tardar).
-    goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
-    if (accept) goDriverUi?.clearOffers?.();
+    if (accept) {
+      acceptingRideIdRef.current = snapOffer.rideId;
+      setPinnedOfferEntry(entry);
+    } else {
+      goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+    }
     setRespondBusy(true);
     try {
       const base = snapModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
@@ -910,9 +934,11 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       const data = (await res.json().catch(() => ({}))) as { conversationId?: number; message?: string };
       if (!res.ok) {
         const msg = data.message || "No se pudo responder";
-        // Si el driver RECHAZA y el backend falla (tomado/expirado/etc), cerramos igual el modal.
+        if (accept) {
+          acceptingRideIdRef.current = null;
+          setPinnedOfferEntry(null);
+        }
         if (!accept) goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
-        // Si el driver ACEPTA, solo cerramos si realmente expiró o se reasignó.
         if (
           accept &&
           (msg.toLowerCase().includes("expir") ||
@@ -924,21 +950,25 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         }
         throw new Error(msg);
       }
-      // Al responder, cerrar el modal y limpiar cola para que no siga sonando.
+      acceptingRideIdRef.current = null;
+      setPinnedOfferEntry(null);
       goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
       goDriverUi?.clearOffers?.();
       if (accept) {
         setDriverNegotiationSent(null);
-        if (data.conversationId != null) setActiveConversationId(data.conversationId);
+        syncRideConversation(data.conversationId ?? null);
         setActiveRideId(snapOffer.rideId);
         setActiveRideOffer(snapOffer);
         setActiveRideStarted(false);
         setSearchingClient(false);
         setPaymentConfirmed(snapOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED);
         // Guardar según módulo para reanudar correctamente.
+        setActiveServiceModule(snapModule === "pack" ? "pack" : "cargo");
         saveGoDriverActiveRideId(snapModule === "pack" ? "pack" : "cargo", snapOffer.rideId);
-        lastServiceRouteFetchRef.current = null;
-        stopAllReceiving();
+        activeServiceRouteRef.current = null;
+        serviceRouteTrimIndexRef.current = 0;
+        lastServiceRouteDeviationFetchRef.current = null;
+        stopReceiving();
       }
       if (!accept) {
         setActiveConversationId(null);
@@ -948,8 +978,12 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
         setPaymentConfirmed(false);
       }
     } catch (e) {
+      if (accept) {
+        acceptingRideIdRef.current = null;
+        setPinnedOfferEntry(null);
+      }
       // Si el conductor aceptó y (por carrera/latencia) ya quedó asignado, evitamos el toast rojo.
-      if (accept && activeRideIdRef.current && incomingOffer?.rideId && activeRideIdRef.current === incomingOffer.rideId) {
+      if (accept && activeRideIdRef.current === snapOffer.rideId) {
         return;
       }
       const msg = e instanceof Error ? e.message : "Intenta de nuevo.";
@@ -1036,7 +1070,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setDriverNegotiationSent(null);
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
-      lastServiceRouteFetchRef.current = null;
+      activeServiceRouteRef.current = null;
+      serviceRouteTrimIndexRef.current = 0;
+      lastServiceRouteDeviationFetchRef.current = null;
       void queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
       disconnectReceivingIfSubscriptionLapsed();
     } catch (e) {
@@ -1079,7 +1115,9 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       setDriverNegotiationSent(null);
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
-      lastServiceRouteFetchRef.current = null;
+      activeServiceRouteRef.current = null;
+      serviceRouteTrimIndexRef.current = 0;
+      lastServiceRouteDeviationFetchRef.current = null;
       toast({ title: "Viaje cancelado", description: "El servicio quedó anulado." });
       setCancelServiceOpen(false);
       disconnectReceivingIfSubscriptionLapsed();
@@ -1097,58 +1135,120 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     return { lat: activeRideOffer.start.lat, lon: activeRideOffer.start.lon };
   }, [activeRideOffer, activeRideStarted]);
 
+  /** Solo al cambiar fase del viaje; no en cada recorte GPS (evita remount del GeoJSON). */
+  const serviceRouteRenderKey = !activeRideOffer ? 0 : activeRideStarted ? 2 : 1;
+
+  const activeRiderPhone = useMemo(() => {
+    if (!activeRideOffer?.rider) return "";
+    return extractUserPublicPhone(activeRideOffer.rider as unknown as Record<string, unknown>);
+  }, [activeRideOffer?.rider]);
+
+  const openActiveRideChat = useCallback(() => {
+    if (activeConversationId != null && Number.isFinite(activeConversationId)) {
+      openChatWithConversation(activeConversationId);
+      return;
+    }
+    toast({
+      title: "Chat no disponible",
+      description: "El hilo de chat aún no está listo. Intenta de nuevo en unos segundos.",
+      variant: "destructive",
+    });
+  }, [activeConversationId, openChatWithConversation, toast]);
+
   useEffect(() => {
-    lastServiceRouteFetchRef.current = null;
+    activeServiceRouteRef.current = null;
+    serviceRouteTrimIndexRef.current = 0;
+    lastServiceRouteDeviationFetchRef.current = null;
   }, [activeRideId, activeRideStarted, serviceNavTarget?.lat, serviceNavTarget?.lon]);
 
-  const fetchServiceRoute = useCallback(async () => {
-    const g = geoPosRef.current;
-    if (!activeRideId || !g || !serviceNavTarget) return;
-    const now = Date.now();
-    const last = lastServiceRouteFetchRef.current;
-    if (last && haversineM(last, g) < 48 && now - last.at < 11_000) return;
+  const applyTrimmedServiceRoute = useCallback(
+    (route: StoredDrivingRoute, driverPos: { lat: number; lon: number }) => {
+      const trimmed = trimRouteAtDriver(route, driverPos, serviceRouteTrimIndexRef.current);
+      serviceRouteTrimIndexRef.current = trimmed.trimIndex;
+      const gj = geoJsonLineFromCoords(trimmed.trimmedCoords);
+      if (gj) {
+        setServiceRouteGeometry(gj);
+      }
+      setServiceEtaSec(trimmed.remainingDurationSec);
+      return trimmed;
+    },
+    [],
+  );
 
-    lastServiceRouteFetchRef.current = { lat: g.lat, lon: g.lon, at: now };
+  const fetchServiceRoadRoute = useCallback(async () => {
+    const g = geoPosRef.current;
+    if (!activeRideId || !g || !serviceNavTarget) return false;
+    const targetKey = serviceNavTargetKey(serviceNavTarget);
+    const url = `/api/maps/route?from=${g.lon},${g.lat}&to=${serviceNavTarget.lon},${serviceNavTarget.lat}`;
+    const tryOnce = async (): Promise<boolean> => {
+      const res = await fetch(url);
+      const data = (await res.json().catch(() => null)) as {
+        geometry?: GeoJsonObject;
+        distanceM?: number;
+        durationSec?: number;
+        source?: string;
+        fallback?: boolean;
+      } | null;
+      if (!res.ok || !isRoadRouteApiPayload(data)) return false;
+      const stored = buildStoredDrivingRoute(
+        data!.geometry,
+        targetKey,
+        Number(data!.distanceM),
+        Number(data!.durationSec ?? 60),
+      );
+      if (!stored) return false;
+      activeServiceRouteRef.current = stored;
+      serviceRouteTrimIndexRef.current = 0;
+      applyTrimmedServiceRoute(stored, g);
+      lastServiceRouteDeviationFetchRef.current = { at: Date.now(), targetKey };
+      return true;
+    };
     setServiceRouteLoading(true);
     try {
-      // Backend espera from/to en formato lon,lat (Geoapify / GeoJSON).
-      const res = await fetch(`/api/maps/route?from=${g.lon},${g.lat}&to=${serviceNavTarget.lon},${serviceNavTarget.lat}`);
-      if (!res.ok) throw new Error("route");
-      const data = (await res.json()) as { geometry?: GeoJsonObject; durationSec?: number };
-      if (data?.geometry) {
-        setServiceRouteGeometry(data.geometry);
-        setServiceRouteRenderKey((k) => k + 1);
-      } else {
-        setServiceRouteGeometry(lineGeoJson(g, serviceNavTarget));
-        setServiceRouteRenderKey((k) => k + 1);
-      }
-      if (data?.durationSec != null && Number(data.durationSec) > 0) {
-        setServiceEtaSec(Number(data.durationSec));
-      } else {
-        const approxM = haversineM(g, serviceNavTarget);
-        setServiceEtaSec(estimateDurationSecFromDistanceM(approxM));
-      }
-    } catch {
-      setServiceRouteGeometry(lineGeoJson(g, serviceNavTarget));
-      const approxM = haversineM(g, serviceNavTarget);
-      setServiceEtaSec(estimateDurationSecFromDistanceM(approxM));
-      setServiceRouteRenderKey((k) => k + 1);
+      if (await tryOnce()) return true;
+      await new Promise((r) => window.setTimeout(r, 1200));
+      return tryOnce();
     } finally {
       setServiceRouteLoading(false);
     }
-  }, [activeRideId, serviceNavTarget]);
+  }, [activeRideId, serviceNavTarget, applyTrimmedServiceRoute]);
+
+  const handleServiceRoutePosition = useCallback(() => {
+    const g = geoPosRef.current;
+    if (!activeRideId || !g || !serviceNavTarget) return;
+    const targetKey = serviceNavTargetKey(serviceNavTarget);
+    const route = activeServiceRouteRef.current;
+
+    if (!route || route.targetKey !== targetKey) {
+      serviceRouteTrimIndexRef.current = 0;
+      void fetchServiceRoadRoute();
+      return;
+    }
+
+    const trimmed = applyTrimmedServiceRoute(route, g);
+    if (trimmed.deviationM < DRIVER_ROUTE_DEVIATION_M) return;
+
+    const now = Date.now();
+    const last = lastServiceRouteDeviationFetchRef.current;
+    if (last?.targetKey === targetKey && now - last.at < DRIVER_ROUTE_DEVIATION_REFETCH_MS) return;
+    void fetchServiceRoadRoute();
+  }, [activeRideId, serviceNavTarget, applyTrimmedServiceRoute, fetchServiceRoadRoute]);
 
   useEffect(() => {
     if (!activeRideId || !serviceNavTarget) {
       setServiceRouteGeometry(null);
       setServiceEtaSec(null);
+      activeServiceRouteRef.current = null;
       return;
     }
     if (!geoPos) return;
-    void fetchServiceRoute();
-    const t = window.setInterval(() => void fetchServiceRoute(), 14_000);
-    return () => window.clearInterval(t);
-  }, [activeRideId, geoPos?.lat, geoPos?.lon, serviceNavTarget?.lat, serviceNavTarget?.lon, fetchServiceRoute]);
+    void fetchServiceRoadRoute();
+  }, [activeRideId, serviceNavTarget?.lat, serviceNavTarget?.lon, fetchServiceRoadRoute]);
+
+  useEffect(() => {
+    if (!activeRideId || !serviceNavTarget || !geoPos) return;
+    handleServiceRoutePosition();
+  }, [activeRideId, geoPos?.lat, geoPos?.lon, serviceNavTarget, handleServiceRoutePosition]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -1169,33 +1269,39 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   /** Reanudar viaje activo tras cerrar la app (solo matched / in_progress). */
   useEffect(() => {
     if (authLoading || !isAuthenticated || !user?.id) return;
-    const stored = loadGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
-    if (!stored) return;
+    const cargoStored = loadGoDriverActiveRideId("cargo");
+    const packStored = loadGoDriverActiveRideId("pack");
+    const resumeModule = cargoStored ? ("cargo" as const) : packStored ? ("pack" as const) : null;
+    const stored = cargoStored ?? packStored;
+    if (!stored || !resumeModule) return;
     const token = localStorage.getItem("token");
+    const clearStored = () => clearGoDriverActiveRideId(resumeModule);
     if (!token) {
-      clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+      clearStored();
       return;
     }
+    const apiBase = resumeModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
     let alive = true;
     (async () => {
       try {
-        const res = await fetch(`${rideApiBase}/${encodeURIComponent(stored)}`, {
+        const res = await fetch(`${apiBase}/${encodeURIComponent(stored)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!alive) return;
         if (!res.ok) {
-          clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+          clearStored();
           return;
         }
         const ride = (await res.json()) as MobilityRideHydration;
         if (ride.driverUserId !== user.id) {
-          clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+          clearStored();
           return;
         }
         if (ride.status !== "matched" && ride.status !== "in_progress") {
-          clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+          clearStored();
           return;
         }
+        setActiveServiceModule(resumeModule);
         setActiveRideId(ride.id);
         setActiveRideOffer(mapApiRideToOffer(ride));
         setActiveRideStarted(ride.status === "in_progress");
@@ -1204,26 +1310,15 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
         );
         setDriverNegotiationSent(null);
+        stopReceiving();
       } catch {
-        if (alive) clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+        if (alive) clearStored();
       }
     })();
     return () => {
       alive = false;
     };
-  }, [authLoading, isAuthenticated, user?.id, rideApiBase]);
-
-  /** Si hay servicio activo en el otro módulo, no permitir entrar aquí. */
-  useEffect(() => {
-    if (authLoading || !isAuthenticated) return;
-    const cargoActive = loadGoDriverActiveRideId("cargo");
-    const packActive = loadGoDriverActiveRideId("pack");
-    const activeModule = cargoActive ? "cargo" : packActive ? "pack" : null;
-    if (!activeModule) return;
-    if (goSlug !== activeModule) {
-      setLocation(activeModule === "pack" ? "/go/delivery/driver" : "/go/taxi/driver");
-    }
-  }, [authLoading, isAuthenticated, goSlug, setLocation]);
+  }, [authLoading, isAuthenticated, user?.id, stopReceiving]);
 
   // Si no cumple requisitos (o venció la suscripción), no quedar en "recibiendo".
   // Excepción: con un viaje/envío activo puede terminar el servicio antes de desconectarse.
@@ -1232,16 +1327,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     const cargoRide = loadGoDriverActiveRideId("cargo");
     const packRide = loadGoDriverActiveRideId("pack");
     if (activeRideId || cargoRide || packRide) return;
-    if (receiving) {
-      if (goSlug === "pack") {
-        setReceivingPack(false);
-        saveGoReceiving("pack", false);
-      } else {
-        setReceivingCargo(false);
-        saveGoReceiving("cargo", false);
-      }
-    }
-  }, [canReceive, receiving, goSlug, activeRideId]);
+    if (receiving) stopReceiving();
+  }, [canReceive, receiving, activeRideId, stopReceiving]);
 
   if (authLoading || !isAuthenticated || (providerLoading && !isAdmin) || (!provider && !isAdmin)) {
     return (
@@ -1273,9 +1360,51 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
   const driverNegotiationSentForUi = (() => {
     const s = driverNegotiationSent;
     if (!s || incomingOpen || activeRideOffer) return null;
-    if (s.module !== (goSlug === "pack" ? "pack" : "cargo")) return null;
     return s;
   })();
+
+  const workMode: GoDriverReceiveMode | "service-taxi" | "service-delivery" = activeRideId
+    ? serviceModule === "pack"
+      ? "service-delivery"
+      : "service-taxi"
+    : receiveMode;
+  const isHybridWork = workMode === "both";
+  const isDeliveryWork = workMode === "delivery" || workMode === "service-delivery";
+
+  const handleReceiveModeChange = (next: GoDriverReceiveMode) => {
+    if (activeRideId) return;
+    if (incomingOpen || classicOfferModalOpen) {
+      toast({
+        title: "Oferta en pantalla",
+        description: "Responde o cierra la oferta antes de cambiar entre taxi y delivery.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setReceiveMode(next);
+  };
+
+  const receiveModeSlider =
+    isCarGoDriver || isPackGoDriver ? (
+      <SlideToGoReceiveMode
+        mode={receiveMode}
+        onModeChange={handleReceiveModeChange}
+        canTaxi={isCarGoDriver}
+        canDelivery={isPackGoDriver || isCarGoDriver}
+        variant={isGoCompact ? "mapOverlay" : "default"}
+        disabled={!canReceive || !!activeRideId}
+        disabledHint={
+          activeRideId
+            ? "Finaliza el servicio activo para cambiar entre taxi y delivery"
+            : slideDisabledHint
+        }
+        className={
+          isGoCompact
+            ? undefined
+            : "rounded-xl border border-border/60 bg-background/95 p-2 shadow-md ring-1 ring-black/[0.06] dark:ring-white/10"
+        }
+      />
+    ) : null;
 
   const driverNegotiationBubble = driverNegotiationSentForUi ? (
     <div
@@ -1312,34 +1441,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 
   /** Móvil: solo deslizante; historial, chat y ajustes van en la barra inferior Go. */
   const controlsBlockMobile = (
-    <div className="space-y-1.5">
-      {goSlug === "cargo" && isCarGoDriver ? (
-        <SlideToCargoOnline
-          receiving={receivingCargo}
-          onReceivingChange={(n) => {
-            setReceivingCargo(n);
-            saveGoReceiving("cargo", n);
-          }}
-          disabled={!canReceive}
-          disabledHint={slideDisabledHint}
-          goSlug="cargo"
-          className="border-border/70 bg-background/90 shadow-lg ring-1 ring-black/10 backdrop-blur-md dark:ring-white/10"
-        />
-      ) : null}
-      {goSlug === "pack" && (isPackGoDriver || isCarGoDriver) ? (
-        <SlideToCargoOnline
-          receiving={receivingPack}
-          onReceivingChange={(n) => {
-            setReceivingPack(n);
-            saveGoReceiving("pack", n);
-          }}
-          disabled={!canReceive}
-          disabledHint={slideDisabledHint}
-          goSlug="pack"
-          className="border-border/70 bg-background/90 shadow-lg ring-1 ring-black/10 backdrop-blur-md dark:ring-white/10"
-        />
-      ) : null}
-    </div>
+    <div className="mx-auto w-full max-w-[min(100%,20.5rem)] space-y-1.5">{receiveModeSlider}</div>
   );
 
   /** En escritorio el panel sigue visible aunque se haya ocultado en móvil (evita vista vacía). */
@@ -1360,19 +1462,13 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               Llegas en <span className="font-medium text-foreground tabular-nums">{Math.max(1, Math.round(serviceEtaSec / 60))} min</span>
             </p>
           ) : null}
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground">
-            {typeof activeRideOffer.rider?.rating === "number" ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2 py-0.5">
-                <Star className="h-3 w-3 text-amber-500" aria-hidden />
-                <span className="font-medium text-foreground tabular-nums">{activeRideOffer.rider.rating.toFixed(1)}</span>
-              </span>
-            ) : null}
-            {typeof activeRideOffer.rider?.completedTrips === "number" ? (
-              <span className="rounded-full border border-border/70 bg-muted/40 px-2 py-0.5">
-                <span className="font-medium text-foreground tabular-nums">{activeRideOffer.rider.completedTrips}</span> viajes
-              </span>
-            ) : null}
-          </div>
+          <GoUserRideStatsBadges
+            compact
+            className="mt-1"
+            rating={activeRideOffer.rider?.rating}
+            ratingCount={activeRideOffer.rider?.ratingCount}
+            completedTrips={activeRideOffer.rider?.completedTrips}
+          />
           <div className="mt-1 flex items-center gap-2">
             {activeRideOffer.rider.profileImageUrl ? (
               <img
@@ -1456,20 +1552,29 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       </div>
         );
       })()}
-      {activeRideOffer.rider?.phone ? (
-        <div className="mt-2">
-          <div className="flex flex-wrap items-center gap-2">
+      {(activeRiderPhone || activeConversationId != null) ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {activeRiderPhone ? (
             <a
-              href={`tel:${activeRideOffer.rider.phone}`}
-              className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-3 py-1 font-medium text-primary"
+              href={`tel:${activeRiderPhone}`}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-semibold text-primary"
             >
-              <Phone className="h-3.5 w-3.5" aria-hidden />
+              <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />
               Llamar
             </a>
-            <span className="rounded-full border border-border/70 bg-muted/40 px-3 py-1 font-medium text-foreground tabular-nums select-text">
-              {activeRideOffer.rider.phone}
-            </span>
-          </div>
+          ) : null}
+          {activeConversationId != null ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 rounded-full px-3 text-xs font-semibold"
+              onClick={openActiveRideChat}
+            >
+              <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Chat
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {activeRideStarted && activeRideId ? (
@@ -1499,31 +1604,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 
   const controlsBlockDesktopSlides = (
     <div className="space-y-4">
-      {goSlug === "cargo" ? (
-        <SlideToCargoOnline
-          receiving={receivingCargo}
-          onReceivingChange={(n) => {
-            setReceivingCargo(n);
-            saveGoReceiving("cargo", n);
-          }}
-          disabled={!canReceive}
-          disabledHint={slideDisabledHint}
-          goSlug="cargo"
-          className="border-border/60 bg-background/95 shadow-md ring-1 ring-black/[0.06] dark:bg-card/95 dark:ring-white/10"
-        />
-      ) : (
-        <SlideToCargoOnline
-          receiving={receivingPack}
-          onReceivingChange={(n) => {
-            setReceivingPack(n);
-            saveGoReceiving("pack", n);
-          }}
-          disabled={!canReceive}
-          disabledHint={slideDisabledHint}
-          goSlug="pack"
-          className="border-border/60 bg-background/95 shadow-md ring-1 ring-black/[0.06] dark:bg-card/95 dark:ring-white/10"
-        />
-      )}
+      {receiveModeSlider}
       {!receiving || !canReceive ? (
         <p className="px-1 text-[11px] leading-relaxed text-muted-foreground lg:text-left lg:text-xs">
           La brújula centra el mapa en tu posición.
@@ -1536,7 +1617,22 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
     <header className="mb-3 shrink-0 space-y-2">
       {driverNegotiationBubble}
       {receiving && canReceive ? (
-        <div className="rounded-2xl border border-emerald-500/45 bg-gradient-to-br from-emerald-600/15 via-background to-background p-4 shadow-sm dark:from-emerald-500/10">
+        <div
+          className={cn(
+            "rounded-2xl border bg-gradient-to-br via-background to-background p-4 shadow-sm",
+            isHybridWork
+              ? "border-sky-500/35 from-sky-600/10 dark:from-sky-500/10"
+              : "border-emerald-500/45 from-emerald-600/15 dark:from-emerald-500/10",
+          )}
+          style={
+            isHybridWork
+              ? {
+                  backgroundImage:
+                    "linear-gradient(135deg, rgba(14,165,233,0.12) 0%, rgba(16,185,129,0.08) 50%, rgba(139,92,246,0.12) 100%)",
+                }
+              : undefined
+          }
+        >
           <div className="flex gap-3">
             <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600/20 ring-2 ring-emerald-500/45">
               <Radio className="h-5 w-5 text-emerald-800 dark:text-emerald-100" aria-hidden />
@@ -1544,14 +1640,25 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             </span>
             <div className="min-w-0 space-y-2">
               <h1 className="font-display text-xl font-bold tracking-tight text-emerald-950 dark:text-emerald-50 sm:text-2xl">
-                {goSlug === "pack"
-                  ? `Disponible para envíos de ${MOBILITY_UI.delivery}`
-                  : `Disponible para ${MOBILITY_UI.taxiService.toLowerCase()}`}
+                {isHybridWork
+                  ? `Modo híbrido · recibiendo ${MOBILITY_UI.taxiService.toLowerCase()} y ${MOBILITY_UI.delivery.toLowerCase()}`
+                  : isDeliveryWork
+                    ? `Disponible para envíos de ${MOBILITY_UI.delivery}`
+                    : `Disponible para ${MOBILITY_UI.taxiService.toLowerCase()}`}
               </h1>
-              <p className="text-sm leading-relaxed text-emerald-950/90 dark:text-emerald-50/90">
-                {goSlug === "pack"
-                  ? "No recibirás cada envío al instante: cuando el sistema te asigne uno, lo verás en el mapa y aquí. Mantén el GPS activo."
-                  : "No recibirás cada pedido al instante: cuando el sistema te asigne uno, lo verás en el mapa y aquí. Mantén el GPS activo."}
+              <p
+                className={cn(
+                  "text-sm leading-relaxed",
+                  isHybridWork
+                    ? "text-foreground/90 dark:text-emerald-50/90"
+                    : "text-emerald-950/90 dark:text-emerald-50/90",
+                )}
+              >
+                {isHybridWork
+                  ? "Recibirás el primer servicio que te asigne el sistema (taxi o envío). Si rechazas uno, sigues disponible para el otro. Mantén el GPS activo."
+                  : isDeliveryWork
+                    ? "No recibirás cada envío al instante: cuando el sistema te asigne uno, lo verás en el mapa y aquí. Mantén el GPS activo."
+                    : "No recibirás cada pedido al instante: cuando el sistema te asigne uno, lo verás en el mapa y aquí. Mantén el GPS activo."}
               </p>
             </div>
           </div>
@@ -1559,12 +1666,11 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
       ) : (
         <>
           <h1 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            {goSlug === "pack" ? MOBILITY_UI.delivery : MOBILITY_UI.taxiService}
+            Panel conductor
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {goSlug === "pack"
-              ? `Mapa en vivo y conexión para recibir solicitudes de ${MOBILITY_UI.delivery.toLowerCase()}. Desliza el control para activar o detener la recepción de envíos.`
-              : `Mapa en vivo y conexión para recibir solicitudes de ${MOBILITY_UI.taxiService.toLowerCase()}. Desliza el control para activar o detener la recepción de viajes.`}
+            Mapa en vivo. Desliza a la izquierda para taxi, al centro para apagar o a la derecha para{" "}
+            {MOBILITY_UI.delivery.toLowerCase()}. Un toque en el botón activa taxi y delivery a la vez; otro toque apaga.
           </p>
         </>
       )}
@@ -1604,6 +1710,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             <DriverCargoMap
               fullscreen
               showRecenter
+              hideLocationSearchingHint
               vehicleType={providerVehicle?.vehicle_type}
               receiving={receiving}
               searchingClient={searchingClient}
@@ -1622,26 +1729,82 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             >
               {driverNegotiationBubble}
               {receiving && canReceive ? (
-                <div className="rounded-lg border border-emerald-500/45 bg-background/88 p-1.5 shadow-lg ring-1 ring-black/5 backdrop-blur-md dark:bg-emerald-500/10 dark:ring-white/10 sm:rounded-xl sm:p-2">
+                <div
+                  className={cn(
+                    "rounded-lg border bg-background/95 p-1.5 shadow-lg ring-1 ring-black/[0.08] backdrop-blur-md sm:rounded-xl sm:p-2 dark:bg-background/88 dark:ring-white/10",
+                    isHybridWork
+                      ? "border-sky-500/40 dark:border-violet-500/35"
+                      : "border-emerald-600/40 dark:border-emerald-500/45 dark:bg-emerald-500/10",
+                  )}
+                  style={
+                    isHybridWork
+                      ? {
+                          backgroundImage:
+                            "linear-gradient(135deg, rgba(14,165,233,0.14) 0%, rgba(16,185,129,0.1) 50%, rgba(139,92,246,0.14) 100%)",
+                        }
+                      : undefined
+                  }
+                >
                   <div className="flex items-start gap-1.5 sm:gap-2">
-                    <span className="relative mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600/20 ring-1 ring-emerald-500/40 dark:bg-emerald-400/15 sm:h-7 sm:w-7">
-                      <Radio className="h-3 w-3 text-emerald-800 dark:text-emerald-100 sm:h-3.5 sm:w-3.5" aria-hidden />
-                      <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/20 [animation-duration:2.5s]" aria-hidden />
+                    <span
+                      className={cn(
+                        "relative mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ring-1 sm:h-7 sm:w-7",
+                        isHybridWork
+                          ? "bg-gradient-to-br from-sky-500/30 via-emerald-500/25 to-violet-500/30 ring-sky-400/40"
+                          : "bg-emerald-600/20 ring-emerald-500/40 dark:bg-emerald-400/15",
+                      )}
+                    >
+                      <Radio
+                        className={cn(
+                          "h-3 w-3 sm:h-3.5 sm:w-3.5",
+                          isHybridWork ? "text-sky-900 dark:text-sky-100" : "text-emerald-800 dark:text-emerald-100",
+                        )}
+                        aria-hidden
+                      />
+                      <span
+                        className={cn(
+                          "absolute inset-0 animate-ping rounded-full [animation-duration:2.5s]",
+                          isHybridWork ? "bg-sky-400/15" : "bg-emerald-400/20",
+                        )}
+                        aria-hidden
+                      />
                     </span>
                     <div className="min-w-0 flex-1 space-y-0.5 sm:space-y-1">
-                      <p className="font-display text-xs font-bold leading-tight text-emerald-950 dark:text-emerald-50 sm:text-sm">
-                        {goSlug === "pack" ? `Disponible · ${MOBILITY_UI.delivery}` : `Disponible · ${MOBILITY_UI.taxiService}`}
+                      <p
+                        className={cn(
+                          "font-display text-xs font-bold leading-tight sm:text-sm",
+                          isHybridWork
+                            ? "bg-gradient-to-r from-sky-800 via-emerald-900 to-violet-900 bg-clip-text text-transparent dark:from-sky-100 dark:via-emerald-50 dark:to-violet-100"
+                            : "text-emerald-950 dark:text-emerald-50",
+                        )}
+                      >
+                        {isHybridWork
+                          ? `Modo híbrido · recibiendo ${MOBILITY_UI.taxiService.toLowerCase()} y ${MOBILITY_UI.delivery.toLowerCase()}`
+                          : isDeliveryWork
+                            ? `Disponible · ${MOBILITY_UI.delivery}`
+                            : `Disponible · ${MOBILITY_UI.taxiService}`}
                       </p>
-                      <p className="text-[9px] leading-snug text-emerald-950/80 dark:text-emerald-50/85 sm:text-[10px]">
+                      <p
+                        className={cn(
+                          "text-[9px] leading-snug sm:text-[10px]",
+                          isHybridWork
+                            ? "text-foreground dark:text-emerald-50/90"
+                            : "text-emerald-950/85 dark:text-emerald-50/85",
+                        )}
+                      >
                         <span className="sm:hidden">
-                          {goSlug === "pack"
-                            ? "Envíos no instantáneos · GPS · salir: desliza abajo."
-                            : "Pedidos no instantáneos · GPS · salir: desliza abajo."}
+                          {isHybridWork
+                            ? "Taxi y delivery · primer servicio disponible · toque en el botón para apagar."
+                            : isDeliveryWork
+                              ? "Envíos no instantáneos · GPS · salir: desliza al centro."
+                              : "Pedidos no instantáneos · GPS · salir: desliza al centro."}
                         </span>
                         <span className="hidden sm:inline">
-                          {goSlug === "pack"
-                            ? "Los envíos no son instantáneos. GPS encendido. Para salir de línea, desliza abajo."
-                            : "Los pedidos no son instantáneos. GPS encendido. Para salir de línea, desliza abajo."}
+                          {isHybridWork
+                            ? "Recibes taxi y delivery. Te llega el primero disponible. GPS encendido. Toca el botón inferior para apagar."
+                            : isDeliveryWork
+                              ? "Los envíos no son instantáneos. GPS encendido. Para salir de línea, desliza al centro."
+                              : "Los pedidos no son instantáneos. GPS encendido. Para salir de línea, desliza al centro."}
                         </span>
                       </p>
                     </div>
@@ -1663,8 +1826,13 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               )}
             </div>
           </div>
-          <div className={goViewportClasses.mapControlsDock}>
-            <div ref={slideDockRef} className="pointer-events-auto">
+          <div
+            className={cn(
+              goViewportClasses.mapControlsDock,
+              "max-lg:flex max-lg:flex-col max-lg:items-center max-lg:pb-11",
+            )}
+          >
+            <div ref={slideDockRef} className="pointer-events-auto w-full max-lg:-translate-y-2">
               {activeRideOffer ? activeServicePanel : controlsBlockMobile}
             </div>
           </div>
@@ -1701,6 +1869,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
             <DriverCargoMap
               fullscreen
               showRecenter
+              hideLocationSearchingHint
               vehicleType={providerVehicle?.vehicle_type}
               receiving={receiving}
               searchingClient={searchingClient}
@@ -1813,7 +1982,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           className="flex max-h-[min(96dvh,900px)] min-h-[min(70dvh,560px)] flex-col gap-0 overflow-hidden rounded-t-2xl p-0 sm:mx-auto sm:max-w-[min(96vw,1180px)]"
         >
           <SheetHeader className="shrink-0 space-y-1 border-b border-border px-4 py-3 text-left">
-            <SheetTitle className="font-display text-lg">Regateo · {goSlug === "pack" ? MOBILITY_UI.delivery : MOBILITY_UI.taxiService}</SheetTitle>
+            <SheetTitle className="font-display text-lg">Regateo · taxi y {MOBILITY_UI.delivery}</SheetTitle>
             <SheetDescription>
               Solicitudes con monto a negociar. Se actualizan solas cada 5 segundos; también puedes pulsar actualizar.
             </SheetDescription>
@@ -1821,6 +1990,8 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
           <div className="min-h-0 flex-1 overflow-hidden px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-4">
             <GoDriverNegotiationBoardPanel
               active={negotiationBoardOpen}
+              viewModule={negotiationViewModule}
+              onViewModuleChange={setNegotiationViewModule}
               providerVehicleType={providerVehicle?.vehicle_type}
               providerIsPetFriendly={!!providerVehicle?.is_pet_friendly}
               canSubmitNegotiationOffers={canUseDriverNegotiation}
@@ -1831,7 +2002,7 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
               }
               onOfferSubmitted={(rideId, amountUsd, module) => {
                 setDriverNegotiationSent({ rideId, module, amountUsd });
-                stopAllReceiving();
+                stopReceiving();
               }}
             />
           </div>
@@ -1982,11 +2153,13 @@ export default function DriverGoGenfeb({ goSlug = "cargo" }: { goSlug?: "cargo" 
 /** Ruta legacy `/driver/go-genfeb` (sin GoShellLayout): mismo panel de chat que en `/go/cargo/driver`. */
 export function DriverGoGenfebWithGoChat() {
   return (
-    <GoChatProvider>
-      <GoDriverUiProvider>
-        <DriverGoGenfeb />
-        <GoChatDrawer />
-      </GoDriverUiProvider>
-    </GoChatProvider>
+    <GoDriverSessionProvider>
+      <GoChatProvider>
+        <GoDriverUiProvider>
+          <DriverGoGenfeb />
+          <GoChatDrawer />
+        </GoDriverUiProvider>
+      </GoChatProvider>
+    </GoDriverSessionProvider>
   );
 }

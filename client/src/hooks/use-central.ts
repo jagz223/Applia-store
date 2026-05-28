@@ -36,6 +36,10 @@ export type CentralFleetDriver = {
   receiving: boolean;
   inService: boolean;
   updatedAt: number | null;
+  /** GPS en tiempo real (socket reciente); false = última posición conocida. */
+  positionLive: boolean;
+  /** Timestamp si apagó «recibir servicios» (sigue en mapa un tiempo con mensaje al clic). */
+  receivingStoppedAt: number | null;
   /** Viaje taxi o delivery en curso (solo si `inService`). */
   activeService: CentralActiveService | null;
 };
@@ -50,6 +54,11 @@ export type CentralFleetSocketPatch = {
   updatedAt: number;
   dispatchCompanyId: string | null;
   offline?: boolean;
+  positionLive?: boolean;
+  receivingStoppedAt?: number | null;
+  receiving?: boolean;
+  receivingTaxi?: boolean;
+  receivingDelivery?: boolean;
 };
 
 export const CENTRAL_FLEET_QUERY_KEY = (companyId: string) => ["central", "fleet", companyId] as const;
@@ -60,11 +69,51 @@ export function mergeCentralFleetDriverPatch(
   patch: CentralFleetSocketPatch,
 ): CentralFleetDriver[] {
   const list = prevDrivers ?? [];
-  if (patch.offline === true) {
-    return list.filter((d) => d.userId !== patch.userId);
-  }
   const idx = list.findIndex((d) => d.userId === patch.userId);
   const existing = idx >= 0 ? list[idx] : undefined;
+
+  if (patch.offline === true) {
+    const lat = Number.isFinite(patch.lat) ? patch.lat : (existing?.lat ?? null);
+    const lon = Number.isFinite(patch.lon) ? patch.lon : (existing?.lon ?? null);
+    const receivingStoppedAt = patch.receivingStoppedAt ?? null;
+    const inService = existing?.inService ?? false;
+
+    if (!receivingStoppedAt && !inService) {
+      if (idx >= 0) return list.filter((d) => d.userId !== patch.userId);
+      return list;
+    }
+
+    if (idx < 0 && (lat == null || lon == null)) return list;
+
+    const merged: CentralFleetDriver = {
+      userId: patch.userId,
+      name: existing?.name ?? "",
+      lastName: existing?.lastName ?? "",
+      avatar: existing?.avatar ?? null,
+      phone: existing?.phone ?? null,
+      licensePlate: existing?.licensePlate ?? null,
+      rating: existing?.rating ?? 5,
+      vehicleType: patch.vehicleType?.trim() || existing?.vehicleType || "car",
+      isPetFriendly: patch.isPetFriendly ?? existing?.isPetFriendly ?? false,
+      lat,
+      lon,
+      receivingTaxi: false,
+      receivingDelivery: false,
+      receiving: false,
+      inService,
+      updatedAt: patch.updatedAt ?? existing?.updatedAt ?? null,
+      positionLive: false,
+      receivingStoppedAt,
+      activeService: existing?.activeService ?? null,
+    };
+    if (idx >= 0) {
+      const next = [...list];
+      next[idx] = merged;
+      return next;
+    }
+    return [...list, merged];
+  }
+
   const merged: CentralFleetDriver = {
     userId: patch.userId,
     name: existing?.name ?? "",
@@ -77,11 +126,14 @@ export function mergeCentralFleetDriverPatch(
     isPetFriendly: patch.isPetFriendly,
     lat: patch.lat,
     lon: patch.lon,
-    receivingTaxi: existing?.receivingTaxi ?? false,
-    receivingDelivery: existing?.receivingDelivery ?? false,
-    receiving: existing?.receiving ?? false,
+    receivingTaxi: patch.receivingTaxi ?? existing?.receivingTaxi ?? false,
+    receivingDelivery: patch.receivingDelivery ?? existing?.receivingDelivery ?? false,
+    receiving: patch.receiving ?? existing?.receiving ?? false,
     inService: existing?.inService ?? false,
     updatedAt: patch.updatedAt,
+    positionLive: patch.positionLive ?? true,
+    receivingStoppedAt:
+      patch.receivingStoppedAt !== undefined ? patch.receivingStoppedAt : (existing?.receivingStoppedAt ?? null),
     activeService: existing?.activeService ?? null,
   };
   if (idx >= 0) {
@@ -203,11 +255,17 @@ export function useCentralFleet(companyId: string | null) {
         receivingTaxi: Boolean(d.receivingTaxi),
         receivingDelivery: Boolean(d.receivingDelivery),
         receiving: Boolean(d.receivingTaxi || d.receivingDelivery || d.receiving),
+        positionLive: Boolean((d as { positionLive?: boolean }).positionLive ?? true),
+        receivingStoppedAt: (d as { receivingStoppedAt?: number | null }).receivingStoppedAt ?? null,
         activeService: (d as { activeService?: CentralActiveService | null }).activeService ?? null,
       }));
     },
     enabled: !!localStorage.getItem("token") && !!companyId,
-    refetchInterval: 12_000,
+    staleTime: 0,
+    refetchInterval: 8_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
   });
 }
 

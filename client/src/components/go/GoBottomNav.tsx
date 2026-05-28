@@ -4,6 +4,8 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Car, History, Menu, Package, MessageSquare, Settings, Bell, TrendingUp, Tags, Ticket } from "lucide-react";
 import { useGoChat } from "@/contexts/GoChatContext";
+import { useConversations } from "@/hooks/use-chat";
+import { activeGoRideConversationId } from "@/lib/go-active-ride-chat";
 import { useGoDriverUi } from "@/contexts/GoDriverUiContext";
 import { useCategories, useCategoryVisibility, useCurrentProvider } from "@/hooks/use-mango-data";
 import { canAccessPromocionesPanel } from "@/lib/auth-utils";
@@ -58,7 +60,8 @@ type GoBottomNavProps = {
 export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   const [location, setLocation] = useLocation();
   const { user, isAuthenticated } = useAuth();
-  const { openChat, chatBadge } = useGoChat();
+  const { openChat, openChatWithConversation, chatBadge } = useGoChat();
+  const { data: chatConversations = [] } = useConversations(isAuthenticated);
   const { openNotifications } = useGoNotifications();
   const goDriverUi = useGoDriverUi();
   const { notifications } = useSocket();
@@ -125,6 +128,8 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   const { data: visibility } = useCategoryVisibility();
   const hiddenSlugs = useMemo(() => new Set(effectiveHiddenCategorySlugs(visibility?.hiddenSlugs)), [visibility]);
   const showPack = !hiddenSlugs.has("delivery");
+  const isUnifiedDriverView =
+    location === "/go/driver" || location.startsWith("/go/driver/");
   const isCargoDriverView =
     location === "/go/taxi/driver" ||
     location.startsWith("/go/taxi/driver/") ||
@@ -135,7 +140,7 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
     location.startsWith("/go/delivery/driver/") ||
     location === "/go/pack/driver" ||
     location.startsWith("/go/pack/driver/");
-  const isDriverView = isCargoDriverView || isPackDriverView;
+  const isDriverView = isUnifiedDriverView || isCargoDriverView || isPackDriverView;
   /** Rutas de pasajero: no incluyen `/go/taxi/driver` ni `/go/delivery/driver` (antes quedaban mal clasificadas). */
   const isRiderCargoView =
     location === "/go/taxi" ||
@@ -148,9 +153,9 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
     location === "/go/pack" ||
     (location.startsWith("/go/pack/") && !location.startsWith("/go/pack/driver"));
   const isRiderGoView = isRiderCargoView || isRiderPackView;
-  const cargoHref = isDriverView ? "/go/taxi/driver" : "/go/taxi";
-  const packHref = isDriverView ? "/go/delivery/driver" : "/go/delivery";
-  const configHref = isCargoDriverView ? "/go/taxi/driver/settings" : isPackDriverView ? "/go/delivery/driver/settings" : "/go/taxi";
+  const cargoHref = isDriverView ? "/go/driver" : "/go/taxi";
+  const packHref = isDriverView ? "/go/driver" : "/go/delivery";
+  const configHref = isDriverView ? "/go/driver/settings" : "/go/taxi";
 
   const [activeDriverService, setActiveDriverService] = useState<null | { module: "cargo" | "pack"; rideId: string }>(null);
   useEffect(() => {
@@ -189,8 +194,12 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   const tabs: Tab[] = useMemo(
     () =>
       [
-        { href: cargoHref, label: "Taxi", icon: <Car className="h-5 w-5" aria-hidden /> },
-        showPack ? { href: packHref, label: "Delivery", icon: <Package className="h-5 w-5" aria-hidden /> } : null,
+        !isDriverView
+          ? { href: cargoHref, label: "Taxi", icon: <Car className="h-5 w-5" aria-hidden /> }
+          : null,
+        !isDriverView && showPack
+          ? { href: packHref, label: "Delivery", icon: <Package className="h-5 w-5" aria-hidden /> }
+          : null,
         !isDriverView && isRiderGoView
           ? {
               href: "__go_rider_history__",
@@ -229,7 +238,16 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
           icon: <Bell className="h-5 w-5" aria-hidden />,
           onClick: openNotifications,
         },
-        { href: "__go_chat__", label: "Chat", icon: <MessageSquare className="h-5 w-5" aria-hidden />, onClick: openChat },
+        {
+          href: "__go_chat__",
+          label: "Chat",
+          icon: <MessageSquare className="h-5 w-5" aria-hidden />,
+          onClick: () => {
+            const activeConv = activeGoRideConversationId(chatConversations);
+            if (activeConv != null) openChatWithConversation(activeConv);
+            else openChat();
+          },
+        },
         isDriverView && goDriverUi
           ? {
               href: "__go_driver_more__",
@@ -243,6 +261,8 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
       ].filter(Boolean) as Tab[],
     [
       openChat,
+      openChatWithConversation,
+      chatConversations,
       openNotifications,
       location,
       cargoHref,
@@ -297,7 +317,11 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
                 (driverMoreMenuOpen || driverEarningsOpen || onSettings));
             const isChatTab = t.href === "__go_chat__";
             const isNotifTab = t.href.startsWith("/notifications") || t.href === "__go_notifications__";
-            const isGoDriverTab = isDriverView && (t.href === "/go/taxi/driver" || t.href === "/go/delivery/driver");
+            const isGoDriverTab =
+              isDriverView &&
+              (t.href === "/go/taxi/driver" ||
+                t.href === "/go/delivery/driver" ||
+                t.href === "/go/driver");
             const isGoRiderTab = !isDriverView && (t.href === "/go/taxi" || t.href === "/go/delivery");
             const highlightChat = isChatTab && (!!activeDriverService || !!activeRiderService);
             const blockedByService =

@@ -151,6 +151,58 @@ export type RolePermissionKey = (typeof ALL_ROLE_PERMISSION_KEYS)[number];
 
 export type RolePermissionsMap = Partial<Record<RolePermissionKey, boolean>>;
 
+/**
+ * Permisos ocultos en el editor de roles (billetera/saldo/retiros no se gestionan en UI por ahora).
+ * Siguen existiendo en el mapa y pueden activarse en segundo plano vía permisos visibles.
+ */
+export const HIDDEN_ROLE_PERMISSION_KEYS = [
+  "associate.wallet",
+  "client.wallet",
+  "admin.recharges",
+  "admin.balance",
+  "admin.payouts",
+] as const;
+
+export type HiddenRolePermissionKey = (typeof HIDDEN_ROLE_PERMISSION_KEYS)[number];
+
+const HIDDEN_PERMISSION_KEY_SET = new Set<string>(HIDDEN_ROLE_PERMISSION_KEYS);
+
+/** Permiso visible → permisos ocultos que se activan automáticamente al guardar / resolver. */
+export const IMPLIED_ROLE_PERMISSIONS: Partial<Record<RolePermissionKey, readonly RolePermissionKey[]>> = {
+  "associate.dashboard": ["associate.wallet"],
+  "client.marketplace": ["client.wallet"],
+};
+
+export function isHiddenRolePermissionKey(key: string): boolean {
+  return HIDDEN_PERMISSION_KEY_SET.has(key);
+}
+
+export function applyImpliedRolePermissions(
+  permissions: Record<RolePermissionKey, boolean>,
+): Record<RolePermissionKey, boolean> {
+  const out = { ...permissions };
+  for (const [source, impliedKeys] of Object.entries(IMPLIED_ROLE_PERMISSIONS) as [
+    RolePermissionKey,
+    readonly RolePermissionKey[],
+  ][]) {
+    const sourceOn = out[source] === true;
+    for (const key of impliedKeys) {
+      out[key] = sourceOn;
+    }
+  }
+  return out;
+}
+
+/** Áreas del editor sin permisos de billetera/saldo/retiros. */
+export function filterVisiblePermissionAreas(areas: readonly RolePermissionArea[]): RolePermissionArea[] {
+  return areas
+    .map((area) => ({
+      ...area,
+      permissions: area.permissions.filter((p) => !isHiddenRolePermissionKey(p.key)),
+    }))
+    .filter((area) => area.permissions.length > 0);
+}
+
 export function isHiddenCatalogRoleCode(code: string | undefined | null): boolean {
   const c = String(code ?? "").trim().toLowerCase();
   return !c || c === "_seed" || c.startsWith("_");
@@ -257,7 +309,7 @@ export function resolveRolePermissions(
       out[key] = stored[key]!;
     }
   }
-  return out;
+  return applyImpliedRolePermissions(out);
 }
 
 export function hasRolePermission(
@@ -268,7 +320,9 @@ export function hasRolePermission(
 }
 
 function summarizeArea(area: RolePermissionArea, permissions: Record<RolePermissionKey, boolean>): string | null {
-  const enabled = area.permissions.filter((p) => permissions[p.key as RolePermissionKey]).map((p) => p.label);
+  const enabled = area.permissions
+    .filter((p) => !isHiddenRolePermissionKey(p.key) && permissions[p.key as RolePermissionKey])
+    .map((p) => p.label);
   if (enabled.length === 0) return null;
   return `${area.label}: ${enabled.slice(0, 3).join(", ")}${enabled.length > 3 ? "…" : ""}`;
 }
@@ -281,7 +335,9 @@ export function summarizeEnabledPermissions(
 
   if (isAdminSuiteEnabled(permissions)) {
     const adminLabels = ADMIN_PERMISSION_AREAS.flatMap((a) =>
-      a.permissions.filter((p) => permissions[p.key as RolePermissionKey]).map((p) => p.label)
+      a.permissions
+        .filter((p) => !isHiddenRolePermissionKey(p.key) && permissions[p.key as RolePermissionKey])
+        .map((p) => p.label),
     );
     if (adminLabels.length > 0) {
       lines.push(`Administración (${adminLabels.length} permisos)`);
@@ -302,5 +358,5 @@ export function summarizeEnabledPermissions(
 }
 
 export function countEnabledPermissions(permissions: Record<RolePermissionKey, boolean>): number {
-  return ALL_ROLE_PERMISSION_KEYS.filter((k) => permissions[k]).length;
+  return ALL_ROLE_PERMISSION_KEYS.filter((k) => !isHiddenRolePermissionKey(k) && permissions[k]).length;
 }

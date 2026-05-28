@@ -7,6 +7,7 @@
 import type { Server as SocketIOServer } from "socket.io";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import type { IStorage } from "./storage-genfeb";
+import { getIO } from "./socket";
 
 export const MOBILITY_RIDE_CHAT_USER_GRACE_MS = 24 * 60 * 60 * 1000;
 
@@ -28,7 +29,13 @@ function hideAtFromNow(): Date {
 /** Al emparejar conductor ↔ pasajero (creación del hilo). */
 export async function registerMobilityRideChatCreated(
   storage: IStorage,
-  params: { conversationId: number; rideId: string; module: MobilityRideChatModule },
+  params: {
+    conversationId: number;
+    rideId: string;
+    module: MobilityRideChatModule;
+    riderUserId?: string;
+    driverUserId?: string;
+  },
 ): Promise<void> {
   const id = Number(params.conversationId);
   if (!Number.isFinite(id) || id <= 0) return;
@@ -39,7 +46,8 @@ export async function registerMobilityRideChatCreated(
     mobilityRideModule: params.module,
     mobilityRideCompleted: false,
     mobilityRideInProgress: false,
-    serviceChatHideFromUsersAt: hideAtFromNow(),
+    /** Sin fecha de ocultación hasta cancelar / no completar / finalizar (evita banner «servicio inactivo» en viaje nuevo). */
+    serviceChatHideFromUsersAt: null,
     messagesLocked: false,
   });
 
@@ -53,6 +61,19 @@ export async function registerMobilityRideChatCreated(
     });
   } catch (e) {
     console.error("[mobility-ride-chat] register created message", e);
+  }
+
+  const riderUid = String(params.riderUserId ?? "").trim();
+  const driverUid = String(params.driverUserId ?? "").trim();
+  if (!riderUid || !driverUid) return;
+  try {
+    const io = getIO();
+    if (!io) return;
+    const payload = { conversationId: String(id), preview: "Chat del viaje" };
+    io.to(`user:${riderUid}`).emit("notification:message", payload);
+    io.to(`user:${driverUid}`).emit("notification:message", payload);
+  } catch (e) {
+    console.error("[mobility-ride-chat] notify created", e);
   }
 }
 

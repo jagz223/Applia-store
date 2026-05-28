@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth, type AuthUser } from "@/hooks/use-auth";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import { api } from "@shared/routes";
 import { ProviderTermsOfUseContent } from "@/constants/provider-terms-of-use-es";
 import { Loader2 } from "lucide-react";
@@ -41,7 +42,8 @@ export function ProviderTermsGate() {
 
   const needsAccept =
     isAuthenticated &&
-    user?.role === "professional" &&
+    user != null &&
+    userCanActAsAssociate(user) &&
     user.acceptedProviderTermsOfUse !== true;
 
   const mutation = useMutation({

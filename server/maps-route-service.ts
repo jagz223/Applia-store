@@ -82,7 +82,8 @@ export async function computeDrivingRoute(
   from: { lon: number; lat: number },
   to: { lon: number; lat: number },
 ): Promise<DrivingRouteResult> {
-  const cacheKey = `ga|from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
+  // Origen más grueso (~11 m): ahorra cuota cuando el conductor se mueve en servicio activo.
+  const cacheKey = `ga|from=${from.lon.toFixed(4)},${from.lat.toFixed(4)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
 

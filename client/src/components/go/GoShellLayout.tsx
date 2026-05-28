@@ -5,6 +5,7 @@ import { GoBottomNav } from "@/components/go/GoBottomNav";
 import { GoChatDrawer } from "@/components/go/GoChatDrawer";
 import { GoChatProvider } from "@/contexts/GoChatContext";
 import { GoDriverUiProvider } from "@/contexts/GoDriverUiContext";
+import { GoDriverSessionProvider } from "@/contexts/GoDriverSessionContext";
 import { GoNotificationsProvider } from "@/contexts/GoNotificationsContext";
 import { GoNotificationsDrawer } from "@/components/go/GoNotificationsDrawer";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { useSocket } from "@/hooks/use-socket";
 import { GoChatAutoCloseOnRideEnd } from "@/components/go/GoChatAutoCloseOnRideEnd";
 import { GoChatBadgeOnMessage } from "@/components/go/GoChatBadgeOnMessage";
+import { GoChatOpenFromQuery } from "@/components/go/GoChatOpenFromQuery";
 import { ListingSubscriptionRibbon } from "@/components/ListingSubscriptionRibbon";
 import {
   goViewportClasses,
@@ -28,8 +30,11 @@ import {
 export function GoShellLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { socket } = useSocket();
-  const headerTitle =
-    location.startsWith("/go/taxi") || location.startsWith("/go/cargo")
+  const isUnifiedDriver =
+    location === "/go/driver" || location.startsWith("/go/driver/");
+  const headerTitle = isUnifiedDriver
+    ? "Panel conductor"
+    : location.startsWith("/go/taxi") || location.startsWith("/go/cargo")
       ? "Servicio de taxi"
       : location.startsWith("/go/delivery") || location.startsWith("/go/pack")
         ? "Delivery"
@@ -37,17 +42,21 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
           ? "Pedidos"
           : "Movilidad y envíos";
   const wideDesktop =
+    isUnifiedDriver ||
     location.startsWith("/go/taxi") ||
     location.startsWith("/go/cargo") ||
     location.startsWith("/go/delivery") ||
     location.startsWith("/go/pack");
   /** En mapa/viaje hacemos overflow hidden; en ajustes el contenido debe desplazarse en móvil. */
   const mainScrollOnMobile =
+    location === "/go/driver/settings" ||
     location === "/go/taxi/driver/settings" ||
     location === "/go/cargo/driver/settings" ||
     location === "/go/delivery/driver/settings" ||
     location === "/go/pack/driver/settings";
   const isGoMapView =
+    location === "/go/driver" ||
+    isUnifiedDriver ||
     location === "/go/taxi" ||
     location === "/go/taxi/driver" ||
     location === "/go/cargo" ||
@@ -81,9 +90,11 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
   return (
     <GoChatProvider>
       <GoNotificationsProvider>
-        <GoDriverUiProvider>
-          <GoChatAutoCloseOnRideEnd />
+        <GoDriverSessionProvider>
+          <GoDriverUiProvider>
+            <GoChatAutoCloseOnRideEnd />
           <GoChatBadgeOnMessage />
+          <GoChatOpenFromQuery />
           <div className={cn(goViewportShellRootSurfaceClass(isGoMapView), goViewportShellRootClass(isGoMapView))}>
             <div
               className={goViewportShellFrameClass(isGoMapView, wideDesktop)}
@@ -157,7 +168,8 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
             <GoChatDrawer />
             <GoNotificationsDrawer />
           </div>
-        </GoDriverUiProvider>
+          </GoDriverUiProvider>
+        </GoDriverSessionProvider>
       </GoNotificationsProvider>
     </GoChatProvider>
   );

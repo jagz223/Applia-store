@@ -10,6 +10,7 @@ import { notifyFullAdminsPendingAccountChangeRequest } from "./account-change-no
 import { genFebStorage } from "./storage-genfeb";
 import { PUBLIC_REGISTER_ROLES, normalizePhone } from "@shared/admin-user-registration";
 import { resolveUserPermissions } from "./resolve-user-permissions";
+import { canActAsAssociate } from "@shared/associate-role-access";
 import {
   RECOVERY_QUESTION_OPTIONS,
   recoveryQuestionsSetupSchema,
@@ -102,11 +103,6 @@ interface UserPayload {
 
 // ============== FUNCIONES AUXILIARES ==============
 
-/** Campo en Firestore/usuario: `acceptedProviderTermsOfUse` (inglés). Solo profesionales; el resto se considera aceptado. */
-function acceptedProviderTermsOfUseForApi(user: { role?: string; acceptedProviderTermsOfUse?: boolean }): boolean {
-  if (user.role !== "professional") return true;
-  return user.acceptedProviderTermsOfUse === true;
-}
 
 /** Cuerpo de usuario para login, registro, /me y aceptación de términos (sin password). */
 async function buildAuthClientUser(
@@ -131,7 +127,9 @@ async function buildAuthClientUser(
     createdAt: user.createdAt,
     profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
     recoveryQuestionsConfigured: userHasRecoveryConfigured(user as { recoveryQuestionsConfigured?: boolean; recoveryQuestions?: unknown }),
-    acceptedProviderTermsOfUse: acceptedProviderTermsOfUseForApi(user as { role?: string; acceptedProviderTermsOfUse?: boolean }),
+    acceptedProviderTermsOfUse: canActAsAssociate(role, permissions)
+      ? user.acceptedProviderTermsOfUse === true
+      : true,
     dispatchCompanyId: (user as { dispatchCompanyId?: string | null }).dispatchCompanyId ?? null,
     pendingCentralSetup: (user as { pendingCentralSetup?: boolean }).pendingCentralSetup === true,
     provider: provider ?? null,
@@ -636,8 +634,9 @@ export async function registerAuthRoutes(
       if (!full) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
-      if (full.role !== "professional") {
-        return res.status(403).json({ message: "Solo los profesionales deben aceptar estas condiciones" });
+      const perms = await resolveUserPermissions(full.role);
+      if (!canActAsAssociate(full.role, perms)) {
+        return res.status(403).json({ message: "Solo los asociados deben aceptar estas condiciones" });
       }
       const updated = await genFebStorage.updateUser(req.user.id, { acceptedProviderTermsOfUse: true } as any);
       if (!updated) {

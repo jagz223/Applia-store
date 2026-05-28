@@ -118,7 +118,7 @@ type FormValues = { vehicle: VehicleFormValues };
 
 const settingsVehicleHref = `/settings?${SETTINGS_VEHICLE_SECTION_QUERY_KEY}=1`;
 
-const GO_MOBILITY_HREF = "/go/taxi/driver";
+const GO_MOBILITY_HREF = "/go/driver";
 
 function BecomeDriverMobilityDialog({
   open,

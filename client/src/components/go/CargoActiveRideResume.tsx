@@ -18,8 +18,8 @@ export function CargoActiveRideResume() {
     if (path.startsWith("/login") || path.startsWith("/register")) return;
 
     const driverRide = loadDriverActiveRideId();
-    if (driverRide && !path.startsWith("/go/taxi/driver")) {
-      setLocation("/go/taxi/driver");
+    if (driverRide && !path.startsWith("/go/driver")) {
+      setLocation("/go/driver");
       return;
     }
 

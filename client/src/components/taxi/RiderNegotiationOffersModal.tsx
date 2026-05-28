@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GoUserRideStatsBadges } from "@/components/go/GoUserRideStatsBadges";
 import { cn } from "@/lib/utils";
 
 const OFFERS_PAGE_SIZE = 3;
@@ -12,7 +13,8 @@ export type RiderNegotiationOfferRow = {
   driver: {
     name: string;
     profileImageUrl: string | null;
-    rating?: number;
+    rating?: number | null;
+    ratingCount?: number;
     completedTrips?: number;
     vehicle: {
       type: string;
@@ -142,18 +144,13 @@ export function RiderNegotiationOffersModal({
                           Placa: <span className="font-mono text-foreground">{o.driver.vehicle.licensePlate}</span>
                         </p>
                       ) : null}
-                      <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                        {typeof o.driver.rating === "number" ? (
-                          <span className="rounded-full border border-border/70 bg-muted/40 px-2 py-0.5">
-                            ⭐ {o.driver.rating.toFixed(1)}
-                          </span>
-                        ) : null}
-                        {typeof o.driver.completedTrips === "number" ? (
-                          <span className="rounded-full border border-border/70 bg-muted/40 px-2 py-0.5">
-                            {o.driver.completedTrips} viajes
-                          </span>
-                        ) : null}
-                      </div>
+                      <GoUserRideStatsBadges
+                        compact
+                        className="mt-1"
+                        rating={o.driver.rating}
+                        ratingCount={o.driver.ratingCount}
+                        completedTrips={o.driver.completedTrips}
+                      />
                       {typeof riderReferenceUsd === "number" && Number.isFinite(riderReferenceUsd) ? (
                         <div className="mt-2 space-y-1">
                           <div className="grid grid-cols-2 gap-2 rounded-lg border border-border/80 bg-muted/30 px-2 py-1.5 text-[11px]">

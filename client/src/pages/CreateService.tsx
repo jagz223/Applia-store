@@ -9,6 +9,7 @@ import {
   useCategoryVisibility,
 } from "@/hooks/use-mango-data";
 import { useAuth } from "@/hooks/use-auth";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,7 +71,7 @@ export default function CreateService() {
   );
   const shouldFetchMyServices =
     !!user &&
-    (!!provider || !!(user as { provider?: unknown }).provider || (user as { role?: string }).role === "professional");
+    (!!provider || !!(user as { provider?: unknown }).provider || userCanActAsAssociate(user));
   const { data: myServices = [] } = useMyServices({ enabled: shouldFetchMyServices && !authLoading });
   const createService = useCreateService();
   const [, setLocation] = useLocation();
@@ -183,7 +184,7 @@ export default function CreateService() {
     if (isTrade) form.setValue("profession", "");
   }, [isTrade, form]);
 
-  if (authLoading || (user?.role === "professional" && !user?.provider && providerApiLoading)) {
+  if (authLoading || (userCanActAsAssociate(user) && !user?.provider && !provider && providerApiLoading)) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="animate-spin" />
@@ -203,11 +204,11 @@ export default function CreateService() {
   }
 
   if (!provider) {
-    const isProfessional = user.role === "professional";
+    const mayBecomeAssociate = userCanActAsAssociate(user);
     return (
       <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <p className="text-muted-foreground mb-4">
-          {isProfessional
+          {mayBecomeAssociate
             ? "Completa tu perfil de asociado para poder crear servicios."
             : "Debes ser asociado para crear servicios."}
         </p>

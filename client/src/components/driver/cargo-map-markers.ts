@@ -1,4 +1,5 @@
 import L from "leaflet";
+import type { FleetWorkAccent } from "@/lib/central-fleet-work-accent";
 
 /** Clase base para iconos HTML sin caja blanca por defecto de Leaflet. */
 const MARKER_BASE_CLASS = "cargo-leaflet-marker !border-0 !bg-transparent !shadow-none";
@@ -52,9 +53,27 @@ const SVG_TRUCK = `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" a
 
 const SVG_PERSON = `<svg viewBox="0 0 48 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="24" cy="12" rx="9" ry="10" fill="#0f172a"/><path d="M8 52 C8 38 16 30 24 30 C32 30 40 38 40 52 Z" fill="#0f172a"/><path d="M18 48 L24 38 L30 48" fill="none" stroke="#334155" stroke-width="2" stroke-linecap="round"/></svg>`;
 
-function wrapSvg(inner: string, w: number, h: number): string {
+const WORK_ACCENT_COLOR: Record<Exclude<FleetWorkAccent, null>, string> = {
+  taxi: "#0ea5e9",
+  delivery: "#8b5cf6",
+  both: "#10b981",
+};
+
+function wrapSvg(
+  inner: string,
+  w: number,
+  h: number,
+  opts?: { stale?: boolean; workAccent?: FleetWorkAccent },
+): string {
+  const stale = !!opts?.stale;
   const shadow = "filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5)) drop-shadow(0 1px 1px rgba(0,0,0,0.35))";
-  return `<div class="flex items-end justify-center" style="width:${w}px;height:${h}px;${shadow}">${inner}</div>`;
+  const staleFx = stale ? "opacity:0.55;filter:saturate(0.65) drop-shadow(0 2px 6px rgba(0,0,0,0.35));" : shadow;
+  const accent = opts?.workAccent;
+  const badge =
+    accent != null
+      ? `<span aria-hidden="true" style="position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:9999px;background:${WORK_ACCENT_COLOR[accent]};border:2px solid #fff;box-shadow:0 0 0 1px rgba(15,23,42,0.35);"></span>`
+      : "";
+  return `<div class="relative flex items-end justify-center" style="width:${w}px;height:${h}px;${staleFx}">${inner}${badge}</div>`;
 }
 
 export type CargoVehicleKind = "motorcycle" | "car" | "pickup_truck" | "truck";
@@ -67,7 +86,10 @@ export function resolveVehicleKind(vehicleType: string | null | undefined): Carg
   return "car";
 }
 
-export function createDriverVehicleIcon(vehicleType: string | null | undefined): L.DivIcon {
+export function createDriverVehicleIcon(
+  vehicleType: string | null | undefined,
+  options?: { entering?: boolean; stale?: boolean; sizePx?: number; workAccent?: FleetWorkAccent },
+): L.DivIcon {
   const kind = resolveVehicleKind(vehicleType);
   const inner =
     kind === "motorcycle"
@@ -77,11 +99,12 @@ export function createDriverVehicleIcon(vehicleType: string | null | undefined):
         : kind === "truck"
           ? SVG_TRUCK
           : SVG_CAR;
-  const w = 48;
-  const h = 48;
+  const w = Math.max(16, Math.round(options?.sizePx ?? 48));
+  const h = w;
+  const enterClass = options?.entering ? " fleet-marker-enter" : "";
   return L.divIcon({
-    className: MARKER_BASE_CLASS,
-    html: wrapSvg(inner, w, h),
+    className: MARKER_BASE_CLASS + enterClass,
+    html: wrapSvg(inner, w, h, { stale: options?.stale, workAccent: options?.workAccent }),
     iconSize: [w, h],
     iconAnchor: [w / 2, h],
     popupAnchor: [0, -h],

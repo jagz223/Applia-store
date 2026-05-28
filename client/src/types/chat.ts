@@ -18,8 +18,12 @@ export interface ConversationEnriched {
   serviceId?: number;
   /** Reserva vinculada (chat de servicio marketplace). */
   bookingId?: number | null;
-  /** p. ej. `service_booking` para conversaciones vinculadas a una reserva. */
+  /** p. ej. `service_booking` | `mobility_ride`. */
   kind?: string | null;
+  /** Viaje Go (taxi / delivery) al que pertenece el hilo. */
+  mobilityRideId?: string | null;
+  mobilityRideInProgress?: boolean;
+  mobilityRideCompleted?: boolean;
   /** Cuando la reserva pasó a completada/cancelada (ISO). */
   serviceEndedAt?: string | null;
   /** Tras esta fecha/hora la conversación ya no aparece para usuarios normales (ISO). Los admins siguen viendo el historial en auditoría. */
@@ -59,4 +63,5 @@ export interface SendMessageInput {
 export interface CreateConversationInput {
   participantId: string;
   serviceId?: number;
+  bookingId?: number;
 }

@@ -64,7 +64,7 @@ export function GoDriverOffersBoard(props: { module: "cargo" | "pack" }) {
   const [mapOffer, setMapOffer] = useState<MarketOffer | null>(null);
 
   const apiBase = module === "pack" ? "/api/pack" : "/api/mobility";
-  const backHref = module === "pack" ? "/go/delivery/driver" : "/go/taxi/driver";
+  const backHref = "/go/driver";
 
   useEffect(() => {
     let cancelled = false;

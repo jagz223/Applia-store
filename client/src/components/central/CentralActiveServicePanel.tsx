@@ -47,9 +47,7 @@ export function CentralActiveServicePanel({ service }: { service: CentralActiveS
       <p className="text-[11px] font-mono text-muted-foreground">ID servicio: {service.rideId}</p>
 
       <div className="grid gap-2 border-t border-border/50 pt-2">
-        <p className="text-xs text-muted-foreground">
-          Servicio activo de punto A a punto B (sin datos del cliente ni ruta en mapa).
-        </p>
+        <p className="text-xs text-muted-foreground">Servicio activo de punto A a punto B.</p>
 
         <p className="flex items-start gap-2">
           <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />

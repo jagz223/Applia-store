@@ -19,7 +19,12 @@ import {
   centralAffiliationNotificationPath,
 } from "@/lib/central-affiliation-notification-path";
 import { NOTIFICATION_TYPE_ROLE_CHANGED } from "@shared/role-change-notification";
-import { cn } from "@/lib/utils";
+import {
+  getNotificationAccentCtaClassName,
+  getNotificationCardClassName,
+  getNotificationTitleClassName,
+} from "@/lib/notification-card-ui";
+import { isGoMobilityShellPath, openChatFromNotification } from "@/lib/open-go-chat";
 import {
   PUBLIC_PROMO_NOTIFICATION_CTA,
   getPublicPromoNotificationDescription,
@@ -184,7 +189,13 @@ export function NotificationBell() {
   const PAGE_SIZE = 10;
 
   const visibleNotifications = useMemo(
-    () => notifications.filter((n) => shouldShowPublicPromoInNotificationList(n.type)),
+    () =>
+      notifications.filter((n) => {
+        if (isPublicPromoNotificationType(n.type)) {
+          return shouldShowPublicPromoInNotificationList(n.type);
+        }
+        return true;
+      }),
     [notifications],
   );
 
@@ -225,6 +236,22 @@ export function NotificationBell() {
 
   const handleNotificationClick = (notification: { id: string; type: string; data?: any }) => {
     markNotificationAsRead(notification.id);
+    const data = notification.data ?? {};
+    if (notification.type === "message") {
+      const convId = data.conversationId ?? data.data?.conversationId;
+      if (convId != null) {
+        const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+        if (isGoMobilityShellPath(pathname)) {
+          openChatFromNotification({
+            conversationId: convId,
+            pathname,
+            setLocation,
+          });
+          setOpen(false);
+          return;
+        }
+      }
+    }
     const path = getNotificationPath(notification);
     if (typeof window !== "undefined") {
       // Evita que el SPA conserve el scroll del historial de notificaciones.
@@ -232,7 +259,6 @@ export function NotificationBell() {
     }
     setLocation(path);
     setOpen(false);
-    const data = notification.data ?? {};
     if (data.type === "recharge_pending") {
       const transferId = data.data?.transferId ?? data.transferId;
       window.dispatchEvent(
@@ -603,28 +629,19 @@ export function NotificationBell() {
                 key={notification.id}
                 type="button"
                 onClick={() => handleNotificationClick(notification)}
-                className={cn(
-                  "w-full text-left p-3 rounded-lg border transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-primary/20",
-                  notification.read ? "bg-muted/50" : "bg-muted",
-                  isPromo && "border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/15 focus:ring-orange-500/30",
-                  isPromo && !notification.read && "ring-1 ring-orange-500/35",
-                )}
+                className={getNotificationCardClassName({ read: notification.read })}
               >
                 <div className="flex items-start gap-2">
                   {getIcon(notification.type)}
                   <div className="flex-1 min-w-0">
-                    <p className={cn("font-medium text-sm", isPromo && "text-orange-600 dark:text-orange-400")}>
-                      {title}
-                    </p>
+                    <p className={getNotificationTitleClassName()}>{title}</p>
                     {description && (
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {description}
                       </p>
                     )}
                     {isPromo && (
-                      <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 mt-1.5">
-                        {PUBLIC_PROMO_NOTIFICATION_CTA}
-                      </p>
+                      <p className={getNotificationAccentCtaClassName()}>{PUBLIC_PROMO_NOTIFICATION_CTA}</p>
                     )}
                     <p className="text-xs text-muted-foreground mt-1">
                       {notification.timestamp instanceof Date

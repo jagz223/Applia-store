@@ -1,9 +1,16 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
+import { useGoChat } from "@/contexts/GoChatContext";
+import { openChatFromNotification } from "@/lib/open-go-chat";
 import { Bell, Check, ChevronRight, Info, MessageSquare, Ticket, X } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  getNotificationAccentCtaClassName,
+  getNotificationCardClassName,
+  getNotificationTitleClassName,
+} from "@/lib/notification-card-ui";
 import { useSocket } from "@/hooks/use-socket";
 import { useGoNotifications } from "@/contexts/GoNotificationsContext";
 import {
@@ -31,9 +38,7 @@ function getNotificationHref(notification: { id?: string; type: string; data?: a
   if (typeof subtype === "string" && subtype.startsWith("cargo_")) return "/go/taxi";
 
   if (notification.type === "message") {
-    const convId = data?.conversationId ?? data?.data?.conversationId;
-    if (convId != null) return `/chat?conversation=${encodeURIComponent(String(convId))}`;
-    return "/chat";
+    return null;
   }
 
   // Para cualquier otro evento sin URL explícita, no forzamos navegación fuera de Go.
@@ -77,7 +82,8 @@ function getDescription(notification: { type: string; data?: any }): string | nu
 export function GoNotificationsDrawer() {
   const { isOpen, closeNotifications } = useGoNotifications();
   const { notifications, markNotificationAsRead, clearNotifications } = useSocket();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
+  const { openChatWithConversation } = useGoChat();
   const [unreadOnly, setUnreadOnly] = useState(false);
 
   const list = useMemo(() => {
@@ -144,13 +150,29 @@ export function GoNotificationsDrawer() {
                     <li key={n.id}>
                       <button
                         type="button"
-                        className={cn(
-                          "w-full rounded-xl border border-border bg-card px-3 py-3 text-left shadow-sm transition-colors",
-                          "hover:bg-muted/40 active:bg-muted/60",
-                          isPromo && "border-orange-500/40 bg-orange-500/10",
-                        )}
+                        className={getNotificationCardClassName({ read: n.read, variant: "go" })}
                         onClick={() => {
                           markNotificationAsRead(String(n.id));
+                          if (n.type === "message") {
+                            const data = (n as { data?: Record<string, unknown> }).data ?? {};
+                            const rawConvId =
+                              data.conversationId ??
+                              (data.data as { conversationId?: unknown } | undefined)?.conversationId;
+                            const convId =
+                              rawConvId != null && String(rawConvId).trim() !== ""
+                                ? Number(rawConvId)
+                                : NaN;
+                            if (Number.isFinite(convId) && convId > 0) {
+                              openChatFromNotification({
+                                conversationId: convId,
+                                pathname: location.split("?")[0],
+                                setLocation,
+                                openChatWithConversation,
+                                closeNotifications,
+                              });
+                            }
+                            return;
+                          }
                           if (href) {
                             closeNotifications();
                             setLocation(href);
@@ -167,32 +189,27 @@ export function GoNotificationsDrawer() {
                               ) : (
                                 <Check className="h-4 w-4 text-muted-foreground" aria-hidden />
                               )}
-                              <p
-                                className={cn(
-                                  "truncate font-semibold",
-                                  isPromo ? "text-orange-600 dark:text-orange-400" : "text-foreground",
-                                )}
-                              >
-                                {title}
-                              </p>
+                              <p className={cn(getNotificationTitleClassName(), "truncate font-semibold")}>{title}</p>
                             </div>
                             {detail ? (
                               <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{detail}</p>
                             ) : null}
                             {isPromo ? (
-                              <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-orange-600 dark:text-orange-400">
+                              <p className={cn(getNotificationAccentCtaClassName(), "mt-2 inline-flex items-center gap-1 text-[11px]")}>
                                 <Ticket className="h-3.5 w-3.5" />
                                 {PUBLIC_PROMO_NOTIFICATION_CTA}
                               </p>
                             ) : null}
                             {n.type === "message" ? (
-                              <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-primary">
+                              <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-orange-600 dark:text-orange-400">
                                 <MessageSquare className="h-3.5 w-3.5" />
                                 Abrir chat
                               </p>
                             ) : null}
                           </div>
-                          {href ? <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" /> : null}
+                          {href || n.type === "message" ? (
+                            <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                          ) : null}
                         </div>
                       </button>
                     </li>

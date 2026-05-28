@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Link, Redirect, useSearch } from "wouter";
 import { Building2, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +22,7 @@ import {
   type CentralFleetSocketPatch,
 } from "@/hooks/use-central";
 import { useSocket } from "@/hooks/use-socket";
+import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -30,7 +31,7 @@ import { CentralDashboardMobile } from "@/components/central/CentralDashboardMob
 import { useCentralWideLayout } from "@/hooks/use-central-wide-layout";
 import { CompanyCombobox } from "@/components/central/CompanyCombobox";
 import type { DispatchMobilityFares, DispatchPackFares } from "@shared/dispatch-company";
-import { CENTRAL_APP_SETTINGS_HREF } from "@/lib/central-dashboard-hrefs";
+import { isCentralFleetVisibleOnMap } from "@/lib/central-fleet-position";
 
 export default function CentralDashboard() {
   const isWideCentralLayout = useCentralWideLayout();
@@ -53,6 +54,12 @@ export default function CentralDashboard() {
     (user as { dispatchCompanyId?: string } | null)?.dispatchCompanyId ?? null,
   );
   const [selectedDriver, setSelectedDriver] = useState<CentralFleetDriver | null>(null);
+  const [mapFocusNonce, setMapFocusNonce] = useState(0);
+
+  const handleSelectDriver = useCallback((driver: CentralFleetDriver | null) => {
+    setSelectedDriver(driver);
+    if (driver) setMapFocusNonce((n) => n + 1);
+  }, []);
 
   const { data: companies } = useCentralCompaniesForAdmin(companySearch, isAdmin);
   const effectiveCompanyId = isAdmin
@@ -87,9 +94,15 @@ export default function CentralDashboard() {
       const patch = raw as CentralFleetSocketPatch;
       if (!patch?.userId || patch.dispatchCompanyId !== effectiveCompanyId) return;
       const key = CENTRAL_FLEET_QUERY_KEY(effectiveCompanyId);
-      queryClient.setQueryData<CentralFleetDriver[]>(key, (prev) =>
-        mergeCentralFleetDriverPatch(prev, patch),
-      );
+      let needsFullRow = false;
+      queryClient.setQueryData<CentralFleetDriver[]>(key, (prev) => {
+        const list = prev ?? [];
+        if (!patch.offline && !list.some((d) => d.userId === patch.userId)) {
+          needsFullRow = true;
+        }
+        return mergeCentralFleetDriverPatch(prev, patch);
+      });
+      if (needsFullRow) debouncedRefetch(queryClient, key);
     };
     socket.on("central:fleet:update", onUpdate);
     return () => {
@@ -110,7 +123,18 @@ export default function CentralDashboard() {
     setSelectedCompanyId(companyIdFromUrl);
   }, [isAdmin, companyIdFromUrl]);
 
-  const driversOnMap = useMemo(() => fleet.filter((d) => d.lat != null && d.lon != null), [fleet]);
+  const driversOnMap = useMemo(() => fleet.filter((d) => isCentralFleetVisibleOnMap(d)), [fleet]);
+  const activeFleet = useMemo(
+    () =>
+      fleet
+        .filter((d) => d.receiving || d.inService)
+        .sort((a, b) => {
+          if (a.inService !== b.inService) return a.inService ? -1 : 1;
+          if (a.receiving !== b.receiving) return a.receiving ? -1 : 1;
+          return `${a.name} ${a.lastName}`.localeCompare(`${b.name} ${b.lastName}`, "es");
+        }),
+    [fleet],
+  );
   /** Datos en vivo del conductor seleccionado (teléfono, placa, posición) al refrescar la flota. */
   const selectedDriverLive = useMemo(() => {
     if (!selectedDriver) return null;
@@ -158,12 +182,14 @@ export default function CentralDashboard() {
     selectedCompanyId: effectiveCompanyId,
     onCompanyChange: setSelectedCompanyId,
     driversOnMap,
+    activeFleet,
+    mapFocusNonce,
     membersCount: members.length,
-    activeOnMap: driversOnMap.length,
+    activeOnMap: activeFleet.length,
     inServiceCount: fleet.filter((d) => d.inService).length,
     fleetCount: fleet.length,
     selectedDriver: selectedDriverLive,
-    onSelectDriver: setSelectedDriver,
+    onSelectDriver: handleSelectDriver,
     mobilityDraft,
     packDraft,
     onMobilityDraftChange: setMobilityDraft,

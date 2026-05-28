@@ -70,6 +70,7 @@ export function ListingSubscriptionRibbon() {
     if (typeof window === "undefined") return { isDriver: false };
     const p = window.location.pathname || "";
     const isDriver =
+      p.startsWith("/go/driver") ||
       p.startsWith("/go/taxi/driver") ||
       p.startsWith("/go/delivery/driver") ||
       p.startsWith("/go/pack/driver") ||

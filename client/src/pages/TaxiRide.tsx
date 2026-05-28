@@ -17,6 +17,7 @@ import {
   Minimize2,
   Navigation,
   PawPrint,
+  MessageSquare,
   Phone,
   Star,
 } from "lucide-react";
@@ -38,6 +39,7 @@ import { CamionetaVehicleIcon } from "@/components/taxi/CamionetaVehicleIcon";
 import type { TaxiPaymentMethod, TaxiVehicleKind, TaxiVehicleModalStep } from "@/components/taxi/TaxiVehicleSearchModal";
 import type { GeoJsonObject } from "geojson";
 import { GoPanicFloatingButton } from "@/components/go/GoPanicFloatingButton";
+import { GoUserRideStatsBadges } from "@/components/go/GoUserRideStatsBadges";
 import { GoRideRatingDialog, goSlugToRatingModule } from "@/components/go/GoRideRatingDialog";
 import { useGoChat } from "@/contexts/GoChatContext";
 import { addHiddenConversationId } from "@/lib/hidden-conversations";
@@ -47,12 +49,19 @@ import { usePlatformMobilityFares, usePlatformPackFares } from "@/hooks/use-mang
 import { useSocket, useSocketChat } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { extractUserPublicPhone } from "@/lib/user-public-phone";
 import { goOffsetAboveBottomNav, goViewportClasses, useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { notifyMobilityRideHistoryChanged } from "@/lib/mobility-ride-history-events";
 import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 import { RIDER_DRIVER_NOT_AVAILABLE_MESSAGE } from "@shared/mobility-negotiation";
-import { fallbackDrivingRoute, haversineM } from "@shared/maps-route-math";
+import {
+  buildStoredDrivingRoute,
+  geoJsonLineFromCoords,
+  isRoadRouteApiPayload,
+  trimRouteAtDriver,
+  type StoredDrivingRoute,
+} from "@/lib/driving-route-geometry";
 import {
   computeMobilitySuggestedByVehicle,
   computeMobilitySuggestedUsd,
@@ -64,19 +73,6 @@ import {
 type GeocodeHit = { lat: number; lon: number; label: string };
 
 type Place = { lat: number; lon: number; label: string };
-
-function fallbackRouteFor(start: Place, end: Place) {
-  const fb = fallbackDrivingRoute(
-    { lon: start.lon, lat: start.lat },
-    { lon: end.lon, lat: end.lat },
-  );
-  return {
-    distanceM: fb.distanceM,
-    durationSec: fb.durationSec,
-    geometry: fb.geometry as unknown as GeoJsonObject,
-    routeSource: "fallback" as const,
-  };
-}
 
 function formatKm(meters: number): string {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
@@ -101,6 +97,15 @@ function formatUsd(n: number): string {
 /** Búsqueda máxima si no hay conductor (5 min). */
 const VEHICLE_SEARCH_MAX_MS = 5 * 60 * 1000;
 const VEHICLE_SEARCH_TOTAL_SEC = Math.max(1, Math.round(VEHICLE_SEARCH_MAX_MS / 1000));
+
+/** Metros fuera de la polyline para recalcular ruta por calles (desvío). */
+const DRIVER_ROUTE_DEVIATION_M = 80;
+/** Evita ráfagas de Geoapify si el GPS salta lejos de la ruta. */
+const DRIVER_ROUTE_DEVIATION_REFETCH_MS = 25_000;
+
+function driverRouteTargetKey(target: Place): string {
+  return `${target.lat.toFixed(5)},${target.lon.toFixed(5)}`;
+}
 
 const VEHICLE_OPTIONS: ReadonlyArray<{
   type: TaxiVehicleKind;
@@ -147,7 +152,7 @@ type MobilityRideHydration = {
     lastName?: string;
     profileImageUrl: string | null;
     phone: string;
-    rating?: number;
+    rating?: number | null;
     ratingCount?: number;
     completedTrips?: number;
     vehicle: {
@@ -172,7 +177,8 @@ function mapServerNegotiationOffer(raw: unknown): RiderNegotiationOfferRow | nul
     driver: {
       name: String(d.name ?? "Conductor"),
       profileImageUrl: (d.profileImageUrl as string) ?? null,
-      rating: typeof d.rating === "number" ? d.rating : undefined,
+      rating: d.rating === null || typeof d.rating === "number" ? (d.rating as number | null) : undefined,
+      ratingCount: typeof d.ratingCount === "number" ? d.ratingCount : undefined,
       completedTrips: typeof d.completedTrips === "number" ? d.completedTrips : undefined,
       vehicle: v
         ? {
@@ -194,7 +200,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const rateTargetRef = useRef<{ rideId: string; target: "driver"; targetName: string } | null>(null);
   const [location, setLocation] = useLocation();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { primeCarGoConversation, resetChat, setMobilityChatReminder } = useGoChat();
+  const { primeCarGoConversation, resetChat, setMobilityChatReminder, openChatWithConversation } = useGoChat();
   const { socket } = useSocket();
   const { toast } = useToast();
   const params = useMemo(() => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""), []);
@@ -246,7 +252,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const endPlaceRef = useRef<Place | null>(null);
   const [driverToPickupGeometry, setDriverToPickupGeometry] = useState<GeoJsonObject | null>(null);
   const [driverToPickupMeta, setDriverToPickupMeta] = useState<{ distanceM: number; durationSec: number } | null>(null);
-  const [driverEtaLoading, setDriverEtaLoading] = useState(false);
+  const activeDriverRouteRef = useRef<StoredDrivingRoute | null>(null);
+  const driverRouteTrimIndexRef = useRef(0);
+  const driverRouteFetchInFlightRef = useRef(false);
+  const pendingDriverTargetRef = useRef<Place | null>(null);
+  const lastDriverRouteFetchRef = useRef<{ at: number; targetKey: string } | null>(null);
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const activeRideIdRef = useRef<string | null>(null);
   const [rideIsNegotiated, setRideIsNegotiated] = useState(false);
@@ -313,7 +323,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       name: string;
       profileImageUrl: string | null;
       phone?: string | null;
-      rating?: number;
+      rating?: number | null;
       ratingCount?: number;
       completedTrips?: number;
       vehicle: {
@@ -375,16 +385,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
   const matchedDriverPhone = useMemo(() => {
     if (!matchedDriverInfo) return "";
-    const d = matchedDriverInfo.driver as unknown as {
-      phone?: unknown;
-      phoneNumber?: unknown;
-      phone_number?: unknown;
-      phone_number_e164?: unknown;
-    };
-    const v =
-      String(d?.phone ?? d?.phoneNumber ?? d?.phone_number ?? d?.phone_number_e164 ?? "").trim();
-    return v.length > 0 ? v : "";
+    return extractUserPublicPhone(matchedDriverInfo.driver as unknown as Record<string, unknown>);
   }, [matchedDriverInfo]);
+
+  const openMatchedDriverChat = useCallback(() => {
+    const id = matchedDriverInfo?.conversationId;
+    if (id != null && Number.isFinite(Number(id))) {
+      openChatWithConversation(Number(id));
+    }
+  }, [matchedDriverInfo?.conversationId, openChatWithConversation]);
 
   /** Evita montar dos mapas Leaflet en Car Go (móvil vs escritorio). */
   const isGoCompact = useGoCompactViewport();
@@ -520,7 +529,11 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     setClientHaggleUsd(0);
     setDriverToPickupGeometry(null);
     setDriverToPickupMeta(null);
-    setDriverEtaLoading(false);
+    activeDriverRouteRef.current = null;
+    driverRouteFetchInFlightRef.current = false;
+    pendingDriverTargetRef.current = null;
+    driverRouteTrimIndexRef.current = 0;
+    lastDriverRouteFetchRef.current = null;
     setRidePanelCollapsed(false);
     try {
       sessionStorage.removeItem(riderDraftKey);
@@ -559,8 +572,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     setNearbyDriverMarkers([]);
     setDriverToPickupGeometry(null);
     setDriverToPickupMeta(null);
+    activeDriverRouteRef.current = null;
+    driverRouteTrimIndexRef.current = 0;
+    driverRouteFetchInFlightRef.current = false;
+    pendingDriverTargetRef.current = null;
+    lastDriverRouteFetchRef.current = null;
     setActiveRideId(null);
     activeRideIdRef.current = null;
+    riderTripInProgressRef.current = false;
     setRiderTripInProgress(false);
     setMatchedFareUsd(null);
     setNegotiationOffersOpen(false);
@@ -630,41 +649,134 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     }
   }, [applyCarGoRideEnded, resetRiderPlanningView, toast, rideApiBase]);
 
-  const loadDriverEtaRoute = useCallback(async (driverPos: { lat: number; lon: number }, target: Place) => {
-    setDriverEtaLoading(true);
-    try {
-      // Backend espera from/to en formato lon,lat (Geoapify / GeoJSON).
-      const res = await fetch(`/api/maps/route?from=${driverPos.lon},${driverPos.lat}&to=${target.lon},${target.lat}`);
-      if (!res.ok) throw new Error();
-      const data = (await res.json()) as { geometry?: GeoJsonObject; distanceM?: number; durationSec?: number };
-      if (data?.geometry) setDriverToPickupGeometry(data.geometry);
-      else {
-        const fb = fallbackRouteFor(
-          { lat: driverPos.lat, lon: driverPos.lon, label: "" },
-          { lat: target.lat, lon: target.lon, label: target.label }
+  const applyTrimmedDriverRoute = useCallback(
+    (route: StoredDrivingRoute, driverPos: { lat: number; lon: number }) => {
+      const trimmed = trimRouteAtDriver(route, driverPos, driverRouteTrimIndexRef.current);
+      driverRouteTrimIndexRef.current = trimmed.trimIndex;
+      const gj = geoJsonLineFromCoords(trimmed.trimmedCoords);
+      if (gj) setDriverToPickupGeometry(gj);
+      setDriverToPickupMeta({
+        distanceM: trimmed.remainingDistanceM,
+        durationSec: trimmed.remainingDurationSec,
+      });
+      return trimmed;
+    },
+    [],
+  );
+
+  const fetchDriverRoadRoute = useCallback(
+    async (driverPos: { lat: number; lon: number }, target: Place): Promise<boolean> => {
+      const targetKey = driverRouteTargetKey(target);
+      const url = `/api/maps/route?from=${driverPos.lon},${driverPos.lat}&to=${target.lon},${target.lat}`;
+      const tryOnce = async (): Promise<boolean> => {
+        const res = await fetch(url);
+        const data = (await res.json().catch(() => null)) as {
+          geometry?: GeoJsonObject;
+          distanceM?: number;
+          durationSec?: number;
+          source?: string;
+          fallback?: boolean;
+        } | null;
+        if (!res.ok || !isRoadRouteApiPayload(data)) return false;
+        const stored = buildStoredDrivingRoute(
+          data!.geometry,
+          targetKey,
+          Number(data!.distanceM),
+          Number(data!.durationSec ?? 60),
         );
-        setDriverToPickupGeometry(fb.geometry);
+        if (!stored) return false;
+        activeDriverRouteRef.current = stored;
+        driverRouteTrimIndexRef.current = 0;
+        applyTrimmedDriverRoute(stored, driverPos);
+        lastDriverRouteFetchRef.current = { at: Date.now(), targetKey };
+        return true;
+      };
+      if (await tryOnce()) return true;
+      await new Promise((r) => window.setTimeout(r, 1200));
+      return tryOnce();
+    },
+    [applyTrimmedDriverRoute],
+  );
+
+  const fetchAndSetDriverRoadRoute = useCallback(
+    async (driverPos: { lat: number; lon: number }, target: Place) => {
+      if (driverRouteFetchInFlightRef.current) {
+        pendingDriverTargetRef.current = target;
+        return;
       }
-      if (data?.distanceM != null && data?.durationSec != null) {
-        setDriverToPickupMeta({ distanceM: Number(data.distanceM), durationSec: Number(data.durationSec) });
-      } else {
-        const fb = fallbackRouteFor(
-          { lat: driverPos.lat, lon: driverPos.lon, label: "" },
-          { lat: target.lat, lon: target.lon, label: target.label }
-        );
-        setDriverToPickupMeta({ distanceM: fb.distanceM, durationSec: fb.durationSec });
+      driverRouteFetchInFlightRef.current = true;
+      try {
+        await fetchDriverRoadRoute(driverPos, target);
+      } finally {
+        driverRouteFetchInFlightRef.current = false;
+        const pending = pendingDriverTargetRef.current;
+        pendingDriverTargetRef.current = null;
+        const pos = assignedDriverPosRef.current;
+        if (
+          pending &&
+          pos &&
+          driverRouteTargetKey(pending) !== activeDriverRouteRef.current?.targetKey &&
+          !driverRouteFetchInFlightRef.current
+        ) {
+          driverRouteFetchInFlightRef.current = true;
+          try {
+            await fetchDriverRoadRoute(pos, pending);
+          } finally {
+            driverRouteFetchInFlightRef.current = false;
+          }
+        }
       }
-    } catch {
-      const fb = fallbackRouteFor(
-        { lat: driverPos.lat, lon: driverPos.lon, label: "" },
-        { lat: target.lat, lon: target.lon, label: target.label }
-      );
-      setDriverToPickupGeometry(fb.geometry);
-      setDriverToPickupMeta({ distanceM: fb.distanceM, durationSec: fb.durationSec });
-    } finally {
-      setDriverEtaLoading(false);
+    },
+    [fetchDriverRoadRoute],
+  );
+
+  const resolveDriverRouteTarget = useCallback((): Place | null => {
+    if (riderTripInProgressRef.current) {
+      return endPlaceRef.current;
     }
-  }, []);
+    return start;
+  }, [start]);
+
+  /**
+   * GPS del conductor: recorta la polyline guardada (sin API).
+   * Geoapify solo al asignar, cambiar etapa o desvío fuerte de la ruta.
+   */
+  const handleDriverRoutePosition = useCallback(
+    (driverPos: { lat: number; lon: number }, target: Place, force = false) => {
+      const targetKey = driverRouteTargetKey(target);
+      const route = activeDriverRouteRef.current;
+
+      if (driverRouteFetchInFlightRef.current) {
+        if (route?.targetKey === targetKey) {
+          applyTrimmedDriverRoute(route, driverPos);
+        } else {
+          pendingDriverTargetRef.current = target;
+        }
+        return;
+      }
+
+      if (force || !route || route.targetKey !== targetKey) {
+        driverRouteTrimIndexRef.current = 0;
+        if (route && route.targetKey !== targetKey) {
+          setDriverToPickupGeometry(null);
+          setDriverToPickupMeta(null);
+        }
+        void fetchAndSetDriverRoadRoute(driverPos, target);
+        return;
+      }
+
+      const trimmed = applyTrimmedDriverRoute(route, driverPos);
+      if (trimmed.deviationM < DRIVER_ROUTE_DEVIATION_M) return;
+
+      const now = Date.now();
+      const last = lastDriverRouteFetchRef.current;
+      if (last?.targetKey === targetKey && now - last.at < DRIVER_ROUTE_DEVIATION_REFETCH_MS) {
+        return;
+      }
+      void fetchAndSetDriverRoadRoute(driverPos, target);
+    },
+    [applyTrimmedDriverRoute, fetchAndSetDriverRoadRoute],
+  );
 
   const resetVehicleChoice = useCallback(() => {
     clearVehicleSearchTimers();
@@ -681,6 +793,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     setClientHaggleUsd(0);
     setNegotiationOffersOpen(false);
     setNegotiationOffers([]);
+    setDriverToPickupGeometry(null);
+    setDriverToPickupMeta(null);
+    activeDriverRouteRef.current = null;
+    driverRouteTrimIndexRef.current = 0;
+    driverRouteFetchInFlightRef.current = false;
+    pendingDriverTargetRef.current = null;
+    lastDriverRouteFetchRef.current = null;
     setMatchedFareUsd(null);
     clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
   }, [clearVehicleSearchTimers]);
@@ -1035,7 +1154,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
             ...(vt ? { vehicleType: vt } : {}),
           },
         ]);
-        if (start) void loadDriverEtaRoute(pos, start);
+        if (start) handleDriverRoutePosition(pos, start, true);
       }
       setVehicleModalStep("done");
       setVehiclePickerOpen(false);
@@ -1054,16 +1173,16 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           ...(vt ? { vehicleType: vt } : {}),
         },
       ]);
-      const target =
-        riderTripInProgressRef.current && end ? end : start;
-      if (target) void loadDriverEtaRoute(pos, target);
+      const target = resolveDriverRouteTarget();
+      if (target) handleDriverRoutePosition(pos, target);
     };
     const onStarted = (p: { rideId: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
+      riderTripInProgressRef.current = true;
       setRiderTripInProgress(true);
       const pos = assignedDriverPosRef.current;
       const dest = endPlaceRef.current;
-      if (pos && dest) void loadDriverEtaRoute(pos, dest);
+      if (pos && dest) handleDriverRoutePosition(pos, dest, true);
     };
     const onDriverSearching = (p: { rideId: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
@@ -1195,7 +1314,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     toast,
     start,
     end,
-    loadDriverEtaRoute,
+    handleDriverRoutePosition,
+    resolveDriverRouteTarget,
     rideSocketPrefix,
     goSlug,
     user?.id,
@@ -1231,10 +1351,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     }
   }, [rateStars, toast, goSlug, resetRiderPlanningView]);
 
+  /** Al pasar a viaje en curso, pedir ruta conductor→destino (por si el socket llegó antes que `end` en estado). */
   useEffect(() => {
-    if (!riderTripInProgress || !assignedDriverPos || !end) return;
-    void loadDriverEtaRoute(assignedDriverPos, end);
-  }, [riderTripInProgress, assignedDriverPos, end, loadDriverEtaRoute]);
+    if (!riderTripInProgress || !matchedDriverInfo || !assignedDriverPos || !end) return;
+    const destKey = driverRouteTargetKey(end);
+    if (activeDriverRouteRef.current?.targetKey === destKey) return;
+    handleDriverRoutePosition(assignedDriverPos, end, true);
+  }, [riderTripInProgress, matchedDriverInfo, assignedDriverPos, end, handleDriverRoutePosition]);
 
   useEffect(() => {
     if (!isGoClient || authLoading || !isAuthenticated) return;
@@ -1323,7 +1446,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         setEnd(ride.end);
         setStartInput(ride.start.label);
         setEndInput(ride.end.label);
-        setRiderTripInProgress(ride.status === "in_progress");
+        const enCurso = ride.status === "in_progress";
+        riderTripInProgressRef.current = enCurso;
+        setRiderTripInProgress(enCurso);
         if (ride.driver) {
           setMatchedDriverInfo({
             driver: ride.driver,
@@ -1432,70 +1557,50 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     if (!start || !end) return;
     setRouteLoading(true);
     setRouteError(null);
+    const from = `${start.lon},${start.lat}`;
+    const to = `${end.lon},${end.lat}`;
+    const url = `/api/maps/route?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+
+    const applyRoadBody = (
+      body: {
+        distanceM?: number;
+        durationSec?: number;
+        geometry?: GeoJsonObject | null;
+        message?: string;
+        source?: string;
+        fallback?: boolean;
+      } | null,
+    ): boolean => {
+      if (!body || !isRoadRouteApiPayload(body) || typeof body.distanceM !== "number") return false;
+      const gj = geoJsonLineFromCoords(
+        buildStoredDrivingRoute(body.geometry, "plan", body.distanceM, body.durationSec ?? 60)?.coords ?? [],
+      );
+      if (!gj) return false;
+      setRouteMeta({
+        distanceM: body.distanceM,
+        durationSec: body.durationSec ?? 0,
+        routeSource: "geoapify",
+      });
+      setRouteGeometry(gj);
+      setRouteError(null);
+      return true;
+    };
+
     try {
-      const from = `${start.lon},${start.lat}`;
-      const to = `${end.lon},${end.lat}`;
-      const url = `/api/maps/route?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-      const res = await fetch(url);
-      const body = (await res.json().catch(() => null)) as
-        | {
-            distanceM?: number;
-            durationSec?: number;
-            geometry?: GeoJsonObject | null;
-            message?: string;
-            source?: "geoapify" | "fallback";
-            fallback?: boolean;
-          }
-        | null;
-      if (!res.ok || !body || typeof body.distanceM !== "number") {
-        const fallback = fallbackRouteFor(start, end);
-        setRouteMeta({
-          distanceM: fallback.distanceM,
-          durationSec: fallback.durationSec,
-          routeSource: "fallback",
-        });
-        setRouteGeometry(fallback.geometry);
-        setRouteError(body?.message ?? "Ruta aproximada (sin motor de rutas).");
-        // Reintento rápido: el backend de rutas a veces falla tras recargar.
-        window.setTimeout(() => {
-          if (start && end) void fetch(url).then(async (r) => {
-            const b = (await r.json().catch(() => null)) as any;
-            if (!r.ok || !b || typeof b.distanceM !== "number") return;
-            const src = b.source === "geoapify" ? "geoapify" : "fallback";
-            setRouteMeta({
-              distanceM: b.distanceM,
-              durationSec: b.durationSec ?? 0,
-              routeSource: src,
-            });
-            setRouteGeometry(b.geometry ?? null);
-            setRouteError(src === "fallback" ? "Ruta estimada en línea recta." : null);
-          }).catch(() => {});
-        }, 800);
-        return;
-      }
-      const data = body;
-      const routeSource =
-        data.source === "geoapify" || (!data.fallback && data.source !== "fallback")
-          ? "geoapify"
-          : "fallback";
-      setRouteMeta({
-        distanceM: data.distanceM!,
-        durationSec: data.durationSec ?? 0,
-        routeSource,
-      });
-      setRouteGeometry(data.geometry ?? null);
-      if (routeSource === "fallback") {
-        setRouteError("Ruta estimada en línea recta (mapas no disponibles).");
-      }
+      let res = await fetch(url);
+      let body = (await res.json().catch(() => null)) as Parameters<typeof applyRoadBody>[0];
+      if (applyRoadBody(body)) return;
+      await new Promise((r) => window.setTimeout(r, 1200));
+      res = await fetch(url);
+      body = (await res.json().catch(() => null)) as Parameters<typeof applyRoadBody>[0];
+      if (applyRoadBody(body)) return;
+      setRouteGeometry(null);
+      setRouteMeta(null);
+      setRouteError(body?.message ?? "No se pudo trazar la ruta por calles. Intenta de nuevo.");
     } catch {
-      const fallback = fallbackRouteFor(start, end);
-      setRouteMeta({
-        distanceM: fallback.distanceM,
-        durationSec: fallback.durationSec,
-        routeSource: "fallback",
-      });
-      setRouteGeometry(fallback.geometry);
-      setRouteError("Ruta aproximada (sin conexión al motor de rutas).");
+      setRouteGeometry(null);
+      setRouteMeta(null);
+      setRouteError("No se pudo conectar al servicio de rutas. Revisa tu red e intenta otra vez.");
     } finally {
       setRouteLoading(false);
     }
@@ -1646,17 +1751,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   Preparando mapa…
                 </div>
               )}
-              {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
+              {(reverseLoading || routeLoading) && !matchedDriverInfo ? (
                 <div
                   style={{ bottom: goOffsetAboveBottomNav() }}
                   className="absolute left-1/2 z-[55] flex max-w-[min(100%-2rem,280px)] -translate-x-1/2 items-center gap-2 rounded-full border bg-background/92 px-3 py-2 text-xs shadow-md backdrop-blur-sm"
                 >
                   <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                  {driverEtaLoading && matchedDriverInfo
-                    ? "Calculando llegada del driver…"
-                    : reverseLoading
-                      ? "Leyendo la dirección…"
-                      : "Calculando ruta…"}
+                  {reverseLoading ? "Leyendo la dirección…" : "Calculando ruta…"}
                 </div>
               ) : null}
             </div>
@@ -1845,24 +1946,12 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                         </div>
                       )}
                       <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                          {typeof matchedDriverInfo.driver.rating === "number" ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/80 px-2 py-0.5">
-                              <Star className="h-3 w-3 text-amber-500" aria-hidden />
-                              <span className="font-medium text-foreground tabular-nums">
-                                {matchedDriverInfo.driver.rating.toFixed(1)}
-                              </span>
-                            </span>
-                          ) : null}
-                          {typeof matchedDriverInfo.driver.completedTrips === "number" ? (
-                            <span className="rounded-full border border-border/70 bg-muted/80 px-2 py-0.5">
-                              <span className="font-medium text-foreground tabular-nums">
-                                {matchedDriverInfo.driver.completedTrips}
-                              </span>{" "}
-                              viajes
-                            </span>
-                          ) : null}
-                        </div>
+                        <GoUserRideStatsBadges
+                          compact
+                          rating={matchedDriverInfo.driver.rating}
+                          ratingCount={matchedDriverInfo.driver.ratingCount}
+                          completedTrips={matchedDriverInfo.driver.completedTrips}
+                        />
                         {matchedDriverInfo.driver.vehicle ? (
                           <p className="leading-snug text-muted-foreground">
                             {vehicleTypeLabel(matchedDriverInfo.driver.vehicle.type) ? (
@@ -1876,19 +1965,30 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                             {matchedDriverInfo.driver.vehicle.color ? ` · Color: ${matchedDriverInfo.driver.vehicle.color}` : ""}
                           </p>
                         ) : null}
-                        {matchedDriverPhone ? (
-                          <a
-                            href={`tel:${matchedDriverPhone}`}
-                            className="mt-1 inline-flex w-full max-w-[220px] items-center justify-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-semibold text-primary"
-                          >
-                            <Phone className="h-4 w-4 shrink-0" aria-hidden />
-                            {isPackGoClient ? "Llamar al repartidor" : "Llamar al conductor"}
-                          </a>
-                        ) : null}
-                        {matchedDriverPhone ? (
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            Tel: <span className="font-medium text-foreground">{matchedDriverPhone}</span>
-                          </p>
+                        {(matchedDriverPhone || matchedDriverInfo.conversationId != null) ? (
+                          <div className="mt-2 flex w-full max-w-[220px] flex-wrap gap-2">
+                            {matchedDriverPhone ? (
+                              <a
+                                href={`tel:${matchedDriverPhone}`}
+                                className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-semibold text-primary"
+                              >
+                                <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                Llamar
+                              </a>
+                            ) : null}
+                            {matchedDriverInfo.conversationId != null ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="min-h-9 flex-1 gap-1.5 rounded-full px-3 text-xs font-semibold"
+                                onClick={openMatchedDriverChat}
+                              >
+                                <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                Chat
+                              </Button>
+                            ) : null}
+                          </div>
                         ) : null}
                         <Button
                           type="button"
@@ -2281,19 +2381,35 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                       {matchedDriverInfo.driver.vehicle.color ? ` · Color: ${matchedDriverInfo.driver.vehicle.color}` : ""}
                     </p>
                   ) : null}
-                  {matchedDriverPhone ? (
-                    <a
-                      href={`tel:${matchedDriverPhone}`}
-                      className="mt-2 inline-flex w-full max-w-xs items-center justify-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-semibold text-primary"
-                    >
-                      <Phone className="h-4 w-4 shrink-0" aria-hidden />
-                      {isPackGoClient ? "Llamar al repartidor" : "Llamar al conductor"}
-                    </a>
-                  ) : null}
-                  {matchedDriverPhone ? (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Tel: <span className="font-medium text-foreground">{matchedDriverPhone}</span>
-                    </p>
+                  <GoUserRideStatsBadges
+                    rating={matchedDriverInfo.driver.rating}
+                    ratingCount={matchedDriverInfo.driver.ratingCount}
+                    completedTrips={matchedDriverInfo.driver.completedTrips}
+                  />
+                  {(matchedDriverPhone || matchedDriverInfo.conversationId != null) ? (
+                    <div className="mt-2 flex w-full max-w-xs flex-wrap gap-2">
+                      {matchedDriverPhone ? (
+                        <a
+                          href={`tel:${matchedDriverPhone}`}
+                          className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 text-sm font-semibold text-primary"
+                        >
+                          <Phone className="h-4 w-4 shrink-0" aria-hidden />
+                          Llamar
+                        </a>
+                      ) : null}
+                      {matchedDriverInfo.conversationId != null ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="min-h-10 flex-1 gap-2 rounded-full px-4 text-sm font-semibold"
+                          onClick={openMatchedDriverChat}
+                        >
+                          <MessageSquare className="h-4 w-4 shrink-0" aria-hidden />
+                          Chat
+                        </Button>
+                      ) : null}
+                    </div>
                   ) : null}
                   <Button
                     type="button"
@@ -2434,12 +2550,6 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                     {reverseLoading ? "Leyendo la dirección de ese punto…" : "Calculando ruta…"}
                   </div>
                 )}
-                {driverEtaLoading && matchedDriverInfo ? (
-                  <div className="absolute bottom-3 right-3 z-[55] flex items-center gap-2 rounded-lg border bg-background/90 px-3 py-2 text-xs shadow">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Llegada del driver…
-                  </div>
-                ) : null}
                 {driverToPickupMeta && matchedDriverInfo ? (
                   <div className="absolute top-3 left-3 z-[55] flex items-center gap-2 rounded-lg border bg-background/90 px-3 py-2 text-xs shadow">
                     Llega en <span className="font-semibold">{formatDuration(driverToPickupMeta.durationSec)}</span>
@@ -2505,14 +2615,10 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   suppressMapPick={vehicleModalStep === "searching"}
                   onRecenter={goClientMapRecenter}
                 />
-                {(driverEtaLoading && matchedDriverInfo) || reverseLoading || routeLoading ? (
+                {(reverseLoading || routeLoading) && !matchedDriverInfo ? (
                   <div className="absolute bottom-3 left-3 z-[55] flex items-center gap-2 rounded-lg border bg-background/90 px-3 py-2 text-xs shadow">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    {driverEtaLoading && matchedDriverInfo
-                      ? "Actualizando ruta…"
-                      : reverseLoading
-                        ? "Leyendo la dirección de ese punto…"
-                        : "Calculando ruta…"}
+                    {reverseLoading ? "Leyendo la dirección de ese punto…" : "Calculando ruta…"}
                   </div>
                 ) : null}
               </div>

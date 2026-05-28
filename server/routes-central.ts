@@ -17,17 +17,24 @@ import {
 } from "./dispatch-companies";
 import {
   getMobilityOnlineDriversSnapshot,
+  getMobilityPresenceRow,
   getMobilityActiveRideForCentral,
   mobilityDriverInActiveRide,
   refreshMobilityPresenceDispatchCompany,
 } from "./mobility-rides";
 import {
   getPackOnlineDriversSnapshot,
+  getPackPresenceRow,
   getPackActiveRideForCentral,
   packDriverInActiveRide,
   refreshPackPresenceDispatchCompany,
 } from "./pack-rides";
-import { centralFleetRoom } from "./central-fleet-notify";
+import { centralFleetRoom, CENTRAL_FLEET_POSITION_LIVE_MS } from "./central-fleet-notify";
+import { getCentralFleetLastKnown } from "./central-fleet-last-known";
+import {
+  getReceivingStopped,
+  CENTRAL_RECEIVING_STOPPED_DISPLAY_MS,
+} from "./central-fleet-receiving-stop";
 import { buildGoDriverEnrollmentCategoryPatch } from "@shared/provider-category-membership";
 import {
   registerCentralMemberSchema,
@@ -88,11 +95,76 @@ function freshPackPresence(userId: string, inActiveRide: boolean) {
 
 /** Posición/vehículo para la central: si hay taxi y delivery, el más reciente por `updatedAt`. */
 function pickPresenceForDisplay(
-  taxi: ReturnType<typeof freshMobilityPresence>,
-  pack: ReturnType<typeof freshPackPresence>,
+  taxi: ReturnType<typeof freshMobilityPresence> | ReturnType<typeof getMobilityPresenceRow> | null | undefined,
+  pack: ReturnType<typeof freshPackPresence> | ReturnType<typeof getPackPresenceRow> | null | undefined,
 ) {
   if (taxi && pack) return taxi.updatedAt >= pack.updatedAt ? taxi : pack;
-  return taxi ?? pack;
+  return taxi ?? pack ?? null;
+}
+
+function resolveFleetPosition(
+  userId: string,
+  inService: boolean,
+  receiving: boolean,
+  taxiFresh: ReturnType<typeof freshMobilityPresence>,
+  packFresh: ReturnType<typeof freshPackPresence>,
+) {
+  const receivingStopped = getReceivingStopped(userId);
+  const stoppedVisible =
+    !!receivingStopped && Date.now() - receivingStopped.stoppedAt <= CENTRAL_RECEIVING_STOPPED_DISPLAY_MS;
+
+  if (!inService && !receiving && !stoppedVisible) return null;
+
+  const taxiAny = getMobilityPresenceRow(userId);
+  const packAny = getPackPresenceRow(userId);
+  const lastKnown = inService ? getCentralFleetLastKnown(userId) : null;
+
+  let pres =
+    pickPresenceForDisplay(taxiFresh, packFresh) ??
+    (inService ? pickPresenceForDisplay(taxiAny, packAny) ?? lastKnown : null);
+
+  if (!pres && stoppedVisible && receivingStopped) {
+    pres = {
+      userId: receivingStopped.userId,
+      vehicleType: receivingStopped.vehicleType,
+      isPetFriendly: receivingStopped.isPetFriendly,
+      lat: receivingStopped.lat,
+      lon: receivingStopped.lon,
+      updatedAt: receivingStopped.stoppedAt,
+      dispatchCompanyId: receivingStopped.dispatchCompanyId,
+    };
+  }
+
+  if (!pres && inService) {
+    pres = pickPresenceForDisplay(taxiAny, packAny) ?? lastKnown;
+  }
+
+  if (!pres) return null;
+
+  const lat = pres.lat ?? null;
+  const lon = pres.lon ?? null;
+  const updatedAt = pres.updatedAt ?? null;
+  const receivingStoppedAt = stoppedVisible ? receivingStopped!.stoppedAt : null;
+  const positionLive =
+    !receivingStoppedAt &&
+    lat != null &&
+    lon != null &&
+    updatedAt != null &&
+    !!(taxiFresh || packFresh) &&
+    Date.now() - updatedAt <= CENTRAL_FLEET_POSITION_LIVE_MS;
+
+  return {
+    pres,
+    lat,
+    lon,
+    updatedAt,
+    positionLive,
+    receivingStoppedAt,
+    taxiFresh,
+    packFresh,
+    taxiAny,
+    packAny,
+  };
 }
 
 export function registerCentralRoutes(app: Express): void {
@@ -249,8 +321,12 @@ export function registerCentralRoutes(app: Express): void {
       const inService = mobilityDriverInActiveRide(userId) || packDriverInActiveRide(userId);
       const taxiPres = freshMobilityPresence(userId, inService);
       const packPres = freshPackPresence(userId, inService);
-      const pres = pickPresenceForDisplay(taxiPres, packPres);
-      if (!pres && !inService) continue;
+      const receiving = !!(
+        (taxiPres && !taxiPres.idleOnMapDuringRide) ||
+        (packPres && !packPres.idleOnMapDuringRide)
+      );
+      const pos = resolveFleetPosition(userId, inService, receiving, taxiPres, packPres);
+      if (!pos) continue;
 
       const activeService = inService
         ? (await getMobilityActiveRideForCentral(userId)) ?? (await getPackActiveRideForCentral(userId))
@@ -276,18 +352,17 @@ export function registerCentralRoutes(app: Express): void {
             ? String(vehicle.license_plate).trim().toUpperCase()
             : null,
         rating: Number(user?.rating ?? 5),
-        vehicleType: pres?.vehicleType ?? vehicle?.vehicle_type ?? "car",
-        isPetFriendly: taxiPres?.isPetFriendly ?? false,
-        lat: pres?.lat ?? null,
-        lon: pres?.lon ?? null,
-        receivingTaxi: !!(taxiPres && !taxiPres.idleOnMapDuringRide),
-        receivingDelivery: !!(packPres && !packPres.idleOnMapDuringRide),
-        receiving: !!(
-          (taxiPres && !taxiPres.idleOnMapDuringRide) ||
-          (packPres && !packPres.idleOnMapDuringRide)
-        ),
+        vehicleType: pos.pres?.vehicleType ?? vehicle?.vehicle_type ?? "car",
+        isPetFriendly: pos.taxiAny?.isPetFriendly ?? pos.taxiFresh?.isPetFriendly ?? false,
+        lat: pos.lat,
+        lon: pos.lon,
+        receivingTaxi: !!(pos.taxiFresh && !pos.taxiFresh.idleOnMapDuringRide),
+        receivingDelivery: !!(pos.packFresh && !pos.packFresh.idleOnMapDuringRide),
+        receiving,
         inService,
-        updatedAt: pres?.updatedAt ?? null,
+        updatedAt: pos.updatedAt,
+        positionLive: pos.positionLive,
+        receivingStoppedAt: pos.receivingStoppedAt,
         activeService,
       });
     }

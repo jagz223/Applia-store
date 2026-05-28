@@ -91,6 +91,7 @@ import { DEFAULT_CATEGORIES, getCategoryDisplayName, CATEGORY_DISPLAY_NAMES } fr
 import { ADMIN_PROVIDER_LIST_BRAND_FILTERS } from "@shared/admin-active-providers-directory";
 import {
   SUBSCRIPTION_FEE_ADMIN_SLUGS,
+  isSubscriptionFeeVisibleInAdminSettings,
   subscriptionFeeAdminHint,
   subscriptionFeeAdminLabel,
 } from "@shared/subscription-category-fees";
@@ -1795,10 +1796,24 @@ export default function AdminPanel() {
   const { data: serviceBrandsData, isLoading: serviceBrandsLoading } = useQuery({
     queryKey: ["admin-service-brands"],
     queryFn: () => fetchWithAuth("/api/admin/service-brands"),
-    enabled: fullAdmin && activeTab === "services",
+    enabled: fullAdmin && (activeTab === "services" || activeTab === "settings"),
     staleTime: 30_000,
   });
   const serviceBrands: AdminServiceBrand[] = serviceBrandsData?.brands ?? [];
+  const brandUiHiddenBySlug = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const b of serviceBrands) {
+      m.set(String(b.slug ?? "").trim().toLowerCase(), b.uiHidden);
+    }
+    return m;
+  }, [serviceBrands]);
+  const visibleSubscriptionFeeSlugs = useMemo(
+    () =>
+      SUBSCRIPTION_FEE_ADMIN_SLUGS.filter((slug) =>
+        isSubscriptionFeeVisibleInAdminSettings(slug, brandUiHiddenBySlug),
+      ),
+    [brandUiHiddenBySlug],
+  );
   const selectedBrand = (serviceBrands ?? []).find((b) => b.categoryId === selectedBrandCategoryId) ?? null;
 
   const { data: brandSubcategoriesData } = useQuery({
@@ -4481,40 +4496,32 @@ export default function AdminPanel() {
               <Card className="border-border bg-card shadow-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Settings className="h-5 w-5 text-primary" />
-                    Configuración general
-                  </CardTitle>
-                  <CardDescription>
-                    Parámetros globales que afectan cálculos y mensajes en toda la plataforma.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="rounded-xl border border-border bg-muted/30 p-4">
-                    <p className="font-semibold text-foreground">Comisión</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Actualmente <strong className="text-foreground">no se aplican comisiones</strong> en la plataforma.
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-border bg-card shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
                     <CreditCard className="h-5 w-5 text-primary" />
                     Suscripción mensual por categoría
                   </CardTitle>
                   <CardDescription>
-                    Define cuánto cuesta la mensualidad de visibilidad (USD) para cada categoría. Aplica al flujo de pago del asociado/driver.
+                    Define cuánto cuesta la mensualidad de visibilidad (USD) para cada categoría (Man Go, Car Go, Marketplace, Pro Go).
+                    Delivery usa la misma tarifa que Car Go.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {!fullAdmin ? (
                     <p className="text-sm text-muted-foreground">Solo administrador puede editar mensualidades.</p>
+                  ) : serviceBrandsLoading && serviceBrands.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Cargando estado de servicios…</p>
+                  ) : visibleSubscriptionFeeSlugs.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No hay categorías activas en Servicios. Activa una marca en la pestaña Servicios para configurar su mensualidad aquí.
+                    </p>
                   ) : (
                     <>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        {SUBSCRIPTION_FEE_ADMIN_SLUGS.map((slug) => {
+                      {visibleSubscriptionFeeSlugs.length < SUBSCRIPTION_FEE_ADMIN_SLUGS.length ? (
+                        <p className="text-xs text-muted-foreground">
+                          Las mensualidades de servicios desactivados en la pestaña Servicios no se muestran aquí; la tarifa guardada no se modifica.
+                        </p>
+                      ) : null}
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        {visibleSubscriptionFeeSlugs.map((slug) => {
                             const label = subscriptionFeeAdminLabel(slug);
                             const hint = subscriptionFeeAdminHint(slug);
                             const v = subscriptionFeesDraft?.[slug];

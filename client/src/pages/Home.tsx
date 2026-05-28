@@ -454,7 +454,7 @@ export default function HomePage() {
                     </Button>
                   </Link>
                 ) : heroAssociateKind === "go_cargo" ? (
-                  <Link href="/go/taxi/driver" className="w-full sm:w-auto">
+                  <Link href="/go/driver" className="w-full sm:w-auto">
                     <Button
                       size="lg"
                       variant="outline"
@@ -851,7 +851,7 @@ export default function HomePage() {
                           variant="default"
                           onClick={() => {
                             setGoQuickOpen(false);
-                            setLocation("/go/taxi/driver");
+                            setLocation("/go/driver");
                           }}
                         >
                           <Car className="h-4 w-4" /> Taxi (conducir)

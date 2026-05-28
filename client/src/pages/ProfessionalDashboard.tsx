@@ -42,6 +42,7 @@ import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton"
 import { BookingsCatalogServicesPanel } from "@/components/professional/BookingsCatalogServicesPanel";
 import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
 import { useAuth } from "@/hooks/use-auth";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import { isCarGoProvider } from "@shared/provider-car-go";
 import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { useCategories, useWallet } from "@/hooks/use-mango-data";
@@ -795,14 +796,14 @@ function ProfessionalDashboardInner() {
   const { data: categories = [] } = useCategories();
   const queryClient = useQueryClient();
   const [location, setLocation] = useLocation();
-  const isProfessionalRole = (user as { role?: string } | null)?.role === "professional";
-  const showBecomeProBanner = isProfessionalRole && !providerProfileLoading && !providerProfile;
+  const actsAsAssociate = userCanActAsAssociate(user);
+  const showBecomeProBanner = actsAsAssociate && !providerProfileLoading && !providerProfile;
   const onboardingDossierComplete = useMemo(
     () => isAssociateOnboardingDossierComplete(professionalVerification),
     [professionalVerification],
   );
   const showReturnToVerificationBanner =
-    isProfessionalRole &&
+    actsAsAssociate &&
     Boolean(providerProfile) &&
     providerProfile?.isVerified !== true &&
     !onboardingDossierComplete;
@@ -1242,7 +1243,7 @@ function ProfessionalDashboardInner() {
  * Quien no sea asociado o no esté logueado se redirige al inicio.
  */
 function ProfessionalDashboardAccessGate() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { data: providerProfile, isLoading: providerLoading } = useCurrentProvider();
   const { data: categories = [] } = useCategories();
   const [, setLocation] = useLocation();
@@ -1260,17 +1261,24 @@ function ProfessionalDashboardAccessGate() {
       setLocation("/");
       return;
     }
-    if (!providerProfile) {
+    if (!userCanActAsAssociate(user)) {
       setLocation("/");
       return;
     }
-  }, [stillLoading, isAuthenticated, providerProfile, isVerifiedCarGoDriver, setLocation]);
+    if (!providerProfile) {
+      setLocation("/become-pro");
+      return;
+    }
+  }, [stillLoading, isAuthenticated, providerProfile, user, setLocation]);
 
   if (stillLoading) {
     return <AccessGateLoading message="Cargando panel de asociado…" />;
   }
-  if (!isAuthenticated || !providerProfile) {
+  if (!isAuthenticated || !userCanActAsAssociate(user)) {
     return <AccessGateLoading message="Redirigiendo al inicio…" />;
+  }
+  if (!providerProfile) {
+    return <AccessGateLoading message="Redirigiendo a registro de asociado…" />;
   }
 
   return <ProfessionalDashboardInner />;

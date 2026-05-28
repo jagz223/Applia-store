@@ -19,6 +19,7 @@ export const MAP_PERSPECTIVE_CONTROLS_VISIBLE = false;
 export function MapPaneBearing({ degrees }: { degrees: number }) {
   const map = useMap();
   useEffect(() => {
+    if (degrees === 0) return;
     let pane: HTMLElement | undefined;
     try {
       pane = map.getPane("mapPane") as HTMLElement | undefined;
@@ -30,16 +31,13 @@ export function MapPaneBearing({ degrees }: { degrees: number }) {
     const prev = pane.style.transform;
     const prevOrigin = pane.style.transformOrigin;
     pane.style.transformOrigin = "50% 50%";
-    pane.style.transform = degrees === 0 ? "" : `rotate(${degrees}deg)`;
+    pane.style.transform = `rotate(${degrees}deg)`;
 
-    // Cuando el usuario “abusa” navegando, el mapa puede desmontarse en medio del frame.
-    // Guardamos para no tocar internals de Leaflet si el container ya no existe.
     const raf = requestAnimationFrame(() => safeInvalidateSize(map));
     return () => {
       cancelAnimationFrame(raf);
       try {
-        if (!pane) return;
-        if (!pane.isConnected) return;
+        if (!pane?.isConnected) return;
         pane.style.transform = prev;
         pane.style.transformOrigin = prevOrigin;
       } catch {

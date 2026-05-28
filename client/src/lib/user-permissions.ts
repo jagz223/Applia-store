@@ -1,3 +1,4 @@
+import { canActAsAssociate, shouldCompleteAssociateOnboarding } from "@shared/associate-role-access";
 import {
   hasRolePermission,
   isAdminSuiteEnabled,
@@ -24,6 +25,21 @@ export function userCan(
   key: RolePermissionKey
 ): boolean {
   return hasRolePermission(getUserPermissions(user), key);
+}
+
+/** Rol o permisos de catálogo que habilitan flujo de asociado (Become Pro, panel, servicios). */
+export function userCanActAsAssociate(user: AuthUserWithPermissions | null | undefined): boolean {
+  if (!user) return false;
+  return canActAsAssociate(user.role, getUserPermissions(user));
+}
+
+/** Sin perfil proveedor pero con derecho a registrarse como asociado. */
+export function userShouldCompleteAssociateOnboarding(
+  user: AuthUserWithPermissions | null | undefined,
+  hasProviderProfile: boolean,
+): boolean {
+  if (!user) return false;
+  return shouldCompleteAssociateOnboarding(user.role, getUserPermissions(user), hasProviderProfile);
 }
 
 /** Panel admin: suite administrativa + acceso al panel, o roles legacy staff. */
