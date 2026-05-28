@@ -42,6 +42,7 @@ import {
   registerMobilityRideChatCreated,
   runMobilityRideChatStartupSweep,
 } from "./mobility-ride-chat";
+import { bumpGoUserCompletedTrips, resolveGoPublicUserStats } from "./go-public-user-enrich";
 import crypto from "crypto";
 
 export type PackVehicleKind = "moto" | "auto" | "camioneta";
@@ -53,7 +54,7 @@ export type PackNegotiationDriverSnapshot = {
   lastName?: string;
   profileImageUrl: string | null;
   phone: string | null;
-  rating: number;
+  rating: number | null;
   ratingCount: number;
   completedTrips: number;
   vehicle: {
@@ -129,6 +130,16 @@ type RideRecord = {
 const rides = new Map<string, RideRecord>();
 const rideTimers = new Map<string, { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }>();
 
+/** Participantes del envío para enlaces de notificación push del chat. */
+export function getPackRideChatParticipants(rideId: string): {
+  riderUserId: string;
+  driverUserId: string | null;
+} | null {
+  const ride = rides.get(rideId);
+  if (!ride) return null;
+  return { riderUserId: ride.riderUserId, driverUserId: ride.driverUserId };
+}
+
 /** Oferta pendiente por driver (recovery al abrir /go/delivery/driver tras push). */
 const pendingOfferByDriverId = new Map<
   string,
@@ -148,6 +159,10 @@ const onlineDrivers = new Map<string, DriverPresence>();
 
 export function getPackOnlineDriversSnapshot(): ReadonlyMap<string, DriverPresence> {
   return onlineDrivers;
+}
+
+export function getPackPresenceRow(userId: string): DriverPresence | undefined {
+  return onlineDrivers.get(userId);
 }
 
 /** Igual que {@link refreshMobilityPresenceDispatchCompany} para presencia delivery (pack). */
@@ -322,11 +337,11 @@ async function buildRiderPublic(riderUserId: string) {
     (rec?.imageUrl as string) ||
     (rec?.avatar as string) ||
     null;
-  const phone = String(rec?.phone ?? "").trim() || null;
-  const rating = Number(rec?.rating) || 0;
-  const ratingCount = Number(rec?.ratingCount) || 0;
-  const completedTrips = Number(rec?.completedTrips) || 0;
-  return { name, lastName: ln, profileImageUrl, phone, rating, ratingCount, completedTrips, email };
+  const phone =
+    String(rec?.phone ?? rec?.phoneNumber ?? rec?.phone_number ?? rec?.phone_number_e164 ?? "").trim() ||
+    null;
+  const stats = await resolveGoPublicUserStats(riderUserId, rec);
+  return { name, lastName: ln, profileImageUrl, phone, ...stats, email };
 }
 
 async function buildDriverPublic(driverUserId: string) {
@@ -346,18 +361,14 @@ async function buildDriverPublic(driverUserId: string) {
     null;
   const phone =
     String(rec?.phone ?? rec?.phoneNumber ?? rec?.phone_number ?? rec?.phone_number_e164 ?? "").trim() || null;
-  const rating = Number(rec?.rating) || 0;
-  const ratingCount = Number(rec?.ratingCount) || 0;
-  const completedTrips = Number(rec?.completedTrips) || 0;
+  const stats = await resolveGoPublicUserStats(driverUserId, rec);
   return {
     userId: driverUserId,
     name,
     lastName: ln,
     profileImageUrl,
     phone,
-    rating,
-    ratingCount,
-    completedTrips,
+    ...stats,
     vehicle: vehicle
       ? {
           type: vehicle.vehicle_type as string,
@@ -468,11 +479,16 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
     // Push al driver si no está viendo la vista de driver.
     try {
       const pth = getUserActivePath(String(driverId));
-      if (!pth || (!pth.startsWith("/go/delivery/driver") && !pth.startsWith("/go/pack/driver"))) {
+      if (
+        !pth ||
+        (!pth.startsWith("/go/driver") &&
+          !pth.startsWith("/go/delivery/driver") &&
+          !pth.startsWith("/go/pack/driver"))
+      ) {
         void notificationService.sendPushToUser(driverId, {
           title: "Delivery",
           body: "Tienes un envío disponible. Abre para aceptar o rechazar.",
-          data: { url: "/go/delivery/driver", type: "pack_ride_offer", rideId: ride.id },
+          data: { url: "/go/driver", type: "pack_ride_offer", rideId: ride.id },
         });
       }
     } catch {}
@@ -507,8 +523,8 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
       if (!data) return;
       if (!data.receiving) {
         if (packDriverInActiveRide(user.id)) {
-          const prev = onlineDrivers.get(user.id);
-          if (prev) {
+          void (async () => {
+            const prev = onlineDrivers.get(user.id);
             const lat = Number(data.lat);
             const lon = Number(data.lon);
             const posOk =
@@ -517,20 +533,31 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
               Math.abs(lat) <= 90 &&
               Math.abs(lon) <= 180 &&
               (Math.abs(lat) > 1e-4 || Math.abs(lon) > 1e-4);
+            const provider = prev ? null : await catalogService.getProviderByUserId(user.id);
+            const dispatchCompanyId =
+              prev?.dispatchCompanyId ??
+              normalizeDispatchCompanyId(
+                (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
+              );
             const next: DriverPresence = {
-              ...prev,
+              userId: user.id,
+              vehicleType: (data.vehicleType || prev?.vehicleType || "car").trim(),
+              lat: posOk ? lat : (prev?.lat ?? 0),
+              lon: posOk ? lon : (prev?.lon ?? 0),
               updatedAt: Date.now(),
+              dispatchCompanyId,
               idleOnMapDuringRide: true,
-              ...(posOk ? { lat, lon } : {}),
             };
+            if (!posOk && !prev) return;
             onlineDrivers.set(user.id, next);
             emitCentralFleetUpdate(io, { ...next, isPetFriendly: false });
-          }
+          })();
           return;
         }
+        if (driverIsBusyCrossModule(user.id)) return;
         const prev = onlineDrivers.get(user.id);
         onlineDrivers.delete(user.id);
-        if (prev) emitCentralFleetUpdate(io, { ...prev, isPetFriendly: false, updatedAt: Date.now() }, true);
+        if (prev) emitCentralFleetUpdate(io, { ...prev, isPetFriendly: false, updatedAt: Date.now() }, { offline: true, receivingStopped: true });
         return;
       }
       void (async () => {
@@ -552,7 +579,11 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
         idleOnMapDuringRide: false,
       };
       onlineDrivers.set(user.id, pres);
-      emitCentralFleetUpdate(io, { ...pres, isPetFriendly: false });
+      emitCentralFleetUpdate(io, { ...pres, isPetFriendly: false }, {
+        receiving: true,
+        receivingTaxi: false,
+        receivingDelivery: true,
+      });
 
       // Si hay envíos en búsqueda, ofrecer también a drivers que se ponen online después.
       void (async () => {
@@ -612,20 +643,51 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
         lat: data.lat,
         lon: data.lon,
       });
-      const presRow = onlineDrivers.get(user.id);
-      if (
-        presRow &&
-        Number.isFinite(lat) &&
-        Number.isFinite(lon) &&
-        (ride.status === "matched" || ride.status === "in_progress")
-      ) {
-        const next: DriverPresence = { ...presRow, lat, lon, updatedAt: Date.now() };
-        onlineDrivers.set(user.id, next);
-        emitCentralFleetUpdate(io, { ...next, isPetFriendly: false });
-      }
+      void (async () => {
+        let presRow = onlineDrivers.get(user.id);
+        if (
+          !presRow &&
+          Number.isFinite(lat) &&
+          Number.isFinite(lon) &&
+          (ride.status === "matched" || ride.status === "in_progress")
+        ) {
+          const provider = await catalogService.getProviderByUserId(user.id);
+          const vehicle = await genFebStorage.getPrimaryVehicleByUserId(user.id);
+          presRow = {
+            userId: user.id,
+            vehicleType: String(vehicle?.vehicle_type ?? ride.vehicleType ?? "car").trim(),
+            lat,
+            lon,
+            updatedAt: Date.now(),
+            dispatchCompanyId: normalizeDispatchCompanyId(
+              (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
+            ),
+            idleOnMapDuringRide: true,
+          };
+          onlineDrivers.set(user.id, presRow);
+        }
+        if (
+          presRow &&
+          Number.isFinite(lat) &&
+          Number.isFinite(lon) &&
+          (ride.status === "matched" || ride.status === "in_progress")
+        ) {
+          const next: DriverPresence = { ...presRow, lat, lon, updatedAt: Date.now(), idleOnMapDuringRide: true };
+          onlineDrivers.set(user.id, next);
+          emitCentralFleetUpdate(io, { ...next, isPetFriendly: false });
+        }
+      })();
     });
 
     socket.on("disconnect", () => {
+      const row = onlineDrivers.get(user.id);
+      if (driverIsBusyCrossModule(user.id) && row) {
+        const next: DriverPresence = { ...row, idleOnMapDuringRide: true, updatedAt: Date.now() };
+        onlineDrivers.set(user.id, next);
+        emitCentralFleetUpdate(io, { ...next, isPetFriendly: false });
+        return;
+      }
+      if (row) emitCentralFleetUpdate(io, { ...row, isPetFriendly: false, updatedAt: Date.now() }, { offline: true });
       onlineDrivers.delete(user.id);
     });
   });
@@ -1098,6 +1160,8 @@ export function registerPackRideRoutes(app: Express) {
           conversationId,
           rideId: ride.id,
           module: "delivery",
+          riderUserId: ride.riderUserId,
+          driverUserId: driverId,
         });
       } catch (ce) {
         console.error("[pack] negotiation accept conversation", ce);
@@ -1183,64 +1247,80 @@ export function registerPackRideRoutes(app: Express) {
       }
       ride.driverUserId = driverUserId;
       ride.status = "matched";
-      if (!ride.isNegotiated) {
-        await applyDriverFareToRide(ride, driverUserId, "delivery");
-      }
+      ride.currentOfferDriverId = null;
+      ride.offerExpiresAt = null;
       clearRideTimers(ride.id);
+      pendingOfferByDriverId.delete(driverUserId);
 
       withdrawDriverNegotiationOffersEverywhere(io, driverUserId, rideId);
 
-      const driver = await buildDriverPublic(driverUserId);
-      const pres = onlineDrivers.get(driverUserId);
-      const driverLat = pres?.lat;
-      const driverLon = pres?.lon;
-      let conversationId: number | null = null;
-      try {
-        const conv = await genFebStorage.createConversation({
-          participant1Id: ride.riderUserId,
-          participant2Id: driverUserId,
-        });
-        conversationId = Number((conv as { id: number }).id);
-        ride.conversationId = conversationId;
-        await registerMobilityRideChatCreated(genFebStorage, {
-          conversationId,
-          rideId: ride.id,
-          module: "delivery",
-        });
-      } catch {}
-
-      const rider = await buildRiderPublic(ride.riderUserId);
-
-      io.to(`user:${ride.riderUserId}`).emit("pack:ride:matched", {
-        rideId,
-        driver,
-        driverLat,
-        driverLon,
-        conversationId,
-        estimatedUsd: ride.estimatedUsd,
-        isNegotiated: !!ride.isNegotiated,
-      });
-
-      try {
-        const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || (!pth.startsWith("/go/delivery") && !pth.startsWith("/go/pack"))) {
-          void notificationService.sendPushToUser(ride.riderUserId, {
-            title: "Delivery",
-            body: "Tu envío fue aceptado. Abre para ver a tu driver.",
-            data: { url: "/go/delivery", type: "pack_ride_matched", rideId },
-          });
-        }
-      } catch {}
-
-      // Avisar a los drivers que tenían esta oferta (como en Car Go) para que cierren el modal.
-      for (const oid of ride.offeredDriverIds) {
-        if (oid === driverUserId) continue;
-        io.to(`user:${oid}`).emit("pack:ride:taken", { rideId });
+      if (!ride.isNegotiated) {
+        await applyDriverFareToRide(ride, driverUserId, "delivery");
       }
 
-      io.to(`user:${driverUserId}`).emit("pack:ride:accepted", { rideId, rider, conversationId });
+      res.json({ ok: true, accepted: true, rideId, conversationId: ride.conversationId ?? null });
 
-      res.json({ ok: true, accepted: true, rideId, conversationId });
+      void (async () => {
+        try {
+          const driver = await buildDriverPublic(driverUserId);
+          const pres = onlineDrivers.get(driverUserId);
+          const driverLat = pres?.lat;
+          const driverLon = pres?.lon;
+          let conversationId: number | null = ride.conversationId ?? null;
+          if (conversationId == null) {
+            try {
+              const conv = await genFebStorage.createConversation({
+                participant1Id: ride.riderUserId,
+                participant2Id: driverUserId,
+              });
+              conversationId = Number((conv as { id: number }).id);
+              ride.conversationId = conversationId;
+              await registerMobilityRideChatCreated(genFebStorage, {
+                conversationId,
+                rideId: ride.id,
+                module: "delivery",
+                riderUserId: ride.riderUserId,
+                driverUserId,
+              });
+            } catch (ce) {
+              console.error("[pack] createConversation", ce);
+            }
+          }
+
+          const rider = await buildRiderPublic(ride.riderUserId);
+
+          io.to(`user:${ride.riderUserId}`).emit("pack:ride:matched", {
+            rideId,
+            driver,
+            driverLat,
+            driverLon,
+            conversationId,
+            estimatedUsd: ride.estimatedUsd,
+            isNegotiated: !!ride.isNegotiated,
+          });
+
+          try {
+            const pth = getUserActivePath(String(ride.riderUserId));
+            if (!pth || (!pth.startsWith("/go/delivery") && !pth.startsWith("/go/pack"))) {
+              void notificationService.sendPushToUser(ride.riderUserId, {
+                title: "Delivery",
+                body: "Tu envío fue aceptado. Abre para ver a tu driver.",
+                data: { url: "/go/delivery", type: "pack_ride_matched", rideId },
+              });
+            }
+          } catch {}
+
+          for (const oid of ride.offeredDriverIds) {
+            if (oid === driverUserId) continue;
+            io.to(`user:${oid}`).emit("pack:ride:taken", { rideId });
+          }
+
+          io.to(`user:${driverUserId}`).emit("pack:ride:accepted", { rideId, rider, conversationId });
+        } catch (finalizeErr) {
+          console.error("[pack] finalize accept", finalizeErr);
+        }
+      })();
+      return;
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
     }
@@ -1373,6 +1453,8 @@ export function registerPackRideRoutes(app: Express) {
           conversationId,
           rideId: ride.id,
           module: "delivery",
+          riderUserId: ride.riderUserId,
+          driverUserId: driverId,
         });
       } catch {}
 
@@ -1537,6 +1619,8 @@ export function registerPackRideRoutes(app: Express) {
 
       ride.status = "expired";
       void persistMobilityRideToHistory(ride, "pack", "completed");
+      void bumpGoUserCompletedTrips(ride.riderUserId);
+      void bumpGoUserCompletedTrips(driverUserId);
       const io = getIO();
       io?.to(`user:${ride.riderUserId}`).emit("pack:ride:completed", { rideId });
       io?.to(`user:${driverUserId}`).emit("pack:ride:completed", { rideId });

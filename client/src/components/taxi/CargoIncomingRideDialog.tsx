@@ -1,7 +1,8 @@
 import type { GeoJsonObject } from "geojson";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ban, CheckCircle2, Loader2, Star, Tags, X } from "lucide-react";
+import { Ban, CheckCircle2, Loader2, Tags, X } from "lucide-react";
+import { GoUserRideStatsBadges } from "@/components/go/GoUserRideStatsBadges";
 import { Button } from "@/components/ui/button";
 import { TaxiRouteMap } from "@/components/taxi/TaxiRouteMap";
 import { mobilityServiceLabel } from "@shared/mobility-ui-labels";
@@ -12,7 +13,7 @@ export type CargoRideOfferPayload = {
     lastName?: string;
     profileImageUrl: string | null;
     phone?: string;
-    rating?: number;
+    rating?: number | null;
     ratingCount?: number;
     completedTrips?: number;
   };
@@ -88,8 +89,6 @@ export function CargoIncomingRideDialog({
 }: Props) {
   if (!open || !offer) return null;
   if (typeof document === "undefined") return null;
-  const riderStars = typeof offer.rider.rating === "number" ? offer.rider.rating : null;
-  const riderTrips = typeof offer.rider.completedTrips === "number" ? offer.rider.completedTrips : null;
   const title = mobilityServiceLabel(module === "pack" ? "pack" : "cargo");
   const isNego = !!offer.isNegotiated && !!onNegotiationPropose;
 
@@ -164,22 +163,16 @@ export function CargoIncomingRideDialog({
             <p className="mt-0.5 text-xs text-muted-foreground">
               {offer.petEnabled ? " · Pet Car" : ""}
             </p>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              {riderStars != null ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2 py-0.5">
-                  <Star className="h-3 w-3 text-amber-500" aria-hidden />
-                  <span className="font-medium text-foreground tabular-nums">{riderStars.toFixed(1)}</span>
-                </span>
-              ) : null}
-              {riderTrips != null ? (
-                <span className="rounded-full border border-border/70 bg-muted/40 px-2 py-0.5">
-                  <span className="font-medium text-foreground tabular-nums">{riderTrips}</span> viajes
-                </span>
-              ) : null}
-              <span className="truncate">
-                {twoWords(offer.start.label)} → {twoWords(offer.end.label)}
-              </span>
-            </div>
+            <GoUserRideStatsBadges
+              compact
+              className="mt-1"
+              rating={offer.rider.rating}
+              ratingCount={offer.rider.ratingCount}
+              completedTrips={offer.rider.completedTrips}
+            />
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">
+              {twoWords(offer.start.label)} → {twoWords(offer.end.label)}
+            </p>
           </div>
           <div className="ml-auto hidden flex-col items-end gap-0.5 sm:flex">
             <span className="text-xs text-muted-foreground">
@@ -310,7 +303,7 @@ export function CargoIncomingRideDialog({
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 {!busy ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : null}
-                Aceptar
+                {busy ? "Aceptando…" : "Aceptar"}
               </Button>
             )}
           </div>

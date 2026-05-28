@@ -84,6 +84,8 @@ export function goViewportShellFrameClass(isGoMapView: boolean, wideDesktop: boo
 
 export function isGoDriverMapPath(pathname: string): boolean {
   return (
+    pathname === "/go/driver" ||
+    pathname.startsWith("/go/driver/") ||
     pathname === "/go/taxi/driver" ||
     pathname.startsWith("/go/taxi/driver/") ||
     pathname === "/go/cargo/driver" ||

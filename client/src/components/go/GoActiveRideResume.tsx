@@ -6,7 +6,7 @@ import { loadGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 
 /**
  * Reanuda Go (Taxi / Delivery) al reabrir la app:
- * - Si hay servicio activo del conductor, lo lleva a `/go/taxi/driver` o `/go/delivery/driver`
+ * - Si hay servicio activo del conductor, lo lleva a `/go/driver`
  * - Si hay servicio activo del cliente, lo lleva a `/go/taxi` o `/go/delivery`
  */
 export function GoActiveRideResume() {
@@ -20,12 +20,8 @@ export function GoActiveRideResume() {
 
     const cargoDriver = loadGoDriverActiveRideId("cargo");
     const packDriver = loadGoDriverActiveRideId("pack");
-    if (packDriver && !path.startsWith("/go/delivery/driver")) {
-      setLocation("/go/delivery/driver");
-      return;
-    }
-    if (cargoDriver && !path.startsWith("/go/taxi/driver")) {
-      setLocation("/go/taxi/driver");
+    if ((cargoDriver || packDriver) && !path.startsWith("/go/driver")) {
+      setLocation("/go/driver");
       return;
     }
 
@@ -42,4 +38,3 @@ export function GoActiveRideResume() {
 
   return null;
 }
-

@@ -21,6 +21,8 @@ import { GoDriverVehicleFormGrid, goVehicleCanMarkPetFriendly } from "@/componen
 import { GoDriverCentralAffiliationFields } from "@/components/provider/GoDriverCentralAffiliationFields";
 import { GoThreeServicesReminder } from "@/components/provider/GoThreeServicesReminder";
 import { useAuth } from "@/hooks/use-auth";
+import { hasFullAdminRole } from "@/lib/auth-utils";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import { useLocation } from "wouter";
 import { api } from "@shared/routes";
 import { setVerifyReturnPath } from "@/lib/verify-return-path";
@@ -398,6 +400,20 @@ export default function BecomePro() {
         <a href={api.auth.replit.login.path}>
           <Button className="w-full">Iniciar sesión / Registrarse</Button>
         </a>
+      </div>
+    );
+  }
+
+  if (!userCanActAsAssociate(user) && !hasFullAdminRole(user)) {
+    return (
+      <div className="container mx-auto max-w-md px-4 py-20 text-center">
+        <h1 className="text-2xl font-bold mb-4">Registro de asociado</h1>
+        <p className="mb-6 text-muted-foreground">
+          Tu rol no incluye permisos para registrarte como asociado. Contacta al administrador si necesitas acceso.
+        </p>
+        <Button type="button" variant="outline" onClick={() => setLocation("/")}>
+          Volver al inicio
+        </Button>
       </div>
     );
   }

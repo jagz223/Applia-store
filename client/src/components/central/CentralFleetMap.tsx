@@ -1,22 +1,23 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  useMap,
-  ZoomControl,
-} from "react-leaflet";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import L from "leaflet";
 import { Bookmark, Loader2, MapPinned, RefreshCw } from "lucide-react";
 import type { CentralServiceMapView } from "@shared/dispatch-company";
-import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
+import {
+  getEffectiveLeafletMaxZoom,
+  getLeafletMapContainerBehaviorProps,
+  getLeafletTileLayerBehaviorProps,
+  getTaxiRasterLayerProps,
+} from "@/components/taxi/leaflet-config";
 import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { CentralFleetDriver } from "@/hooks/use-central";
+import { formatCentralFleetMapHint } from "@/lib/central-fleet-position";
+import { fleetMarkerSizeForZoom } from "@/lib/fleet-map-marker-size";
+import { fleetWorkAccentForDriver, type FleetWorkAccent } from "@/lib/central-fleet-work-accent";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -41,29 +42,113 @@ function lineStringLatLngs(geometry: unknown): [number, number][] {
  */
 function CentralMapCamera({
   followDriver,
+  focusNonce = 0,
 }: {
   followDriver: CentralFleetDriver | null;
+  focusNonce?: number;
 }) {
   const map = useMap();
-  const lastFollowUserIdRef = useRef<string | null>(null);
+  const lastFocusRef = useRef<{ userId: string | null; nonce: number }>({ userId: null, nonce: -1 });
 
   useEffect(() => {
     if (!followDriver || followDriver.lat == null || followDriver.lon == null) {
-      lastFollowUserIdRef.current = null;
+      lastFocusRef.current = { userId: null, nonce: focusNonce };
       return;
     }
 
-    const latlng: L.LatLngExpression = [followDriver.lat, followDriver.lon];
-    if (lastFollowUserIdRef.current !== followDriver.userId) {
-      lastFollowUserIdRef.current = followDriver.userId;
-      const z = Math.max(14, map.getZoom());
-      map.flyTo(latlng, z, { duration: 0.45 });
+    if (
+      lastFocusRef.current.userId === followDriver.userId &&
+      lastFocusRef.current.nonce === focusNonce
+    ) {
       return;
     }
-    map.panTo(latlng, { animate: true });
-  }, [followDriver, map]);
+
+    lastFocusRef.current = { userId: followDriver.userId, nonce: focusNonce };
+    const latlng: L.LatLngExpression = [followDriver.lat, followDriver.lon];
+    const z = Math.max(14, map.getZoom());
+    map.flyTo(latlng, z, { duration: 0.45 });
+  }, [followDriver, focusNonce, map]);
 
   return null;
+}
+
+function FleetMapZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void }) {
+  const map = useMap();
+
+  useMapEvents({
+    zoomend: () => onZoomChange(map.getZoom()),
+  });
+
+  useEffect(() => {
+    onZoomChange(map.getZoom());
+  }, [map, onZoomChange]);
+
+  return null;
+}
+
+function FleetVehicleMarkers({
+  drivers,
+  mapZoom,
+  enteringDriverIds,
+  onSelectDriver,
+}: {
+  drivers: CentralFleetDriver[];
+  mapZoom: number;
+  enteringDriverIds: Set<string>;
+  onSelectDriver: (driver: CentralFleetDriver) => void;
+}) {
+  const markerSizePx = fleetMarkerSizeForZoom(mapZoom);
+
+  return (
+    <>
+      {drivers.map((d) => {
+        const stale = !d.positionLive || !!d.receivingStoppedAt;
+        const mapHint = formatCentralFleetMapHint(d);
+        const workAccent = fleetWorkAccentForDriver(d);
+        const workLabel: Record<Exclude<FleetWorkAccent, null>, string> = {
+          taxi: "Trabajando · taxi",
+          delivery: "Trabajando · delivery",
+          both: "Modo híbrido · taxi y delivery",
+        };
+        return (
+          <Marker
+            key={d.userId}
+            position={[d.lat!, d.lon!]}
+            icon={createDriverVehicleIcon(d.vehicleType, {
+              entering: enteringDriverIds.has(d.userId),
+              stale,
+              sizePx: markerSizePx,
+              workAccent: fleetWorkAccentForDriver(d),
+            })}
+            eventHandlers={{ click: () => onSelectDriver(d) }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <p className="font-medium">
+                  {d.name} {d.lastName}
+                </p>
+                {workAccent ? (
+                  <p
+                    className={cn(
+                      "mt-1 text-xs font-medium",
+                      workAccent === "taxi"
+                        ? "text-sky-700 dark:text-sky-300"
+                        : workAccent === "delivery"
+                          ? "text-violet-700 dark:text-violet-300"
+                          : "text-emerald-800 dark:text-emerald-200",
+                    )}
+                  >
+                    {workLabel[workAccent]}
+                  </p>
+                ) : null}
+                {mapHint ? <p className="mt-1 text-xs text-muted-foreground">{mapHint}</p> : null}
+              </div>
+            </Popup>
+          </Marker>
+        );
+      })}
+    </>
+  );
 }
 
 function CentralMapToolbar({
@@ -129,6 +214,36 @@ function FleetMapInvalidateLayout({ nonce }: { nonce: number }) {
   return null;
 }
 
+/** Conductores que acaban de aparecer en el mapa (nuevo en flota o primera coordenada). */
+function useFleetMarkerEntering(drivers: CentralFleetDriver[]): Set<string> {
+  const prevOnMapRef = useRef(new Set<string>());
+  const animatedRef = useRef(new Set<string>());
+
+  const entering = useMemo(() => {
+    const onMap = new Set<string>();
+    const next = new Set<string>();
+    for (const d of drivers) {
+      if (d.lat == null || d.lon == null) continue;
+      onMap.add(d.userId);
+      if (!prevOnMapRef.current.has(d.userId) && !animatedRef.current.has(d.userId)) {
+        next.add(d.userId);
+      }
+    }
+    prevOnMapRef.current = onMap;
+    for (const id of next) animatedRef.current.add(id);
+    return next;
+  }, [drivers]);
+
+  useEffect(() => {
+    const onMap = new Set(drivers.filter((d) => d.lat != null && d.lon != null).map((d) => d.userId));
+    for (const id of animatedRef.current) {
+      if (!onMap.has(id)) animatedRef.current.delete(id);
+    }
+  }, [drivers]);
+
+  return entering;
+}
+
 type CentralFleetMapProps = {
   drivers: CentralFleetDriver[];
   onSelectDriver: (driver: CentralFleetDriver) => void;
@@ -143,6 +258,8 @@ type CentralFleetMapProps = {
   persistServiceMapPending?: boolean;
   /** Remount al cambiar de empresa (admin). */
   mapInstanceKey?: string;
+  /** Incrementar al elegir conductor desde listado para recentrar el mapa. */
+  focusNonce?: number;
   /** Conductor seleccionado en el panel (datos en vivo); la cámara lo sigue en el mapa. */
   followDriver?: CentralFleetDriver | null;
   /** Vuelve a pedir la flota al servidor y actualiza marcadores. */
@@ -161,13 +278,25 @@ export function CentralFleetMap({
   persistServiceMapPending = false,
   mapInstanceKey = "default",
   followDriver = null,
+  focusNonce = 0,
   onRefreshFleet,
   fleetRefreshing = false,
 }: CentralFleetMapProps) {
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
+  const tileBehavior = getLeafletTileLayerBehaviorProps();
+  const mapBehavior = getLeafletMapContainerBehaviorProps();
+  const tileMaxZoom = getEffectiveLeafletMaxZoom(raster.maxZoom);
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: fullscreen ? 64 : 64 });
+  const center: [number, number] = [serviceMapView.lat, serviceMapView.lon];
+  const initialZoom = serviceMapView.cityZoom;
   const [layoutNonce, setLayoutNonce] = useState(0);
+  const [mapZoom, setMapZoom] = useState(initialZoom);
+  const enteringDriverIds = useFleetMarkerEntering(drivers);
+
+  useEffect(() => {
+    setMapZoom(initialZoom);
+  }, [initialZoom, mapInstanceKey]);
 
   const handleRefreshFleet = () => {
     if (!onRefreshFleet) return;
@@ -179,9 +308,6 @@ export function CentralFleetMap({
       }
     })();
   };
-
-  const center: [number, number] = [serviceMapView.lat, serviceMapView.lon];
-  const initialZoom = serviceMapView.cityZoom;
 
   return (
     <div
@@ -244,6 +370,8 @@ export function CentralFleetMap({
             className="h-full w-full z-0"
             style={{ width: "100%", height: "100%", minHeight: fullscreen ? 200 : 280 }}
             scrollWheelZoom
+            maxZoom={tileMaxZoom}
+            {...mapBehavior}
           >
             <LeafletMapLayoutFix />
             <FleetMapInvalidateLayout nonce={layoutNonce} />
@@ -251,23 +379,19 @@ export function CentralFleetMap({
             <TileLayer
               attribution={raster.attribution}
               url={raster.url}
-              maxZoom={raster.maxZoom}
+              maxZoom={tileMaxZoom}
               {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
               {...(raster.apiKey ? { apiKey: raster.apiKey } : {})}
+              {...tileBehavior}
             />
-            <CentralMapCamera followDriver={followDriver} />
-            {drivers.map((d) => (
-              <Marker
-                key={d.userId}
-                position={[d.lat!, d.lon!]}
-                icon={createDriverVehicleIcon(d.vehicleType)}
-                eventHandlers={{ click: () => onSelectDriver(d) }}
-              >
-                <Popup>
-                  {d.name} {d.lastName}
-                </Popup>
-              </Marker>
-            ))}
+            <FleetMapZoomTracker onZoomChange={setMapZoom} />
+            <CentralMapCamera followDriver={followDriver} focusNonce={focusNonce} />
+            <FleetVehicleMarkers
+              drivers={drivers}
+              mapZoom={mapZoom}
+              enteringDriverIds={enteringDriverIds}
+              onSelectDriver={onSelectDriver}
+            />
             {showMapToolbar ? (
               <CentralMapToolbar
                 serviceCenter={center}

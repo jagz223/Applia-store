@@ -331,6 +331,35 @@
     /* Respaldo si height:100% aún no resuelve (padre sin alto en el primer paint). */
     min-height: 400px !important;
     border-radius: 0.75rem;
+    /* Fondo acorde al estilo Carto/Geoapify (evita “cuadros blancos” al cargar teselas). */
+    background: #e2e8f0;
+  }
+  .taxi-leaflet-wrapper .leaflet-tile-pane {
+    background: #e2e8f0;
+  }
+  .taxi-leaflet-wrapper .leaflet-tile {
+    background-color: #e2e8f0;
+  }
+  .dark .taxi-leaflet-wrapper .leaflet-container,
+  .dark .taxi-leaflet-wrapper .leaflet-tile-pane {
+    background: #1a1d24;
+  }
+  .dark .taxi-leaflet-wrapper .leaflet-tile {
+    background-color: #1a1d24;
+  }
+  .genfeb-driver-map-fs .leaflet-container,
+  .genfeb-driver-map-fs .leaflet-tile-pane {
+    background: #e2e8f0;
+  }
+  .genfeb-driver-map-fs .leaflet-tile {
+    background-color: #e2e8f0;
+  }
+  .dark .genfeb-driver-map-fs .leaflet-container,
+  .dark .genfeb-driver-map-fs .leaflet-tile-pane {
+    background: #1a1d24;
+  }
+  .dark .genfeb-driver-map-fs .leaflet-tile {
+    background-color: #1a1d24;
   }
   /** Reserva / chat: mapa más bajo dentro de tarjetas. */
   .taxi-leaflet-wrapper--sm {
@@ -486,4 +515,21 @@
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
+}
+
+/** Entrada suave de vehículos en el mapa de flota (panel Central). */
+@keyframes fleet-marker-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.88) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.leaflet-marker-icon.fleet-marker-enter {
+  animation: fleet-marker-fade-in 0.55s ease-out forwards;
+  transform-origin: 50% 100%;
 }

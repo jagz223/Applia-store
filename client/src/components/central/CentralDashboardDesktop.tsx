@@ -3,12 +3,14 @@ import { Link } from "wouter";
 import { Car, MapPin, Phone, Radio, Settings, Star, Users, Hash } from "lucide-react";
 import type { DispatchMobilityFares, DispatchPackFares, CentralServiceMapView } from "@shared/dispatch-company";
 import type { CentralFleetDriver } from "@/hooks/use-central";
+import { formatCentralFleetMapHint } from "@/lib/central-fleet-position";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { CentralFleetMap } from "@/components/central/CentralFleetMap";
+import { CentralFleetActiveList, CentralFleetActiveListHeader } from "@/components/central/CentralFleetActiveList";
 import { CentralFaresPanel } from "@/components/central/CentralFaresPanel";
 import { CentralMemberRegisterForm } from "@/components/central/CentralMemberRegisterForm";
 import { CentralMembersPanel } from "@/components/central/CentralMembersPanel";
@@ -44,6 +46,22 @@ function StatPill({
 function DriverCard({ driver }: { driver: CentralFleetDriver }) {
   const phone = driver.phone?.trim() || null;
   const plate = driver.licensePlate?.trim() || null;
+  const mapHint = formatCentralFleetMapHint(driver);
+  const connectionLabel = driver.receivingStoppedAt
+    ? "Servicio apagado"
+    : driver.inService
+      ? driver.positionLive
+        ? "En movimiento"
+        : "En servicio"
+      : driver.receiving
+        ? "En línea"
+        : "Sin señal en vivo";
+  const connectionVariant =
+    driver.receiving || driver.inService
+      ? driver.receivingStoppedAt
+        ? "secondary"
+        : "outline"
+      : "secondary";
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
@@ -94,12 +112,21 @@ function DriverCard({ driver }: { driver: CentralFleetDriver }) {
         <Badge variant={driver.inService ? "default" : "secondary"}>
           {driver.inService ? "En servicio" : "Buscando clientes"}
         </Badge>
-        <Badge variant={driver.receiving ? "outline" : "destructive"}>
-          {driver.receiving ? "En línea" : "Desconectado"}
-        </Badge>
+        <Badge variant={connectionVariant}>{connectionLabel}</Badge>
       </div>
+      {mapHint ? (
+        <p className="text-xs text-muted-foreground">{mapHint}</p>
+      ) : null}
       {(driver.receivingTaxi || driver.receivingDelivery) ? (
         <div className="flex flex-wrap gap-2">
+          {driver.receivingTaxi && driver.receivingDelivery ? (
+            <Badge
+              variant="secondary"
+              className="border-emerald-500/35 bg-emerald-500/10 text-xs font-normal text-emerald-900 dark:text-emerald-100"
+            >
+              Modo híbrido · taxi y delivery
+            </Badge>
+          ) : null}
           {driver.receivingTaxi ? (
             <Badge variant="secondary" className="text-xs font-normal">
               Recibiendo taxi
@@ -133,6 +160,8 @@ export type CentralDashboardDesktopProps = {
   selectedCompanyId: string | null;
   onCompanyChange: (id: string | null) => void;
   driversOnMap: CentralFleetDriver[];
+  activeFleet: CentralFleetDriver[];
+  mapFocusNonce: number;
   membersCount: number;
   activeOnMap: number;
   inServiceCount: number;
@@ -166,6 +195,8 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
     selectedCompanyId,
     onCompanyChange,
     driversOnMap,
+    activeFleet,
+    mapFocusNonce,
     membersCount,
     activeOnMap,
     inServiceCount,
@@ -235,58 +266,37 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
 
         <div className="flex flex-wrap gap-3 lg:justify-center">
           <StatPill icon={Users} label="Usuarios" value={membersCount} />
-          <StatPill icon={MapPin} label="En mapa" value={activeOnMap} />
+          <StatPill icon={MapPin} label="En mapa" value={driversOnMap.length} />
           <StatPill icon={Car} label="En servicio" value={inServiceCount} />
-          <StatPill icon={Radio} label="Flota activa" value={fleetCount} />
+          <StatPill icon={Radio} label="Activos" value={activeFleet.length} />
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_min(320px,26vw)]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_min(340px,28vw)_min(280px,22vw)]">
           <div className="min-w-0 space-y-6">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,2.15fr)_minmax(240px,1fr)]">
-              <Card className="overflow-hidden border-border/80 shadow-md lg:min-h-0">
-                <CardHeader className="border-b border-border/50 bg-muted/20 pb-3">
-                  <CardTitle className="text-lg">Mapa de flota</CardTitle>
-                  <CardDescription>
-                    Vista fija de tu ciudad; los marcadores se actualizan solos o con «Actualizar mapa». Elige un
-                    conductor para seguirlo en el mapa; si tiene viaje activo, el detalle muestra punto A → B sin ruta ni
-                    datos del cliente.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <CentralFleetMap
-                    mapInstanceKey={companyId}
-                    drivers={driversOnMap}
-                    onSelectDriver={(d) => onSelectDriver(d)}
-                    serviceMapView={serviceMapView}
-                    showMapToolbar
-                    onPersistServiceMap={onPersistServiceMap}
-                    persistServiceMapPending={persistServiceMapPending}
-                    followDriver={selectedDriver}
-                    onRefreshFleet={onRefreshFleet}
-                    fleetRefreshing={fleetRefreshing}
-                  />
-                </CardContent>
-              </Card>
-
-              <Card className="border-border/80 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">Detalle</CardTitle>
-                  <CardDescription>
-                    Al elegir un conductor, la cámara lo sigue en el mapa. Si está en servicio, aquí ves el resumen del
-                    viaje (punto A → B) sin datos del cliente ni trazado de ruta.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {selectedDriver ? (
-                    <DriverCard driver={selectedDriver} />
-                  ) : (
-                    <p className="rounded-lg border border-dashed border-border/80 bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
-                      Toca un marcador en el mapa para ver datos del conductor.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+            <Card className="overflow-hidden border-border/80 shadow-md lg:min-h-0">
+              <CardHeader className="border-b border-border/50 bg-muted/20 pb-3">
+                <CardTitle className="text-lg">Mapa de flota</CardTitle>
+                <CardDescription>
+                  Vista fija de tu ciudad; al acercar zoom los iconos se reducen para evitar solapamiento. Elige un
+                  conductor en el mapa o en el listado.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <CentralFleetMap
+                  mapInstanceKey={companyId}
+                  drivers={driversOnMap}
+                  onSelectDriver={(d) => onSelectDriver(d)}
+                  serviceMapView={serviceMapView}
+                  showMapToolbar
+                  onPersistServiceMap={onPersistServiceMap}
+                  persistServiceMapPending={persistServiceMapPending}
+                  followDriver={selectedDriver}
+                  focusNonce={mapFocusNonce}
+                  onRefreshFleet={onRefreshFleet}
+                  fleetRefreshing={fleetRefreshing}
+                />
+              </CardContent>
+            </Card>
 
             <Tabs value={lowerTab} onValueChange={(v) => setLowerTab(v as typeof lowerTab)} className="space-y-4">
               <TabsList className="mx-auto grid w-full max-w-3xl grid-cols-2 sm:grid-cols-4">
@@ -325,6 +335,41 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                 />
               </TabsContent>
             </Tabs>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-4">
+            <Card className="border-border/80 shadow-sm">
+              <CardHeader className="pb-2">
+                <CentralFleetActiveListHeader count={activeFleet.length} />
+              </CardHeader>
+              <CardContent>
+                <CentralFleetActiveList
+                  drivers={activeFleet}
+                  selectedUserId={selectedDriver?.userId ?? null}
+                  onSelectDriver={(d) => onSelectDriver(d)}
+                  maxHeightClass="max-h-[min(42vh,420px)]"
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/80 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg">Detalle</CardTitle>
+                <CardDescription>
+                  Al elegir un conductor, el mapa se centra en su posición. Si está en servicio, aquí ves el resumen del
+                  viaje.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {selectedDriver ? (
+                  <DriverCard driver={selectedDriver} />
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border/80 bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+                    Elige un conductor del listado o del mapa para ver sus datos.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
           <aside className="min-w-0">

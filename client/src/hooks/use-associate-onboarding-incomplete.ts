@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useCurrentProvider } from "@/hooks/use-mango-data";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import {
   clearAssociateOnboardingStarted,
   readAssociateOnboardingStarted,
@@ -8,8 +9,8 @@ import {
 } from "@/lib/associate-onboarding-storage";
 
 /**
- * Usuario que debe terminar `/become-pro`: rol professional sin perfil de proveedor,
- * o cualquier rol que haya abierto el formulario de asociado (marca en localStorage) y aún no tenga perfil.
+ * Usuario que debe terminar `/become-pro`: rol/permisos de asociado sin perfil de proveedor,
+ * o quien haya abierto el formulario (marca en localStorage) y aún no tenga perfil.
  */
 export function useAssociateOnboardingIncomplete() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -30,8 +31,7 @@ export function useAssociateOnboardingIncomplete() {
     };
   }, []);
 
-  const role = String((user as { role?: string } | null)?.role ?? "").toLowerCase();
-  const isProfessionalRole = role === "professional";
+  const actsAsAssociate = userCanActAsAssociate(user);
 
   /**
    * `/api/auth/me` suele traer `user.provider` en cuanto existe fila de proveedor.
@@ -45,7 +45,7 @@ export function useAssociateOnboardingIncomplete() {
   /** Profesional sin fila aún resuelta: esperar a que termine el fetch (incl. refetch con isLoading ya false). */
   const providerStillResolving =
     isAuthenticated &&
-    isProfessionalRole &&
+    actsAsAssociate &&
     !hasProviderRecord &&
     (providerLoading || providerFetching);
 
@@ -58,13 +58,13 @@ export function useAssociateOnboardingIncomplete() {
     if (providerLoading) return false;
     if (providerStillResolving) return false;
     if (hasProviderRecord) return false;
-    return isProfessionalRole || startedFlag;
+    return actsAsAssociate || startedFlag;
   }, [
     isAuthenticated,
     authLoading,
     providerLoading,
     hasProviderRecord,
-    isProfessionalRole,
+    actsAsAssociate,
     startedFlag,
     providerStillResolving,
   ]);

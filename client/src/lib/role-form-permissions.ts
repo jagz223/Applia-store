@@ -1,5 +1,6 @@
 import {
   ADMIN_SUITE_MASTER_KEY,
+  applyImpliedRolePermissions,
   isAdminSuiteEnabled,
   resolveRolePermissions,
   type RolePermissionKey,
@@ -15,5 +16,5 @@ export function permissionsForRoleForm(
   if (isAdminSuiteEnabled(perms) && !perms[ADMIN_SUITE_MASTER_KEY]) {
     perms[ADMIN_SUITE_MASTER_KEY] = true;
   }
-  return perms;
+  return applyImpliedRolePermissions(perms);
 }

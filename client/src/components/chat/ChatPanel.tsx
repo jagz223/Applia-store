@@ -39,6 +39,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSocket } from "@/hooks/use-socket";
 import type { ConversationEnriched } from "@/types/chat";
+import { findConversationForServiceScope } from "@shared/chat-conversation-scope";
+import { activeGoRideConversationId } from "@/lib/go-active-ride-chat";
 
 type Props = {
   mode: "page" | "embedded";
@@ -129,6 +131,24 @@ export function ChatPanel({
 
   useChatRealtime(selectedConversationId);
 
+  /** Go embebido: tras emparejar, el hilo puede no estar aún en caché (staleTime ∞). */
+  useEffect(() => {
+    if (allowNavigate) return;
+    if (selectedConversationId == null) return;
+    if (conversations.some((c) => c.id === selectedConversationId)) return;
+    void queryClient.refetchQueries({ queryKey: ["chat", "conversations"] });
+  }, [allowNavigate, selectedConversationId, conversations, queryClient]);
+
+  /** Go embebido: con viaje activo, abrir siempre el hilo de ese viaje (no uno antiguo con el mismo usuario). */
+  useEffect(() => {
+    if (allowNavigate) return;
+    if (!conversationsQuery.isSuccess) return;
+    const activeConv = activeGoRideConversationId(conversations);
+    if (activeConv == null) return;
+    if (selectedConversationId === activeConv) return;
+    setSelectedConversationId(activeConv);
+  }, [allowNavigate, conversationsQuery.isSuccess, conversations, selectedConversationId, setSelectedConversationId]);
+
   /** Prioridad: datos de la conversación en API (persisten sin query ?bookingId=). Fallback: deep link en chatContext. */
   const { bookingIdForContext, serviceIdForContext } = useMemo(() => {
     if (selectedConversationId == null) {
@@ -193,16 +213,30 @@ export function ChatPanel({
     enabled: !!serviceIdForContext,
   });
 
-  const graceBannerText =
-    selectedConversation?.serviceChatHideFromUsersAt &&
-    new Date(selectedConversation.serviceChatHideFromUsersAt).getTime() > Date.now()
-      ? (() => {
-          const until = new Date(selectedConversation.serviceChatHideFromUsersAt as string);
-          if (Number.isNaN(until.getTime())) return null;
-          const rel = formatDistanceToNow(until, { locale: es, addSuffix: true });
-          return `El servicio ya no está activo. Esta conversación se archivará de tu vista ${rel}; guarda lo que necesites antes.`;
-        })()
-      : null;
+  const graceBannerText = (() => {
+    const c = selectedConversation;
+    if (!c) return null;
+    const hideAtMs =
+      c.serviceChatHideFromUsersAt != null
+        ? new Date(c.serviceChatHideFromUsersAt as string).getTime()
+        : NaN;
+    const hideScheduled = Number.isFinite(hideAtMs) && hideAtMs > Date.now();
+    const serviceEnded =
+      c.messagesLocked === true ||
+      (c.serviceEndedAt != null && String(c.serviceEndedAt).trim() !== "") ||
+      c.mobilityRideCompleted === true;
+    const rideNotActive =
+      String(c.kind ?? "") === "mobility_ride" && c.mobilityRideInProgress !== true;
+    if (!serviceEnded && !(hideScheduled && rideNotActive)) return null;
+    if (hideScheduled) {
+      const rel = formatDistanceToNow(new Date(hideAtMs), { locale: es, addSuffix: true });
+      return `El servicio ya no está activo. Esta conversación se archivará de tu vista ${rel}; guarda lo que necesites antes.`;
+    }
+    if (serviceEnded) {
+      return "El servicio ya no está activo. Esta conversación quedó cerrada; guarda lo que necesites antes de que desaparezca de tu lista.";
+    }
+    return null;
+  })();
 
   const bookingOrServiceReminder =
     selectedConversationId != null
@@ -359,17 +393,11 @@ export function ChatPanel({
     const resolveKey = `with:${withUserId}|b:${bookingId ?? ""}|s:${serviceId ?? ""}`;
     if (resolvedChatDeepLinkRef.current === resolveKey) return;
 
-    const matchesPeer = (c: ConversationEnriched) =>
-      c.otherParticipant?.id === withUserId ||
-      c.participant1Id === withUserId ||
-      c.participant2Id === withUserId;
-
-    const pickFromList = (list: ConversationEnriched[]) => {
-      if (bookingId != null && !Number.isNaN(bookingId)) {
-        return list.find((c) => matchesPeer(c) && Number(c.bookingId) === bookingId);
-      }
-      return list.find(matchesPeer);
-    };
+    const pickFromList = (list: ConversationEnriched[]) =>
+      findConversationForServiceScope(list, {
+        participantId: withUserId,
+        bookingId: bookingId != null && !Number.isNaN(bookingId) ? bookingId : undefined,
+      });
 
     const existing = pickFromList(conversations);
     if (existing) {

@@ -1,21 +1,24 @@
+import { canActAsAssociate } from "@shared/associate-role-access";
 import { canAccessCentralPanel, hasAdminPrivileges, isFullAdmin, normalizeRoleCode } from "@shared/roles";
+import type { RolePermissionsMap } from "@shared/role-permissions";
 import { api } from "@shared/routes";
 
 /** Roles que no deben ver el CTA "Convertirse en Profesional" (salvo reglas especiales por rol). */
-export const ROLES_HIDING_BECOME_PRO_CTA = ["professional", "tiSupport", "central"] as const;
+export const ROLES_HIDING_BECOME_PRO_CTA = ["tiSupport", "central"] as const;
 
 /**
- * Indica si debe mostrarse el CTA de "Convertirse en Profesional".
- * - Profesional: no (ya es asociado).
- * - Admin: sí si aún no tiene perfil proveedor; puede ser asociado sin perder rol admin.
- * - Soporte TI: no (misma política que antes).
+ * CTA «Convertirse en asociado»: usuarios con permisos de asociado (o admin) sin perfil proveedor.
+ * Quienes ya tienen perfil usan «Panel asociado» / onboarding incompleto.
  */
-export function shouldShowBecomeProCTA(user: { role?: string; provider?: unknown } | null): boolean {
+export function shouldShowBecomeProCTA(
+  user: { role?: string; provider?: unknown; permissions?: RolePermissionsMap } | null,
+): boolean {
   if (!user?.role) return true;
-  if (user.role === "professional") return false;
-  if (user.role === "admin") {
-    return user.provider == null;
-  }
+  if (user.provider != null) return false;
+  const role = normalizeRoleCode(user.role);
+  if (role === "tisupport" || role === "central") return false;
+  if (canActAsAssociate(user.role, user.permissions)) return true;
+  if (role === "admin") return true;
   return !(ROLES_HIDING_BECOME_PRO_CTA as readonly string[]).includes(user.role);
 }
 
@@ -34,16 +37,28 @@ export function canAccessCentralDashboard(user: { role?: string } | null): boole
 }
 
 /**
- * Ruta `/dashboard` (actividad / abono asociado): solo administrador pleno, profesionales y conductores
- * (perfil de proveedor en API o rol `professional`). Excluye clientes y Soporte TI.
+ * Ruta `/dashboard` (actividad / abono asociado): administrador, asociados con proveedor o rol asociado.
+ * Excluye clientes puros y Soporte TI.
  */
 export function canAccessAssociateActivityDashboard(
-  user: { role?: string; provider?: unknown } | null | undefined,
+  user: { role?: string; provider?: unknown; permissions?: RolePermissionsMap } | null | undefined,
   hasProviderProfile: boolean,
 ): boolean {
   if (hasFullAdminRole(user ?? null)) return true;
   if (hasProviderProfile) return true;
-  return normalizeRoleCode(user?.role) === "professional";
+  return canActAsAssociate(user?.role, user?.permissions);
+}
+
+/**
+ * Panel `/dashboard` común: asociados/profesionales y también clientes (historial como cliente).
+ */
+export function canAccessActivityDashboard(
+  user: { role?: string; provider?: unknown; permissions?: RolePermissionsMap } | null | undefined,
+  hasProviderProfile: boolean,
+): boolean {
+  if (canAccessAssociateActivityDashboard(user, hasProviderProfile)) return true;
+  const role = normalizeRoleCode(user?.role);
+  return role === "client";
 }
 
 /**

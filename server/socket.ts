@@ -69,6 +69,14 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
       userActivePath.set(String(user.id), p);
     });
 
+    socket.on("driver:work_mode", (data: { mode?: string; at?: number }) => {
+      const mode = data?.mode === "taxi" || data?.mode === "delivery" || data?.mode === "off" ? data.mode : null;
+      if (!mode) return;
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[driver:work_mode] user=${user.id} mode=${mode} at=${data?.at ?? "—"}`);
+      }
+    });
+
     // Admin y Soporte TI entran al room "admin" (notificaciones internas: recargas, retiros, etc.)
     if (isFullAdmin(user.role)) {
       socket.join("admin");

@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -13,12 +13,18 @@ import {
 import type { GeoJsonObject } from "geojson";
 import L from "leaflet";
 import { Loader2, Navigation } from "lucide-react";
-import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
+import {
+  getEffectiveLeafletMaxZoom,
+  getLeafletMapContainerBehaviorProps,
+  getLeafletTileLayerBehaviorProps,
+  getTaxiRasterLayerProps,
+} from "@/components/taxi/leaflet-config";
 import { useTheme } from "@/contexts/ThemeContext";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { cn } from "@/lib/utils";
+import { mapBoundsFitKey, mapPointFitKey } from "@/lib/leaflet-map-camera";
 import { isLeafletMapContainerLive, safeInvalidateSize } from "@/lib/safe-leaflet";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,23 +57,17 @@ function MapClickLayer({ onPick }: { onPick: (lat: number, lon: number) => void 
   return null;
 }
 
-function FitRouteBounds({
-  start,
-  end,
-  extra,
-}: {
-  start: MapPoint | null;
-  end: MapPoint | null;
-  extra: ReadonlyArray<{ lat: number; lon: number }>;
-}) {
+function FitRouteBounds({ start, end }: { start: MapPoint; end: MapPoint }) {
   const map = useMap();
+  const lastFitKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!start || !end) return;
+    const key = mapBoundsFitKey(start, end);
+    if (lastFitKeyRef.current === key) return;
+    lastFitKeyRef.current = key;
     let cancelled = false;
     try {
       if (!isLeafletMapContainerLive(map)) return;
       const bounds = L.latLngBounds(L.latLng(start.lat, start.lon), L.latLng(end.lat, end.lon));
-      for (const p of extra) bounds.extend(L.latLng(p.lat, p.lon));
       map.fitBounds(bounds, { padding: [52, 52], maxZoom: 15 });
       const raf = requestAnimationFrame(() => {
         if (!cancelled) safeInvalidateSize(map);
@@ -77,21 +77,25 @@ function FitRouteBounds({
         cancelAnimationFrame(raf);
       };
     } catch {
-      /* mapa desmontándose (Leaflet panes/_leaflet_pos aún no listos) */
+      /* mapa desmontándose */
     }
-  }, [map, start?.lat, start?.lon, end?.lat, end?.lon, extra]);
+  }, [map, start.lat, start.lon, end.lat, end.lon]);
   return null;
 }
 
 function FocusSinglePoint({ point }: { point: MapPoint | null }) {
   const map = useMap();
+  const lastKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!point) return;
+    const z = Math.max(map.getZoom(), 14);
+    const key = mapPointFitKey(point, z);
+    if (lastKeyRef.current === key) return;
+    lastKeyRef.current = key;
     let cancelled = false;
     try {
       if (!isLeafletMapContainerLive(map)) return;
       const ll = L.latLng(point.lat, point.lon);
-      const z = Math.max(map.getZoom(), 14);
       map.setView(ll, z, { animate: true });
       const raf = requestAnimationFrame(() => {
         if (!cancelled) safeInvalidateSize(map);
@@ -110,7 +114,11 @@ function FocusSinglePoint({ point }: { point: MapPoint | null }) {
 /** Centra el mapa cuando cambian defaultCenter/defaultZoom (p. ej. GPS inicial). */
 function SyncBootstrapView({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useMap();
+  const lastKeyRef = useRef<string | null>(null);
   useEffect(() => {
+    const key = mapPointFitKey({ lat: center[0], lon: center[1] }, zoom);
+    if (lastKeyRef.current === key) return;
+    lastKeyRef.current = key;
     let cancelled = false;
     try {
       if (!isLeafletMapContainerLive(map)) return;
@@ -289,6 +297,10 @@ export function TaxiRouteMap({
 }: TaxiRouteMapProps) {
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
+  const tileBehavior = getLeafletTileLayerBehaviorProps();
+  const mapBehavior = getLeafletMapContainerBehaviorProps();
+  const tileMaxZoom = getEffectiveLeafletMaxZoom(raster.maxZoom);
+  const perspectiveEnabled = MAP_PERSPECTIVE_CONTROLS_VISIBLE;
   const singleFocus = start && !end ? start : !start && end ? end : null;
   const pickHandler = suppressMapPick ? () => {} : onMapPick;
   const customZoom = zoomPosition !== "default";
@@ -354,13 +366,13 @@ export function TaxiRouteMap({
         <div
           className={
             fullscreen
-              ? "relative h-full min-h-0 flex-1 [perspective:960px]"
-              : "relative h-full min-h-[400px] [perspective:960px]"
+              ? cn("relative h-full min-h-0 flex-1", perspectiveEnabled && "[perspective:960px]")
+              : cn("relative h-full min-h-[400px]", perspectiveEnabled && "[perspective:960px]")
           }
         >
           <div
             className="h-full w-full overflow-hidden rounded-xl transition-transform duration-300 ease-out"
-            style={{ transform: `rotateX(${tiltDeg}deg)` }}
+            style={perspectiveEnabled ? { transform: `rotateX(${tiltDeg}deg)` } : undefined}
           >
             <MapContainer
               center={defaultCenter}
@@ -370,24 +382,27 @@ export function TaxiRouteMap({
               className="h-full w-full rounded-xl border border-border z-0"
               style={{ width: "100%", height: "100%", minHeight: fullscreen ? 0 : 400 }}
               scrollWheelZoom
+              maxZoom={tileMaxZoom}
+              {...mapBehavior}
             >
               {zoomPosition === "topright" ? <ZoomControl position="topright" /> : null}
               {zoomPosition === "bottomleft" ? <ZoomControl position="bottomleft" /> : null}
               {zoomPosition === "bottomright" ? <ZoomControl position="bottomright" /> : null}
-              <MapPaneBearing degrees={bearingDeg} />
+              {bearingDeg !== 0 ? <MapPaneBearing degrees={bearingDeg} /> : null}
               <TileLayer
                 key={`tiles-${theme}`}
                 attribution={raster.attribution}
                 url={raster.url}
-                maxZoom={raster.maxZoom}
+                maxZoom={tileMaxZoom}
                 {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
                 {...(raster.apiKey ? { apiKey: raster.apiKey } : {})}
+                {...tileBehavior}
               />
               <LeafletMapLayoutFix />
               {syncDefaultView ? <SyncBootstrapView center={defaultCenter} zoom={defaultZoom} /> : null}
               <MapClickLayer onPick={pickHandler} />
               {onRecenter ? <RecenterControl onClick={onRecenter} zoomPosition={zoomPosition} /> : null}
-              {fitStart && fitEnd ? <FitRouteBounds start={fitStart} end={fitEnd} extra={markers} /> : null}
+              {fitStart && fitEnd && !routeFocus ? <FitRouteBounds start={fitStart} end={fitEnd} /> : null}
               {singleFocus && <FocusSinglePoint point={singleFocus} />}
               {start && (
                 <CircleMarker

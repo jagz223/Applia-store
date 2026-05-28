@@ -5,6 +5,7 @@ import type { DispatchMobilityFares, DispatchPackFares, CentralServiceMapView } 
 import type { CentralFleetDriver } from "@/hooks/use-central";
 import { Button } from "@/components/ui/button";
 import { CentralFleetMap } from "@/components/central/CentralFleetMap";
+import { CentralFleetActiveList, CentralFleetActiveListHeader } from "@/components/central/CentralFleetActiveList";
 import { CentralBottomNav, type CentralMobileTab } from "@/components/central/CentralBottomNav";
 import { CentralDriverMapSheet } from "@/components/central/CentralDriverSheet";
 import { CentralFaresPanel } from "@/components/central/CentralFaresPanel";
@@ -78,6 +79,8 @@ export type CentralDashboardMobileProps = {
   selectedCompanyId: string | null;
   onCompanyChange: (id: string | null) => void;
   driversOnMap: CentralFleetDriver[];
+  activeFleet: CentralFleetDriver[];
+  mapFocusNonce: number;
   fleetCount: number;
   inServiceCount: number;
   membersCount: number;
@@ -110,6 +113,8 @@ export function CentralDashboardMobile({
   selectedCompanyId,
   onCompanyChange,
   driversOnMap,
+  activeFleet,
+  mapFocusNonce,
   fleetCount,
   inServiceCount,
   membersCount,
@@ -131,6 +136,7 @@ export function CentralDashboardMobile({
   fleetRefreshing,
 }: CentralDashboardMobileProps) {
   const [tab, setTab] = useState<CentralMobileTab>("map");
+  const [fleetListOpen, setFleetListOpen] = useState(false);
 
   useEffect(() => {
     if (highlightAffiliationRequestId) setTab("requests");
@@ -166,6 +172,7 @@ export function CentralDashboardMobile({
             onPersistServiceMap={onPersistServiceMap}
             persistServiceMapPending={persistServiceMapPending}
             followDriver={selectedDriver}
+            focusNonce={mapFocusNonce}
             onRefreshFleet={onRefreshFleet}
             fleetRefreshing={fleetRefreshing}
           />
@@ -190,7 +197,7 @@ export function CentralDashboardMobile({
               </span>
               <span className={centralViewportClasses.mapOverlayChip}>
                 <Radio className="mr-1 inline h-3 w-3" />
-                {fleetCount} activos
+                {activeFleet.length} activos
               </span>
             </div>
             {isAdmin && (
@@ -205,6 +212,36 @@ export function CentralDashboardMobile({
                 />
               </div>
             )}
+          </div>
+
+          <div
+            className="pointer-events-none absolute inset-x-0 z-30 flex flex-col px-3"
+            style={{ bottom: "calc(var(--central-bottom-nav-height, 4.25rem) + 0.5rem)" }}
+          >
+            <div className="pointer-events-auto overflow-hidden rounded-2xl border border-border/80 bg-background/95 shadow-xl backdrop-blur-md">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+                onClick={() => setFleetListOpen((o) => !o)}
+                aria-expanded={fleetListOpen}
+              >
+                <CentralFleetActiveListHeader count={activeFleet.length} />
+                <span className="text-xs font-medium text-primary">{fleetListOpen ? "Ocultar" : "Ver lista"}</span>
+              </button>
+              {fleetListOpen ? (
+                <div className="border-t border-border/60 px-3 pb-3 pt-1">
+                  <CentralFleetActiveList
+                    drivers={activeFleet}
+                    selectedUserId={selectedDriver?.userId ?? null}
+                    onSelectDriver={(d) => {
+                      onSelectDriver(d);
+                      setFleetListOpen(false);
+                    }}
+                    maxHeightClass="max-h-[min(38vh,320px)]"
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <CentralDriverMapSheet driver={selectedDriver} onClose={() => onSelectDriver(null)} />

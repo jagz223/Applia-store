@@ -222,6 +222,14 @@ async function loadForUserFromFirestore(userId: string, limit: number): Promise<
   return rows.slice(0, limit);
 }
 
+/** Viajes Go terminados con éxito (Car Go + Pack Go) en los que participó el usuario. */
+export async function countCompletedMobilityTripsForUser(userId: string): Promise<number> {
+  const key = String(userId ?? "").trim();
+  if (!key) return 0;
+  const rows = await loadForUserFromFirestore(key, 500);
+  return rows.filter((r) => r.outcome === "completed").length;
+}
+
 export async function listMobilityRideHistoryForUser(
   userId: string,
   options?: { limit?: number; role?: "rider" | "driver" }

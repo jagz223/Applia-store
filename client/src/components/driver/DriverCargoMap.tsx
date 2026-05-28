@@ -5,7 +5,12 @@ import L from "leaflet";
 import { Loader2, LocateFixed, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { GeoJsonObject } from "geojson";
-import { getTaxiRasterLayerProps } from "@/components/taxi/leaflet-config";
+import {
+  getEffectiveLeafletMaxZoom,
+  getLeafletMapContainerBehaviorProps,
+  getLeafletTileLayerBehaviorProps,
+  getTaxiRasterLayerProps,
+} from "@/components/taxi/leaflet-config";
 import { useTheme } from "@/contexts/ThemeContext";
 import "@/components/taxi/leaflet-config";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
@@ -155,14 +160,6 @@ function InitialFlyToGpsIfNoPersisted({
       if (!c?.isConnected) return;
       map.setView(L.latLng(me.lat, me.lon), Math.max(map.getZoom(), 15), { animate: true });
       writePersistedMapView(me.lat, me.lon, Math.max(map.getZoom(), 15));
-      requestAnimationFrame(() => {
-        try {
-          if (!map.getContainer()?.isConnected) return;
-          map.invalidateSize({ animate: false });
-        } catch {
-          /* mapa desmontado */
-        }
-      });
     } catch {
       /* contenedor Leaflet no listo o ya desmontado */
     }
@@ -180,17 +177,23 @@ function FitToService({
   me: { lat: number; lon: number } | null;
 }) {
   const map = useMap();
+  const lastPhaseKeyRef = useRef<string | null>(null);
+  const hadMeForFitRef = useRef(false);
   useEffect(() => {
     if (!end) return;
-    if (!me && !start) return;
+    const anchor = me ?? start;
+    if (!anchor) return;
+    const phaseKey = `svc|${end.lat.toFixed(5)},${end.lon.toFixed(5)}|${start?.lat?.toFixed(5) ?? "x"},${start?.lon?.toFixed(5) ?? "x"}`;
+    if (lastPhaseKeyRef.current !== phaseKey) hadMeForFitRef.current = false;
+    const meJustArrived = !!me && !hadMeForFitRef.current;
+    if (lastPhaseKeyRef.current === phaseKey && !meJustArrived) return;
+    if (me) hadMeForFitRef.current = true;
+    lastPhaseKeyRef.current = phaseKey;
     try {
       const c = map.getContainer();
       if (!c?.isConnected) return;
-      const bounds = L.latLngBounds(L.latLng(end.lat, end.lon), L.latLng(end.lat, end.lon));
-      if (me) bounds.extend(L.latLng(me.lat, me.lon));
-      else if (start) bounds.extend(L.latLng(start.lat, start.lon));
+      const bounds = L.latLngBounds(L.latLng(end.lat, end.lon), L.latLng(anchor.lat, anchor.lon));
       map.fitBounds(bounds, { padding: [52, 52], maxZoom: 15 });
-      requestAnimationFrame(() => map.invalidateSize({ animate: false }));
     } catch {
       /* mapa desmontándose */
     }
@@ -316,14 +319,6 @@ function DriverMapRecenterToolbar({
       try {
         if (!map.getContainer()?.isConnected) return;
         map.setView(L.latLng(lat, lon), Math.max(map.getZoom(), 15), { animate: true });
-        requestAnimationFrame(() => {
-          try {
-            if (!map.getContainer()?.isConnected) return;
-            map.invalidateSize({ animate: false });
-          } catch {
-            /* mapa desmontado */
-          }
-        });
       } catch {
         /* mapa desmontado */
       }
@@ -401,6 +396,8 @@ export type DriverCargoMapProps = {
   routeGeometry?: GeoJsonObject | null;
   /** Forzar remount de GeoJSON cuando cambia la ruta (Leaflet a veces no redibuja solo con `data`). */
   routeRenderKey?: number;
+  /** Oculta el aviso inferior «Buscando tu ubicación…» (p. ej. cuando hay control deslizante encima). */
+  hideLocationSearchingHint?: boolean;
 };
 
 export function DriverCargoMap({
@@ -413,9 +410,14 @@ export function DriverCargoMap({
   end = null,
   routeGeometry = null,
   routeRenderKey = 0,
+  hideLocationSearchingHint = false,
 }: DriverCargoMapProps) {
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
+  const tileBehavior = getLeafletTileLayerBehaviorProps();
+  const mapBehavior = getLeafletMapContainerBehaviorProps();
+  const tileMaxZoom = getEffectiveLeafletMaxZoom(raster.maxZoom);
+  const perspectiveEnabled = MAP_PERSPECTIVE_CONTROLS_VISIBLE;
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: fullscreen ? 120 : 64 });
   const [me, setMe] = useState<{ lat: number; lon: number } | null>(null);
   const meRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -471,8 +473,8 @@ export function DriverCargoMap({
         <div
           className={
             fullscreen
-              ? "relative h-full min-h-0 flex-1 [perspective:960px]"
-              : "relative h-full min-h-[260px] [perspective:960px]"
+              ? cn("relative h-full min-h-0 flex-1", perspectiveEnabled && "[perspective:960px]")
+              : cn("relative h-full min-h-[260px]", perspectiveEnabled && "[perspective:960px]")
           }
         >
           <div
@@ -481,7 +483,7 @@ export function DriverCargoMap({
                 ? "h-full w-full overflow-hidden rounded-none transition-transform duration-300 ease-out"
                 : "h-full w-full overflow-hidden rounded-2xl transition-transform duration-300 ease-out"
             }
-            style={{ transform: `rotateX(${tiltDeg}deg)` }}
+            style={perspectiveEnabled ? { transform: `rotateX(${tiltDeg}deg)` } : undefined}
           >
             <MapContainer
               center={initialFrame.center}
@@ -491,6 +493,8 @@ export function DriverCargoMap({
               className={fullscreen ? "z-0 h-full w-full rounded-none" : "z-0 h-full w-full rounded-2xl"}
               style={{ width: "100%", height: "100%", minHeight: fullscreen ? 0 : 260 }}
               scrollWheelZoom
+              maxZoom={tileMaxZoom}
+              {...mapBehavior}
             >
               {/* topright: evita solaparse con chips/banners en la esquina superior izquierda del overlay */}
               {fullscreen ? <ZoomControl position="topright" /> : null}
@@ -499,14 +503,15 @@ export function DriverCargoMap({
                 receiving={receiving}
                 searchingClient={searchingClient}
               />
-              <MapPaneBearing degrees={bearingDeg} />
+              {bearingDeg !== 0 ? <MapPaneBearing degrees={bearingDeg} /> : null}
               <TileLayer
                 key={`tiles-${theme}`}
                 attribution={raster.attribution}
                 url={raster.url}
-                maxZoom={raster.maxZoom}
+                maxZoom={tileMaxZoom}
                 {...(raster.subdomains != null ? { subdomains: raster.subdomains } : {})}
                 {...(raster.apiKey ? { apiKey: raster.apiKey } : {})}
+                {...tileBehavior}
               />
               <LeafletMapLayoutFix />
               <PersistDriverMapView />
@@ -559,7 +564,7 @@ export function DriverCargoMap({
           ) : null}
         </div>
       )}
-      {!me && ready && (
+      {!hideLocationSearchingHint && !me && ready && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3">
           <p className="rounded-full border border-border bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow">
             Buscando tu ubicación… activa el GPS. Si tarda, usa el botón de ubicación junto a +/− en el mapa para

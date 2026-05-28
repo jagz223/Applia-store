@@ -31,12 +31,35 @@ import { hasAdminPrivileges, isFullAdmin, normalizeRoleCode } from "@shared/role
 import { isWalletAtOrBelowDebtCap, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { isOffPlatformServiceBookingPayment, serviceBookingPaymentLabel } from "@shared/booking-payment";
 import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
+import { buildGoMobilityChatPath } from "@shared/chat-notification-open";
+import { getMobilityRideChatParticipants } from "./mobility-rides";
+import { getPackRideChatParticipants } from "./pack-rides";
 
 // Usar storage de GenFeb para las nuevas funcionalidades
 const storage = genFebStorage;
 
 /** Mensajes por página en el chat (paginación). Balance entre UX y carga en servidor. */
 export const CHAT_MESSAGES_PAGE_SIZE = 25;
+
+function chatPushUrlForMobilityConversation(
+  conv: { kind?: string; mobilityRideId?: string; mobilityRideModule?: string },
+  recipientUserId: string,
+  conversationId: number,
+): string | undefined {
+  if (String(conv.kind ?? "") !== "mobility_ride") return undefined;
+  const rideId = String(conv.mobilityRideId ?? "").trim();
+  const module =
+    conv.mobilityRideModule === "delivery" ? ("delivery" as const) : ("taxi" as const);
+  const cargo = rideId ? getMobilityRideChatParticipants(rideId) : null;
+  const pack = rideId && !cargo ? getPackRideChatParticipants(rideId) : null;
+  const participants = cargo ?? pack;
+  const rideModule = cargo ? ("taxi" as const) : pack ? ("delivery" as const) : module;
+  return buildGoMobilityChatPath(conversationId, {
+    recipientUserId: String(recipientUserId),
+    module: rideModule,
+    driverUserId: participants?.driverUserId ?? null,
+  });
+}
 
 function conversationTimestampToIso(v: unknown): string | null {
   if (v == null) return null;
@@ -1613,6 +1636,9 @@ export async function registerGenFebRoutes(
             messagesLocked: !!(c as any).messagesLocked,
             bookingId: (c as any).bookingId ?? null,
             kind: (c as any).kind ?? null,
+            mobilityRideId: (c as any).mobilityRideId ?? null,
+            mobilityRideInProgress: !!(c as any).mobilityRideInProgress,
+            mobilityRideCompleted: !!(c as any).mobilityRideCompleted,
             otherParticipant: { 
               id: String(otherUser?.id ?? otherId), 
               name,
@@ -1745,6 +1771,7 @@ export async function registerGenFebRoutes(
         conversationId: message.conversationId,
         preview: messagePreview,
         senderId: userId,
+        pushUrl: chatPushUrlForMobilityConversation(conv, recipientIdStr, message.conversationId),
       });
 
       const io = getIO();

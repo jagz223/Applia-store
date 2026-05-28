@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import { storeVerifyReturnPath } from "@/lib/verify-return-path";
 import { AlertCircle } from "lucide-react";
 import { useCategories, useCurrentProvider, useVerifyingStatusMe } from "@/hooks/use-mango-data";
@@ -26,7 +27,7 @@ export function ProfessionalVerificationBanner() {
   const provider = currentProvider || user?.provider;
   const { data: categories = [] } = useCategories();
   const bannerKind = useMemo(() => getVerificationBannerKind(provider ?? undefined, categories), [provider, categories]);
-  const isPro = user != null && (user.role === "professional" || provider != null);
+  const isPro = user != null && (provider != null || userCanActAsAssociate(user));
   const unverified = provider != null && provider.isVerified !== true;
 
   const fetchVerifyingStatus =

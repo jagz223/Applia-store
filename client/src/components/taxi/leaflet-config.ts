@@ -4,8 +4,20 @@
  */
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import type { MapOptions } from "leaflet";
 
 const geoapifyKey = String(import.meta.env.VITE_GEOAPIFY_API_KEY ?? "").trim();
+
+/** Móvil / pantalla táctil: menos animación y teselas más ligeras. */
+export function isLeafletMobileMap(): boolean {
+  if (typeof window === "undefined") return false;
+  if (L.Browser.mobile) return true;
+  try {
+    return window.matchMedia("(pointer: coarse)").matches;
+  } catch {
+    return false;
+  }
+}
 
 /** Modo claro: Carto Voyager (reserva si no hay `VITE_GEOAPIFY_API_KEY`). */
 export const TAXI_TILE_LAYER_URL =
@@ -69,7 +81,8 @@ export function getTaxiRasterLayerProps(isDarkMode: boolean): {
   apiKey?: string;
 } {
   if (geoapifyKey) {
-    const retina = L.Browser.retina;
+    // @2x en móvil duplica peso de red y agrava “cuadros blancos” al hacer zoom.
+    const retina = L.Browser.retina && !isLeafletMobileMap();
     const style = isDarkMode ? "dark-matter" : "osm-bright";
     const url = retina
       ? `https://maps.geoapify.com/v1/tile/${style}/{z}/{x}/{y}@2x.png?apiKey={apiKey}`
@@ -95,6 +108,44 @@ export function getTaxiRasterLayerProps(isDarkMode: boolean): {
     attribution: TAXI_TILE_ATTRIBUTION,
     maxZoom: TAXI_TILE_MAX_ZOOM,
     subdomains: TAXI_TILE_SUBDOMAINS,
+  };
+}
+
+/** Zoom máximo efectivo (menos teselas en móvil). */
+export function getEffectiveLeafletMaxZoom(maxZoom: number): number {
+  const cap = isLeafletMobileMap() ? 18 : maxZoom;
+  return Math.min(maxZoom, cap);
+}
+
+/**
+ * Opciones del mapa para reducir huecos blancos al zoom.
+ * En móvil el zoom es instantáneo (sin estirar teselas viejas).
+ */
+export function getLeafletMapContainerBehaviorProps(): Pick<
+  MapOptions,
+  "fadeAnimation" | "zoomAnimation" | "zoomAnimationThreshold" | "markerZoomAnimation"
+> {
+  const mobile = isLeafletMobileMap();
+  return {
+    fadeAnimation: false,
+    zoomAnimation: !mobile,
+    zoomAnimationThreshold: mobile ? 0 : 4,
+    markerZoomAnimation: !mobile,
+  };
+}
+
+/** Reduce parpadeos / “cuadros blancos” al pan/zoom o redimensionar. */
+export function getLeafletTileLayerBehaviorProps(): {
+  updateWhenIdle: boolean;
+  updateWhenZooming: boolean;
+  keepBuffer: number;
+} {
+  const mobile = isLeafletMobileMap();
+  return {
+    updateWhenIdle: true,
+    // Escritorio: precargar durante zoom para tapar huecos; móvil: zoom sin animación.
+    updateWhenZooming: !mobile,
+    keepBuffer: mobile ? 3 : 5,
   };
 }
 

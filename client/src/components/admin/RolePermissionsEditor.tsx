@@ -5,6 +5,8 @@ import {
   ASSOCIATE_CENTRAL_PERMISSION_AREAS,
   CLIENT_PERMISSION_AREA,
   ALL_ROLE_PERMISSION_KEYS,
+  applyImpliedRolePermissions,
+  filterVisiblePermissionAreas,
   isAdminSuiteEnabled,
   emptyPermissionsMap,
   type RolePermissionKey,
@@ -88,12 +90,25 @@ export function RolePermissionsEditor({
   readOnly = false,
   disabled = false,
 }: RolePermissionsEditorProps) {
-  const perms = useMemo(() => normalizePermissionsValue(value), [value]);
+  const perms = useMemo(() => applyImpliedRolePermissions(normalizePermissionsValue(value)), [value]);
   const adminSuiteOn = isAdminSuiteEnabled(perms);
+  const visibleAdminAreas = useMemo(() => filterVisiblePermissionAreas(ADMIN_PERMISSION_AREAS), []);
+  const visibleAssociateCentralAreas = useMemo(
+    () => filterVisiblePermissionAreas(ASSOCIATE_CENTRAL_PERMISSION_AREAS),
+    [],
+  );
+  const visibleClientArea = useMemo(() => {
+    const [area] = filterVisiblePermissionAreas([CLIENT_PERMISSION_AREA]);
+    return area ?? null;
+  }, []);
+
+  function emitPermissions(next: Record<RolePermissionKey, boolean>) {
+    onChange(applyImpliedRolePermissions(next));
+  }
 
   function toggle(key: RolePermissionKey, checked: boolean) {
     if (readOnly || disabled) return;
-    onChange({ ...perms, [key]: checked });
+    emitPermissions({ ...perms, [key]: checked });
   }
 
   function toggleAdminSuite(checked: boolean) {
@@ -109,7 +124,7 @@ export function RolePermissionsEditor({
         }
       }
     }
-    onChange(next);
+    emitPermissions(next);
   }
 
   return (
@@ -143,7 +158,7 @@ export function RolePermissionsEditor({
         </div>
         {adminSuiteOn ? (
           <div className="p-4 space-y-5">
-            {ADMIN_PERMISSION_AREAS.map((area) => (
+            {visibleAdminAreas.map((area) => (
               <PermissionGrid
                 key={area.id}
                 area={area}
@@ -169,7 +184,7 @@ export function RolePermissionsEditor({
             Permisos de proveedor (asociado/driver) y de empresa despachadora (central).
           </p>
         </div>
-        {ASSOCIATE_CENTRAL_PERMISSION_AREAS.map((area) => (
+        {visibleAssociateCentralAreas.map((area) => (
           <PermissionGrid
             key={area.id}
             area={area}
@@ -182,21 +197,23 @@ export function RolePermissionsEditor({
       </section>
 
       {/* Cliente */}
-      <section className={cn("rounded-lg border border-border bg-muted/20 p-4 space-y-4")}>
-        <div>
-          <p className="text-base font-semibold text-foreground">Opciones de Cliente</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Uso básico de la plataforma para contratar servicios.
-          </p>
-        </div>
-        <PermissionGrid
-          area={CLIENT_PERMISSION_AREA}
-          perms={perms}
-          readOnly={readOnly}
-          disabled={disabled}
-          onToggle={toggle}
-        />
-      </section>
+      {visibleClientArea ? (
+        <section className={cn("rounded-lg border border-border bg-muted/20 p-4 space-y-4")}>
+          <div>
+            <p className="text-base font-semibold text-foreground">Opciones de Cliente</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Uso básico de la plataforma para contratar servicios.
+            </p>
+          </div>
+          <PermissionGrid
+            area={visibleClientArea}
+            perms={perms}
+            readOnly={readOnly}
+            disabled={disabled}
+            onToggle={toggle}
+          />
+        </section>
+      ) : null}
     </div>
   );
 }

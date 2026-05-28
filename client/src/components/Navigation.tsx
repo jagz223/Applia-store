@@ -5,10 +5,11 @@ import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { useAssociateOnboardingIncomplete } from "@/hooks/use-associate-onboarding-incomplete";
 import {
   hasAdminRole,
-  canAccessAssociateActivityDashboard,
+  canAccessActivityDashboard,
   canAccessPromocionesPanel,
   canAccessCentralDashboard,
 } from "@/lib/auth-utils";
+import { userCanActAsAssociate } from "@/lib/user-permissions";
 import { isGoVehicleProvider } from "@shared/provider-car-go";
 import { isCentralRole } from "@shared/roles";
 import { Button } from "@/components/ui/button";
@@ -92,11 +93,11 @@ export function Navigation() {
   const showBecomePro = useShowBecomePro();
   const { data: providerProfile } = useCurrentProvider();
   /** Incluir `user.provider`: si el perfil remoto aún no cargó, igual debemos pedir /api/me/services. */
-  const shouldFetchMyServices =
-    isAuthenticated &&
-    (!!providerProfile ||
-      !!(user as { provider?: unknown } | null)?.provider ||
-      (user as { role?: string } | null)?.role === "professional");
+  const actsAsAssociate =
+    !!providerProfile ||
+    !!(user as { provider?: unknown } | null)?.provider ||
+    userCanActAsAssociate(user);
+  const shouldFetchMyServices = isAuthenticated && actsAsAssociate;
   const { data: myServices = [], isLoading: myServicesLoading } = useMyServices({
     enabled: shouldFetchMyServices,
   });
@@ -148,13 +149,13 @@ export function Navigation() {
 
   const isActive = (path: string) => location === path || location.startsWith(path + '/');
 
-  /** Mostrar opciones de profesional si tiene perfil de proveedor o rol professional (por si el perfil no carga). */
-  const isProfessional = !!providerProfile || (user as { role?: string } | null)?.role === "professional";
+  /** Asociado: perfil proveedor o permisos/rol de asociado en el catálogo. */
+  const isProfessional = actsAsAssociate;
   const hasProviderForDashboard =
     !!providerProfile || !!(user as { provider?: unknown } | null)?.provider;
   const isGoAssociateDriver =
     !!providerProfile && isGoVehicleProvider(providerProfile, categories);
-  const canAccessActivityDashboard = canAccessAssociateActivityDashboard(user, hasProviderForDashboard);
+  const canAccessActivityDashboardNav = canAccessActivityDashboard(user, hasProviderForDashboard);
   const showPromocionesNav =
     isAuthenticated &&
     canAccessPromocionesPanel(user, hasProviderForDashboard, {
@@ -236,7 +237,7 @@ export function Navigation() {
           {canSeeMobility &&
             (isAdmin || (isProfessional && !myServicesLoading && !providerVehicleLoading && (isCarGoDriver || canUseGoDriverConducir))) && (
             <DropdownMenuItem asChild>
-              <Link href="/go/taxi/driver" className="flex items-center gap-2 w-full">
+              <Link href="/go/driver" className="flex items-center gap-2 w-full">
                 <Car className="h-4 w-4" />
                 <span>Conducir</span>
               </Link>
@@ -446,7 +447,7 @@ export function Navigation() {
                 <Button variant="outline" className="hidden sm:flex border-primary text-primary hover:bg-primary/10" asChild>
                   <Link href="/become-pro">Convertirse en Asociado</Link>
                 </Button>
-              ) : canAccessActivityDashboard ? (
+              ) : canAccessActivityDashboardNav ? (
                  <Button variant="ghost" className="hidden sm:flex items-center gap-2 text-primary" asChild>
                    <Link href="/dashboard">
                      <LayoutDashboard className="h-4 w-4" />
@@ -487,7 +488,7 @@ export function Navigation() {
                       </Link>
                     </DropdownMenuItem>
                   )}
-                  {canAccessActivityDashboard && (
+                  {canAccessActivityDashboardNav && (
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard" className="flex items-center">
                       <LayoutDashboard className="mr-2 h-4 w-4" />
@@ -664,7 +665,7 @@ export function Navigation() {
                   (isAdmin ||
                     (isProfessional && !myServicesLoading && !providerVehicleLoading && (isCarGoDriver || canUseGoDriverConducir))) && (
                   <Link
-                    href="/go/taxi/driver"
+                    href="/go/driver"
                     className="text-lg font-medium flex items-center gap-2 hover:text-primary transition-colors"
                     onClick={() => setMobileOpen(false)}
                   >
@@ -689,7 +690,7 @@ export function Navigation() {
                     )}
                   </>
                 )}
-                {canAccessActivityDashboard && (
+                {canAccessActivityDashboardNav && (
                 <Link href="/dashboard" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Mi Panel
                 </Link>

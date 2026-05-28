@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GeoJsonObject } from "geojson";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, MapPin, Minus, Plus, RefreshCw, Star, Tags } from "lucide-react";
+import { Car, Loader2, MapPin, Minus, Package, Plus, RefreshCw, Star, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { TaxiRouteMap } from "@/components/taxi/TaxiRouteMap";
@@ -80,6 +80,9 @@ type Props = {
   active?: boolean;
   providerVehicleType?: string;
   providerIsPetFriendly?: boolean;
+  /** Módulo visible en el tablero (taxi o delivery). */
+  viewModule: "cargo" | "pack";
+  onViewModuleChange: (module: "cargo" | "pack") => void;
   onOfferSubmitted?: (rideId: string, amountUsd: number, module: "cargo" | "pack") => void;
   canSubmitNegotiationOffers?: boolean;
   /** Mensaje cuando no puede enviar ofertas (p. ej. suscripción vencida). */
@@ -94,6 +97,8 @@ export function GoDriverNegotiationBoardPanel({
   active = true,
   providerVehicleType,
   providerIsPetFriendly = false,
+  viewModule,
+  onViewModuleChange,
   onOfferSubmitted,
   canSubmitNegotiationOffers = true,
   submitBlockedHint,
@@ -133,7 +138,7 @@ export function GoDriverNegotiationBoardPanel({
     if (!selectedSegmentId) return;
     setRows([]);
     firstBoardLoad.current = true;
-  }, [selectedSegmentId]);
+  }, [selectedSegmentId, viewModule]);
 
   const fetchBoard = useCallback(
     async (opts?: { manual?: boolean }) => {
@@ -150,41 +155,35 @@ export function GoDriverNegotiationBoardPanel({
       else if (firstBoardLoad.current) setLoading(true);
       try {
         const q = `?vehicleSegment=${encodeURIComponent(segment)}`;
-        const fetchPack = Object.prototype.hasOwnProperty.call(NEGOTIATION_MATCH_MAP_PACK, segment);
-        const cargoRes = await fetch(`/api/mobility/rides/negotiation-board${q}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const packRes = fetchPack
-          ? await fetch(`/api/pack/rides/negotiation-board${q}`, { headers: { Authorization: `Bearer ${token}` } })
-          : null;
+        const isPack = viewModule === "pack";
+        const fetchPack = isPack && Object.prototype.hasOwnProperty.call(NEGOTIATION_MATCH_MAP_PACK, segment);
+        const apiUrl = isPack
+          ? fetchPack
+            ? `/api/pack/rides/negotiation-board${q}`
+            : null
+          : `/api/mobility/rides/negotiation-board${q}`;
 
-        const cargoData = (await cargoRes.json().catch(() => ({}))) as BoardApiPayload;
-        const packData = packRes
-          ? ((await packRes.json().catch(() => ({}))) as BoardApiPayload)
-          : { offers: [] };
+        if (!apiUrl) {
+          setRows([]);
+          setLoadFailed(false);
+          return;
+        }
 
-        if (!cargoRes.ok) throw new Error(cargoData.message || "No se pudo cargar taxi");
-        if (packRes && !packRes.ok) throw new Error(packData.message || "No se pudo cargar delivery");
+        const res = await fetch(apiUrl, { headers: { Authorization: `Bearer ${token}` } });
+        const data = (await res.json().catch(() => ({}))) as BoardApiPayload;
+        if (!res.ok) {
+          throw new Error(data.message || (isPack ? "No se pudo cargar delivery" : "No se pudo cargar taxi"));
+        }
 
         const win =
-          typeof cargoData.negotiationWindowMs === "number"
-            ? cargoData.negotiationWindowMs
-            : typeof packData.negotiationWindowMs === "number"
-              ? packData.negotiationWindowMs
-              : GO_NEGOTIATION_OFFER_WINDOW_MS;
+          typeof data.negotiationWindowMs === "number" ? data.negotiationWindowMs : GO_NEGOTIATION_OFFER_WINDOW_MS;
         setNegotiationWindowMs(win);
 
-        const cargoRows = (Array.isArray(cargoData.offers) ? cargoData.offers : []).map((r) => ({
+        const moduleRows = (Array.isArray(data.offers) ? data.offers : []).map((r) => ({
           ...r,
-          serviceModule: "cargo" as const,
+          serviceModule: isPack ? ("pack" as const) : ("cargo" as const),
         }));
-        const packRows = (Array.isArray(packData.offers) ? packData.offers : []).map((r) => ({
-          ...r,
-          serviceModule: "pack" as const,
-        }));
-
-        const merged = [...cargoRows, ...packRows].sort((a, b) => a.createdAt - b.createdAt);
-        setRows(merged);
+        setRows(moduleRows.sort((a, b) => a.createdAt - b.createdAt));
         setLoadFailed(false);
       } catch {
         setRows([]);
@@ -197,7 +196,7 @@ export function GoDriverNegotiationBoardPanel({
         setRefreshing(false);
       }
     },
-    [selectedSegmentId]
+    [selectedSegmentId, viewModule],
   );
 
   useEffect(() => {
@@ -205,7 +204,7 @@ export function GoDriverNegotiationBoardPanel({
     void fetchBoard();
     const t = window.setInterval(() => void fetchBoard(), GO_NEGOTIATION_BOARD_POLL_MS);
     return () => window.clearInterval(t);
-  }, [active, selectedSegmentId, fetchBoard]);
+  }, [active, selectedSegmentId, viewModule, fetchBoard]);
 
   /** Retiros/rechazos en tiempo real: quitar filas sin esperar al polling. */
   useEffect(() => {
@@ -324,6 +323,40 @@ export function GoDriverNegotiationBoardPanel({
           {refreshing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
           Actualizar
         </Button>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:text-[11px]">
+          Ver servicios
+        </span>
+        <div className="flex gap-1.5 rounded-full border border-border/80 bg-muted/30 p-0.5">
+          <Button
+            type="button"
+            size="sm"
+            variant={viewModule === "cargo" ? "default" : "ghost"}
+            className={cn(
+              "h-8 shrink-0 gap-1 rounded-full px-3 text-xs",
+              viewModule === "cargo" && "bg-sky-600 text-white hover:bg-sky-700",
+            )}
+            onClick={() => onViewModuleChange("cargo")}
+          >
+            <Car className="h-3.5 w-3.5" aria-hidden />
+            Taxi
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={viewModule === "pack" ? "default" : "ghost"}
+            className={cn(
+              "h-8 shrink-0 gap-1 rounded-full px-3 text-xs",
+              viewModule === "pack" && "bg-violet-600 text-white hover:bg-violet-700",
+            )}
+            onClick={() => onViewModuleChange("pack")}
+          >
+            <Package className="h-3.5 w-3.5" aria-hidden />
+            {MOBILITY_UI.delivery}
+          </Button>
+        </div>
       </div>
 
       <div className="flex shrink-0 gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">

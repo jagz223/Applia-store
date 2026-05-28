@@ -1,5 +1,6 @@
 import { Star, X, Phone, Hash } from "lucide-react";
 import type { CentralFleetDriver } from "@/hooks/use-central";
+import { formatCentralFleetMapHint } from "@/lib/central-fleet-position";
 import { CentralActiveServicePanel } from "@/components/central/CentralActiveServicePanel";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +11,22 @@ import { cn } from "@/lib/utils";
 export function CentralDriverCard({ driver }: { driver: CentralFleetDriver }) {
   const phone = driver.phone?.trim() || null;
   const plate = driver.licensePlate?.trim() || null;
+  const mapHint = formatCentralFleetMapHint(driver);
+  const connectionLabel = driver.receivingStoppedAt
+    ? "Servicio apagado"
+    : driver.inService
+      ? driver.positionLive
+        ? "En movimiento"
+        : "En servicio"
+      : driver.receiving
+        ? "En línea"
+        : "Sin señal en vivo";
+  const connectionVariant =
+    driver.receiving || driver.inService
+      ? driver.receivingStoppedAt
+        ? "secondary"
+        : "outline"
+      : "secondary";
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
@@ -63,20 +80,29 @@ export function CentralDriverCard({ driver }: { driver: CentralFleetDriver }) {
         <Badge variant={driver.inService ? "default" : "secondary"}>
           {driver.inService ? "En servicio" : "Buscando clientes"}
         </Badge>
-        <Badge variant={driver.receiving ? "outline" : "destructive"}>
-          {driver.receiving ? "En línea" : "Desconectado"}
-        </Badge>
+        <Badge variant={connectionVariant}>{connectionLabel}</Badge>
       </div>
+      {mapHint ? (
+        <p className="text-xs text-muted-foreground">{mapHint}</p>
+      ) : null}
       {(driver.receivingTaxi || driver.receivingDelivery) ? (
         <div className="flex flex-wrap gap-2">
+          {driver.receivingTaxi && driver.receivingDelivery ? (
+            <Badge
+              variant="secondary"
+              className="border-emerald-500/35 bg-emerald-500/10 text-xs font-normal text-emerald-900 dark:text-emerald-100"
+            >
+              Modo híbrido · taxi y delivery
+            </Badge>
+          ) : null}
           {driver.receivingTaxi ? (
             <Badge variant="secondary" className="text-xs font-normal">
-              Recibiendo taxi
+              Trabajando · taxi
             </Badge>
           ) : null}
           {driver.receivingDelivery ? (
             <Badge variant="secondary" className="text-xs font-normal">
-              Recibiendo delivery
+              Trabajando · delivery
             </Badge>
           ) : null}
         </div>

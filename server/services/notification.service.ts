@@ -239,6 +239,8 @@ class NotificationService {
     conversationId: number;
     preview: string;
     senderId: string | number;
+    /** Si se define, se usa en push (p. ej. chat embebido Go: /go/driver?goChat=…). */
+    pushUrl?: string;
   }): Promise<void> {
     const db = getFirestore();
 
@@ -284,13 +286,18 @@ class NotificationService {
           return `De ${senderName}`;
         })();
 
+    const url =
+      typeof params.pushUrl === "string" && params.pushUrl.trim()
+        ? params.pushUrl.trim()
+        : `/chat?conversation=${params.conversationId}`;
+
     await this.sendPushToUser(this.normalizeUserId(params.recipientId), {
       title,
       body,
       data: {
         type: "chat_message",
         conversationId: String(params.conversationId),
-        url: `/chat?conversation=${params.conversationId}`,
+        url,
       },
     });
   }

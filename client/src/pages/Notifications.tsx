@@ -27,7 +27,11 @@ import {
   centralAffiliationNotificationPath,
 } from "@/lib/central-affiliation-notification-path";
 import { NOTIFICATION_TYPE_ROLE_CHANGED } from "@shared/role-change-notification";
-import { cn } from "@/lib/utils";
+import {
+  getNotificationAccentCtaClassName,
+  getNotificationCardClassName,
+  getNotificationTitleClassName,
+} from "@/lib/notification-card-ui";
 import {
   PUBLIC_PROMO_NOTIFICATION_CTA,
   getPublicPromoNotificationDescription,
@@ -663,24 +667,15 @@ export default function Notifications() {
                     key={notification.id}
                     type="button"
                     onClick={() => handleOpenNotification(notification)}
-                    className={cn(
-                      "w-full text-left p-3 rounded-lg border transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-primary/20",
-                      notification.read ? "bg-muted/50" : "bg-muted",
-                      isPromo && "border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/15 focus:ring-orange-500/30",
-                      isPromo && !notification.read && "ring-1 ring-orange-500/35",
-                    )}
+                    className={getNotificationCardClassName({ read: notification.read })}
                   >
                     <div className="flex items-start gap-2">
                       {getIcon(notification.type, data)}
                       <div className="flex-1 min-w-0">
-                        <p className={cn("font-medium text-sm", isPromo && "text-orange-600 dark:text-orange-400")}>
-                          {title}
-                        </p>
+                        <p className={getNotificationTitleClassName()}>{title}</p>
                         {detail && <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>}
                         {isPromo && (
-                          <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 mt-1.5">
-                            {PUBLIC_PROMO_NOTIFICATION_CTA}
-                          </p>
+                          <p className={getNotificationAccentCtaClassName()}>{PUBLIC_PROMO_NOTIFICATION_CTA}</p>
                         )}
                         <p className="text-xs text-muted-foreground mt-1">
                           {notification.timestamp instanceof Date

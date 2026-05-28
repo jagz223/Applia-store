@@ -1,6 +1,6 @@
-import DriverGoGenfeb from "@/pages/DriverGoGenfeb";
+import { Redirect } from "wouter";
 
+/** Legacy: `/go/delivery/driver` redirige al panel unificado. */
 export default function DriverPackGenfeb() {
-  return <DriverGoGenfeb goSlug="pack" />;
+  return <Redirect to="/go/driver" />;
 }
-
