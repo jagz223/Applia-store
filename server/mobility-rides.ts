@@ -36,14 +36,14 @@ import { resolveGoRideRouteQuote } from "./go-ride-route-quote";
 import { applyDriverFareToRide } from "./ride-fare-apply";
 import { normalizeDispatchCompanyId } from "@shared/dispatch-company";
 import { toCentralActiveServiceForPanel } from "@shared/central-active-service-for-central";
-import { emitCentralFleetUpdate } from "./central-fleet-notify";
+import { emitCentralFleetUpdate, CENTRAL_FLEET_IN_SERVICE_RECEIVING } from "./central-fleet-notify";
 import { persistMobilityRideToHistory } from "./mobility-ride-archive-helper";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
+  ensureMobilityRideConversation,
   onMobilityRideChatCancelled,
   onMobilityRideChatCompleted,
   onMobilityRideChatStarted,
-  registerMobilityRideChatCreated,
   runMobilityRideChatStartupSweep,
 } from "./mobility-ride-chat";
 import { bumpGoUserCompletedTrips, resolveGoPublicUserStats } from "./go-public-user-enrich";
@@ -1224,19 +1224,14 @@ export function registerMobilityRideRoutes(app: Express) {
       const driverLon = pres?.lon;
       let conversationId: number | null = null;
       try {
-        const conv = await genFebStorage.createConversation({
-          participant1Id: ride.riderUserId,
-          participant2Id: driverId,
-        });
-        conversationId = Number((conv as { id: number }).id);
-        ride.conversationId = conversationId;
-        await registerMobilityRideChatCreated(genFebStorage, {
-          conversationId,
+        conversationId = await ensureMobilityRideConversation(genFebStorage, {
           rideId: ride.id,
           module: "taxi",
           riderUserId: ride.riderUserId,
           driverUserId: driverId,
+          hintedConversationId: ride.conversationId,
         });
+        ride.conversationId = conversationId;
       } catch (ce) {
         console.error("[mobility] negotiation accept conversation", ce);
       }
@@ -1347,25 +1342,18 @@ export function registerMobilityRideRoutes(app: Express) {
           const pres = onlineDrivers.get(driverUserId);
           const driverLat = pres?.lat;
           const driverLon = pres?.lon;
-          let conversationId: number | null = ride.conversationId ?? null;
-          if (conversationId == null) {
-            try {
-              const conv = await genFebStorage.createConversation({
-                participant1Id: ride.riderUserId,
-                participant2Id: driverUserId,
-              });
-              conversationId = Number((conv as { id: number }).id);
-              ride.conversationId = conversationId;
-              await registerMobilityRideChatCreated(genFebStorage, {
-                conversationId,
-                rideId: ride.id,
-                module: "taxi",
-                riderUserId: ride.riderUserId,
-                driverUserId,
-              });
-            } catch (ce) {
-              console.error("[mobility] createConversation", ce);
-            }
+          let conversationId: number | null = null;
+          try {
+            conversationId = await ensureMobilityRideConversation(genFebStorage, {
+              rideId: ride.id,
+              module: "taxi",
+              riderUserId: ride.riderUserId,
+              driverUserId,
+              hintedConversationId: ride.conversationId,
+            });
+            ride.conversationId = conversationId;
+          } catch (ce) {
+            console.error("[mobility] ensureMobilityRideConversation", ce);
           }
 
           const rider = await buildRiderPublic(ride.riderUserId);
@@ -1531,19 +1519,14 @@ export function registerMobilityRideRoutes(app: Express) {
       const driverLon = pres?.lon;
       let conversationId: number | null = null;
       try {
-        const conv = await genFebStorage.createConversation({
-          participant1Id: ride.riderUserId,
-          participant2Id: driverId,
-        });
-        conversationId = Number((conv as { id: number }).id);
-        ride.conversationId = conversationId;
-        await registerMobilityRideChatCreated(genFebStorage, {
-          conversationId,
+        conversationId = await ensureMobilityRideConversation(genFebStorage, {
           rideId: ride.id,
           module: "taxi",
           riderUserId: ride.riderUserId,
           driverUserId: driverId,
+          hintedConversationId: ride.conversationId,
         });
+        ride.conversationId = conversationId;
       } catch {}
 
       const rider = await buildRiderPublic(ride.riderUserId);
@@ -1909,11 +1892,22 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
               };
               if (!posOk && !prev) return;
               onlineDrivers.set(user.id, next);
-              emitCentralFleetUpdate(getIO(), next);
+              emitCentralFleetUpdate(getIO(), next, CENTRAL_FLEET_IN_SERVICE_RECEIVING);
             })();
             return;
           }
-          if (driverIsBusyCrossModule(user.id)) return;
+          if (driverIsBusyCrossModule(user.id)) {
+            const prev = onlineDrivers.get(user.id);
+            if (prev && !prev.idleOnMapDuringRide) {
+              onlineDrivers.delete(user.id);
+              emitCentralFleetUpdate(
+                getIO(),
+                { ...prev, updatedAt: Date.now() },
+                { receivingTaxi: false },
+              );
+            }
+            return;
+          }
           const prev = onlineDrivers.get(user.id);
           onlineDrivers.delete(user.id);
           if (prev) emitCentralFleetUpdate(getIO(), { ...prev, updatedAt: Date.now() }, { offline: true, receivingStopped: true });
@@ -2039,7 +2033,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
         ) {
           const next: DriverPresence = { ...presRow, lat, lon, updatedAt: Date.now(), idleOnMapDuringRide: true };
           onlineDrivers.set(user.id, next);
-          emitCentralFleetUpdate(getIO(), next);
+          emitCentralFleetUpdate(getIO(), next, CENTRAL_FLEET_IN_SERVICE_RECEIVING);
         }
       })();
     });
@@ -2049,7 +2043,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
       if (driverIsBusyCrossModule(user.id) && row) {
         const next: DriverPresence = { ...row, idleOnMapDuringRide: true, updatedAt: Date.now() };
         onlineDrivers.set(user.id, next);
-        emitCentralFleetUpdate(getIO(), next);
+        emitCentralFleetUpdate(getIO(), next, CENTRAL_FLEET_IN_SERVICE_RECEIVING);
         return;
       }
       if (row) emitCentralFleetUpdate(getIO(), { ...row, updatedAt: Date.now() }, { offline: true });

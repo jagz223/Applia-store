@@ -2928,6 +2928,32 @@ class FirestoreStorageImpl implements IStorage {
     return null;
   }
 
+  async findConversationForMobilityRide(params: { rideId: string }): Promise<any | null> {
+    if (!this.db) return null;
+    const rideId = String(params.rideId ?? "").trim();
+    if (!rideId) return null;
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.CONVERSATIONS)
+      .where("kind", "==", "mobility_ride")
+      .where("mobilityRideId", "==", rideId)
+      .limit(8)
+      .get();
+    const rows = snap.docs
+      .map((d) => ({ id: parseInt(d.id) || d.id, ...d.data() } as Record<string, unknown>))
+      .filter((c) => c.messagesLocked !== true);
+    if (rows.length === 0) return null;
+    const lastAtMs = (c: Record<string, unknown>): number => {
+      const t = c.lastMessageAt;
+      if (t instanceof Date) return t.getTime();
+      if (typeof (t as { toMillis?: () => number })?.toMillis === "function") {
+        return (t as { toMillis: () => number }).toMillis();
+      }
+      return 0;
+    };
+    rows.sort((a, b) => lastAtMs(b) - lastAtMs(a));
+    return rows[0] ?? null;
+  }
+
   async listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]> {
     if (!this.db) return [];
     const lim = Math.min(Math.max(Number(opts?.limit) || 200, 1), 500);

@@ -5,6 +5,8 @@ export const CENTRAL_COMPACT_MAX_WIDTH_PX = 1023;
 
 export const centralViewportStyle = {
   "--central-bottom-nav-height": "4.25rem",
+  /** Altura de la franja «Conductores activos» (colapsada); la vista móvil la ajusta al expandir. */
+  "--central-fleet-strip-height": "4.25rem",
 } as const satisfies Record<string, string>;
 
 export const centralViewportCssVars = centralViewportStyle as CSSProperties;
@@ -12,6 +14,14 @@ export const centralViewportCssVars = centralViewportStyle as CSSProperties;
 export function centralOffsetAboveBottomNav(extra = "0px"): string {
   return `calc(var(--central-bottom-nav-height, 4.25rem) + env(safe-area-inset-bottom, 0px) + ${extra})`;
 }
+
+/** Espacio libre sobre la barra inferior + franja de flota (controles Leaflet, atribución). */
+export function centralMobileMapChromeBottom(extra = "0.5rem"): string {
+  return `calc(var(--central-bottom-nav-height, 4.25rem) + env(safe-area-inset-bottom, 0px) + var(--central-fleet-strip-height, 4.25rem) + ${extra})`;
+}
+
+/** Slot en overlay superior móvil para botones del mapa (portal desde Leaflet). */
+export const CENTRAL_MOBILE_MAP_TOOLBAR_SLOT_ID = "central-mobile-map-toolbar-slot";
 
 export const centralViewportClasses = {
   root: "fixed inset-0 z-0 flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden overscroll-none bg-background",

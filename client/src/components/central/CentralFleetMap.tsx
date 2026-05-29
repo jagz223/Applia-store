@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import L from "leaflet";
 import { Bookmark, Loader2, MapPinned, RefreshCw } from "lucide-react";
@@ -17,9 +18,13 @@ import { useTheme } from "@/contexts/ThemeContext";
 import type { CentralFleetDriver } from "@/hooks/use-central";
 import { formatCentralFleetMapHint } from "@/lib/central-fleet-position";
 import { fleetMarkerSizeForZoom } from "@/lib/fleet-map-marker-size";
-import { fleetWorkAccentForDriver, type FleetWorkAccent } from "@/lib/central-fleet-work-accent";
+import { fleetMapMarkerColorForUser } from "@/lib/fleet-map-marker-color";
+import { spreadFleetMapMarkerPositions } from "@/lib/fleet-map-marker-spread";
+import { fleetWorkAccentForDriver, centralDriverReceivingModeLabel, type FleetWorkAccent } from "@/lib/central-fleet-work-accent";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { CENTRAL_MOBILE_MAP_TOOLBAR_SLOT_ID } from "@/lib/central-viewport-layout";
 
 /** Convierte coordenadas GeoJSON LineString [lon, lat] → [lat, lon] para Leaflet. */
 function lineStringLatLngs(geometry: unknown): [number, number][] {
@@ -86,6 +91,58 @@ function FleetMapZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number) =>
   return null;
 }
 
+function FleetMapDriverPopup({
+  driver,
+  mapHint,
+  receivingLabel,
+  workAccent,
+}: {
+  driver: CentralFleetDriver;
+  mapHint: string | null;
+  receivingLabel: string | null;
+  workAccent: FleetWorkAccent;
+}) {
+  const markerColor = fleetMapMarkerColorForUser(driver.userId);
+  return (
+    <div className="flex max-w-[220px] items-start gap-2.5 text-sm">
+      <Avatar
+        className="h-9 w-9 shrink-0 ring-2 ring-background"
+        style={{ boxShadow: `0 0 0 2px ${markerColor}` }}
+      >
+        <AvatarImage src={driver.avatar ?? undefined} alt="" />
+        <AvatarFallback className="bg-primary/10 text-[10px] text-primary">
+          {driver.name[0]}
+          {driver.lastName[0]}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium leading-tight">
+          {driver.name} {driver.lastName}
+        </p>
+        {receivingLabel ? (
+          <p
+            className={cn(
+              "mt-0.5 text-xs font-medium leading-snug",
+              workAccent === "taxi"
+                ? "text-sky-700 dark:text-sky-300"
+                : workAccent === "delivery"
+                  ? "text-violet-700 dark:text-violet-300"
+                  : "text-emerald-800 dark:text-emerald-200",
+            )}
+          >
+            {receivingLabel}
+          </p>
+        ) : driver.inService ? (
+          <p className="mt-0.5 text-xs font-medium text-primary">En servicio</p>
+        ) : (
+          <p className="mt-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">Activo</p>
+        )}
+        {mapHint ? <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{mapHint}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function FleetVehicleMarkers({
   drivers,
   mapZoom,
@@ -99,50 +156,44 @@ function FleetVehicleMarkers({
 }) {
   const markerSizePx = fleetMarkerSizeForZoom(mapZoom);
 
+  const displayPositions = useMemo(() => {
+    const points = drivers
+      .filter((d) => d.lat != null && d.lon != null)
+      .map((d) => ({ userId: d.userId, lat: d.lat!, lon: d.lon! }));
+    return spreadFleetMapMarkerPositions(points, mapZoom);
+  }, [drivers, mapZoom]);
+
   return (
     <>
       {drivers.map((d) => {
         const stale = !d.positionLive || !!d.receivingStoppedAt;
         const mapHint = formatCentralFleetMapHint(d);
         const workAccent = fleetWorkAccentForDriver(d);
-        const workLabel: Record<Exclude<FleetWorkAccent, null>, string> = {
-          taxi: "Trabajando · taxi",
-          delivery: "Trabajando · delivery",
-          both: "Modo híbrido · taxi y delivery",
-        };
+        const receivingLabel = centralDriverReceivingModeLabel(d);
+        const display = displayPositions.get(d.userId);
+        const position: [number, number] =
+          display != null ? [display.lat, display.lon] : [d.lat!, d.lon!];
+        const markerColor = fleetMapMarkerColorForUser(d.userId);
         return (
           <Marker
             key={d.userId}
-            position={[d.lat!, d.lon!]}
+            position={position}
             icon={createDriverVehicleIcon(d.vehicleType, {
               entering: enteringDriverIds.has(d.userId),
               stale,
               sizePx: markerSizePx,
-              workAccent: fleetWorkAccentForDriver(d),
+              workAccent,
+              markerColor,
             })}
             eventHandlers={{ click: () => onSelectDriver(d) }}
           >
-            <Popup>
-              <div className="text-sm">
-                <p className="font-medium">
-                  {d.name} {d.lastName}
-                </p>
-                {workAccent ? (
-                  <p
-                    className={cn(
-                      "mt-1 text-xs font-medium",
-                      workAccent === "taxi"
-                        ? "text-sky-700 dark:text-sky-300"
-                        : workAccent === "delivery"
-                          ? "text-violet-700 dark:text-violet-300"
-                          : "text-emerald-800 dark:text-emerald-200",
-                    )}
-                  >
-                    {workLabel[workAccent]}
-                  </p>
-                ) : null}
-                {mapHint ? <p className="mt-1 text-xs text-muted-foreground">{mapHint}</p> : null}
-              </div>
+            <Popup minWidth={180} maxWidth={240}>
+              <FleetMapDriverPopup
+                driver={d}
+                mapHint={mapHint}
+                receivingLabel={receivingLabel}
+                workAccent={workAccent}
+              />
             </Popup>
           </Marker>
         );
@@ -156,42 +207,82 @@ function CentralMapToolbar({
   serviceZoom,
   onPersistServiceMap,
   persistPending,
+  mobileCompact = false,
 }: {
   serviceCenter: [number, number];
   serviceZoom: number;
   onPersistServiceMap?: (lat: number, lon: number, zoom: number) => void | Promise<void>;
   persistPending?: boolean;
+  /** Botones compactos en overlay superior (móvil). */
+  mobileCompact?: boolean;
 }) {
   const map = useMap();
-  return (
-    <div className="pointer-events-none absolute bottom-3 right-3 z-[800] flex flex-col items-end gap-2">
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!mobileCompact) {
+      setPortalTarget(null);
+      return;
+    }
+    setPortalTarget(document.getElementById(CENTRAL_MOBILE_MAP_TOOLBAR_SLOT_ID));
+  }, [mobileCompact]);
+
+  const controls = (
+    <>
       <Button
         type="button"
-        size="sm"
+        size={mobileCompact ? "icon" : "sm"}
         variant="secondary"
-        className="pointer-events-auto shadow-md backdrop-blur-sm"
+        className={cn(
+          "pointer-events-auto border-border/80 bg-background/95 shadow-md backdrop-blur-sm",
+          mobileCompact ? "h-9 w-9 rounded-full" : "shadow-md backdrop-blur-sm",
+        )}
         onClick={() => map.setView(serviceCenter, serviceZoom, { animate: true })}
+        aria-label="Centrar mapa en mi ciudad"
+        title="Mi ciudad"
       >
-        <MapPinned className="mr-1.5 h-4 w-4 shrink-0" aria-hidden />
-        Mi ciudad
+        <MapPinned className={cn("h-4 w-4 shrink-0", !mobileCompact && "mr-1.5")} aria-hidden />
+        {!mobileCompact ? "Mi ciudad" : null}
       </Button>
       {onPersistServiceMap ? (
         <Button
           type="button"
-          size="sm"
+          size={mobileCompact ? "icon" : "sm"}
           variant="outline"
-          className="pointer-events-auto border-border/80 bg-background/95 shadow-sm backdrop-blur-sm"
+          className={cn(
+            "pointer-events-auto border-border/80 bg-background/95 shadow-sm backdrop-blur-sm",
+            mobileCompact && "h-9 w-9 rounded-full",
+          )}
           disabled={persistPending}
           onClick={() => {
             const c = map.getCenter();
             const z = Math.round(map.getZoom());
             void onPersistServiceMap(c.lat, c.lng, z);
           }}
+          aria-label="Guardar vista del mapa"
+          title="Guardar vista"
         >
-          <Bookmark className="mr-1.5 h-4 w-4 shrink-0" aria-hidden />
-          Guardar vista
+          <Bookmark className={cn("h-4 w-4 shrink-0", !mobileCompact && "mr-1.5")} aria-hidden />
+          {!mobileCompact ? "Guardar vista" : null}
         </Button>
       ) : null}
+    </>
+  );
+
+  if (mobileCompact && portalTarget) {
+    return createPortal(
+      <div className="pointer-events-auto flex items-center justify-end gap-1.5">{controls}</div>,
+      portalTarget,
+    );
+  }
+
+  if (mobileCompact) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none absolute bottom-3 right-3 z-[800] flex flex-col items-end gap-2">
+      {controls}
     </div>
   );
 }
@@ -258,6 +349,10 @@ type CentralFleetMapProps = {
   persistServiceMapPending?: boolean;
   /** Remount al cambiar de empresa (admin). */
   mapInstanceKey?: string;
+  /** Ocultar botón flotante de refresco (p. ej. si va en la cabecera móvil). */
+  hideRefreshControl?: boolean;
+  /** Ocultar atribución (p. ej. la coloca el layout móvil sobre la barra inferior). */
+  hideAttribution?: boolean;
   /** Incrementar al elegir conductor desde listado para recentrar el mapa. */
   focusNonce?: number;
   /** Conductor seleccionado en el panel (datos en vivo); la cámara lo sigue en el mapa. */
@@ -281,6 +376,8 @@ export function CentralFleetMap({
   focusNonce = 0,
   onRefreshFleet,
   fleetRefreshing = false,
+  hideRefreshControl = false,
+  hideAttribution = false,
 }: CentralFleetMapProps) {
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
@@ -314,7 +411,7 @@ export function CentralFleetMap({
       ref={shellRef}
       className={
         fullscreen
-          ? "relative h-full min-h-0 w-full flex-1 overflow-hidden"
+          ? "central-fleet-map-fs relative h-full min-h-0 w-full flex-1 overflow-hidden"
           : "relative w-full overflow-hidden rounded-b-lg"
       }
       style={
@@ -333,7 +430,7 @@ export function CentralFleetMap({
         </div>
       ) : (
         <>
-          {onRefreshFleet ? (
+          {onRefreshFleet && !hideRefreshControl ? (
             <div
               className={cn(
                 "pointer-events-none absolute z-[801]",
@@ -398,10 +495,11 @@ export function CentralFleetMap({
                 serviceZoom={serviceMapView.cityZoom}
                 onPersistServiceMap={onPersistServiceMap}
                 persistPending={persistServiceMapPending}
+                mobileCompact={fullscreen}
               />
             ) : null}
           </MapContainer>
-          <GeoapifyMapAttribution />
+          {!hideAttribution ? <GeoapifyMapAttribution /> : null}
         </>
       )}
     </div>

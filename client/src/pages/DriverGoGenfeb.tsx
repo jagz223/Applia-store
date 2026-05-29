@@ -51,6 +51,7 @@ import {
   receiveModeToGoSlug,
 } from "@/lib/go-driver-receive-mode";
 import { extractUserPublicPhone } from "@/lib/user-public-phone";
+import { fetchGoRideConversationId } from "@/lib/go-active-ride-chat";
 import { useGoDriverSession } from "@/contexts/GoDriverSessionContext";
 import { Button } from "@/components/ui/button";
 import { GoChatProvider, useGoChat } from "@/contexts/GoChatContext";
@@ -219,9 +220,24 @@ export default function DriverGoGenfeb() {
 
   /** Enlaza el hilo Go al drawer de chat y refresca la lista (el pasajero ya hacía primeCarGoConversation). */
   const syncRideConversation = useCallback(
-    (conversationId: number | null | undefined) => {
+    (conversationId: number | null | undefined, rideIdForScope?: string | null) => {
       if (conversationId == null || !Number.isFinite(Number(conversationId))) return;
       const id = Number(conversationId);
+      const rideScope = rideIdForScope ?? activeRideIdRef.current;
+      if (rideScope) {
+        const list = queryClient.getQueryData<
+          { id: number; kind?: string; mobilityRideId?: string | null; messagesLocked?: boolean }[]
+        >(["chat", "conversations"]);
+        const row = list?.find((c) => c.id === id);
+        if (
+          row &&
+          String(row.kind ?? "") === "mobility_ride" &&
+          String(row.mobilityRideId ?? "").trim() !== "" &&
+          String(row.mobilityRideId ?? "").trim() !== String(rideScope).trim()
+        ) {
+          return;
+        }
+      }
       setActiveConversationId(id);
       primeCarGoConversation(id);
       void queryClient.invalidateQueries({ queryKey: ["chat", "conversations"] });
@@ -241,6 +257,31 @@ export default function DriverGoGenfeb() {
       setMobilityChatReminder(null);
     }
   }, [activeRideId, activeRideOffer, goSlug, setMobilityChatReminder]);
+
+  /** El respond HTTP puede devolver conversationId null antes de crear el hilo; reintentar hasta tenerlo. */
+  useEffect(() => {
+    if (!activeRideId || activeConversationId != null) return;
+    const mod: "cargo" | "pack" =
+      activeServiceModule ?? (goSlug === "pack" ? "pack" : "cargo");
+    let cancelled = false;
+    let attempts = 0;
+    const run = async () => {
+      while (!cancelled && attempts < 10) {
+        attempts += 1;
+        const cid = await fetchGoRideConversationId(activeRideId, mod);
+        if (cancelled) return;
+        if (cid != null) {
+          syncRideConversation(cid);
+          return;
+        }
+        await new Promise((r) => window.setTimeout(r, 500 + attempts * 250));
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRideId, activeConversationId, activeServiceModule, goSlug, syncRideConversation]);
 
   useEffect(() => {
     if (!activeRideOffer) setActiveRidePanelCollapsed(false);
@@ -412,7 +453,16 @@ export default function DriverGoGenfeb() {
       serviceModule: "cargo" | "pack"
     ) => {
       if (!p?.rideId) return;
-      if (activeRideIdRef.current === p.rideId) return;
+      if (activeRideIdRef.current === p.rideId) {
+        const fromEvent = p.conversationId ?? null;
+        if (fromEvent != null) {
+          syncRideConversation(fromEvent);
+          return;
+        }
+        const cid = await fetchGoRideConversationId(p.rideId, serviceModule);
+        if (cid != null) syncRideConversation(cid);
+        return;
+      }
       acceptingRideIdRef.current = null;
       setPinnedOfferEntry(null);
       const token = localStorage.getItem("token");
@@ -810,23 +860,19 @@ export default function DriverGoGenfeb() {
       }
 
       if (activeRideIdRef.current) {
-        const mod = activeServiceModuleRef.current ?? "cargo";
-        if (mod === "cargo") {
-          socket.emit("cargo:driver:presence", {
-            receiving: false,
-            vehicleType,
-            isPetFriendly: pet,
-            lat: pos.lat,
-            lon: pos.lon,
-          });
-        } else {
-          socket.emit("pack:driver:presence", {
-            receiving: false,
-            vehicleType,
-            lat: pos.lat,
-            lon: pos.lon,
-          });
-        }
+        socket.emit("cargo:driver:presence", {
+          receiving: false,
+          vehicleType,
+          isPetFriendly: pet,
+          lat: pos.lat,
+          lon: pos.lon,
+        });
+        socket.emit("pack:driver:presence", {
+          receiving: false,
+          vehicleType,
+          lat: pos.lat,
+          lon: pos.lon,
+        });
         return true;
       }
 
@@ -957,6 +1003,14 @@ export default function DriverGoGenfeb() {
       if (accept) {
         setDriverNegotiationSent(null);
         syncRideConversation(data.conversationId ?? null);
+        if (data.conversationId == null) {
+          void fetchGoRideConversationId(
+            snapOffer.rideId,
+            snapModule === "pack" ? "pack" : "cargo",
+          ).then((cid) => {
+            if (cid != null) syncRideConversation(cid);
+          });
+        }
         setActiveRideId(snapOffer.rideId);
         setActiveRideOffer(snapOffer);
         setActiveRideStarted(false);
@@ -1143,9 +1197,20 @@ export default function DriverGoGenfeb() {
     return extractUserPublicPhone(activeRideOffer.rider as unknown as Record<string, unknown>);
   }, [activeRideOffer?.rider]);
 
-  const openActiveRideChat = useCallback(() => {
-    if (activeConversationId != null && Number.isFinite(activeConversationId)) {
-      openChatWithConversation(activeConversationId);
+  const openActiveRideChat = useCallback(async () => {
+    let convId = activeConversationId;
+    if ((convId == null || !Number.isFinite(convId)) && activeRideId) {
+      const mod: "cargo" | "pack" =
+        activeServiceModule ?? (goSlug === "pack" ? "pack" : "cargo");
+      const fetched = await fetchGoRideConversationId(activeRideId, mod);
+      if (fetched != null) {
+        syncRideConversation(fetched);
+        convId = fetched;
+      }
+    }
+    if (convId != null && Number.isFinite(convId)) {
+      await queryClient.refetchQueries({ queryKey: ["chat", "conversations"] });
+      openChatWithConversation(Number(convId));
       return;
     }
     toast({
@@ -1153,7 +1218,16 @@ export default function DriverGoGenfeb() {
       description: "El hilo de chat aún no está listo. Intenta de nuevo en unos segundos.",
       variant: "destructive",
     });
-  }, [activeConversationId, openChatWithConversation, toast]);
+  }, [
+    activeConversationId,
+    activeRideId,
+    activeServiceModule,
+    goSlug,
+    openChatWithConversation,
+    queryClient,
+    syncRideConversation,
+    toast,
+  ]);
 
   useEffect(() => {
     activeServiceRouteRef.current = null;
@@ -1309,6 +1383,7 @@ export default function DriverGoGenfeb() {
         setPaymentConfirmed(
           (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
         );
+        syncRideConversation(ride.conversationId ?? null);
         setDriverNegotiationSent(null);
         stopReceiving();
       } catch {
@@ -1318,7 +1393,7 @@ export default function DriverGoGenfeb() {
     return () => {
       alive = false;
     };
-  }, [authLoading, isAuthenticated, user?.id, stopReceiving]);
+  }, [authLoading, isAuthenticated, user?.id, stopReceiving, syncRideConversation]);
 
   // Si no cumple requisitos (o venció la suscripción), no quedar en "recibiendo".
   // Excepción: con un viaje/envío activo puede terminar el servicio antes de desconectarse.
@@ -1552,7 +1627,7 @@ export default function DriverGoGenfeb() {
       </div>
         );
       })()}
-      {(activeRiderPhone || activeConversationId != null) ? (
+      {activeRideId ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {activeRiderPhone ? (
             <a
@@ -1563,18 +1638,16 @@ export default function DriverGoGenfeb() {
               Llamar
             </a>
           ) : null}
-          {activeConversationId != null ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 gap-1.5 rounded-full px-3 text-xs font-semibold"
-              onClick={openActiveRideChat}
-            >
-              <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              Chat
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 rounded-full px-3 text-xs font-semibold"
+            onClick={() => void openActiveRideChat()}
+          >
+            <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Chat
+          </Button>
         </div>
       ) : null}
       {activeRideStarted && activeRideId ? (

@@ -62,6 +62,7 @@ export function findConversationForServiceScope<T extends ConversationScopeRow>(
     );
   }
 
+  // Sin ámbito de reserva ni viaje: chat directo (no reutiliza hilos de servicios).
   return list.find((c) => matchesPeer(c, participantId) && !isServiceScopedConversation(c));
 }
 

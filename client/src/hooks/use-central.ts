@@ -64,6 +64,48 @@ export type CentralFleetSocketPatch = {
 export const CENTRAL_FLEET_QUERY_KEY = (companyId: string) => ["central", "fleet", companyId] as const;
 
 /** Actualiza una fila de flota en caché sin refetch HTTP (escala con muchos conductores). */
+/** Actualiza flags de recepción sin que ticks parciales (taxi vs delivery) apaguen el otro en modo híbrido. */
+function mergeReceivingFlags(
+  existing: CentralFleetDriver | undefined,
+  patch: CentralFleetSocketPatch,
+  inService: boolean,
+): Pick<CentralFleetDriver, "receivingTaxi" | "receivingDelivery" | "receiving"> {
+  if (inService) {
+    return { receivingTaxi: false, receivingDelivery: false, receiving: false };
+  }
+
+  if (patch.offline === true) {
+    return {
+      receivingTaxi: patch.receivingTaxi ?? false,
+      receivingDelivery: patch.receivingDelivery ?? false,
+      receiving: false,
+    };
+  }
+
+  let taxi = existing?.receivingTaxi ?? false;
+  let delivery = existing?.receivingDelivery ?? false;
+
+  if (patch.receivingTaxi === true) taxi = true;
+  if (patch.receivingDelivery === true) delivery = true;
+
+  if (patch.receivingTaxi === false) {
+    if (patch.receivingDelivery === false || !delivery) taxi = false;
+  }
+  if (patch.receivingDelivery === false) {
+    if (patch.receivingTaxi === false || !taxi) delivery = false;
+  }
+
+  if (patch.receiving === false && patch.receivingTaxi === undefined && patch.receivingDelivery === undefined) {
+    taxi = false;
+    delivery = false;
+  }
+
+  const receiving =
+    patch.receiving !== undefined ? patch.receiving : taxi || delivery;
+
+  return { receivingTaxi: taxi, receivingDelivery: delivery, receiving };
+}
+
 export function mergeCentralFleetDriverPatch(
   prevDrivers: CentralFleetDriver[] | undefined,
   patch: CentralFleetSocketPatch,
@@ -114,6 +156,7 @@ export function mergeCentralFleetDriverPatch(
     return [...list, merged];
   }
 
+  const mergedReceiving = mergeReceivingFlags(existing, patch, existing?.inService === true);
   const merged: CentralFleetDriver = {
     userId: patch.userId,
     name: existing?.name ?? "",
@@ -126,9 +169,9 @@ export function mergeCentralFleetDriverPatch(
     isPetFriendly: patch.isPetFriendly,
     lat: patch.lat,
     lon: patch.lon,
-    receivingTaxi: patch.receivingTaxi ?? existing?.receivingTaxi ?? false,
-    receivingDelivery: patch.receivingDelivery ?? existing?.receivingDelivery ?? false,
-    receiving: patch.receiving ?? existing?.receiving ?? false,
+    receivingTaxi: mergedReceiving.receivingTaxi,
+    receivingDelivery: mergedReceiving.receivingDelivery,
+    receiving: mergedReceiving.receiving,
     inService: existing?.inService ?? false,
     updatedAt: patch.updatedAt,
     positionLive: patch.positionLive ?? true,
@@ -248,17 +291,22 @@ export function useCentralFleet(companyId: string | null) {
       const res = await fetch(`/api/central/fleet${q}`, { headers: authHeaders() });
       if (!res.ok) throw new Error("No se pudo cargar la flota");
       const data = (await res.json()) as { drivers: CentralFleetDriver[] };
-      return data.drivers.map((d) => ({
+      return data.drivers.map((d) => {
+        const inService = Boolean(d.inService);
+        const receivingTaxi = inService ? false : Boolean(d.receivingTaxi);
+        const receivingDelivery = inService ? false : Boolean(d.receivingDelivery);
+        return {
         ...d,
         phone: d.phone ?? null,
         licensePlate: d.licensePlate ?? null,
-        receivingTaxi: Boolean(d.receivingTaxi),
-        receivingDelivery: Boolean(d.receivingDelivery),
-        receiving: Boolean(d.receivingTaxi || d.receivingDelivery || d.receiving),
+        receivingTaxi,
+        receivingDelivery,
+        receiving: inService ? false : Boolean(receivingTaxi || receivingDelivery || d.receiving),
         positionLive: Boolean((d as { positionLive?: boolean }).positionLive ?? true),
         receivingStoppedAt: (d as { receivingStoppedAt?: number | null }).receivingStoppedAt ?? null,
         activeService: (d as { activeService?: CentralActiveService | null }).activeService ?? null,
-      }));
+      };
+      });
     },
     enabled: !!localStorage.getItem("token") && !!companyId,
     staleTime: 0,

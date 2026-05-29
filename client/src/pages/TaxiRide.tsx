@@ -934,6 +934,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     return { mapStart, routeFocus, routeGeometryKey };
   }, [matchedDriverInfo, riderTripInProgress, assignedDriverPos, start, end]);
 
+  /** Car Go / Delivery: no cambiar vehículo durante búsqueda o servicio activo. */
+  const showVehicleSelectionActions = useMemo(() => {
+    if (!start || !end) return false;
+    if (matchedDriverInfo) return false;
+    if (activeRideId) return false;
+    if (vehicleModalStep === "searching") return false;
+    return true;
+  }, [start, end, matchedDriverInfo, activeRideId, vehicleModalStep]);
+
   /** Busca conductor real (Socket + API). */
   const handleConfirmVehicleSearch = useCallback(async () => {
     if (!selectedVehicle || !start || !end || !taxiPaymentMethod || !routeMeta) return;
@@ -2005,7 +2014,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 )}
 
                 <AnimatePresence>
-                  {start && end && !matchedDriverInfo ? (
+                  {showVehicleSelectionActions ? (
                     <motion.div
                       key="taxi-route-actions-mobile"
                       className="flex flex-col gap-2 pt-0.5"
@@ -2426,7 +2435,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           )}
 
           <AnimatePresence>
-            {start && end ? (
+            {showVehicleSelectionActions ? (
               <motion.div
                 key="taxi-route-actions"
                 className="flex flex-col gap-3 pt-1"

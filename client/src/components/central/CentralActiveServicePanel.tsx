@@ -1,17 +1,12 @@
 import { Clock, DollarSign, MapPin, Navigation, Package, Route } from "lucide-react";
 import type { CentralActiveService } from "@shared/central-fleet";
+import { centralActiveServiceModeLabel } from "@/lib/central-fleet-work-accent";
 import { Badge } from "@/components/ui/badge";
 
 function paymentLabel(method: string) {
   if (method === "cash") return "Efectivo";
   if (method === "bank_transfer") return "Transferencia bancaria";
   return method;
-}
-
-function statusLabel(status: CentralActiveService["status"]) {
-  if (status === "matched") return "Asignado — en camino al punto de recogida";
-  if (status === "in_progress") return "En curso — viaje iniciado";
-  return status;
 }
 
 function vehicleKindLabel(kind: string) {
@@ -26,7 +21,6 @@ function vehicleKindLabel(kind: string) {
 export function CentralActiveServicePanel({ service }: { service: CentralActiveService }) {
   const km = (service.distanceM / 1000).toFixed(1);
   const min = Math.max(1, Math.round(service.durationSec / 60));
-  const modeLabel = service.mode === "taxi" ? "Taxi (movilidad)" : "Delivery";
   const ModeIcon = service.mode === "taxi" ? Route : Package;
 
   return (
@@ -34,14 +28,8 @@ export function CentralActiveServicePanel({ service }: { service: CentralActiveS
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="default" className="gap-1">
           <ModeIcon className="h-3 w-3" aria-hidden />
-          {modeLabel}
+          {centralActiveServiceModeLabel(service.mode)}
         </Badge>
-        <Badge variant="outline">{statusLabel(service.status)}</Badge>
-        {service.driverSearchingClient ? (
-          <Badge variant="secondary" className="font-normal">
-            Buscando al cliente
-          </Badge>
-        ) : null}
       </div>
 
       <p className="text-[11px] font-mono text-muted-foreground">ID servicio: {service.rideId}</p>

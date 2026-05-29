@@ -156,12 +156,21 @@ export function useGetOrCreateConversation() {
       mobilityRideId?: string;
     }) => {
       const list = await chatApi.getConversations();
+      const hasRideScope = mobilityRideId != null && String(mobilityRideId).trim() !== "";
+      const hasBookingScope = bookingId != null && Number.isFinite(bookingId);
+
       const existing = findConversationForServiceScope(list, {
         participantId,
         bookingId,
         mobilityRideId,
       });
       if (existing) return existing.id;
+
+      // Car Go / Delivery: el hilo lo crea el servidor al emparejar; no abrir chat genérico con el mismo usuario.
+      if (hasRideScope) {
+        throw new Error("El chat del viaje aún no está disponible. Espera a que se confirme el servicio.");
+      }
+
       const created = await chatApi.createConversation({ participantId, serviceId, bookingId });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.conversations });
       debouncedRefetch(queryClient, QUERY_KEYS.conversations);

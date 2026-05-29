@@ -30,7 +30,7 @@ const FIRESTORE_METHODS = new Set([
   // Chat: debe persistir en Firestore para auditoría/admin.
   "getConversationsByUser", "createConversation", "getMessagesByConversation", "getLastMessageByConversation", "getUnreadCountByConversation",
   "createMessage", "markMessageAsRead", "markConversationAsRead", "hideConversationForUsers",
-  "patchConversation", "findConversationForServiceBooking", "listConversationsForAdmin", "sweepStaleMobilityRideChats",
+  "patchConversation", "findConversationForServiceBooking", "findConversationForMobilityRide", "listConversationsForAdmin", "sweepStaleMobilityRideChats",
 ]);
 
 /** Delegador Firestore/memoria alineado con {@link IStorage} en tiempo de ejecución. */
@@ -202,6 +202,9 @@ export class HybridStorage {
     serviceId?: number;
   }) {
     return this.delegate("findConversationForServiceBooking", [booking]);
+  }
+  findConversationForMobilityRide(params: { rideId: string }) {
+    return this.delegate("findConversationForMobilityRide", [params]);
   }
   listConversationsForAdmin(opts?: { limit?: number }) {
     return this.delegate("listConversationsForAdmin", [opts]);

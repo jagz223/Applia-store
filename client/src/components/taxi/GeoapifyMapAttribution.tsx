@@ -1,11 +1,18 @@
 import { cn } from "@/lib/utils";
 import { showGeoapifyMapAttribution } from "@/components/taxi/leaflet-config";
+import type { CSSProperties } from "react";
 
 /**
  * Atribución legal de las **teselas** del mapa (Geoapify + OpenMapTiles + OSM).
  * El routing/geocoding también usa Geoapify en servidor, pero esta franja solo cubre la capa visual del mapa.
  */
-export function GeoapifyMapAttribution({ className }: { className?: string }) {
+export function GeoapifyMapAttribution({
+  className,
+  style,
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
   if (!showGeoapifyMapAttribution()) return null;
   return (
     <div
@@ -13,6 +20,7 @@ export function GeoapifyMapAttribution({ className }: { className?: string }) {
         "pointer-events-none absolute bottom-1 right-1 z-[650] max-w-[min(calc(100%-0.5rem),15rem)] select-none",
         className
       )}
+      style={style}
       role="note"
     >
       <p className="pointer-events-auto rounded border border-border/60 bg-background/80 px-1.5 py-0.5 text-[9px] leading-tight text-muted-foreground shadow-sm backdrop-blur-[2px] sm:text-[10px]">

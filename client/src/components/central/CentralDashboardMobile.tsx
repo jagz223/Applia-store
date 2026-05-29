@@ -1,12 +1,13 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, type CSSProperties } from "react";
 import { Link } from "wouter";
-import { Building2, Car, MapPin, Radio, Settings } from "lucide-react";
+import { Building2, Car, MapPin, Radio, RefreshCw, Settings } from "lucide-react";
 import type { DispatchMobilityFares, DispatchPackFares, CentralServiceMapView } from "@shared/dispatch-company";
 import type { CentralFleetDriver } from "@/hooks/use-central";
 import { Button } from "@/components/ui/button";
 import { CentralFleetMap } from "@/components/central/CentralFleetMap";
 import { CentralFleetActiveList, CentralFleetActiveListHeader } from "@/components/central/CentralFleetActiveList";
 import { CentralBottomNav, type CentralMobileTab } from "@/components/central/CentralBottomNav";
+import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import { CentralDriverMapSheet } from "@/components/central/CentralDriverSheet";
 import { CentralFaresPanel } from "@/components/central/CentralFaresPanel";
 import { CentralMemberRegisterForm } from "@/components/central/CentralMemberRegisterForm";
@@ -17,14 +18,36 @@ import { CompanyCombobox } from "@/components/central/CompanyCombobox";
 import {
   centralViewportClasses,
   centralViewportCssVars,
+  CENTRAL_MOBILE_MAP_TOOLBAR_SLOT_ID,
+  centralOffsetAboveBottomNav,
 } from "@/lib/central-viewport-layout";
 import { CENTRAL_APP_SETTINGS_HREF } from "@/lib/central-dashboard-hrefs";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/NotificationBell";
 
-function CentralMobileHeaderActions() {
+function CentralMobileHeaderActions({
+  onRefreshFleet,
+  fleetRefreshing,
+}: {
+  onRefreshFleet?: () => void | Promise<unknown>;
+  fleetRefreshing?: boolean;
+}) {
   return (
     <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
+      {onRefreshFleet ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className="size-10 shrink-0 rounded-full border border-border/60 bg-background/90 shadow-md backdrop-blur-sm"
+          disabled={fleetRefreshing}
+          onClick={() => void onRefreshFleet()}
+          aria-label="Actualizar posiciones en el mapa"
+          title="Actualizar mapa"
+        >
+          <RefreshCw className={cn("h-4 w-4", fleetRefreshing && "animate-spin")} aria-hidden />
+        </Button>
+      ) : null}
       <div className="rounded-full border border-border/60 bg-background/90 shadow-md backdrop-blur-sm [&_button]:h-9 [&_button]:w-9 [&_button]:rounded-full">
         <NotificationBell />
       </div>
@@ -158,25 +181,20 @@ export function CentralDashboardMobile({
     if (tab !== "map") onSelectDriver(null);
   }, [tab, onSelectDriver]);
 
+  const mapFleetStripHeight = fleetListOpen ? "min(calc(38vh + 4.25rem), 22rem)" : "4.25rem";
+  const mapStageStyle = useMemo(
+    () =>
+      ({
+        ...centralViewportCssVars,
+        "--central-fleet-strip-height": mapFleetStripHeight,
+      }) as CSSProperties,
+    [mapFleetStripHeight],
+  );
+
   return (
     <div className={cn(centralViewportClasses.root, "lg:hidden")} style={centralViewportCssVars}>
       {tab === "map" ? (
-        <div className={centralViewportClasses.mapStage}>
-          <CentralFleetMap
-            fullscreen
-            mapInstanceKey={companyId}
-            drivers={driversOnMap}
-            onSelectDriver={(d) => onSelectDriver(d)}
-            serviceMapView={serviceMapView}
-            showMapToolbar
-            onPersistServiceMap={onPersistServiceMap}
-            persistServiceMapPending={persistServiceMapPending}
-            followDriver={selectedDriver}
-            focusNonce={mapFocusNonce}
-            onRefreshFleet={onRefreshFleet}
-            fleetRefreshing={fleetRefreshing}
-          />
-
+        <div className={centralViewportClasses.mapStage} style={mapStageStyle}>
           <div className={centralViewportClasses.mapOverlayTop}>
             <div className="flex items-start justify-between gap-2">
               <CentralMobileHomeFab />
@@ -184,7 +202,7 @@ export function CentralDashboardMobile({
                 <p className="truncate text-sm font-semibold leading-tight">{companyName}</p>
                 <p className="text-[10px] text-muted-foreground">Flota en tiempo real</p>
               </div>
-              <CentralMobileHeaderActions />
+              <CentralMobileHeaderActions onRefreshFleet={onRefreshFleet} fleetRefreshing={fleetRefreshing} />
             </div>
             <div className="flex flex-wrap gap-1.5">
               <span className={centralViewportClasses.mapOverlayChip}>
@@ -200,7 +218,7 @@ export function CentralDashboardMobile({
                 {activeFleet.length} activos
               </span>
             </div>
-            {isAdmin && (
+            {isAdmin ? (
               <div className="pointer-events-auto">
                 <CompanyCombobox
                   compact
@@ -211,22 +229,42 @@ export function CentralDashboardMobile({
                   onSearchChange={onCompanySearchChange}
                 />
               </div>
-            )}
+            ) : null}
+            <div id={CENTRAL_MOBILE_MAP_TOOLBAR_SLOT_ID} className="min-h-9 empty:hidden" />
           </div>
+
+          <CentralFleetMap
+            fullscreen
+            mapInstanceKey={companyId}
+            drivers={driversOnMap}
+            onSelectDriver={(d) => onSelectDriver(d)}
+            serviceMapView={serviceMapView}
+            showMapToolbar
+            onPersistServiceMap={onPersistServiceMap}
+            persistServiceMapPending={persistServiceMapPending}
+            followDriver={selectedDriver}
+            focusNonce={mapFocusNonce}
+            onRefreshFleet={onRefreshFleet}
+            fleetRefreshing={fleetRefreshing}
+            hideRefreshControl
+            hideAttribution
+          />
 
           <div
             className="pointer-events-none absolute inset-x-0 z-30 flex flex-col px-3"
-            style={{ bottom: "calc(var(--central-bottom-nav-height, 4.25rem) + 0.5rem)" }}
+            style={{ bottom: centralOffsetAboveBottomNav("0.5rem") }}
           >
             <div className="pointer-events-auto overflow-hidden rounded-2xl border border-border/80 bg-background/95 shadow-xl backdrop-blur-md">
               <button
                 type="button"
-                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+                className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
                 onClick={() => setFleetListOpen((o) => !o)}
                 aria-expanded={fleetListOpen}
               >
-                <CentralFleetActiveListHeader count={activeFleet.length} />
-                <span className="text-xs font-medium text-primary">{fleetListOpen ? "Ocultar" : "Ver lista"}</span>
+                <CentralFleetActiveListHeader compact count={activeFleet.length} />
+                <span className="shrink-0 text-xs font-medium text-primary">
+                  {fleetListOpen ? "Ocultar" : "Ver lista"}
+                </span>
               </button>
               {fleetListOpen ? (
                 <div className="border-t border-border/60 px-3 pb-3 pt-1">
@@ -304,6 +342,13 @@ export function CentralDashboardMobile({
           )}
         </div>
       )}
+
+      {tab === "map" ? (
+        <GeoapifyMapAttribution
+          className="fixed right-2 z-[1095] max-w-[9.5rem]"
+          style={{ bottom: centralOffsetAboveBottomNav("0.15rem") }}
+        />
+      ) : null}
 
       <CentralBottomNav
         active={tab}
