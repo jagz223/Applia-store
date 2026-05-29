@@ -27,6 +27,85 @@ function hideAtFromNow(): Date {
 }
 
 /** Al emparejar conductor ↔ pasajero (creación del hilo). */
+function conversationPeersMatch(
+  c: Record<string, unknown>,
+  riderUserId: string,
+  driverUserId: string,
+): boolean {
+  const p1 = String(c.participant1Id ?? "");
+  const p2 = String(c.participant2Id ?? "");
+  const peers = new Set([p1, p2]);
+  return peers.has(riderUserId) && peers.has(driverUserId);
+}
+
+/**
+ * Un hilo por viaje Go (como Pro/Man Go por reserva): reutiliza solo si coincide rideId y sigue activo;
+ * nunca reutiliza chats genéricos ni hilos cerrados de viajes anteriores.
+ */
+export async function ensureMobilityRideConversation(
+  storage: IStorage,
+  params: {
+    rideId: string;
+    module: MobilityRideChatModule;
+    riderUserId: string;
+    driverUserId: string;
+    hintedConversationId?: number | null;
+  },
+): Promise<number | null> {
+  const rideId = String(params.rideId).trim();
+  const riderUserId = String(params.riderUserId).trim();
+  const driverUserId = String(params.driverUserId).trim();
+  if (!rideId || !riderUserId || !driverUserId) return null;
+
+  const isReusable = (c: Record<string, unknown>): boolean => {
+    if (String(c.kind ?? "") !== "mobility_ride") return false;
+    if (String(c.mobilityRideId ?? "").trim() !== rideId) return false;
+    if (c.messagesLocked === true) return false;
+    return conversationPeersMatch(c, riderUserId, driverUserId);
+  };
+
+  const hinted = params.hintedConversationId != null ? Number(params.hintedConversationId) : NaN;
+  if (Number.isFinite(hinted) && hinted > 0) {
+    try {
+      const fromRide = await storage.findConversationForMobilityRide({ rideId });
+      if (fromRide && Number((fromRide as { id: number }).id) === hinted && isReusable(fromRide as Record<string, unknown>)) {
+        return hinted;
+      }
+    } catch {
+      /* crear hilo nuevo */
+    }
+  }
+
+  try {
+    const existing = await storage.findConversationForMobilityRide({ rideId });
+    if (existing && isReusable(existing as Record<string, unknown>)) {
+      return Number((existing as { id: number }).id);
+    }
+  } catch {
+    /* crear hilo nuevo */
+  }
+
+  try {
+    const conv = await storage.createConversation({
+      participant1Id: riderUserId,
+      participant2Id: driverUserId,
+    });
+    const conversationId = Number((conv as { id: number }).id);
+    if (!Number.isFinite(conversationId) || conversationId <= 0) return null;
+    await registerMobilityRideChatCreated(storage, {
+      conversationId,
+      rideId,
+      module: params.module,
+      riderUserId,
+      driverUserId,
+    });
+    return conversationId;
+  } catch (e) {
+    console.error("[mobility-ride-chat] ensureMobilityRideConversation", e);
+    return null;
+  }
+}
+
 export async function registerMobilityRideChatCreated(
   storage: IStorage,
   params: {

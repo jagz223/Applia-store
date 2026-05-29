@@ -321,10 +321,9 @@ export function registerCentralRoutes(app: Express): void {
       const inService = mobilityDriverInActiveRide(userId) || packDriverInActiveRide(userId);
       const taxiPres = freshMobilityPresence(userId, inService);
       const packPres = freshPackPresence(userId, inService);
-      const receiving = !!(
-        (taxiPres && !taxiPres.idleOnMapDuringRide) ||
-        (packPres && !packPres.idleOnMapDuringRide)
-      );
+      const receivingTaxiRaw = !!(taxiPres && !taxiPres.idleOnMapDuringRide);
+      const receivingDeliveryRaw = !!(packPres && !packPres.idleOnMapDuringRide);
+      const receiving = inService ? false : !!(receivingTaxiRaw || receivingDeliveryRaw);
       const pos = resolveFleetPosition(userId, inService, receiving, taxiPres, packPres);
       if (!pos) continue;
 
@@ -356,8 +355,8 @@ export function registerCentralRoutes(app: Express): void {
         isPetFriendly: pos.taxiAny?.isPetFriendly ?? pos.taxiFresh?.isPetFriendly ?? false,
         lat: pos.lat,
         lon: pos.lon,
-        receivingTaxi: !!(pos.taxiFresh && !pos.taxiFresh.idleOnMapDuringRide),
-        receivingDelivery: !!(pos.packFresh && !pos.packFresh.idleOnMapDuringRide),
+        receivingTaxi: inService ? false : receivingTaxiRaw,
+        receivingDelivery: inService ? false : receivingDeliveryRaw,
         receiving,
         inService,
         updatedAt: pos.updatedAt,

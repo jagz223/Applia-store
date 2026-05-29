@@ -29,6 +29,13 @@ export type CentralFleetEmitOptions = {
   receivingDelivery?: boolean;
 };
 
+/** En viaje activo no debe mostrarse «recibiendo» taxi ni delivery en la central. */
+export const CENTRAL_FLEET_IN_SERVICE_RECEIVING: CentralFleetEmitOptions = {
+  receiving: false,
+  receivingTaxi: false,
+  receivingDelivery: false,
+};
+
 export function centralFleetRoom(companyId: string): string {
   return `central:${companyId}`;
 }

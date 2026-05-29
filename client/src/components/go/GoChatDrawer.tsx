@@ -22,6 +22,7 @@ export function GoChatDrawer() {
               selectedConversationId={selectedConversationId}
               onSelectedConversationIdChange={setSelectedConversationId}
               mobilityEmbeddedReminder={mobilityChatReminder}
+              goEmbeddedDrawerOpen={isOpen}
             />
           </div>
         </div>

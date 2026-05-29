@@ -53,11 +53,94 @@ const SVG_TRUCK = `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" a
 
 const SVG_PERSON = `<svg viewBox="0 0 48 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="24" cy="12" rx="9" ry="10" fill="#0f172a"/><path d="M8 52 C8 38 16 30 24 30 C32 30 40 38 40 52 Z" fill="#0f172a"/><path d="M18 48 L24 38 L30 48" fill="none" stroke="#334155" stroke-width="2" stroke-linecap="round"/></svg>`;
 
+export type CargoVehicleKind = "motorcycle" | "car" | "pickup_truck" | "truck";
+
 const WORK_ACCENT_COLOR: Record<Exclude<FleetWorkAccent, null>, string> = {
   taxi: "#0ea5e9",
   delivery: "#8b5cf6",
   both: "#10b981",
 };
+
+type VehicleShadeKey = "dark" | "base" | "light" | "highlight" | "stroke" | "strokeLight";
+
+const VEHICLE_TINT_MAPS: Record<CargoVehicleKind, readonly (readonly [string, VehicleShadeKey])[]> = {
+  motorcycle: [
+    ["#0369a1", "dark"],
+    ["#0ea5e9", "base"],
+    ["#38bdf8", "light"],
+    ["#075985", "stroke"],
+    ["#e0f2fe", "strokeLight"],
+  ],
+  car: [
+    ["#047857", "dark"],
+    ["#10b981", "base"],
+    ["#6ee7b7", "light"],
+    ["#a7f3d0", "highlight"],
+    ["#065f46", "stroke"],
+  ],
+  pickup_truck: [
+    ["#c2410c", "dark"],
+    ["#fb923c", "base"],
+    ["#fdba74", "light"],
+    ["#ffedd5", "highlight"],
+    ["#9a3412", "stroke"],
+  ],
+  truck: [
+    ["#475569", "dark"],
+    ["#64748b", "base"],
+    ["#94a3b8", "light"],
+    ["#e2e8f0", "highlight"],
+    ["#334155", "stroke"],
+    ["#1e293b", "stroke"],
+  ],
+};
+
+function hexToRgb(hex: string): [number, number, number] {
+  const normalized = hex.replace("#", "");
+  const expanded =
+    normalized.length === 3
+      ? normalized
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : normalized;
+  const n = Number.parseInt(expanded, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return `#${[r, g, b]
+    .map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function mixHex(from: string, to: string, amount: number): string {
+  const [fr, fg, fb] = hexToRgb(from);
+  const [tr, tg, tb] = hexToRgb(to);
+  const t = Math.max(0, Math.min(1, amount));
+  return rgbToHex(fr + (tr - fr) * t, fg + (tg - fg) * t, fb + (tb - fb) * t);
+}
+
+function markerColorShades(base: string): Record<VehicleShadeKey, string> {
+  return {
+    dark: mixHex(base, "#000000", 0.38),
+    base,
+    light: mixHex(base, "#ffffff", 0.32),
+    highlight: mixHex(base, "#ffffff", 0.52),
+    stroke: mixHex(base, "#000000", 0.55),
+    strokeLight: mixHex(base, "#ffffff", 0.62),
+  };
+}
+
+/** Sustituye los tonos de carrocería del pictograma por una paleta derivada del color del conductor. */
+function tintVehicleSvg(svg: string, kind: CargoVehicleKind, markerColor: string): string {
+  const shades = markerColorShades(markerColor.trim());
+  let out = svg;
+  for (const [original, key] of VEHICLE_TINT_MAPS[kind]) {
+    out = out.split(original).join(shades[key]);
+  }
+  return out;
+}
 
 function wrapSvg(
   inner: string,
@@ -71,12 +154,10 @@ function wrapSvg(
   const accent = opts?.workAccent;
   const badge =
     accent != null
-      ? `<span aria-hidden="true" style="position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:9999px;background:${WORK_ACCENT_COLOR[accent]};border:2px solid #fff;box-shadow:0 0 0 1px rgba(15,23,42,0.35);"></span>`
+      ? `<span aria-hidden="true" style="position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:9999px;background:${WORK_ACCENT_COLOR[accent]};border:2px solid #fff;box-shadow:0 0 0 1px rgba(15,23,42,0.35);z-index:3;"></span>`
       : "";
-  return `<div class="relative flex items-end justify-center" style="width:${w}px;height:${h}px;${staleFx}">${inner}${badge}</div>`;
+  return `<div class="relative flex items-end justify-center" style="width:${w}px;height:${h}px;${staleFx}"><div style="position:relative;z-index:1;width:100%;height:100%;">${inner}</div>${badge}</div>`;
 }
-
-export type CargoVehicleKind = "motorcycle" | "car" | "pickup_truck" | "truck";
 
 export function resolveVehicleKind(vehicleType: string | null | undefined): CargoVehicleKind {
   const t = String(vehicleType ?? "").toLowerCase().trim();
@@ -88,10 +169,17 @@ export function resolveVehicleKind(vehicleType: string | null | undefined): Carg
 
 export function createDriverVehicleIcon(
   vehicleType: string | null | undefined,
-  options?: { entering?: boolean; stale?: boolean; sizePx?: number; workAccent?: FleetWorkAccent },
+  options?: {
+    entering?: boolean;
+    stale?: boolean;
+    sizePx?: number;
+    workAccent?: FleetWorkAccent;
+    /** Tinte de carrocería por conductor (mapa de central). */
+    markerColor?: string;
+  },
 ): L.DivIcon {
   const kind = resolveVehicleKind(vehicleType);
-  const inner =
+  const baseInner =
     kind === "motorcycle"
       ? SVG_MOTO
       : kind === "pickup_truck"
@@ -99,12 +187,20 @@ export function createDriverVehicleIcon(
         : kind === "truck"
           ? SVG_TRUCK
           : SVG_CAR;
+  const markerColor = options?.markerColor?.trim();
+  const inner =
+    markerColor != null && markerColor.length > 0
+      ? tintVehicleSvg(baseInner, kind, markerColor)
+      : baseInner;
   const w = Math.max(16, Math.round(options?.sizePx ?? 48));
   const h = w;
   const enterClass = options?.entering ? " fleet-marker-enter" : "";
   return L.divIcon({
     className: MARKER_BASE_CLASS + enterClass,
-    html: wrapSvg(inner, w, h, { stale: options?.stale, workAccent: options?.workAccent }),
+    html: wrapSvg(inner, w, h, {
+      stale: options?.stale,
+      workAccent: options?.workAccent,
+    }),
     iconSize: [w, h],
     iconAnchor: [w / 2, h],
     popupAnchor: [0, -h],

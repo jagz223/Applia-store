@@ -38,6 +38,8 @@ interface ChatWindowProps {
   pinInputToBottom?: boolean;
   /** Reserva/servicio terminado: no enviar mensajes. */
   chatLocked?: boolean;
+  /** Go embebido: mostrar atrás también en escritorio (no solo md:hidden). */
+  alwaysShowBack?: boolean;
 }
 
 export function ChatWindow({
@@ -58,6 +60,7 @@ export function ChatWindow({
   reminderActions,
   pinInputToBottom = false,
   chatLocked = false,
+  alwaysShowBack = false,
 }: ChatWindowProps) {
   const { user } = useAuth();
   const push = usePushNotifications();
@@ -139,7 +142,13 @@ export function ChatWindow({
         <header className="p-4 border-b border-border flex items-center justify-between min-w-0">
         <div className="flex items-center gap-3">
           {onBack && (
-            <Button variant="ghost" size="icon" className="md:hidden" onClick={onBack}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={alwaysShowBack ? "" : "md:hidden"}
+              onClick={onBack}
+              aria-label="Volver a conversaciones"
+            >
               <ArrowLeft className="w-5 h-5" />
             </Button>
           )}

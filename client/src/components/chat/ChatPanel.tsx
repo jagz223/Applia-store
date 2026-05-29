@@ -40,7 +40,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useSocket } from "@/hooks/use-socket";
 import type { ConversationEnriched } from "@/types/chat";
 import { findConversationForServiceScope } from "@shared/chat-conversation-scope";
-import { activeGoRideConversationId } from "@/lib/go-active-ride-chat";
+import { activeGoRideConversationId, conversationBelongsToGoRide, loadActiveGoRideId } from "@/lib/go-active-ride-chat";
 
 type Props = {
   mode: "page" | "embedded";
@@ -48,6 +48,8 @@ type Props = {
   onSelectedConversationIdChange?: (id: number | null) => void;
   /** Chat Go embebido: recordatorio de contexto (pasajero ↔ conductor) sin tocar reservas. */
   mobilityEmbeddedReminder?: string | null;
+  /** Drawer Go abierto: al cerrar se resetea el «atrás» para reabrir el hilo del viaje. */
+  goEmbeddedDrawerOpen?: boolean;
 };
 
 /** Altura del área de chat (viewport menos header aproximado). */
@@ -83,6 +85,7 @@ export function ChatPanel({
   selectedConversationId: externalId,
   onSelectedConversationIdChange,
   mobilityEmbeddedReminder = null,
+  goEmbeddedDrawerOpen = false,
 }: Props) {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const allowNavigate = mode === "page";
@@ -107,6 +110,8 @@ export function ChatPanel({
   /** Evita bucles; incluye bookingId/serviceId para que un mismo `with` abra otro hilo al cambiar de reserva. */
   const resolvedChatDeepLinkRef = useRef<string | null>(null);
   const resolvedSupportRef = useRef<boolean>(false);
+  /** Go embebido: el usuario pulsó «atrás» y no debe reabrirse el hilo del viaje activo. */
+  const embeddedThreadDismissedRef = useRef(false);
   /** Contexto de la conversación al abrir desde reserva/servicio (para mostrar recordatorio). */
   const [chatContext, setChatContext] = useState<{ bookingId: number | null; serviceId: number | null }>({ bookingId: null, serviceId: null });
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
@@ -139,15 +144,32 @@ export function ChatPanel({
     void queryClient.refetchQueries({ queryKey: ["chat", "conversations"] });
   }, [allowNavigate, selectedConversationId, conversations, queryClient]);
 
-  /** Go embebido: con viaje activo, abrir siempre el hilo de ese viaje (no uno antiguo con el mismo usuario). */
+  /** Go embebido: con viaje activo, abrir el hilo de ese viaje al entrar (salvo si el usuario volvió a la lista). */
   useEffect(() => {
     if (allowNavigate) return;
+    if (embeddedThreadDismissedRef.current) return;
     if (!conversationsQuery.isSuccess) return;
-    const activeConv = activeGoRideConversationId(conversations);
+    const rideId = loadActiveGoRideId();
+    if (!rideId) return;
+    if (selectedConversationId != null) {
+      const current = conversations.find((c) => c.id === selectedConversationId);
+      if (conversationBelongsToGoRide(current, rideId)) return;
+    }
+    const activeConv = activeGoRideConversationId(conversations, rideId);
     if (activeConv == null) return;
     if (selectedConversationId === activeConv) return;
     setSelectedConversationId(activeConv);
   }, [allowNavigate, conversationsQuery.isSuccess, conversations, selectedConversationId, setSelectedConversationId]);
+
+  useEffect(() => {
+    if (allowNavigate) return;
+    if (selectedConversationId != null) embeddedThreadDismissedRef.current = false;
+  }, [allowNavigate, selectedConversationId]);
+
+  useEffect(() => {
+    if (allowNavigate) return;
+    if (!goEmbeddedDrawerOpen) embeddedThreadDismissedRef.current = false;
+  }, [allowNavigate, goEmbeddedDrawerOpen]);
 
   /** Prioridad: datos de la conversación en API (persisten sin query ?bookingId=). Fallback: deep link en chatContext. */
   const { bookingIdForContext, serviceIdForContext } = useMemo(() => {
@@ -343,9 +365,12 @@ export function ChatPanel({
   }, [selectedConversationId]);
 
   const handleBackFromChat = useCallback(() => {
+    if (!allowNavigate) embeddedThreadDismissedRef.current = true;
     setSelectedConversationId(null);
     if (allowNavigate) stripConversationFromUrl(setLocation);
   }, [allowNavigate, setLocation, setSelectedConversationId]);
+
+  const embeddedAlwaysShowBack = mode === "embedded";
 
   // Si el usuario elige un chat desde la lista pero la URL no lleva ?conversation=, sincronizar (F5 conserva hilo y banner).
   useEffect(() => {
@@ -671,6 +696,7 @@ export function ChatPanel({
                         onLoadMoreMessages={messagesQuery.fetchNextPage}
                         isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
                         onBack={handleBackFromChat}
+                        alwaysShowBack={embeddedAlwaysShowBack}
                         reminderText={chatReminderText ?? undefined}
                         reminderActions={reminderActions}
                         chatLocked={serviceChatLocked}
@@ -723,6 +749,7 @@ export function ChatPanel({
                         onLoadMoreMessages={messagesQuery.fetchNextPage}
                         isLoadingMoreMessages={messagesQuery.isFetchingNextPage ?? false}
                         onBack={handleBackFromChat}
+                        alwaysShowBack={embeddedAlwaysShowBack}
                         reminderText={chatReminderText ?? undefined}
                         reminderActions={reminderActions}
                         chatLocked={serviceChatLocked}

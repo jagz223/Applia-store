@@ -106,6 +106,8 @@ export interface IStorage
     providerId?: number;
     serviceId?: number;
   }): Promise<any | null>;
+  /** Hilo activo de un viaje Go (por mobilityRideId; no reutiliza chats genéricos ni cerrados). */
+  findConversationForMobilityRide(params: { rideId: string }): Promise<any | null>;
   /** Lista conversaciones para auditoría admin (sin filtro de gracia ni hiddenForUserIds). */
   listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]>;
   /** Marca hilos de viaje Go no completados cuyo plazo de 24 h ya venció. */
@@ -1295,6 +1297,24 @@ export class InMemoryStorage implements IStorage {
     const byBooking = this.conversations.find((c: any) => Number(c?.bookingId) === bid);
     if (byBooking) return byBooking;
     return null;
+  }
+
+  async findConversationForMobilityRide(params: { rideId: string }): Promise<any | null> {
+    const rideId = String(params.rideId ?? "").trim();
+    if (!rideId) return null;
+    const matches = this.conversations.filter((c: any) => {
+      if (String(c.kind ?? "") !== "mobility_ride") return false;
+      if (String(c.mobilityRideId ?? "").trim() !== rideId) return false;
+      if (c.messagesLocked === true) return false;
+      return true;
+    });
+    if (matches.length === 0) return null;
+    matches.sort((a: any, b: any) => {
+      const ta = a.lastMessageAt instanceof Date ? a.lastMessageAt.getTime() : 0;
+      const tb = b.lastMessageAt instanceof Date ? b.lastMessageAt.getTime() : 0;
+      return tb - ta;
+    });
+    return matches[0] ?? null;
   }
 
   async listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]> {

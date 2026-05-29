@@ -419,6 +419,22 @@
     touch-action: manipulation;
   }
 
+  /** Central móvil: zoom por encima de franja de flota + nav inferior. */
+  .central-fleet-map-fs .leaflet-bottom.leaflet-left {
+    margin-bottom: calc(
+      var(--central-bottom-nav-height, 4.25rem) + env(safe-area-inset-bottom, 0px) +
+        var(--central-fleet-strip-height, 4.25rem) + 0.5rem
+    ) !important;
+    margin-left: 0.5rem !important;
+    z-index: 650 !important;
+  }
+  .central-fleet-map-fs .leaflet-bottom.leaflet-left a {
+    pointer-events: auto !important;
+  }
+  .central-fleet-map-fs .leaflet-control-zoom a {
+    touch-action: manipulation;
+  }
+
   /** Controles Leaflet más legibles en modo oscuro (teselas oscuras Carto). */
   .dark .leaflet-bar a {
     background-color: hsl(220 18% 18%);

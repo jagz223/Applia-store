@@ -4,6 +4,8 @@ import { Car, MapPin, Phone, Radio, Settings, Star, Users, Hash } from "lucide-r
 import type { DispatchMobilityFares, DispatchPackFares, CentralServiceMapView } from "@shared/dispatch-company";
 import type { CentralFleetDriver } from "@/hooks/use-central";
 import { formatCentralFleetMapHint } from "@/lib/central-fleet-position";
+import { CentralDriverReceivingBadge } from "@/components/central/CentralDriverReceivingBadge";
+import { centralDriverInServiceLabel } from "@/lib/central-fleet-work-accent";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -110,35 +112,14 @@ function DriverCard({ driver }: { driver: CentralFleetDriver }) {
       </div>
       <div className="flex flex-wrap gap-2">
         <Badge variant={driver.inService ? "default" : "secondary"}>
-          {driver.inService ? "En servicio" : "Buscando clientes"}
+          {centralDriverInServiceLabel(driver)}
         </Badge>
         <Badge variant={connectionVariant}>{connectionLabel}</Badge>
       </div>
       {mapHint ? (
         <p className="text-xs text-muted-foreground">{mapHint}</p>
       ) : null}
-      {(driver.receivingTaxi || driver.receivingDelivery) ? (
-        <div className="flex flex-wrap gap-2">
-          {driver.receivingTaxi && driver.receivingDelivery ? (
-            <Badge
-              variant="secondary"
-              className="border-emerald-500/35 bg-emerald-500/10 text-xs font-normal text-emerald-900 dark:text-emerald-100"
-            >
-              Modo híbrido · taxi y delivery
-            </Badge>
-          ) : null}
-          {driver.receivingTaxi ? (
-            <Badge variant="secondary" className="text-xs font-normal">
-              Recibiendo taxi
-            </Badge>
-          ) : null}
-          {driver.receivingDelivery ? (
-            <Badge variant="secondary" className="text-xs font-normal">
-              Recibiendo delivery
-            </Badge>
-          ) : null}
-        </div>
-      ) : null}
+      <CentralDriverReceivingBadge driver={driver} />
       {driver.activeService ? (
         <CentralActiveServicePanel service={driver.activeService} />
       ) : driver.inService ? (
@@ -219,7 +200,7 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
     fleetRefreshing,
   } = props;
 
-  const [lowerTab, setLowerTab] = useState<"fares" | "register" | "requests" | "history">("fares");
+  const [lowerTab, setLowerTab] = useState<"fares" | "register" | "requests" | "history" | "members">("fares");
   useEffect(() => {
     if (highlightAffiliationRequestId) setLowerTab("requests");
   }, [highlightAffiliationRequestId]);
@@ -299,7 +280,7 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
             </Card>
 
             <Tabs value={lowerTab} onValueChange={(v) => setLowerTab(v as typeof lowerTab)} className="space-y-4">
-              <TabsList className="mx-auto grid w-full max-w-3xl grid-cols-2 sm:grid-cols-4">
+              <TabsList className="mx-auto grid w-full max-w-4xl grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
                 <TabsTrigger value="fares">Tarifas</TabsTrigger>
                 <TabsTrigger value="register">Registrar</TabsTrigger>
                 <TabsTrigger value="history">Historial</TabsTrigger>
@@ -308,6 +289,14 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                   {pendingAffiliationCount > 0 ? (
                     <span className="ml-1 inline-flex min-w-5 justify-center rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">
                       {pendingAffiliationCount > 99 ? "99+" : pendingAffiliationCount}
+                    </span>
+                  ) : null}
+                </TabsTrigger>
+                <TabsTrigger value="members" className="relative text-xs sm:text-sm">
+                  Usuarios registrados
+                  {membersCount > 0 ? (
+                    <span className="ml-1 inline-flex min-w-5 justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                      {membersCount > 99 ? "99+" : membersCount}
                     </span>
                   ) : null}
                 </TabsTrigger>
@@ -334,24 +323,29 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                   highlightRequestId={highlightAffiliationRequestId}
                 />
               </TabsContent>
+              <TabsContent value="members">
+                <CentralMembersPanel companyId={companyId} variant="embedded" />
+              </TabsContent>
             </Tabs>
           </div>
 
-          <div className="flex min-w-0 flex-col gap-4">
-            <Card className="border-border/80 shadow-sm">
-              <CardHeader className="pb-2">
+          <div className="flex min-w-0 flex-col">
+            <Card className="flex min-h-0 flex-1 flex-col border-border/80 shadow-sm">
+              <CardHeader className="shrink-0 pb-2">
                 <CentralFleetActiveListHeader count={activeFleet.length} />
               </CardHeader>
-              <CardContent>
+              <CardContent className="min-h-0 flex-1 pb-4">
                 <CentralFleetActiveList
                   drivers={activeFleet}
                   selectedUserId={selectedDriver?.userId ?? null}
                   onSelectDriver={(d) => onSelectDriver(d)}
-                  maxHeightClass="max-h-[min(42vh,420px)]"
+                  maxHeightClass="max-h-[min(72vh,640px)]"
                 />
               </CardContent>
             </Card>
+          </div>
 
+          <aside className="min-w-0 xl:sticky xl:top-6 xl:self-start">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Detalle</CardTitle>
@@ -370,10 +364,6 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                 )}
               </CardContent>
             </Card>
-          </div>
-
-          <aside className="min-w-0">
-            <CentralMembersPanel companyId={companyId} variant="sidebar" />
           </aside>
         </div>
       </div>
