@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Tienda">
+  <rect width="240" height="240" fill="#e8eef5"/>
+  <rect x="40" y="90" width="160" height="110" rx="8" fill="#c5d4e8"/>
+  <path d="M30 95 L120 45 L210 95" fill="none" stroke="#9aa8bc" stroke-width="10" stroke-linejoin="round"/>
+  <rect x="105" y="140" width="50" height="60" rx="4" fill="#9aa8bc"/>
+  <rect x="55" y="115" width="40" height="35" rx="4" fill="#f0f4f8" stroke="#9aa8bc" stroke-width="4"/>
+  <rect x="145" y="115" width="40" height="35" rx="4" fill="#f0f4f8" stroke="#9aa8bc" stroke-width="4"/>
+</svg>

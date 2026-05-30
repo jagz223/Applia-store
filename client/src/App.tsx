@@ -63,6 +63,11 @@ import AccountRecoverySetup from "@/pages/AccountRecoverySetup";
 import ForgotPassword from "@/pages/ForgotPassword";
 import VerifyProfessional from "@/pages/VerifyProfessional";
 import VerifyProfessionalPayment from "@/pages/VerifyProfessionalPayment";
+import StorePage from "@/pages/StorePage";
+import StoreCreate from "@/pages/StoreCreate";
+import StoreSubscriptionPayment from "@/pages/StoreSubscriptionPayment";
+import StoreAdmin from "@/pages/StoreAdmin";
+import StoresCatalog from "@/pages/StoresCatalog";
 import { GoShellLayout } from "@/components/go/GoShellLayout";
 import { useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { GoCategoryGate } from "@/components/go/GoCategoryGate";
@@ -148,6 +153,11 @@ function MainRouter() {
       <Route path="/promociones" component={Promociones} />
       <Route path="/professional/verify" component={VerifyProfessional} />
       <Route path="/professional/verify/payment" component={VerifyProfessionalPayment} />
+      <Route path="/tienda/crear" component={StoreCreate} />
+      <Route path="/tiendas" component={StoresCatalog} />
+      <Route path="/tienda/:slug/pago" component={StoreSubscriptionPayment} />
+      <Route path="/tienda/:slug/admin/:section?" component={StoreAdmin} />
+      <Route path="/tienda/:slug" component={StorePage} />
       <Route path="/politics" component={Politics} />
       <Route component={NotFound} />
     </Switch>

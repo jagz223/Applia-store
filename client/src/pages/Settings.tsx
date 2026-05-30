@@ -27,6 +27,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import { SettingsChangePasswordCard } from "@/components/settings/SettingsChangePasswordCard";
 import { SettingsAvatarEditor } from "@/components/settings/SettingsAvatarEditor";
+import { StoreSettingsCta } from "@/components/store/StoreSettingsCta";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -398,6 +399,7 @@ export default function Settings() {
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-8">
         <aside className="flex flex-col gap-6 lg:col-span-4 lg:sticky lg:top-6 lg:self-start">
+          <StoreSettingsCta />
           <ThemeAppearanceCard />
           <SettingsChangePasswordCard recoveryConfigured={recoveryConfigured} />
           <Card>

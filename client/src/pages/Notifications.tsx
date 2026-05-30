@@ -154,6 +154,18 @@ function getNotificationPath(notification: { id?: string; type: string; data?: a
     }
     case "verification_welcome":
       return data.url ?? "/professional-dashboard";
+    case "store_subscription_result": {
+      const u = data.url ?? data.data?.url;
+      if (typeof u === "string" && u.startsWith("/")) return u;
+      const storeSlug = data.storeSlug ?? data.data?.storeSlug;
+      const st = data.status ?? data.data?.status;
+      if (st === "rejected" && typeof storeSlug === "string" && storeSlug.trim()) {
+        return `/tienda/${encodeURIComponent(storeSlug.trim())}/pago`;
+      }
+      return "/dashboard";
+    }
+    case "admin_store_subscription_payment":
+      return data.url ?? "/admin?tab=store-payments";
     case "account_change_request_approved":
     case "account_change_request_rejected": {
       const u = data.url ?? data.data?.url;
@@ -216,6 +228,12 @@ function getIcon(type: string, data?: any) {
         : <ShieldCheck className="h-4 w-4 text-green-500" />;
     case "verification_welcome":
       return <ShieldCheck className="h-4 w-4 text-primary animate-pulse" />;
+    case "store_subscription_result":
+      return data?.status === "rejected"
+        ? <ShieldAlert className="h-4 w-4 text-red-500" />
+        : <ShieldCheck className="h-4 w-4 text-green-500" />;
+    case "admin_store_subscription_payment":
+      return <Shield className="h-4 w-4 text-amber-500" />;
     case "account_change_request_approved":
       return <Bell className="h-4 w-4 text-green-500" />;
     case "account_change_request_rejected":
@@ -433,6 +451,19 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
 
   if (type === "verification_result" || type === "verification_welcome") {
     return d.message ?? d.data?.message ?? "Tu estado de verificación ha sido actualizado.";
+  }
+
+  if (type === "store_subscription_result") {
+    const st = d.status ?? d.data?.status;
+    const msg = d.message ?? d.data?.message;
+    if (typeof msg === "string" && msg.trim()) return msg.trim();
+    return st === "rejected"
+      ? "Pago rechazado. Toca para volver a enviar el comprobante."
+      : "Tu pago de tienda fue verificado.";
+  }
+
+  if (type === "admin_store_subscription_payment") {
+    return d.message ?? d.data?.message ?? "Nuevo comprobante de tienda pendiente de revisión.";
   }
 
   if (type === "account_change_request_approved" || type === "account_change_request_rejected") {

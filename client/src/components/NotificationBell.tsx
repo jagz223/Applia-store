@@ -134,6 +134,18 @@ function getNotificationPath(notification: { id?: string; type: string; data?: a
       return "/movimientos";
     case "verification_welcome":
       return "/professional-dashboard";
+    case "store_subscription_result": {
+      const u = data.url ?? data.data?.url;
+      if (typeof u === "string" && u.startsWith("/")) return u;
+      const storeSlug = data.storeSlug ?? data.data?.storeSlug;
+      const st = data.status ?? data.data?.status;
+      if (st === "rejected" && typeof storeSlug === "string" && storeSlug.trim()) {
+        return `/tienda/${encodeURIComponent(storeSlug.trim())}/pago`;
+      }
+      return "/dashboard";
+    }
+    case "admin_store_subscription_payment":
+      return data.url ?? "/admin?tab=store-payments";
     case "verification_result": {
       const step = data.step ?? data.data?.step;
       const st = data.status ?? data.data?.status;

@@ -1,11 +1,15 @@
 import { MAN_GO_CATEGORY_SLUG, MARKETPLACE_CATEGORY_SLUG } from "./default-categories";
 
+/** Slug de mensualidad de visibilidad para tiendas online. */
+export const STORE_SUBSCRIPTION_FEE_SLUG = "store";
+
 /** Slugs editables en admin → Suscripción mensual (orden de pantalla). */
 export const SUBSCRIPTION_FEE_ADMIN_SLUGS = [
   MAN_GO_CATEGORY_SLUG,
   "transport",
   MARKETPLACE_CATEGORY_SLUG,
   "professional",
+  STORE_SUBSCRIPTION_FEE_SLUG,
 ] as const;
 
 export type SubscriptionFeeAdminSlug = (typeof SUBSCRIPTION_FEE_ADMIN_SLUGS)[number];
@@ -36,6 +40,7 @@ export function subscriptionFeeAdminLabel(slug: SubscriptionFeeAdminSlug): strin
   if (slug === "transport") return "Car Go";
   if (slug === MARKETPLACE_CATEGORY_SLUG) return "Marketplace";
   if (slug === "professional") return "Pro Go";
+  if (slug === STORE_SUBSCRIPTION_FEE_SLUG) return "Tienda";
   return slug;
 }
 
@@ -43,6 +48,9 @@ export function subscriptionFeeAdminHint(slug: SubscriptionFeeAdminSlug): string
   if (slug === "transport") return "La misma tarifa aplica a Delivery (Pack Go).";
   if (slug === MARKETPLACE_CATEGORY_SLUG) {
     return "Mensualidad de visibilidad para asociados del catálogo Marketplace.";
+  }
+  if (slug === STORE_SUBSCRIPTION_FEE_SLUG) {
+    return "Mensualidad de visibilidad para tiendas con productos publicados.";
   }
   return undefined;
 }

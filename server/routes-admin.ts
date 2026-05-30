@@ -71,6 +71,11 @@ import {
 import { buildMobilityCategoryApprovalPatch } from "@shared/provider-category-membership";
 import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
 import { buildSubscriptionPaymentAuditMeta } from "@shared/admin-audit-payment-meta";
+import {
+  listStoreSubscriptionPaymentsForAdmin,
+  reviewStoreSubscriptionPayment,
+} from "./store-subscription-payments";
+import { storeSubscriptionPaymentReviewSchema } from "@shared/store-subscription-payment";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
@@ -2948,6 +2953,60 @@ export function registerAdminRoutes(app: Express): void {
       return res.status(500).json({ message: "Error al eliminar código promocional" });
     }
   });
+
+  app.get("/api/admin/store-subscription-payments", authenticateJWT, requireFullAdmin, async (req, res) => {
+    try {
+      const statusRaw = String(req.query.status ?? "").trim();
+      const status =
+        statusRaw === "pending" || statusRaw === "completed" || statusRaw === "rejected"
+          ? statusRaw
+          : undefined;
+      const items = await listStoreSubscriptionPaymentsForAdmin(status);
+      return res.json({ items });
+    } catch (e) {
+      console.error("[admin] store-subscription-payments list", e);
+      return res.status(500).json({ message: "No se pudieron cargar los pagos de tiendas." });
+    }
+  });
+
+  app.patch(
+    "/api/admin/store-subscription-payments/:reportId",
+    authenticateJWT,
+    requireFullAdmin,
+    async (req: any, res) => {
+      try {
+        const reportId = req.params.reportId;
+        if (reportId == null || reportId === "") {
+          return res.status(400).json({ message: "reportId es requerido" });
+        }
+        const parsed = storeSubscriptionPaymentReviewSchema.safeParse(req.body ?? {});
+        if (!parsed.success) {
+          return res.status(400).json({ message: "Datos inválidos", errors: parsed.error.flatten() });
+        }
+        if (parsed.data.action === "reject" && (parsed.data.reason ?? "").trim().length < 3) {
+          return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
+        }
+        const adminUserId = String(req.user?.id ?? "");
+        const result = await reviewStoreSubscriptionPayment({
+          reportId,
+          adminUserId,
+          review: parsed.data,
+        });
+        return res.json(result);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg === "REPORT_NOT_FOUND") return res.status(404).json({ message: "Comprobante no encontrado." });
+        if (msg === "REPORT_NOT_PENDING") {
+          return res.status(409).json({ message: "Este comprobante ya fue revisado." });
+        }
+        if (msg === "REJECT_REASON_REQUIRED") {
+          return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
+        }
+        console.error("[admin] store-subscription-payments review", e);
+        return res.status(500).json({ message: "No se pudo procesar la revisión." });
+      }
+    },
+  );
 
   console.log("✅ Admin routes registered (incl. GET /api/admin/dashboard-stats)");
 }

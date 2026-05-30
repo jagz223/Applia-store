@@ -2,6 +2,8 @@ import { Link } from "wouter";
 import { Bell, ChevronRight, Shield, User } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
+import { StoreSettingsCta } from "@/components/store/StoreSettingsCta";
+import { useAuth } from "@/hooks/use-auth";
 
 type QuickSettingsPanelProps = {
   /** Ruta para volver desde /settings (solo path, ej. `/go/cargo`). */
@@ -19,6 +21,7 @@ function isGoTaxiOrDeliverySettingsContext(returnPath: string): boolean {
 }
 
 export function QuickSettingsPanel({ returnPath, onNavigate }: QuickSettingsPanelProps) {
+  const { isAuthenticated } = useAuth();
   const safeReturn =
     typeof returnPath === "string" && returnPath.startsWith("/") ? returnPath : "/dashboard";
   const settingsHref = `/settings?return=${encodeURIComponent(safeReturn)}`;
@@ -29,6 +32,8 @@ export function QuickSettingsPanel({ returnPath, onNavigate }: QuickSettingsPane
   return (
     <div className="space-y-4">
       <ThemeAppearanceCard />
+
+      {isAuthenticated ? <StoreSettingsCta onNavigate={onNavigate} /> : null}
 
       <Card className="border-border">
         <CardHeader className="pb-2">

@@ -44,6 +44,17 @@ export function buildVerificationReportDescription(args: {
   return `${base}${receiptPart}`;
 }
 
+export function buildStoreSubscriptionReportDescription(args: {
+  storeName: string;
+  months: number;
+  transferReceiptCode?: string | null;
+}): string {
+  const months = Math.max(1, Math.trunc(args.months));
+  const base = `Pago mensualidad tienda «${args.storeName.trim()}» (${months} mes${months === 1 ? "" : "es"})`;
+  const receipt = args.transferReceiptCode?.trim();
+  return receipt ? `${base} (Comprobante: ${receipt})` : base;
+}
+
 export function invoiceNotesFromReport(report: Record<string, unknown>): string[] {
   const lines: string[] = [];
   const purpose = String(report.description ?? "").trim();

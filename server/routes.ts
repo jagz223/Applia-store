@@ -44,6 +44,7 @@ import { registerMapRoutes } from "./routes-maps";
 import { registerMobilityRideRoutes, mobilityPanicResolveContext } from "./mobility-rides";
 import { registerPackRideRoutes, packPanicResolveContext } from "./pack-rides";
 import { registerSeoRoutes } from "./seo";
+import { registerStoreRoutes } from "./routes-stores";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
@@ -79,6 +80,7 @@ export async function registerRoutes(
   registerCentralRoutes(app);
   registerRoleRoutes(app);
   registerMapRoutes(app);
+  registerStoreRoutes(app);
   registerMobilityRideRoutes(app);
   registerPackRideRoutes(app);
 
