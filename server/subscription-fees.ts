@@ -22,6 +22,10 @@ export {
   subscriptionMonthlyUsdForProvider,
   subscriptionBillingCategorySlugFromProvider,
 } from "@shared/provider-subscription-fee";
+export {
+  subscriptionMonthlyUsdForStore,
+  STORE_SUBSCRIPTION_FEE_SLUG,
+} from "@shared/store-subscription-fee";
 
 const DOC_ID = "global";
 const TTL_MS = 15_000;

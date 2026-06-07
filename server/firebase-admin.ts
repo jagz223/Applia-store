@@ -193,4 +193,12 @@ export const FIRESTORE_COLLECTIONS = {
   STATS_SUBCATEGORY_BOOKINGS_MONTHLY: "stats_subcategory_bookings_monthly",
   /** Historial persistente de viajes Car Go / Pack Go (completados, cancelados, expirados). */
   MOBILITY_RIDE_HISTORY: "mobility_ride_history",
+  /** Tiendas online (1 por dueño en MVP). */
+  STORES: "stores",
+  /** Productos de una tienda. */
+  STORE_PRODUCTS: "store_products",
+  /** Categorías internas de una tienda (agrupan productos). */
+  STORE_CATEGORIES: "store_categories",
+  /** Ingredientes y materiales globales (sin pertenencia a tienda). */
+  INGREDIENTS_MATERIALS: "ingredients_materials",
 } as const;

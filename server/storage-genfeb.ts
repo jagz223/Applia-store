@@ -39,6 +39,28 @@ import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
 import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
 import { DEFAULT_CATEGORIES } from "@shared/default-categories";
+import {
+  INGREDIENTS_MATERIALS_PAGE_SIZE,
+  type Store,
+  type IngredientMaterial,
+  type InsertStore,
+  type InsertIngredientMaterial,
+  type InsertStoreProduct,
+  type UpdateStore,
+  type UpdateStoreProduct,
+  type StoreProduct,
+  type StoreCategory,
+  type InsertStoreCategory,
+  type UpdateStoreCategory,
+} from "@shared/store-schema";
+import { STORE_SUBSCRIPTION_FEE_REPORT_TYPE } from "@shared/store-subscription-payment";
+import {
+  ingredientMaterialKey,
+  normalizeIngredientMaterialName,
+  resolveUniqueStoreSlug,
+} from "@shared/store-slug";
+import { isStoreVisibilityActive } from "@shared/store-visibility";
+import { extendStoreVisibilitySubscriptionEndsAt } from "@shared/store-subscription-fee";
 const getDb = async () => (await import("./db")).db;
 
 /**
@@ -394,6 +416,55 @@ export interface IStorage
     estimatedUsd: number;
     paymentMethod: "genfeb" | "cash" | "bank_transfer";
   }): Promise<void>;
+
+  // ==================== Tiendas ====================
+  createStore(input: InsertStore & { ownerUserId: string }): Promise<Store>;
+  updateStore(storeId: number, input: UpdateStore): Promise<Store>;
+  getStoreById(id: number): Promise<Store | undefined>;
+  getStoreBySlug(slug: string): Promise<Store | undefined>;
+  getStoreByOwnerUserId(ownerUserId: string): Promise<Store | undefined>;
+  storeSlugExists(slug: string): Promise<boolean>;
+  listActiveStores(options?: { limit?: number }): Promise<Store[]>;
+  listIngredientsMaterials(options: {
+    q?: string;
+    page: number;
+    limit?: number;
+  }): Promise<{ items: IngredientMaterial[]; total: number; page: number; limit: number }>;
+  createIngredientMaterial(input: InsertIngredientMaterial): Promise<IngredientMaterial>;
+  findIngredientMaterialByNormalizedName(normalizedName: string): Promise<IngredientMaterial | undefined>;
+  /** Extiende vigencia tras pago aprobado (Prompt 3). */
+  extendStoreVisibilitySubscription(args: {
+    storeId: number;
+    months: number;
+    approvalAt?: Date;
+  }): Promise<Store>;
+  /** Ajuste manual de fin de vigencia (admin / soporte). */
+  patchStoreVisibilitySubscriptionEndsAt(storeId: number, endsAt: string | null): Promise<Store>;
+  findPendingStoreSubscriptionReport(storeId: number): Promise<any | undefined>;
+  listStoreSubscriptionFinancialReports(status?: "pending" | "completed" | "rejected"): Promise<any[]>;
+  patchStoreSubscriptionPaymentMeta(
+    storeId: number,
+    patch: {
+      visibilitySubscriptionLastPaymentKey?: string | null;
+      visibilitySubscriptionLastPaymentApprovedAt?: Date | string | null;
+      visibilitySubscriptionLastPaymentApprovedBy?: string | null;
+    },
+  ): Promise<Store>;
+  listStoreProducts(storeId: number): Promise<StoreProduct[]>;
+  getStoreProduct(storeId: number, productId: number): Promise<StoreProduct | undefined>;
+  createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct>;
+  updateStoreProduct(storeId: number, productId: number, input: UpdateStoreProduct): Promise<StoreProduct>;
+  deleteStoreProduct(storeId: number, productId: number): Promise<void>;
+  deleteStoreProduct(storeId: number, productId: number): Promise<void>;
+  listStoreCategories(storeId: number): Promise<StoreCategory[]>;
+  getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined>;
+  createStoreCategory(storeId: number, input: Omit<InsertStoreCategory, "productIds">): Promise<StoreCategory>;
+  updateStoreCategory(
+    storeId: number,
+    categoryId: number,
+    input: Omit<UpdateStoreCategory, "productIds">,
+  ): Promise<StoreCategory>;
+  deleteStoreCategory(storeId: number, categoryId: number): Promise<void>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -3051,6 +3122,307 @@ export class InMemoryStorage implements IStorage {
 
   private professionalVerifications = new Map<string, ProfessionalVerification>();
   private verifyingStatuses = new Map<string, VerifyingStatus>();
+
+  private stores: Store[] = [];
+  private storeIdCounter = 1;
+  private ingredientsMaterials: IngredientMaterial[] = [];
+  private ingredientMaterialIdCounter = 1;
+
+  async createStore(input: InsertStore & { ownerUserId: string }): Promise<Store> {
+    const existing = await this.getStoreByOwnerUserId(input.ownerUserId);
+    if (existing) {
+      throw new Error("STORE_ALREADY_EXISTS");
+    }
+    const slug = await resolveUniqueStoreSlug(input.name, (s) => this.storeSlugExists(s));
+    const now = new Date();
+    const store: Store = {
+      id: this.storeIdCounter++,
+      ownerUserId: input.ownerUserId,
+      name: input.name.trim(),
+      slug,
+      description: null,
+      rubro: null,
+      coverImageUrl: null,
+      visibilitySubscriptionEndsAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.stores.push(store);
+    return store;
+  }
+
+  async updateStore(storeId: number, input: UpdateStore): Promise<Store> {
+    const index = this.stores.findIndex((s) => s.id === storeId);
+    if (index < 0) throw new Error("STORE_NOT_FOUND");
+    const now = new Date();
+    const current = this.stores[index];
+    const updated: Store = {
+      ...current,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description?.trim() ? input.description.trim() : null }
+        : {}),
+      ...(input.rubro !== undefined ? { rubro: input.rubro } : {}),
+      coverImageUrl: input.coverImageUrl !== undefined ? input.coverImageUrl : current.coverImageUrl,
+      updatedAt: now,
+    };
+    this.stores[index] = updated;
+    return updated;
+  }
+
+  async getStoreById(id: number): Promise<Store | undefined> {
+    return this.stores.find((s) => s.id === id);
+  }
+
+  async getStoreBySlug(slug: string): Promise<Store | undefined> {
+    const key = slug.trim().toLowerCase();
+    return this.stores.find((s) => s.slug.toLowerCase() === key);
+  }
+
+  async getStoreByOwnerUserId(ownerUserId: string): Promise<Store | undefined> {
+    return this.stores.find((s) => s.ownerUserId === ownerUserId);
+  }
+
+  async storeSlugExists(slug: string): Promise<boolean> {
+    const key = slug.trim().toLowerCase();
+    return this.stores.some((s) => s.slug.toLowerCase() === key);
+  }
+
+  async listActiveStores(options?: { limit?: number }): Promise<Store[]> {
+    const limit = options?.limit ?? 100;
+    return this.stores
+      .filter((s) => isStoreVisibilityActive(s))
+      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+      .slice(0, limit);
+  }
+
+  async listIngredientsMaterials(options: {
+    q?: string;
+    page: number;
+    limit?: number;
+  }): Promise<{ items: IngredientMaterial[]; total: number; page: number; limit: number }> {
+    const limit = options.limit ?? INGREDIENTS_MATERIALS_PAGE_SIZE;
+    const page = Math.max(1, options.page);
+    const q = (options.q ?? "").trim().toLowerCase();
+    let list = [...this.ingredientsMaterials];
+    if (q) {
+      list = list.filter(
+        (item) =>
+          item.name.toLowerCase().includes(q) || item.normalizedName.includes(q),
+      );
+    }
+    list.sort((a, b) => a.name.localeCompare(b.name, "es"));
+    const total = list.length;
+    const start = (page - 1) * limit;
+    return {
+      items: list.slice(start, start + limit),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async findIngredientMaterialByNormalizedName(normalizedName: string): Promise<IngredientMaterial | undefined> {
+    const key = normalizedName.trim().toLowerCase();
+    return this.ingredientsMaterials.find((item) => item.normalizedName === key);
+  }
+
+  async createIngredientMaterial(input: InsertIngredientMaterial): Promise<IngredientMaterial> {
+    const name = normalizeIngredientMaterialName(input.name);
+    const normalizedName = ingredientMaterialKey(name);
+    const dup = await this.findIngredientMaterialByNormalizedName(normalizedName);
+    if (dup) {
+      throw new Error("INGREDIENT_MATERIAL_ALREADY_EXISTS");
+    }
+    const item: IngredientMaterial = {
+      id: this.ingredientMaterialIdCounter++,
+      name,
+      normalizedName,
+      createdAt: new Date(),
+    };
+    this.ingredientsMaterials.push(item);
+    return item;
+  }
+
+  private storeProducts: StoreProduct[] = [];
+  private storeProductIdCounter = 1;
+
+  async listStoreProducts(storeId: number): Promise<StoreProduct[]> {
+    return this.storeProducts
+      .filter((p) => p.storeId === storeId)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStoreProduct(storeId: number, productId: number): Promise<StoreProduct | undefined> {
+    return this.storeProducts.find((p) => p.storeId === storeId && p.id === productId);
+  }
+
+  async createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct> {
+    const now = new Date();
+    const product: StoreProduct = {
+      id: this.storeProductIdCounter++,
+      storeId,
+      name: input.name.trim(),
+      description: input.description?.trim() ?? null,
+      price: Number(input.price),
+      categoryIds: input.categoryIds ?? [],
+      ingredientMaterialIds: input.ingredientMaterialIds ?? [],
+      imageUrls: input.imageUrls ?? [],
+      showOnShowcase: input.showOnShowcase ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storeProducts.push(product);
+    return product;
+  }
+
+  async updateStoreProduct(
+    storeId: number,
+    productId: number,
+    input: UpdateStoreProduct,
+  ): Promise<StoreProduct> {
+    const idx = this.storeProducts.findIndex((p) => p.storeId === storeId && p.id === productId);
+    if (idx === -1) throw new Error("STORE_PRODUCT_NOT_FOUND");
+    const cur = this.storeProducts[idx];
+    const next: StoreProduct = {
+      ...cur,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description?.trim() ?? null }
+        : {}),
+      ...(input.price !== undefined ? { price: Number(input.price) } : {}),
+      ...(input.categoryIds !== undefined ? { categoryIds: input.categoryIds } : {}),
+      ...(input.ingredientMaterialIds !== undefined
+        ? { ingredientMaterialIds: input.ingredientMaterialIds }
+        : {}),
+      ...(input.imageUrls !== undefined ? { imageUrls: input.imageUrls } : {}),
+      ...(input.showOnShowcase !== undefined ? { showOnShowcase: input.showOnShowcase } : {}),
+      updatedAt: new Date(),
+    };
+    this.storeProducts[idx] = next;
+    return next;
+  }
+
+  async deleteStoreProduct(storeId: number, productId: number): Promise<void> {
+    const idx = this.storeProducts.findIndex((p) => p.storeId === storeId && p.id === productId);
+    if (idx === -1) throw new Error("STORE_PRODUCT_NOT_FOUND");
+    this.storeProducts.splice(idx, 1);
+  }
+
+  private storeCategories: StoreCategory[] = [];
+  private storeCategoryIdCounter = 1;
+
+  async listStoreCategories(storeId: number): Promise<StoreCategory[]> {
+    return this.storeCategories
+      .filter((c) => c.storeId === storeId)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined> {
+    return this.storeCategories.find((c) => c.storeId === storeId && c.id === categoryId);
+  }
+
+  async createStoreCategory(
+    storeId: number,
+    input: Omit<InsertStoreCategory, "productIds">,
+  ): Promise<StoreCategory> {
+    const now = new Date();
+    const category: StoreCategory = {
+      id: this.storeCategoryIdCounter++,
+      storeId,
+      name: input.name.trim(),
+      description: input.description?.trim() ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storeCategories.push(category);
+    return category;
+  }
+
+  async updateStoreCategory(
+    storeId: number,
+    categoryId: number,
+    input: Omit<UpdateStoreCategory, "productIds">,
+  ): Promise<StoreCategory> {
+    const idx = this.storeCategories.findIndex((c) => c.storeId === storeId && c.id === categoryId);
+    if (idx === -1) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    const cur = this.storeCategories[idx];
+    const next: StoreCategory = {
+      ...cur,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description?.trim() ? input.description.trim() : null }
+        : {}),
+      updatedAt: new Date(),
+    };
+    this.storeCategories[idx] = next;
+    return next;
+  }
+
+  async deleteStoreCategory(storeId: number, categoryId: number): Promise<void> {
+    const idx = this.storeCategories.findIndex((c) => c.storeId === storeId && c.id === categoryId);
+    if (idx === -1) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    this.storeCategories.splice(idx, 1);
+  }
+
+  async extendStoreVisibilitySubscription(args: {
+    storeId: number;
+    months: number;
+    approvalAt?: Date;
+  }): Promise<Store> {
+    const store = await this.getStoreById(args.storeId);
+    if (!store) throw new Error("STORE_NOT_FOUND");
+    const nextIso = extendStoreVisibilitySubscriptionEndsAt(
+      store.visibilitySubscriptionEndsAt,
+      args.months,
+      args.approvalAt ?? new Date(),
+    );
+    store.visibilitySubscriptionEndsAt = nextIso;
+    store.updatedAt = new Date();
+    return store;
+  }
+
+  async patchStoreVisibilitySubscriptionEndsAt(storeId: number, endsAt: string | null): Promise<Store> {
+    const store = await this.getStoreById(storeId);
+    if (!store) throw new Error("STORE_NOT_FOUND");
+    store.visibilitySubscriptionEndsAt = endsAt;
+    store.updatedAt = new Date();
+    return store;
+  }
+
+  async findPendingStoreSubscriptionReport(storeId: number): Promise<any | undefined> {
+    return this.financialReports.find(
+      (r) =>
+        r.type === STORE_SUBSCRIPTION_FEE_REPORT_TYPE &&
+        Number(r.storeId) === storeId &&
+        r.status === "pending",
+    );
+  }
+
+  async listStoreSubscriptionFinancialReports(
+    status?: "pending" | "completed" | "rejected",
+  ): Promise<any[]> {
+    let list = this.financialReports.filter((r) => r.type === STORE_SUBSCRIPTION_FEE_REPORT_TYPE);
+    if (status) list = list.filter((r) => r.status === status);
+    return list.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }
+
+  async patchStoreSubscriptionPaymentMeta(
+    storeId: number,
+    patch: {
+      visibilitySubscriptionLastPaymentKey?: string | null;
+      visibilitySubscriptionLastPaymentApprovedAt?: Date | string | null;
+      visibilitySubscriptionLastPaymentApprovedBy?: string | null;
+    },
+  ): Promise<Store> {
+    const store = await this.getStoreById(storeId);
+    if (!store) throw new Error("STORE_NOT_FOUND");
+    Object.assign(store, patch);
+    store.updatedAt = new Date();
+    return store;
+  }
 
   async getReviews(params: { targetId?: string; targetType?: string; limit?: number; offset?: number }): Promise<any[]> {
     let result = this.reviews;

@@ -236,6 +236,66 @@ export async function uploadProfessionalCredential(userId: string, file: File): 
   return getDownloadURL(storageRef);
 }
 
+const MAX_STORE_PRODUCT_IMAGE_MB = 5;
+
+/** Fotos de producto en tienda online (1–4 por producto). */
+export async function uploadStoreProductImage(storeId: number, file: File): Promise<string> {
+  if (file.size > MAX_STORE_PRODUCT_IMAGE_MB * 1024 * 1024) {
+    throw new Error(`La imagen no debe superar ${MAX_STORE_PRODUCT_IMAGE_MB} MB`);
+  }
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+  const path = `store-products/${storeId}/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on(
+      "state_changed",
+      () => {},
+      (err) => reject(err),
+      () => resolve(),
+    );
+  });
+
+  return getDownloadURL(storageRef);
+}
+
+/** Foto / portada de la tienda (1 imagen principal). Path: stores/{storeId}/… */
+export async function uploadStoreCoverImage(storeId: number, file: File): Promise<string> {
+  if (file.size > MAX_STORE_PRODUCT_IMAGE_MB * 1024 * 1024) {
+    throw new Error(`La imagen no debe superar ${MAX_STORE_PRODUCT_IMAGE_MB} MB`);
+  }
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+  const path = `stores/${storeId}/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on(
+      "state_changed",
+      () => {},
+      (err) => reject(err),
+      () => resolve(),
+    );
+  });
+
+  return getDownloadURL(storageRef);
+}
+
 export async function getMessagingIfSupported(): Promise<Messaging | null> {
   if (typeof window === "undefined") return null;
 

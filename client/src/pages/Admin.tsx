@@ -75,6 +75,7 @@ import { AdminStatisticsPanel } from "@/components/admin/AdminStatisticsPanel";
 import { AdminVerificationDocumentDialog } from "@/components/admin/AdminVerificationDocumentDialog";
 import { fetchAdminProviderDetail } from "@/components/admin/admin-provider-detail-lib";
 import { AdminPromotionalCodesPanel } from "@/components/admin/AdminPromotionalCodesPanel";
+import { AdminStoreSubscriptionPaymentsPanel } from "@/components/admin/AdminStoreSubscriptionPaymentsPanel";
 import { AdminRolesPanel } from "@/components/admin/AdminRolesPanel";
 import { AdminRegisterUserForm } from "@/components/admin/AdminRegisterUserForm";
 import { AdminCargoGoRidesPanel } from "@/components/admin/AdminCargoGoRidesPanel";
@@ -1393,6 +1394,7 @@ export default function AdminPanel() {
       if (tab === "recargas" || tab === "saldo" || tab === "payouts") return "estadisticas";
       if (tab === "services") return "services";
       if (tab === "promotional-codes") return "promotional-codes";
+      if (tab === "store-payments") return "store-payments";
       if (tab === "users" || tab === "roles") return tab;
     }
     return "overview";
@@ -2233,6 +2235,11 @@ export default function AdminPanel() {
                     <span className="hidden sm:inline">Gestión de asociados</span>
                   </TabsTrigger>
                 )}
+                {fullAdmin && (
+                  <TabsTrigger value="store-payments" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">
+                    Pagos tiendas
+                  </TabsTrigger>
+                )}
                 {canUsers && (
                   <TabsTrigger value="users" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">Usuarios</TabsTrigger>
                 )}
@@ -2280,6 +2287,10 @@ export default function AdminPanel() {
               createModalOpen={promoCreateModalOpen}
               onCreateModalOpenChange={setPromoCreateModalOpen}
             />
+          </TabsContent>
+
+          <TabsContent value="store-payments" className="min-w-0">
+            <AdminStoreSubscriptionPaymentsPanel enabled={fullAdmin && activeTab === "store-payments"} />
           </TabsContent>
 
           <TabsContent value="overview">

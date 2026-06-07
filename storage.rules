@@ -1,16 +1,18 @@
 rules_version = '2';
 // Desplegar: Firebase Console → Storage → Rules, o `firebase deploy --only storage`
-// (requiere firebase.json y proyecto vinculado con `firebase use`).
+// IMPORTANTE: el match `/{allPaths=**}` de cierre debe ser el ÚLTIMO bloque (nada debajo).
+
 service firebase.storage {
   match /b/{bucket}/o {
-    // Fotos de perfil (registro) — solo imágenes, máx. 5 MB (ver firebase-client.ts)
+
+    // Fotos de perfil — imágenes, máx. 5 MB
     match /avatars/{fileName} {
       allow read: if true;
       allow write: if request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
-    // Documento de identidad en verificación — solo JPG/PNG, máx. 5 MB
+    // Documento de identidad — JPG/PNG, máx. ~6 MB
     match /verification_ids/{userId}/{fileName} {
       allow read: if true;
       allow write: if request.resource.size < 6 * 1024 * 1024
@@ -18,8 +20,7 @@ service firebase.storage {
             || request.resource.contentType == 'image/png');
     }
 
-    // Documento profesional — JPG, PNG o PDF (application/pdf); máx. 13 MB (cliente: 12 MB)
-    // Sin permitir PDF aquí, la subida falla con storage/unauthorized aunque el código lo acepte.
+    // Documento profesional — JPG, PNG o PDF, hasta ~13 MB
     match /professional_credentials/{userId}/{fileName} {
       allow read: if true;
       allow write: if request.resource.size < 13 * 1024 * 1024
@@ -28,18 +29,40 @@ service firebase.storage {
             || request.resource.contentType == 'application/pdf');
     }
 
-    // Capturas de comprobante de pago en chat (solo imágenes, máx. 9 MB)
+    // Comprobantes de pago en chat — imágenes, máx. 9 MB
     match /chat_payment_proofs/{conversationId}/{fileName} {
       allow read: if true;
       allow write: if request.resource.size < 9 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
-    // Iconos de categoría/subcategoría (admin, desde el panel) — solo PNG, máx. 2 MB
+    // Iconos de categoría (admin) — solo PNG, máx. 2 MB
     match /category-icons/{fileName} {
       allow read: if true;
       allow write: if request.resource.size < 2 * 1024 * 1024
         && request.resource.contentType == 'image/png';
+    }
+
+    // Foto / portada de la tienda — imágenes, máx. 5 MB
+    // Path en código: stores/{storeId}/{uuid}.{ext}
+    match /stores/{storeId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Fotos de productos de la tienda — imágenes, máx. 5 MB
+    // Path en código: store-products/{storeId}/{uuid}.{ext}
+    match /store-products/{storeId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Todo lo demás: sin acceso público
+    match /{allPaths=**} {
+      allow read: if false;
+      allow write: if false;
     }
   }
 }

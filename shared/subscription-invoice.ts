@@ -2,6 +2,7 @@
 
 export type SubscriptionInvoicePaymentKind =
   | "subscription_transfer"
+  | "store_subscription_transfer"
   | "promo_free_months"
   | "promo_discount"
   | "unknown";
@@ -40,6 +41,9 @@ export function inferSubscriptionPaymentKind(row: SubscriptionInvoiceListItem): 
   const desc = String(row.service ?? "").toLowerCase();
   if (desc.includes("meses gratuitos") || desc.includes("código promocional")) return "promo_free_months";
   if (desc.includes("código promo") || desc.includes("codigo promo")) return "promo_discount";
+  if (desc.includes("tienda") && (desc.includes("suscripción") || desc.includes("suscripcion"))) {
+    return "store_subscription_transfer";
+  }
   if (desc.includes("suscripción") || desc.includes("suscripcion") || desc.includes("visibilidad")) {
     return "subscription_transfer";
   }
@@ -49,6 +53,10 @@ export function inferSubscriptionPaymentKind(row: SubscriptionInvoiceListItem): 
 export function subscriptionInvoicePurposeLabel(row: SubscriptionInvoiceListItem): string {
   const kind = inferSubscriptionPaymentKind(row);
   const months = row.subscriptionMonths;
+  if (kind === "store_subscription_transfer") {
+    const m = months ?? 1;
+    return `Mensualidad de tienda (${m} mes${m === 1 ? "" : "es"})`;
+  }
   if (kind === "promo_free_months") {
     const granted = row.freeMonthsGranted ?? months ?? 1;
     return `Meses gratuitos por código promocional (${granted} mes${granted === 1 ? "" : "es"})`;

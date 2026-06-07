@@ -56,6 +56,28 @@ import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { aggregateAdminDashboardStats, type AdminDashboardStatsResult } from "./admin-dashboard-stats";
 import { countVerificationsAwaitingAdminReview } from "./associate-verification-admin";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
+import {
+  INGREDIENTS_MATERIALS_PAGE_SIZE,
+  type Store,
+  type IngredientMaterial,
+  type InsertStore,
+  type InsertIngredientMaterial,
+  type InsertStoreProduct,
+  type UpdateStore,
+  type UpdateStoreProduct,
+  type StoreProduct,
+  type StoreCategory,
+  type InsertStoreCategory,
+  type UpdateStoreCategory,
+} from "@shared/store-schema";
+import {
+  ingredientMaterialKey,
+  normalizeIngredientMaterialName,
+  resolveUniqueStoreSlug,
+} from "@shared/store-slug";
+import { isStoreVisibilityActive } from "@shared/store-visibility";
+import { extendStoreVisibilitySubscriptionEndsAt } from "@shared/store-subscription-fee";
+import { STORE_SUBSCRIPTION_FEE_REPORT_TYPE } from "@shared/store-subscription-payment";
 
 /** Transfer type: service_payment = earnings from a booking; recharge = top-up to wallet; withdrawal = payout (admin processed); payment = client paid for a service (outflow from pending to provider). */
 export type WalletTransferType = "service_payment" | "recharge" | "withdrawal" | "payment";
@@ -4238,6 +4260,491 @@ class FirestoreStorageImpl implements IStorage {
       },
       params
     );
+  }
+
+  // ============ TIENDAS ============
+
+  async createStore(input: InsertStore & { ownerUserId: string }): Promise<Store> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreByOwnerUserId(input.ownerUserId);
+    if (existing) throw new Error("STORE_ALREADY_EXISTS");
+    const slug = await resolveUniqueStoreSlug(input.name, (s) => this.storeSlugExists(s));
+    const id = await this.getNextId("stores");
+    const now = new Date();
+    const payload: Store = {
+      id,
+      ownerUserId: input.ownerUserId,
+      name: input.name.trim(),
+      slug,
+      description: null,
+      rubro: null,
+      coverImageUrl: null,
+      visibilitySubscriptionEndsAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async updateStore(storeId: number, input: UpdateStore): Promise<Store> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const store = await this.getStoreById(storeId);
+    if (!store) throw new Error("STORE_NOT_FOUND");
+    const now = new Date();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (input.name !== undefined) patch.name = input.name.trim();
+    if (input.description !== undefined) {
+      patch.description = input.description?.trim() ? input.description.trim() : null;
+    }
+    if (input.rubro !== undefined) patch.rubro = input.rubro;
+    if (input.coverImageUrl !== undefined) {
+      patch.coverImageUrl = input.coverImageUrl;
+    }
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(storeId)).update(patch);
+    return {
+      ...store,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description?.trim() ? input.description.trim() : null }
+        : {}),
+      ...(input.rubro !== undefined ? { rubro: input.rubro } : {}),
+      coverImageUrl: input.coverImageUrl !== undefined ? input.coverImageUrl : store.coverImageUrl,
+      updatedAt: now,
+    };
+  }
+
+  async getStoreById(id: number): Promise<Store | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(id)).get();
+    if (!doc.exists) return undefined;
+    return this.mapStoreDoc(doc.id, doc.data());
+  }
+
+  async getStoreBySlug(slug: string): Promise<Store | undefined> {
+    if (!this.db) return undefined;
+    const key = slug.trim().toLowerCase();
+    const snapshot = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORES)
+      .where("slug", "==", key)
+      .limit(1)
+      .get();
+    if (snapshot.empty) return undefined;
+    const doc = snapshot.docs[0];
+    return this.mapStoreDoc(doc.id, doc.data());
+  }
+
+  async getStoreByOwnerUserId(ownerUserId: string): Promise<Store | undefined> {
+    if (!this.db) return undefined;
+    const snapshot = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORES)
+      .where("ownerUserId", "==", ownerUserId)
+      .limit(1)
+      .get();
+    if (snapshot.empty) return undefined;
+    const doc = snapshot.docs[0];
+    return this.mapStoreDoc(doc.id, doc.data());
+  }
+
+  async storeSlugExists(slug: string): Promise<boolean> {
+    const found = await this.getStoreBySlug(slug);
+    return found != null;
+  }
+
+  async listActiveStores(options?: { limit?: number }): Promise<Store[]> {
+    if (!this.db) return [];
+    const limit = options?.limit ?? 100;
+    const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.STORES).limit(500).get();
+    const stores = snapshot.docs
+      .map((doc) => this.mapStoreDoc(doc.id, doc.data()))
+      .filter((store): store is Store => store != null && isStoreVisibilityActive(store));
+    stores.sort((a, b) => String(a.name).localeCompare(String(b.name), "es"));
+    return stores.slice(0, limit);
+  }
+
+  async listIngredientsMaterials(options: {
+    q?: string;
+    page: number;
+    limit?: number;
+  }): Promise<{ items: IngredientMaterial[]; total: number; page: number; limit: number }> {
+    const limit = options.limit ?? INGREDIENTS_MATERIALS_PAGE_SIZE;
+    const page = Math.max(1, options.page);
+    const q = (options.q ?? "").trim().toLowerCase();
+    if (!this.db) {
+      return { items: [], total: 0, page, limit };
+    }
+    const col = this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS);
+
+    if (q) {
+      const prefixSnap = await col
+        .where("normalizedName", ">=", q)
+        .where("normalizedName", "<=", `${q}\uf8ff`)
+        .orderBy("normalizedName")
+        .limit(500)
+        .get();
+      const all = prefixSnap.docs.map((doc) => this.mapIngredientMaterialDoc(doc.id, doc.data()));
+      const filtered = all.filter(
+        (item) => item.name.toLowerCase().includes(q) || item.normalizedName.includes(q),
+      );
+      const total = filtered.length;
+      const start = (page - 1) * limit;
+      return { items: filtered.slice(start, start + limit), total, page, limit };
+    }
+
+    const countSnap = await col.count().get();
+    const total = countSnap.data().count;
+    const offset = (page - 1) * limit;
+    const pageSnap = await col.orderBy("normalizedName").offset(offset).limit(limit).get();
+    return {
+      items: pageSnap.docs.map((doc) => this.mapIngredientMaterialDoc(doc.id, doc.data())),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async findIngredientMaterialByNormalizedName(normalizedName: string): Promise<IngredientMaterial | undefined> {
+    if (!this.db) return undefined;
+    const key = normalizedName.trim().toLowerCase();
+    const snapshot = await this.db
+      .collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS)
+      .where("normalizedName", "==", key)
+      .limit(1)
+      .get();
+    if (snapshot.empty) return undefined;
+    const doc = snapshot.docs[0];
+    return this.mapIngredientMaterialDoc(doc.id, doc.data());
+  }
+
+  async createIngredientMaterial(input: InsertIngredientMaterial): Promise<IngredientMaterial> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const name = normalizeIngredientMaterialName(input.name);
+    const normalizedName = ingredientMaterialKey(name);
+    const dup = await this.findIngredientMaterialByNormalizedName(normalizedName);
+    if (dup) throw new Error("INGREDIENT_MATERIAL_ALREADY_EXISTS");
+    const id = await this.getNextId("ingredients_materials");
+    const now = new Date();
+    const payload: IngredientMaterial = { id, name, normalizedName, createdAt: now };
+    await this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async extendStoreVisibilitySubscription(args: {
+    storeId: number;
+    months: number;
+    approvalAt?: Date;
+  }): Promise<Store> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const store = await this.getStoreById(args.storeId);
+    if (!store) throw new Error("STORE_NOT_FOUND");
+    const nextIso = extendStoreVisibilitySubscriptionEndsAt(
+      store.visibilitySubscriptionEndsAt,
+      args.months,
+      args.approvalAt ?? new Date(),
+    );
+    const now = new Date();
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(args.storeId)).update({
+      visibilitySubscriptionEndsAt: nextIso,
+      updatedAt: now,
+    });
+    return { ...store, visibilitySubscriptionEndsAt: nextIso, updatedAt: now };
+  }
+
+  async patchStoreVisibilitySubscriptionEndsAt(storeId: number, endsAt: string | null): Promise<Store> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const store = await this.getStoreById(storeId);
+    if (!store) throw new Error("STORE_NOT_FOUND");
+    const now = new Date();
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(storeId)).update({
+      visibilitySubscriptionEndsAt: endsAt,
+      updatedAt: now,
+    });
+    return { ...store, visibilitySubscriptionEndsAt: endsAt, updatedAt: now };
+  }
+
+  async findPendingStoreSubscriptionReport(storeId: number): Promise<any | undefined> {
+    if (!this.db) return undefined;
+    const reports = await this.listStoreSubscriptionFinancialReports("pending");
+    return reports.find((r) => Number(r.storeId) === storeId);
+  }
+
+  async listStoreSubscriptionFinancialReports(
+    status?: "pending" | "completed" | "rejected",
+  ): Promise<any[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.FINANCIAL_REPORTS)
+      .where("type", "==", STORE_SUBSCRIPTION_FEE_REPORT_TYPE)
+      .limit(500)
+      .get();
+    let list = snap.docs.map((doc) => ({ id: parseInt(doc.id, 10) || doc.id, ...doc.data() } as Record<string, unknown> & { id: number | string }));
+    if (status) list = list.filter((r) => r.status === status);
+    list.sort((a, b) => {
+      const ta =
+        typeof (a.createdAt as { toMillis?: () => number })?.toMillis === "function"
+          ? (a.createdAt as { toMillis: () => number }).toMillis()
+          : new Date(String(a.createdAt ?? 0)).getTime();
+      const tb =
+        typeof (b.createdAt as { toMillis?: () => number })?.toMillis === "function"
+          ? (b.createdAt as { toMillis: () => number }).toMillis()
+          : new Date(String(b.createdAt ?? 0)).getTime();
+      return tb - ta;
+    });
+    return list;
+  }
+
+  async patchStoreSubscriptionPaymentMeta(
+    storeId: number,
+    patch: {
+      visibilitySubscriptionLastPaymentKey?: string | null;
+      visibilitySubscriptionLastPaymentApprovedAt?: Date | string | null;
+      visibilitySubscriptionLastPaymentApprovedBy?: string | null;
+    },
+  ): Promise<Store> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const store = await this.getStoreById(storeId);
+    if (!store) throw new Error("STORE_NOT_FOUND");
+    const now = new Date();
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(storeId)).update({
+      ...patch,
+      updatedAt: now,
+    });
+    return { ...store, ...patch, updatedAt: now };
+  }
+
+  async listStoreProducts(storeId: number): Promise<StoreProduct[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS)
+      .where("storeId", "==", storeId)
+      .get();
+    return snap.docs
+      .map((doc) => this.mapStoreProductDoc(doc.id, doc.data()))
+      .filter((p): p is StoreProduct => p != null)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStoreProduct(storeId: number, productId: number): Promise<StoreProduct | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS).doc(String(productId)).get();
+    if (!doc.exists) return undefined;
+    const product = this.mapStoreProductDoc(doc.id, doc.data());
+    if (!product || product.storeId !== storeId) return undefined;
+    return product;
+  }
+
+  async createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("store_products");
+    const now = new Date();
+    const payload: StoreProduct = {
+      id,
+      storeId,
+      name: input.name.trim(),
+      description: input.description?.trim() ?? null,
+      price: Number(input.price),
+      categoryIds: input.categoryIds ?? [],
+      ingredientMaterialIds: input.ingredientMaterialIds ?? [],
+      imageUrls: input.imageUrls ?? [],
+      showOnShowcase: input.showOnShowcase ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async updateStoreProduct(
+    storeId: number,
+    productId: number,
+    input: UpdateStoreProduct,
+  ): Promise<StoreProduct> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreProduct(storeId, productId);
+    if (!existing) throw new Error("STORE_PRODUCT_NOT_FOUND");
+    const now = new Date();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (input.name !== undefined) patch.name = input.name.trim();
+    if (input.description !== undefined) patch.description = input.description?.trim() ?? null;
+    if (input.price !== undefined) patch.price = Number(input.price);
+    if (input.categoryIds !== undefined) patch.categoryIds = input.categoryIds;
+    if (input.ingredientMaterialIds !== undefined) patch.ingredientMaterialIds = input.ingredientMaterialIds;
+    if (input.imageUrls !== undefined) patch.imageUrls = input.imageUrls;
+    if (input.showOnShowcase !== undefined) patch.showOnShowcase = input.showOnShowcase;
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS).doc(String(productId)).update(patch);
+    return { ...existing, ...patch, updatedAt: now } as StoreProduct;
+  }
+
+  async deleteStoreProduct(storeId: number, productId: number): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreProduct(storeId, productId);
+    if (!existing) throw new Error("STORE_PRODUCT_NOT_FOUND");
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS).doc(String(productId)).delete();
+  }
+
+  async listStoreCategories(storeId: number): Promise<StoreCategory[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES)
+      .where("storeId", "==", storeId)
+      .get();
+    return snap.docs
+      .map((doc) => this.mapStoreCategoryDoc(doc.id, doc.data()))
+      .filter((c): c is StoreCategory => c != null)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(categoryId)).get();
+    if (!doc.exists) return undefined;
+    const category = this.mapStoreCategoryDoc(doc.id, doc.data());
+    if (!category || category.storeId !== storeId) return undefined;
+    return category;
+  }
+
+  async createStoreCategory(
+    storeId: number,
+    input: Omit<InsertStoreCategory, "productIds">,
+  ): Promise<StoreCategory> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("store_categories");
+    const now = new Date();
+    const payload: StoreCategory = {
+      id,
+      storeId,
+      name: input.name.trim(),
+      description: input.description?.trim() ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async updateStoreCategory(
+    storeId: number,
+    categoryId: number,
+    input: Omit<UpdateStoreCategory, "productIds">,
+  ): Promise<StoreCategory> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreCategory(storeId, categoryId);
+    if (!existing) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    const now = new Date();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (input.name !== undefined) patch.name = input.name.trim();
+    if (input.description !== undefined) {
+      patch.description = input.description?.trim() ? input.description.trim() : null;
+    }
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(categoryId)).update(patch);
+    return { ...existing, ...patch, updatedAt: now } as StoreCategory;
+  }
+
+  async deleteStoreCategory(storeId: number, categoryId: number): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreCategory(storeId, categoryId);
+    if (!existing) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(categoryId)).delete();
+  }
+
+  private mapStoreCategoryDoc(
+    docId: string,
+    data: Record<string, unknown> | undefined,
+  ): StoreCategory | undefined {
+    if (!data) return undefined;
+    const id = Number(data.id ?? docId);
+    if (!Number.isFinite(id)) return undefined;
+    return {
+      id,
+      storeId: Number(data.storeId),
+      name: String(data.name ?? ""),
+      description: data.description != null && String(data.description).trim()
+        ? String(data.description).trim()
+        : null,
+      createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
+      updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
+    };
+  }
+
+  private mapStoreProductDoc(
+    docId: string,
+    data: Record<string, unknown> | undefined,
+  ): StoreProduct | undefined {
+    if (!data) return undefined;
+    const id = Number(data.id ?? docId);
+    if (!Number.isFinite(id)) return undefined;
+    return {
+      id,
+      storeId: Number(data.storeId),
+      name: String(data.name ?? ""),
+      description: data.description != null ? String(data.description) : null,
+      price: Number(data.price ?? 0),
+      categoryIds: Array.isArray(data.categoryIds)
+        ? data.categoryIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
+        : [],
+      ingredientMaterialIds: Array.isArray(data.ingredientMaterialIds)
+        ? data.ingredientMaterialIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
+        : [],
+      imageUrls: Array.isArray(data.imageUrls)
+        ? data.imageUrls.map((x) => String(x).trim()).filter((u) => u.length > 0).slice(0, 4)
+        : [],
+      showOnShowcase: data.showOnShowcase !== false,
+      createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
+      updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
+    };
+  }
+
+  private mapStoreDoc(docId: string, data: Record<string, unknown> | undefined): Store | undefined {
+    if (!data) return undefined;
+    const id = Number(data.id ?? docId);
+    if (!Number.isFinite(id)) return undefined;
+    return {
+      id,
+      ownerUserId: String(data.ownerUserId ?? ""),
+      name: String(data.name ?? ""),
+      slug: String(data.slug ?? ""),
+      description:
+        data.description != null && String(data.description).trim()
+          ? String(data.description).trim()
+          : null,
+      rubro:
+        data.rubro != null && String(data.rubro).trim() ? String(data.rubro).trim() : null,
+      coverImageUrl: data.coverImageUrl != null && String(data.coverImageUrl).trim()
+        ? String(data.coverImageUrl).trim()
+        : null,
+      visibilitySubscriptionEndsAt: this.readFirestoreDate(data.visibilitySubscriptionEndsAt),
+      createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
+      updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
+    };
+  }
+
+  private mapIngredientMaterialDoc(docId: string, data: Record<string, unknown> | undefined): IngredientMaterial {
+    const id = Number(data?.id ?? docId);
+    return {
+      id: Number.isFinite(id) ? id : parseInt(docId, 10),
+      name: String(data?.name ?? ""),
+      normalizedName: String(data?.normalizedName ?? ""),
+      createdAt: this.readFirestoreDate(data?.createdAt) ?? new Date(),
+    };
+  }
+
+  private readFirestoreDate(raw: unknown): Date | null {
+    if (raw == null) return null;
+    if (raw instanceof Date) return raw;
+    if (typeof raw === "object" && raw !== null && typeof (raw as { toDate?: () => Date }).toDate === "function") {
+      try {
+        const d = (raw as { toDate: () => Date }).toDate();
+        return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
+      } catch {
+        return null;
+      }
+    }
+    if (typeof raw === "string") {
+      const t = Date.parse(raw);
+      return Number.isNaN(t) ? null : new Date(t);
+    }
+    if (typeof raw === "number" && Number.isFinite(raw)) return new Date(raw);
+    return null;
   }
 
   async seedRoles(): Promise<void> {

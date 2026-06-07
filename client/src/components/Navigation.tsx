@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShowBecomePro } from "@/hooks/use-show-become-pro";
 import { useAssociateOnboardingIncomplete } from "@/hooks/use-associate-onboarding-incomplete";
+import { useMyStore, getMyStoreNavHref } from "@/hooks/use-my-store";
 import {
   hasAdminRole,
   canAccessActivityDashboard,
@@ -43,6 +44,7 @@ import {
   AlertTriangle,
   Building2,
   Ticket,
+  Store,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -136,6 +138,9 @@ export function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
+  const { data: myStore } = useMyStore(isAuthenticated);
+  const myStoreHref = getMyStoreNavHref(myStore);
+
   useEffect(() => {
     if (isDownloading) {
       const timer = setTimeout(() => setIsDownloading(false), 3000);
@@ -204,6 +209,9 @@ export function Navigation() {
       </Link>
       <Link href="/explore" className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary ${isActive('/explore') ? 'text-primary' : 'text-muted-foreground'}`}>
         Explorar
+      </Link>
+      <Link href="/tiendas" className={`text-sm font-medium whitespace-nowrap transition-colors hover:text-primary ${isActive('/tiendas') ? 'text-primary' : 'text-muted-foreground'}`}>
+        Tiendas
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -504,6 +512,14 @@ export function Navigation() {
                       </Link>
                     </DropdownMenuItem>
                   )}
+                  {myStoreHref ? (
+                    <DropdownMenuItem asChild>
+                      <Link href={myStoreHref} className="flex items-center">
+                        <Store className="mr-2 h-4 w-4" />
+                        Mi tienda
+                      </Link>
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem asChild>
                     <Link href="/bookings" className="flex items-center">
                       <Calendar className="mr-2 h-4 w-4" />
@@ -629,6 +645,16 @@ export function Navigation() {
                 <Link href="/explore" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                   Explorar Servicios
                 </Link>
+                <Link href="/tiendas" className="text-lg font-medium flex items-center gap-2" onClick={() => setMobileOpen(false)}>
+                  <Store className="h-5 w-5 shrink-0" />
+                  Tiendas
+                </Link>
+                {myStoreHref ? (
+                  <Link href={myStoreHref} className="text-lg font-medium flex items-center gap-2" onClick={() => setMobileOpen(false)}>
+                    <Store className="h-5 w-5 shrink-0" />
+                    Mi tienda
+                  </Link>
+                ) : null}
                 {isAuthenticated && (
                   <>
                     <Link href="/booking" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
