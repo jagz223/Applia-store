@@ -199,6 +199,10 @@ export const FIRESTORE_COLLECTIONS = {
   STORE_PRODUCTS: "store_products",
   /** Categorías internas de una tienda (agrupan productos). */
   STORE_CATEGORIES: "store_categories",
+  /** Promociones / combos de una tienda. */
+  STORE_PROMOTIONS: "store_promotions",
+  /** Carrito de compras por usuario y tienda (1 por par userId+storeId). */
+  STORE_CARTS: "store_carts",
   /** Ingredientes y materiales globales (sin pertenencia a tienda). */
   INGREDIENTS_MATERIALS: "ingredients_materials",
 } as const;

@@ -12,6 +12,7 @@ import { useStoreBySlug } from "@/hooks/use-my-store";
 import { StoreAdminLayout } from "@/components/store/StoreAdminLayout";
 import { StoreAdminProductsPanel } from "@/components/store/StoreAdminProductsPanel";
 import { StoreAdminCategoriesPanel } from "@/components/store/StoreAdminCategoriesPanel";
+import { StoreAdminPromotionsPanel } from "@/components/store/StoreAdminPromotionsPanel";
 import { StoreAdminConfigPanel } from "@/components/store/StoreAdminConfigPanel";
 import { StoreAdminComingSoon } from "@/components/store/StoreAdminComingSoon";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ function sectionPanel(
 ) {
   if (section === "productos") return <StoreAdminProductsPanel storeId={store.id} />;
   if (section === "categorias") return <StoreAdminCategoriesPanel storeId={store.id} />;
+  if (section === "promociones") return <StoreAdminPromotionsPanel storeId={store.id} />;
   if (section === "configuracion") {
     return (
       <StoreAdminConfigPanel

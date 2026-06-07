@@ -1,5 +1,5 @@
-import { ImageIcon, Loader2, Package } from "lucide-react";
-import type { StoreShowcaseProduct } from "@/hooks/use-store-showcase";
+import { ImageIcon, Loader2, Percent } from "lucide-react";
+import type { StoreShowcasePromotion } from "@/hooks/use-store-showcase";
 import {
   StoreShowcaseAddToCartButton,
   showcaseCartItemKey,
@@ -11,17 +11,17 @@ function formatPrice(value: number) {
   return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
 }
 
-function ShowcaseProductCard({
-  product,
+function ShowcasePromotionCard({
+  promotion,
   onAddToCart,
   addBusyKey,
 }: {
-  product: StoreShowcaseProduct;
+  promotion: StoreShowcasePromotion;
   onAddToCart?: () => void;
   addBusyKey?: string | null;
 }) {
-  const imageUrl = product.imageUrls[0]?.trim();
-  const itemKey = showcaseCartItemKey("product", product.id);
+  const imageUrl = promotion.imageUrl?.trim();
+  const itemKey = showcaseCartItemKey("promotion", promotion.id);
   const busy = addBusyKey === itemKey;
 
   return (
@@ -37,22 +37,29 @@ function ShowcaseProductCard({
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/70">
-              <ImageIcon className="h-12 w-12" strokeWidth={1.25} aria-hidden />
+              <Percent className="h-12 w-12" strokeWidth={1.25} aria-hidden />
             </div>
           )}
           {onAddToCart ? (
             <StoreShowcaseAddToCartButton
               onClick={onAddToCart}
               busy={busy}
-              ariaLabel={`Añadir ${product.name} al carrito`}
+              ariaLabel={`Añadir promoción ${promotion.name} al carrito`}
             />
           ) : null}
         </div>
         <div className="p-3 flex flex-col flex-1 gap-1">
-          <p className="text-sm font-semibold leading-snug line-clamp-2 text-foreground">{product.name}</p>
-          <p className="text-sm font-medium text-primary">{formatPrice(product.price)}</p>
-          {product.description ? (
-            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
+          <p className="text-sm font-semibold leading-snug line-clamp-2 text-foreground">{promotion.name}</p>
+          <p className="text-sm font-medium text-primary">{formatPrice(promotion.price)}</p>
+          {promotion.description ? (
+            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{promotion.description}</p>
+          ) : null}
+          {promotion.items.length > 0 ? (
+            <p className="text-xs text-muted-foreground mt-1">
+              {promotion.items.length === 1
+                ? "1 producto incluido"
+                : `${promotion.items.length} productos incluidos`}
+            </p>
           ) : null}
         </div>
       </CardContent>
@@ -60,27 +67,27 @@ function ShowcaseProductCard({
   );
 }
 
-type StoreShowcaseProductGridProps = {
-  products: StoreShowcaseProduct[];
+type StoreShowcasePromotionGridProps = {
+  promotions: StoreShowcasePromotion[];
   isLoading?: boolean;
   error?: Error | null;
   emptyMessage?: string;
   className?: string;
   centered?: boolean;
-  onAddProductToCart?: (productId: number) => void;
+  onAddPromotionToCart?: (promotionId: number) => void;
   addToCartBusyKey?: string | null;
 };
 
-export function StoreShowcaseProductGrid({
-  products,
+export function StoreShowcasePromotionGrid({
+  promotions,
   isLoading,
   error,
-  emptyMessage = "Esta tienda aún no tiene productos visibles en la vitrina.",
+  emptyMessage = "No hay promociones activas en este momento.",
   className,
   centered = false,
-  onAddProductToCart,
+  onAddPromotionToCart,
   addToCartBusyKey,
-}: StoreShowcaseProductGridProps) {
+}: StoreShowcasePromotionGridProps) {
   if (isLoading) {
     return (
       <div className={cn("py-12 flex justify-center", className)}>
@@ -95,7 +102,7 @@ export function StoreShowcaseProductGrid({
     );
   }
 
-  if (products.length === 0) {
+  if (promotions.length === 0) {
     return (
       <div
         className={cn(
@@ -103,7 +110,7 @@ export function StoreShowcaseProductGrid({
           className,
         )}
       >
-        <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" aria-hidden />
+        <ImageIcon className="h-10 w-10 mx-auto text-muted-foreground mb-3" aria-hidden />
         <p className="text-sm text-muted-foreground">{emptyMessage}</p>
       </div>
     );
@@ -112,13 +119,13 @@ export function StoreShowcaseProductGrid({
   if (centered) {
     return (
       <div className={cn("flex flex-wrap justify-center gap-4 max-w-2xl mx-auto", className)}>
-        {products.map((product) => (
-          <div key={product.id} className="w-[calc(50%-0.5rem)] sm:w-[180px]">
-            <ShowcaseProductCard
-              product={product}
+        {promotions.map((promotion) => (
+          <div key={promotion.id} className="w-[calc(50%-0.5rem)] sm:w-[180px]">
+            <ShowcasePromotionCard
+              promotion={promotion}
               addBusyKey={addToCartBusyKey}
               onAddToCart={
-                onAddProductToCart ? () => onAddProductToCart(product.id) : undefined
+                onAddPromotionToCart ? () => onAddPromotionToCart(promotion.id) : undefined
               }
             />
           </div>
@@ -129,12 +136,14 @@ export function StoreShowcaseProductGrid({
 
   return (
     <div className={cn("grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4", className)}>
-      {products.map((product) => (
-        <ShowcaseProductCard
-          key={product.id}
-          product={product}
+      {promotions.map((promotion) => (
+        <ShowcasePromotionCard
+          key={promotion.id}
+          promotion={promotion}
           addBusyKey={addToCartBusyKey}
-          onAddToCart={onAddProductToCart ? () => onAddProductToCart(product.id) : undefined}
+          onAddToCart={
+            onAddPromotionToCart ? () => onAddPromotionToCart(promotion.id) : undefined
+          }
         />
       ))}
     </div>

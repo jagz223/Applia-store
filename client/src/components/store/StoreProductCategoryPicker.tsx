@@ -156,7 +156,11 @@ export function StoreProductCategoryPicker({
               Lista
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-[min(360px,calc(100vw-2rem))] p-0" align="end">
+          <PopoverContent
+            layer="modal"
+            className="w-[min(360px,calc(100vw-2rem))] p-0"
+            align="end"
+          >
             <Command shouldFilter={false}>
               <CommandList className="max-h-56">
                 {isLoading ? (

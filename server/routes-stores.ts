@@ -51,15 +51,32 @@ import {
   updateStoreSchema,
   insertStoreCategorySchema,
   updateStoreCategorySchema,
+  insertStorePromotionSchema,
+  updateStorePromotionSchema,
   INGREDIENTS_MATERIALS_PAGE_SIZE,
   type Store,
   type StoreProduct,
   type StoreCategory,
+  type StorePromotion,
 } from "@shared/store-schema";
 import { storeSubscriptionPaymentBodySchema } from "@shared/store-subscription-payment";
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { filterStoresByCatalogQuery, getStoreRubroLabel } from "@shared/store-rubros";
 import { parsePositiveIntParam, requireStoreOwner } from "./store-product-auth";
+import {
+  addStoreCartItemSchema,
+  updateStoreCartItemSchema,
+  removeStoreCartItemSchema,
+} from "@shared/store-cart-schema";
+import {
+  addBodyToCartItem,
+  enrichStoreCart,
+  mergeAddCartItem,
+  pruneAndSaveCart,
+  removeCartItem,
+  setCartItemQuantity,
+  validateCartItemForStore,
+} from "./store-cart";
 
 function serializeDate(value: Date | string | null | undefined): string | null {
   if (value == null) return null;
@@ -107,6 +124,37 @@ async function assertStoreProductIds(storeId: number, productIds: number[]): Pro
   }
 }
 
+function serializeStorePromotion(promotion: StorePromotion, products: StoreProduct[]) {
+  const nameById = new Map(products.map((p) => [p.id, p.name]));
+  return {
+    id: promotion.id,
+    storeId: promotion.storeId,
+    name: promotion.name,
+    description: promotion.description,
+    price: promotion.price,
+    status: promotion.status,
+    items: promotion.items.map((item) => ({
+      productId: item.productId,
+      productName: nameById.get(item.productId) ?? `Producto #${item.productId}`,
+      quantity: item.quantity,
+      status: item.status,
+    })),
+    createdAt: serializeDate(promotion.createdAt),
+    updatedAt: serializeDate(promotion.updatedAt),
+  };
+}
+
+async function assertStorePromotionItems(
+  storeId: number,
+  items: { productId: number }[] | undefined,
+): Promise<void> {
+  if (!items?.length) return;
+  await assertStoreProductIds(
+    storeId,
+    items.map((i) => i.productId),
+  );
+}
+
 function serializeStoreShowcaseProduct(product: StoreProduct) {
   return {
     id: product.id,
@@ -114,6 +162,37 @@ function serializeStoreShowcaseProduct(product: StoreProduct) {
     description: product.description,
     price: product.price,
     imageUrls: product.imageUrls ?? [],
+    categoryIds: product.categoryIds ?? [],
+  };
+}
+
+function serializeShowcaseCategory(category: StoreCategory) {
+  return {
+    id: category.id,
+    name: category.name,
+  };
+}
+
+function serializeStoreShowcasePromotion(promotion: StorePromotion, products: StoreProduct[]) {
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const imageUrl =
+    promotion.items
+      .map((item) => productById.get(item.productId)?.imageUrls?.[0]?.trim())
+      .find((url) => Boolean(url)) ?? null;
+
+  return {
+    id: promotion.id,
+    name: promotion.name,
+    description: promotion.description,
+    price: promotion.price,
+    imageUrl,
+    items: promotion.items
+      .filter((item) => item.status === "active")
+      .map((item) => ({
+        productId: item.productId,
+        productName: productById.get(item.productId)?.name ?? `Producto #${item.productId}`,
+        quantity: item.quantity,
+      })),
   };
 }
 
@@ -460,6 +539,253 @@ export function registerStoreRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/stores/:storeId/promotions", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const [promotions, products] = await Promise.all([
+        genFebStorage.listStorePromotions(storeId),
+        genFebStorage.listStoreProducts(storeId),
+      ]);
+      return res.json({ promotions: promotions.map((p) => serializeStorePromotion(p, products)) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      console.error("[stores] list promotions", e);
+      return res.status(500).json({ message: "No se pudieron cargar las promociones." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/promotions", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const parsed = insertStorePromotionSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      await assertStorePromotionItems(storeId, parsed.data.items);
+      const promotion = await genFebStorage.createStorePromotion(storeId, parsed.data);
+      const products = await genFebStorage.listStoreProducts(storeId);
+      return res.status(201).json({ promotion: serializeStorePromotion(promotion, products) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_PRODUCT_INVALID") {
+        return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
+      }
+      console.error("[stores] create promotion", e);
+      return res.status(500).json({ message: "No se pudo crear la promoción." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/promotions/:promotionId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const promotionId = parsePositiveIntParam(req.params.promotionId);
+      if (!storeId || !promotionId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      const promotion = await genFebStorage.getStorePromotion(storeId, promotionId);
+      if (!promotion) return res.status(404).json({ message: "Promoción no encontrada." });
+      const products = await genFebStorage.listStoreProducts(storeId);
+      return res.json({ promotion: serializeStorePromotion(promotion, products) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      console.error("[stores] get promotion", e);
+      return res.status(500).json({ message: "No se pudo cargar la promoción." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/promotions/:promotionId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const promotionId = parsePositiveIntParam(req.params.promotionId);
+      if (!storeId || !promotionId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      const parsed = updateStorePromotionSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      if (parsed.data.items != null) {
+        await assertStorePromotionItems(storeId, parsed.data.items);
+      }
+      const promotion = await genFebStorage.updateStorePromotion(storeId, promotionId, parsed.data);
+      const products = await genFebStorage.listStoreProducts(storeId);
+      return res.json({ promotion: serializeStorePromotion(promotion, products) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_PROMOTION_NOT_FOUND") return res.status(404).json({ message: "Promoción no encontrada." });
+      if (msg === "STORE_PRODUCT_INVALID") {
+        return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
+      }
+      console.error("[stores] update promotion", e);
+      return res.status(500).json({ message: "No se pudo actualizar la promoción." });
+    }
+  });
+
+  app.delete("/api/stores/:storeId/promotions/:promotionId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const promotionId = parsePositiveIntParam(req.params.promotionId);
+      if (!storeId || !promotionId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      await genFebStorage.deleteStorePromotion(storeId, promotionId);
+      return res.status(204).send();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_PROMOTION_NOT_FOUND") return res.status(404).json({ message: "Promoción no encontrada." });
+      console.error("[stores] delete promotion", e);
+      return res.status(500).json({ message: "No se pudo eliminar la promoción." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/cart", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      let cart = await genFebStorage.getStoreCart(userId, storeId);
+      if (cart) cart = await pruneAndSaveCart(userId, cart);
+      const payload = await enrichStoreCart(cart, storeId);
+      return res.json({ cart: payload });
+    } catch (e: unknown) {
+      console.error("[stores] get cart", e);
+      return res.status(500).json({ message: "No se pudo cargar el carrito." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/cart/items", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const parsed = addStoreCartItemSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const incoming = addBodyToCartItem(parsed.data);
+      await validateCartItemForStore(storeId, incoming);
+
+      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const nextItems = mergeAddCartItem(existing, incoming);
+      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const payload = await enrichStoreCart(saved, storeId);
+      return res.status(201).json({ cart: payload });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_CART_ITEM_INVALID") {
+        return res.status(400).json({ message: "El artículo no está disponible en esta tienda." });
+      }
+      console.error("[stores] add cart item", e);
+      return res.status(500).json({ message: "No se pudo añadir al carrito." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/cart/items", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const parsed = updateStoreCartItemSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const nextItems = setCartItemQuantity(existing, parsed.data);
+      if (parsed.data.quantity > 0) {
+        const probe =
+          parsed.data.kind === "product"
+            ? { kind: "product" as const, productId: parsed.data.productId!, quantity: parsed.data.quantity }
+            : { kind: "promotion" as const, promotionId: parsed.data.promotionId!, quantity: parsed.data.quantity };
+        await validateCartItemForStore(storeId, probe);
+      }
+      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const payload = await enrichStoreCart(saved, storeId);
+      return res.json({ cart: payload });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_CART_ITEM_INVALID") {
+        return res.status(400).json({ message: "El artículo no está disponible en esta tienda." });
+      }
+      console.error("[stores] update cart item", e);
+      return res.status(500).json({ message: "No se pudo actualizar el carrito." });
+    }
+  });
+
+  app.delete("/api/stores/:storeId/cart/items", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const parsed = removeStoreCartItemSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const nextItems = removeCartItem(existing, parsed.data);
+      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const payload = await enrichStoreCart(saved, storeId);
+      return res.json({ cart: payload });
+    } catch (e: unknown) {
+      console.error("[stores] remove cart item", e);
+      return res.status(500).json({ message: "No se pudo quitar del carrito." });
+    }
+  });
+
   app.get("/api/stores/:storeId/products", authenticateJWT, async (req: any, res) => {
     try {
       const userId = String(req.user?.id ?? "");
@@ -595,16 +921,27 @@ export function registerStoreRoutes(app: Express): void {
       const visibilityActive = isStoreVisibilityActive(storeForView);
 
       if (!visibilityActive && !isOwner) {
-        return res.json({ products: [], visibilityActive: false, inactive: true });
+        return res.json({ products: [], categories: [], promotions: [], visibilityActive: false, inactive: true });
       }
 
       const all = await genFebStorage.listStoreProducts(storeForView.id);
-      const products = all
-        .filter((p) => p.showOnShowcase !== false)
-        .map(serializeStoreShowcaseProduct);
+      const showcaseList = all.filter((p) => p.showOnShowcase !== false);
+      const products = showcaseList.map(serializeStoreShowcaseProduct);
+
+      const allCategories = await genFebStorage.listStoreCategories(storeForView.id);
+      const categories = allCategories
+        .filter((c) => productIdsForCategory(showcaseList, c.id).length > 0)
+        .map(serializeShowcaseCategory);
+
+      const allPromotions = await genFebStorage.listStorePromotions(storeForView.id);
+      const promotions = allPromotions
+        .filter((p) => p.status === "active" && p.items.some((item) => item.status === "active"))
+        .map((p) => serializeStoreShowcasePromotion(p, all));
 
       return res.json({
         products,
+        categories,
+        promotions,
         visibilityActive,
         isOwner,
       });

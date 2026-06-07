@@ -52,7 +52,12 @@ import {
   type StoreCategory,
   type InsertStoreCategory,
   type UpdateStoreCategory,
+  type StorePromotion,
+  type InsertStorePromotion,
+  type UpdateStorePromotion,
 } from "@shared/store-schema";
+import type { StoreCart, StoreCartItem } from "@shared/store-cart-schema";
+import { STORE_CART_TTL_MS } from "@shared/store-cart-schema";
 import { STORE_SUBSCRIPTION_FEE_REPORT_TYPE } from "@shared/store-subscription-payment";
 import {
   ingredientMaterialKey,
@@ -465,6 +470,18 @@ export interface IStorage
     input: Omit<UpdateStoreCategory, "productIds">,
   ): Promise<StoreCategory>;
   deleteStoreCategory(storeId: number, categoryId: number): Promise<void>;
+  listStorePromotions(storeId: number): Promise<StorePromotion[]>;
+  getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined>;
+  createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion>;
+  updateStorePromotion(
+    storeId: number,
+    promotionId: number,
+    input: UpdateStorePromotion,
+  ): Promise<StorePromotion>;
+  deleteStorePromotion(storeId: number, promotionId: number): Promise<void>;
+  getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined>;
+  saveStoreCart(userId: string, storeId: number, items: StoreCartItem[]): Promise<StoreCart>;
+  deleteStoreCart(userId: string, storeId: number): Promise<void>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -3363,6 +3380,115 @@ export class InMemoryStorage implements IStorage {
     const idx = this.storeCategories.findIndex((c) => c.storeId === storeId && c.id === categoryId);
     if (idx === -1) throw new Error("STORE_CATEGORY_NOT_FOUND");
     this.storeCategories.splice(idx, 1);
+  }
+
+  private storePromotions: StorePromotion[] = [];
+  private storePromotionIdCounter = 1;
+
+  async listStorePromotions(storeId: number): Promise<StorePromotion[]> {
+    return this.storePromotions
+      .filter((p) => p.storeId === storeId)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined> {
+    return this.storePromotions.find((p) => p.storeId === storeId && p.id === promotionId);
+  }
+
+  async createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion> {
+    const now = new Date();
+    const promotion: StorePromotion = {
+      id: this.storePromotionIdCounter++,
+      storeId,
+      name: input.name.trim(),
+      description: input.description?.trim() ? input.description.trim() : null,
+      price: input.price,
+      items: input.items.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        status: item.status ?? "active",
+      })),
+      status: input.status ?? "active",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storePromotions.push(promotion);
+    return promotion;
+  }
+
+  async updateStorePromotion(
+    storeId: number,
+    promotionId: number,
+    input: UpdateStorePromotion,
+  ): Promise<StorePromotion> {
+    const idx = this.storePromotions.findIndex((p) => p.storeId === storeId && p.id === promotionId);
+    if (idx === -1) throw new Error("STORE_PROMOTION_NOT_FOUND");
+    const cur = this.storePromotions[idx];
+    const next: StorePromotion = {
+      ...cur,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description?.trim() ? input.description.trim() : null }
+        : {}),
+      ...(input.price !== undefined ? { price: input.price } : {}),
+      ...(input.items !== undefined
+        ? {
+            items: input.items.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              status: item.status ?? "active",
+            })),
+          }
+        : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+      updatedAt: new Date(),
+    };
+    this.storePromotions[idx] = next;
+    return next;
+  }
+
+  async deleteStorePromotion(storeId: number, promotionId: number): Promise<void> {
+    const idx = this.storePromotions.findIndex((p) => p.storeId === storeId && p.id === promotionId);
+    if (idx === -1) throw new Error("STORE_PROMOTION_NOT_FOUND");
+    this.storePromotions.splice(idx, 1);
+  }
+
+  private storeCarts = new Map<string, StoreCart>();
+
+  private storeCartKey(userId: string, storeId: number) {
+    return `${userId}:${storeId}`;
+  }
+
+  async getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined> {
+    const key = this.storeCartKey(userId, storeId);
+    const cart = this.storeCarts.get(key);
+    if (!cart) return undefined;
+    if (new Date(cart.expiresAt).getTime() <= Date.now()) {
+      this.storeCarts.delete(key);
+      return undefined;
+    }
+    return cart;
+  }
+
+  async saveStoreCart(userId: string, storeId: number, items: StoreCartItem[]): Promise<StoreCart> {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + STORE_CART_TTL_MS);
+    const key = this.storeCartKey(userId, storeId);
+    const existing = this.storeCarts.get(key);
+    const cart: StoreCart = {
+      userId,
+      storeId,
+      items,
+      expiresAt,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.storeCarts.set(key, cart);
+    return cart;
+  }
+
+  async deleteStoreCart(userId: string, storeId: number): Promise<void> {
+    this.storeCarts.delete(this.storeCartKey(userId, storeId));
   }
 
   async extendStoreVisibilitySubscription(args: {

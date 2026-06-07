@@ -119,3 +119,46 @@ export type StoreCategory = {
   createdAt: Date | string;
   updatedAt: Date | string;
 };
+
+export const storePromotionStatusSchema = z.enum(["active", "inactive"]);
+
+export type StorePromotionStatus = z.infer<typeof storePromotionStatusSchema>;
+
+export const storePromotionLineItemSchema = z.object({
+  productId: z.number().int().positive(),
+  quantity: z.number().int().positive().max(9999),
+  status: storePromotionStatusSchema.default("active"),
+});
+
+export type StorePromotionLineItem = z.infer<typeof storePromotionLineItemSchema>;
+
+export const insertStorePromotionSchema = z.object({
+  name: z.string().trim().min(1, "El nombre es obligatorio").max(120),
+  description: z.string().trim().max(500).optional().nullable(),
+  price: z.number().positive("El precio debe ser mayor a cero"),
+  items: z
+    .array(storePromotionLineItemSchema)
+    .min(1, "Debe incluir al menos un producto")
+    .refine((items) => new Set(items.map((i) => i.productId)).size === items.length, {
+      message: "No puedes repetir el mismo producto en la promoción",
+    }),
+  status: storePromotionStatusSchema.optional().default("active"),
+});
+
+export type InsertStorePromotion = z.infer<typeof insertStorePromotionSchema>;
+
+export const updateStorePromotionSchema = insertStorePromotionSchema.partial();
+
+export type UpdateStorePromotion = z.infer<typeof updateStorePromotionSchema>;
+
+export type StorePromotion = {
+  id: number;
+  storeId: number;
+  name: string;
+  description: string | null;
+  price: number;
+  items: StorePromotionLineItem[];
+  status: StorePromotionStatus;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};

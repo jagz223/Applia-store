@@ -180,6 +180,7 @@ export function StoreProductFormDialog({
         categoryIds: categories.map((c) => c.id),
         ingredientMaterialIds: hasIngredients ? ingredients.map((i) => i.id) : [],
         imageUrls,
+        showOnShowcase: isEdit && product ? product.showOnShowcase : true,
       };
 
       if (isEdit && product) {

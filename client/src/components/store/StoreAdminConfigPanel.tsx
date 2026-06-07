@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { STORE_RUBROS, getStoreRubroLabel } from "@shared/store-rubros";
+import { STORE_RUBROS, getStoreRubroLabel, isStoreRubroId } from "@shared/store-rubros";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   StoreCoverPhotoPicker,
@@ -147,7 +147,7 @@ export function StoreAdminConfigPanel({
       const store = await updateStore.mutateAsync({
         name: trimmedName,
         description: description.trim() || null,
-        rubro,
+        rubro: rubro && isStoreRubroId(rubro) ? rubro : null,
       });
       setSavedName(store.name ?? trimmedName);
       setSavedDescription(store.description ?? "");
