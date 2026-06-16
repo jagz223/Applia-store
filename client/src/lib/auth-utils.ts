@@ -1,7 +1,6 @@
 import { canActAsAssociate } from "@shared/associate-role-access";
 import { canAccessCentralPanel, hasAdminPrivileges, isFullAdmin, normalizeRoleCode } from "@shared/roles";
 import type { RolePermissionsMap } from "@shared/role-permissions";
-import { api } from "@shared/routes";
 
 /** Roles que no deben ver el CTA "Convertirse en Profesional" (salvo reglas especiales por rol). */
 export const ROLES_HIDING_BECOME_PRO_CTA = ["tiSupport", "central"] as const;
@@ -105,6 +104,6 @@ export function redirectToLogin(toast?: (options: { title: string; description: 
     });
   }
   setTimeout(() => {
-    window.location.href = api.auth.replit.login.path;
+    window.location.href = "/login";
   }, 500);
 }
