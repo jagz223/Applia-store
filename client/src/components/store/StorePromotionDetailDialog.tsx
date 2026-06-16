@@ -29,6 +29,11 @@ export function StorePromotionDetailDialog({
           <DialogTitle>{promotion.name}</DialogTitle>
           <DialogDescription>Detalle de la promoción</DialogDescription>
         </DialogHeader>
+        {promotion.imageUrl ? (
+          <div className="aspect-[4/3] rounded-lg border border-border overflow-hidden bg-muted/30">
+            <img src={promotion.imageUrl} alt="" className="h-full w-full object-cover" />
+          </div>
+        ) : null}
         <dl className="space-y-3 text-sm">
           <div>
             <dt className="font-medium text-muted-foreground">Precio del pack</dt>

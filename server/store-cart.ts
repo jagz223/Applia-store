@@ -5,7 +5,16 @@ import type {
   StoreCartItem,
   UpdateStoreCartItem,
 } from "@shared/store-cart-schema";
-import type { StoreProduct, StorePromotion } from "@shared/store-schema";
+import {
+  isStoreFulfillmentModeEnabled,
+  normalizeStoreFulfillmentOptions,
+  STORE_FULFILLMENT_LABELS,
+  type StoreFulfillmentMode,
+} from "@shared/store-fulfillment";
+import type { StoreProduct, StorePromotion, StoreLocation } from "@shared/store-schema";
+import { normalizeStoreLocation } from "@shared/store-schema";
+import { resolveStorePromotionImageUrl } from "@shared/store-schema";
+import type { StoreCheckoutPaymentMethod } from "@shared/store-order-schema";
 import { genFebStorage } from "./storage-genfeb";
 
 export type EnrichedStoreCartLine = {
@@ -19,12 +28,21 @@ export type EnrichedStoreCartLine = {
   imageUrl: string | null;
 };
 
+export type StoreCartFulfillmentOption = {
+  mode: StoreFulfillmentMode;
+  label: string;
+};
+
 export type EnrichedStoreCart = {
   storeId: number;
   items: EnrichedStoreCartLine[];
   subtotal: number;
   itemCount: number;
   expiresAt: string | null;
+  fulfillmentMode: StoreFulfillmentMode | null;
+  fulfillmentOptions: StoreCartFulfillmentOption[];
+  paymentMethods: StoreCheckoutPaymentMethod[];
+  storeLocation: StoreLocation | null;
 };
 
 export function addBodyToCartItem(body: AddStoreCartItem): StoreCartItem {
@@ -97,9 +115,40 @@ async function isValidCartItem(
 }
 
 export async function enrichStoreCart(cart: StoreCart | undefined, storeId: number): Promise<EnrichedStoreCart> {
+  const store = await genFebStorage.getStoreById(storeId);
+  const storeOptions = normalizeStoreFulfillmentOptions(store?.fulfillmentOptions);
+  const fulfillmentOptions: StoreCartFulfillmentOption[] = storeOptions.map((mode) => ({
+    mode,
+    label: STORE_FULFILLMENT_LABELS[mode],
+  }));
+
+  const paymentMethodsRaw = await genFebStorage.listStorePaymentMethods(storeId);
+  const paymentMethods: StoreCheckoutPaymentMethod[] = paymentMethodsRaw.map((m) => ({
+    id: m.id,
+    name: m.name,
+    accountNumber: m.accountNumber,
+    imageUrl: m.imageUrl ?? null,
+  }));
+
+  const storeLocation = normalizeStoreLocation(store?.location ?? null);
+
   if (!cart) {
-    return { storeId, items: [], subtotal: 0, itemCount: 0, expiresAt: null };
+    return {
+      storeId,
+      items: [],
+      subtotal: 0,
+      itemCount: 0,
+      expiresAt: null,
+      fulfillmentMode: null,
+      fulfillmentOptions,
+      paymentMethods,
+      storeLocation,
+    };
   }
+
+  const fulfillmentMode = isStoreFulfillmentModeEnabled(storeOptions, cart.fulfillmentMode)
+    ? cart.fulfillmentMode
+    : null;
 
   const [products, promotions] = await Promise.all([
     genFebStorage.listStoreProducts(storeId),
@@ -140,10 +189,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     const lineTotal = promotion.price * line.quantity;
     subtotal += lineTotal;
     itemCount += line.quantity;
-    const imageUrl =
-      promotion.items
-        .map((i) => productById.get(i.productId)?.imageUrls?.[0]?.trim())
-        .find((url) => Boolean(url)) ?? null;
+    const imageUrl = resolveStorePromotionImageUrl(promotion, products);
     items.push({
       kind: "promotion",
       promotionId: promotion.id,
@@ -160,7 +206,52 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
       ? cart.expiresAt.toISOString()
       : new Date(cart.expiresAt).toISOString();
 
-  return { storeId, items, subtotal, itemCount, expiresAt };
+  return {
+    storeId,
+    items,
+    subtotal,
+    itemCount,
+    expiresAt,
+    fulfillmentMode,
+    fulfillmentOptions,
+    paymentMethods,
+    storeLocation,
+  };
+}
+
+export async function validateCheckoutPaymentMethod(
+  storeId: number,
+  paymentMethodId: number,
+): Promise<void> {
+  const method = await genFebStorage.getStorePaymentMethod(storeId, paymentMethodId);
+  if (!method) throw new Error("STORE_PAYMENT_METHOD_NOT_FOUND");
+}
+
+export async function validateCheckoutFulfillment(
+  storeId: number,
+  fulfillmentMode: StoreFulfillmentMode | null | undefined,
+): Promise<StoreFulfillmentMode | null> {
+  const store = await genFebStorage.getStoreById(storeId);
+  if (!store) throw new Error("STORE_NOT_FOUND");
+  const storeOptions = normalizeStoreFulfillmentOptions(store.fulfillmentOptions);
+  if (storeOptions.length === 0) return null;
+  if (!fulfillmentMode || !isStoreFulfillmentModeEnabled(storeOptions, fulfillmentMode)) {
+    throw new Error("STORE_CART_FULFILLMENT_INVALID");
+  }
+  return fulfillmentMode;
+}
+
+export async function validateCartFulfillmentForStore(
+  storeId: number,
+  fulfillmentMode: StoreFulfillmentMode | null,
+): Promise<void> {
+  if (fulfillmentMode == null) return;
+  const store = await genFebStorage.getStoreById(storeId);
+  if (!store) throw new Error("STORE_NOT_FOUND");
+  const storeOptions = normalizeStoreFulfillmentOptions(store.fulfillmentOptions);
+  if (!isStoreFulfillmentModeEnabled(storeOptions, fulfillmentMode)) {
+    throw new Error("STORE_CART_FULFILLMENT_INVALID");
+  }
 }
 
 export async function validateCartItemForStore(storeId: number, item: StoreCartItem): Promise<void> {

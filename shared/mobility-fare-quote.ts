@@ -155,3 +155,14 @@ export function computePackSuggestedByVehicle(
   }
   return out;
 }
+
+/** Tarifa delivery más económica entre moto, auto y camioneta (Pack Go). */
+export function computeLowestPackSuggestedUsd(fares: PackFaresQuote, distanceM: number): number {
+  const byVehicle = computePackSuggestedByVehicle(fares, distanceM);
+  let min: number | null = null;
+  for (const v of Object.values(byVehicle)) {
+    if (v == null) continue;
+    if (min == null || v < min) min = v;
+  }
+  return min ?? 0;
+}

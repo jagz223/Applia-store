@@ -203,6 +203,10 @@ export const FIRESTORE_COLLECTIONS = {
   STORE_PROMOTIONS: "store_promotions",
   /** Carrito de compras por usuario y tienda (1 por par userId+storeId). */
   STORE_CARTS: "store_carts",
+  /** Métodos de pago registrados por tienda (propios de cada tienda). */
+  STORE_PAYMENT_METHODS: "store_payment_methods",
+  /** Pedidos / compras de clientes en tienda. */
+  STORE_ORDERS: "store_orders",
   /** Ingredientes y materiales globales (sin pertenencia a tienda). */
   INGREDIENTS_MATERIALS: "ingredients_materials",
 } as const;

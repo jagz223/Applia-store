@@ -259,14 +259,24 @@ export default function StorePage() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="relative min-h-[50vh]">
-        {isOwner && (
+      <div
+        className={cn(
+          "w-full",
+          showCustomerCart ? "flex flex-1 min-h-0 overflow-hidden bg-muted/20" : "relative min-h-[50vh]",
+        )}
+      >
+        {isOwner && !showCustomerCart ? (
           <div className="absolute top-4 right-4 z-10">
             <StoreOwnerSettingsButton store={store} visibilityActive={visibilityActive} />
           </div>
-        )}
-
-        <div className={cn("container mx-auto max-w-3xl px-4 py-10 space-y-6", showCustomerCart && "pr-14")}>
+        ) : null}
+        <div
+          className={cn(
+            showCustomerCart
+              ? "flex-1 min-w-0 overflow-y-auto px-4 py-8 sm:px-6 lg:px-10 space-y-6"
+              : "mx-auto container max-w-3xl px-4 py-10 space-y-6",
+          )}
+        >
           {store.coverImageUrl ? (
             <div className="relative mx-auto aspect-[21/9] max-h-56 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-muted/30">
               <img src={store.coverImageUrl} alt="" className="h-full w-full object-cover" />
@@ -299,10 +309,10 @@ export default function StorePage() {
             </Link>
           )}
 
-          <header className="space-y-2 text-center px-2 sm:px-12">
+          <header className={cn("space-y-2 px-2", showCustomerCart ? "text-left sm:px-0" : "text-center sm:px-12")}>
             <h1 className="text-2xl font-bold tracking-tight">{store.name}</h1>
             {store.rubroLabel ? (
-              <div className="flex justify-center">
+              <div className={cn(showCustomerCart ? "" : "flex justify-center")}>
                 <Badge variant="secondary">{store.rubroLabel}</Badge>
               </div>
             ) : null}
@@ -329,7 +339,7 @@ export default function StorePage() {
 
           {(visibilityActive || ownerPreview) && (
             <section className="space-y-4">
-              <h2 className="text-lg font-semibold text-center">
+              <h2 className={cn("text-lg font-semibold", showCustomerCart ? "text-left" : "text-center")}>
                 {showingPromotions ? "Promociones" : "Productos"}
               </h2>
               {!showcaseLoading && hasShowcaseFilters ? (
@@ -344,7 +354,8 @@ export default function StorePage() {
               ) : null}
               {showingPromotions ? (
                 <StoreShowcasePromotionGrid
-                  centered
+                  largeCards
+                  centered={false}
                   promotions={filteredShowcasePromotions}
                   isLoading={showcaseLoading}
                   error={showcaseError as Error | null}
@@ -358,7 +369,8 @@ export default function StorePage() {
                 />
               ) : (
                 <StoreShowcaseProductGrid
-                  centered
+                  largeCards={showCustomerCart}
+                  centered={!showCustomerCart}
                   products={filteredShowcaseProducts}
                   isLoading={showcaseLoading}
                   error={showcaseError as Error | null}
@@ -386,7 +398,11 @@ export default function StorePage() {
           )}
         </div>
 
-        <StoreCartPanel storeId={store.id} storeName={store.name} enabled={showCustomerCart} />
+        {showCustomerCart ? (
+          <div className="shrink-0 flex min-h-0 self-stretch p-3 pr-4 pb-4 pt-3">
+            <StoreCartPanel storeId={store.id} storeName={store.name} enabled />
+          </div>
+        ) : null}
       </div>
 
       <Dialog open={paymentSentDialogOpen} onOpenChange={setPaymentSentDialogOpen}>

@@ -4,6 +4,7 @@ import {
   StoreShowcaseAddToCartButton,
   showcaseCartItemKey,
 } from "@/components/store/StoreShowcaseAddToCartButton";
+import { StoreShowcaseCardImage } from "@/components/store/StoreShowcaseCardImage";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -15,31 +16,56 @@ function ShowcasePromotionCard({
   promotion,
   onAddToCart,
   addBusyKey,
+  large,
 }: {
   promotion: StoreShowcasePromotion;
   onAddToCart?: () => void;
   addBusyKey?: string | null;
+  large?: boolean;
 }) {
-  const imageUrl = promotion.imageUrl?.trim();
+  const imageUrl = (promotion.promotionImageUrl ?? promotion.imageUrl)?.trim();
   const itemKey = showcaseCartItemKey("promotion", promotion.id);
   const busy = addBusyKey === itemKey;
 
-  return (
-    <Card className="overflow-hidden border-border h-full flex flex-col">
-      <CardContent className="p-0 flex flex-col flex-1">
-        <div className="relative aspect-square w-full bg-muted/40 overflow-hidden">
-          {imageUrl ? (
-            <img
-              src={imageUrl}
-              alt=""
-              className="absolute inset-0 h-full w-full object-cover"
-              loading="lazy"
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/70">
-              <Percent className="h-12 w-12" strokeWidth={1.25} aria-hidden />
+  if (large) {
+    return (
+      <Card className="overflow-hidden border-0 shadow-md bg-card flex flex-col rounded-2xl">
+        <CardContent className="p-0 flex flex-col">
+          <StoreShowcaseCardImage src={imageUrl} placeholderIcon={Percent} />
+          <div className="p-3 flex flex-col gap-1.5">
+            <p className="text-sm font-bold leading-snug line-clamp-2 text-foreground">{promotion.name}</p>
+            {promotion.description ? (
+              <p className="text-xs text-muted-foreground line-clamp-2">{promotion.description}</p>
+            ) : null}
+            {promotion.items.length > 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                {promotion.items.length === 1
+                  ? "1 producto incluido"
+                  : `${promotion.items.length} productos incluidos`}
+              </p>
+            ) : null}
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-sm font-bold text-primary">{formatPrice(promotion.price)}</span>
+              {onAddToCart ? (
+                <StoreShowcaseAddToCartButton
+                  variant="footer"
+                  onClick={onAddToCart}
+                  busy={busy}
+                  ariaLabel={`Añadir promoción ${promotion.name} al carrito`}
+                />
+              ) : null}
             </div>
-          )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-hidden border-border flex flex-col">
+      <CardContent className="p-0 flex flex-col">
+        <div className="relative">
+          <StoreShowcaseCardImage src={imageUrl} aspect="square" placeholderIcon={Percent} />
           {onAddToCart ? (
             <StoreShowcaseAddToCartButton
               onClick={onAddToCart}
@@ -48,7 +74,7 @@ function ShowcasePromotionCard({
             />
           ) : null}
         </div>
-        <div className="p-3 flex flex-col flex-1 gap-1">
+        <div className="p-3 flex flex-col gap-1">
           <p className="text-sm font-semibold leading-snug line-clamp-2 text-foreground">{promotion.name}</p>
           <p className="text-sm font-medium text-primary">{formatPrice(promotion.price)}</p>
           {promotion.description ? (
@@ -74,6 +100,7 @@ type StoreShowcasePromotionGridProps = {
   emptyMessage?: string;
   className?: string;
   centered?: boolean;
+  largeCards?: boolean;
   onAddPromotionToCart?: (promotionId: number) => void;
   addToCartBusyKey?: string | null;
 };
@@ -85,6 +112,7 @@ export function StoreShowcasePromotionGrid({
   emptyMessage = "No hay promociones activas en este momento.",
   className,
   centered = false,
+  largeCards = false,
   onAddPromotionToCart,
   addToCartBusyKey,
 }: StoreShowcasePromotionGridProps) {
@@ -112,6 +140,24 @@ export function StoreShowcasePromotionGrid({
       >
         <ImageIcon className="h-10 w-10 mx-auto text-muted-foreground mb-3" aria-hidden />
         <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+      </div>
+    );
+  }
+
+  if (largeCards) {
+    return (
+      <div className={cn("grid grid-cols-2 md:grid-cols-3 gap-4", className)}>
+        {promotions.map((promotion) => (
+          <ShowcasePromotionCard
+            key={promotion.id}
+            promotion={promotion}
+            large
+            addBusyKey={addToCartBusyKey}
+            onAddToCart={
+              onAddPromotionToCart ? () => onAddPromotionToCart(promotion.id) : undefined
+            }
+          />
+        ))}
       </div>
     );
   }

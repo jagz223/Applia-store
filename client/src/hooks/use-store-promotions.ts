@@ -13,6 +13,7 @@ export type StorePromotionSummary = {
   storeId: number;
   name: string;
   description: string | null;
+  imageUrl: string | null;
   price: number;
   status: "active" | "inactive";
   items: StorePromotionItemSummary[];

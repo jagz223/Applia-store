@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { storeFulfillmentModeSchema, type StoreFulfillmentMode } from "./store-fulfillment";
 
 /** Vigencia del carrito por tienda (se renueva en cada modificación). */
 export const STORE_CART_TTL_MS = 24 * 60 * 60 * 1000;
@@ -71,10 +72,18 @@ export const removeStoreCartItemSchema = z.object({
 
 export type RemoveStoreCartItem = z.infer<typeof removeStoreCartItemSchema>;
 
+export const updateStoreCartFulfillmentSchema = z.object({
+  fulfillmentMode: storeFulfillmentModeSchema.nullable(),
+});
+
+export type UpdateStoreCartFulfillment = z.infer<typeof updateStoreCartFulfillmentSchema>;
+
 export type StoreCart = {
   userId: string;
   storeId: number;
   items: StoreCartItem[];
+  /** Modalidad elegida por el cliente (una sola). */
+  fulfillmentMode: StoreFulfillmentMode | null;
   expiresAt: Date | string;
   createdAt: Date | string;
   updatedAt: Date | string;

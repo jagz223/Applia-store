@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Eye, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Eye, ImageIcon, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   useDeleteStorePromotion,
   useStorePromotions,
@@ -35,6 +35,28 @@ import { cn } from "@/lib/utils";
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
+}
+
+function PromotionThumbnail({ imageUrl }: { imageUrl: string | null }) {
+  const url = imageUrl?.trim();
+  if (!url) {
+    return (
+      <div
+        className="h-12 w-12 shrink-0 rounded-md border border-dashed border-border bg-muted/40 flex items-center justify-center text-muted-foreground"
+        aria-hidden
+      >
+        <ImageIcon className="h-5 w-5" />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      referrerPolicy="no-referrer"
+      className="h-12 w-12 shrink-0 rounded-md border border-border object-cover bg-muted/30"
+    />
+  );
 }
 
 function PromotionStatusToggle({
@@ -157,6 +179,7 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[72px]">Foto</TableHead>
                     <TableHead>Nombre</TableHead>
                     <TableHead className="w-[120px]">Precio</TableHead>
                     <TableHead className="min-w-[280px] text-right">Acciones</TableHead>
@@ -165,13 +188,16 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
                 <TableBody>
                   {promotions.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">
+                      <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
                         Aún no hay promociones. Usa «Crear promoción» para añadir la primera.
                       </TableCell>
                     </TableRow>
                   ) : (
                     promotions.map((promotion) => (
                       <TableRow key={promotion.id}>
+                        <TableCell>
+                          <PromotionThumbnail imageUrl={promotion.imageUrl} />
+                        </TableCell>
                         <TableCell className="font-medium">{promotion.name}</TableCell>
                         <TableCell>{formatPrice(promotion.price)}</TableCell>
                         <TableCell className="text-right whitespace-nowrap">

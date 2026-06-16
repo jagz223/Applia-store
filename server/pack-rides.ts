@@ -7,7 +7,7 @@ import type { Server as SocketIOServer, Socket } from "socket.io";
 import type { GeoJsonObject } from "geojson";
 import { z } from "zod";
 import { authenticateJWT } from "./routes-auth";
-import { getIO, getUserActivePath } from "./socket";
+import { getIO, getUserActivePath, sendNotificationToUser } from "./socket";
 import { genFebStorage } from "./storage-genfeb";
 import { catalogService } from "./services";
 import { notificationService } from "./services/notification.service";
@@ -125,7 +125,228 @@ type RideRecord = {
   offers?: PackNegotiationDriverOffer[];
   offersArchive?: PackNegotiationOffersArchiveEntry[];
   negotiationExpiresAt?: number;
+  /** Orden de tienda vinculada (delivery solicitado por la tienda). */
+  storeOrderId?: number | null;
+  storeId?: number | null;
 };
+
+export type PackRideRecordSnapshot = Pick<
+  RideRecord,
+  | "id"
+  | "status"
+  | "riderUserId"
+  | "driverUserId"
+  | "conversationId"
+  | "estimatedUsd"
+  | "distanceM"
+  | "durationSec"
+  | "start"
+  | "end"
+  | "storeOrderId"
+  | "storeId"
+>;
+
+function toPackRideSnapshot(ride: RideRecord): PackRideRecordSnapshot {
+  return {
+    id: ride.id,
+    status: ride.status,
+    riderUserId: ride.riderUserId,
+    driverUserId: ride.driverUserId,
+    conversationId: ride.conversationId,
+    estimatedUsd: ride.estimatedUsd,
+    distanceM: ride.distanceM,
+    durationSec: ride.durationSec,
+    start: ride.start,
+    end: ride.end,
+    storeOrderId: ride.storeOrderId ?? null,
+    storeId: ride.storeId ?? null,
+  };
+}
+
+async function notifyStoreOrderPackEvent(
+  ride: RideRecord,
+  kind: "matched" | "started" | "cancelled_driver" | "completed",
+): Promise<void> {
+  if (ride.storeOrderId == null) return;
+  const mod = await import("./store-order-delivery");
+  const snap = toPackRideSnapshot(ride);
+  if (kind === "matched") await mod.onStoreOrderPackRideMatched(snap);
+  else if (kind === "started") await mod.onStoreOrderPackRideStarted(snap);
+  else if (kind === "cancelled_driver") await mod.onStoreOrderPackRideCancelledByDriver(snap);
+  else if (kind === "completed") await mod.onStoreOrderPackRideCompleted(snap);
+}
+
+export function getActivePackRideForStoreOrder(
+  storeOrderId?: number,
+  rideId?: string,
+): PackRideRecordSnapshot | null {
+  if (rideId) {
+    const ride = rides.get(rideId);
+    return ride ? toPackRideSnapshot(ride) : null;
+  }
+  if (storeOrderId == null) return null;
+  for (const ride of rides.values()) {
+    if (ride.storeOrderId === storeOrderId) return toPackRideSnapshot(ride);
+  }
+  return null;
+}
+
+/** Cancela búsqueda Pack Go de una orden de tienda (sin re-lanzar búsqueda). */
+export function cancelStoreOrderPackSearch(storeOrderId: number): boolean {
+  const io = getIO();
+  let anyCancelled = false;
+
+  for (const ride of rides.values()) {
+    if (ride.storeOrderId !== storeOrderId) continue;
+    if (ride.status === "cancelled" || ride.status === "expired") continue;
+
+    const prevStatus = ride.status;
+    const prevOfferDriverId = ride.currentOfferDriverId;
+    clearRideTimers(ride.id);
+    ride.status = "cancelled";
+    ride.currentOfferDriverId = null;
+    ride.offerExpiresAt = null;
+    anyCancelled = true;
+
+    if (prevOfferDriverId) pendingOfferByDriverId.delete(prevOfferDriverId);
+
+    if (io) {
+      const payload = { rideId: ride.id, cancelledBy: "rider" as const };
+      const notify = new Set<string>();
+      notify.add(ride.riderUserId);
+      if (ride.driverUserId) notify.add(ride.driverUserId);
+      if (prevStatus === "searching") {
+        for (const oid of ride.offeredDriverIds) notify.add(oid);
+        if (prevOfferDriverId) notify.add(prevOfferDriverId);
+      }
+      for (const uid2 of notify) {
+        io.to(`user:${uid2}`).emit("pack:ride:cancelled", payload);
+      }
+      void persistMobilityRideToHistory(ride, "pack", "cancelled", { cancelledBy: "rider" });
+    }
+
+    if (ride.conversationId != null && ride.driverUserId != null) {
+      void onMobilityRideChatCancelled(genFebStorage, {
+        conversationId: Number(ride.conversationId),
+        riderUserId: ride.riderUserId,
+        driverUserId: ride.driverUserId,
+      }).catch((e) => console.error("[pack] store order pack cancel chat", e));
+    }
+  }
+
+  return anyCancelled;
+}
+
+export async function getPackRideDeliveryDetail(rideId: string) {
+  const ride = rides.get(rideId);
+  if (!ride) return null;
+  const driver = ride.driverUserId ? await buildDriverPublic(ride.driverUserId) : null;
+  return {
+    ...toPackRideSnapshot(ride),
+    routeGeometry: ride.routeGeometry,
+    vehicleType: ride.vehicleType,
+    paymentMethod: ride.paymentMethod,
+    driver,
+    ratedByRider: !!(ride as { ratedByRider?: boolean }).ratedByRider,
+    ratedByDriver: !!(ride as { ratedByDriver?: boolean }).ratedByDriver,
+  };
+}
+
+/** Crea búsqueda Pack Go para una orden de tienda (cliente = dueño de la tienda). */
+export async function createPackRideForStoreOrder(input: {
+  storeOrderId: number;
+  storeId: number;
+  riderUserId: string;
+  start: { lat: number; lon: number; label: string };
+  end: { lat: number; lon: number; label: string };
+  estimatedUsd: number;
+  distanceM: number;
+  durationSec?: number;
+  routeGeometry?: GeoJsonObject | null;
+  vehicleType?: PackVehicleKind;
+  paymentMethod?: PackPaymentMethod;
+}): Promise<string> {
+  const io = getIO();
+  if (!io) throw new Error("Socket no disponible");
+
+  const vehicleType = input.vehicleType ?? "moto";
+  const paymentMethod = input.paymentMethod ?? "cash";
+  const id = crypto.randomUUID();
+
+  let distanceM = Math.max(0, input.distanceM);
+  let durationSec = Math.max(60, input.durationSec ?? 0);
+  let geometry = input.routeGeometry ?? null;
+
+  if (distanceM <= 0 || !geometry) {
+    const routeQuote = await resolveGoRideRouteQuote({
+      start: input.start,
+      end: input.end,
+      vehicleType,
+      module: "delivery",
+    });
+    distanceM = routeQuote.distanceM;
+    durationSec = routeQuote.durationSec;
+    geometry = (routeQuote.geometry ?? null) as GeoJsonObject | null;
+  }
+
+  const suggestedUsd = roundToCents(
+    input.estimatedUsd > 0 ? input.estimatedUsd : (await resolveGoRideRouteQuote({
+      start: input.start,
+      end: input.end,
+      vehicleType,
+      module: "delivery",
+    })).suggestedUsd,
+  );
+
+  let candidates = freshDriversForRide({
+    vehicleType,
+    storeOrderId: input.storeOrderId,
+    storeId: input.storeId,
+  });
+  candidates = rankDriversByNearest(input.start, candidates);
+  const candidateIds = candidates.map((c) => c.userId);
+
+  const ride: RideRecord = {
+    id,
+    riderUserId: input.riderUserId,
+    driverUserId: null,
+    status: "searching",
+    vehicleType,
+    paymentMethod,
+    paymentConfirmed: true,
+    estimatedUsd: suggestedUsd,
+    suggestedUsd,
+    isNegotiated: false,
+    distanceM,
+    durationSec,
+    start: input.start,
+    end: input.end,
+    routeGeometry: geometry,
+    createdAt: Date.now(),
+    conversationId: null,
+    offeredDriverIds: candidateIds,
+    offerIndex: 0,
+    currentOfferDriverId: null,
+    offerExpiresAt: null,
+    declinedAtByDriverId: {},
+    storeOrderId: input.storeOrderId,
+    storeId: input.storeId,
+  };
+  rides.set(id, ride);
+
+  const timers = { offerTimeoutId: null, expireTimeoutId: null };
+  rideTimers.set(id, timers);
+
+  const rider = await buildRiderPublic(input.riderUserId);
+  io.to(`user:${input.riderUserId}`).emit("pack:ride:searching", {
+    rideId: id,
+    candidateCount: candidateIds.length,
+    isNegotiated: false,
+  });
+  void offerNextDriver(io, ride, rider);
+
+  return id;
+}
 
 const rides = new Map<string, RideRecord>();
 const rideTimers = new Map<string, { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }>();
@@ -285,6 +506,74 @@ function freshDriversForVehicle(kind: PackVehicleKind): DriverPresence[] {
   return list;
 }
 
+function isStoreOrderPackRide(ride: RideRecord): boolean {
+  return ride.storeOrderId != null && ride.storeId != null;
+}
+
+const ALL_PACK_PROVIDER_VEHICLES = new Set(Object.values(PACK_TO_PROVIDER_VEHICLE));
+
+function driverMatchesPackRideVehicle(ride: RideRecord, pres: DriverPresence): boolean {
+  if (isStoreOrderPackRide(ride)) {
+    return ALL_PACK_PROVIDER_VEHICLES.has(pres.vehicleType);
+  }
+  return PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind] === pres.vehicleType;
+}
+
+/** Envíos de tienda: cualquier conductor delivery online (moto, auto, camioneta). */
+function freshDriversForRide(ride: Pick<RideRecord, "vehicleType" | "storeOrderId" | "storeId">): DriverPresence[] {
+  if (ride.storeOrderId != null && ride.storeId != null) {
+    const now = Date.now();
+    const list: DriverPresence[] = [];
+    for (const d of onlineDrivers.values()) {
+      if (!ALL_PACK_PROVIDER_VEHICLES.has(d.vehicleType)) continue;
+      if (now - d.updatedAt > PRESENCE_TTL_MS) continue;
+      if (driverIsBusyCrossModule(d.userId)) continue;
+      list.push(d);
+    }
+    return list;
+  }
+  return freshDriversForVehicle(ride.vehicleType);
+}
+
+function isDriverPresenceFresh(pres: DriverPresence | undefined): boolean {
+  if (!pres) return false;
+  return Date.now() - pres.updatedAt <= PRESENCE_TTL_MS;
+}
+
+/** Oferta activa a un conductor que ya no está online: liberar y re-ofertar. */
+function clearStaleActiveOffer(ride: RideRecord): void {
+  if (!ride.currentOfferDriverId) return;
+  const driverId = ride.currentOfferDriverId;
+  const expired = ride.offerExpiresAt != null && Date.now() > ride.offerExpiresAt;
+  const offline = !isDriverPresenceFresh(onlineDrivers.get(driverId));
+  if (!expired && !offline) return;
+  pendingOfferByDriverId.delete(driverId);
+  ride.currentOfferDriverId = null;
+  ride.offerExpiresAt = null;
+  const timers = rideTimers.get(ride.id);
+  if (timers?.offerTimeoutId) {
+    clearTimeout(timers.offerTimeoutId);
+    timers.offerTimeoutId = null;
+  }
+}
+
+async function reconcilePendingRidesForDriver(io: SocketIOServer, pres: DriverPresence): Promise<void> {
+  for (const ride of rides.values()) {
+    if (ride.status !== "searching" || ride.driverUserId != null) continue;
+    if (ride.isNegotiated) continue;
+    if (typeof ride.marketVisibleUntil === "number") continue;
+    if (!driverMatchesPackRideVehicle(ride, pres)) continue;
+
+    packInsertDriverByDistance(ride, pres.userId);
+    clearStaleActiveOffer(ride);
+
+    if (!ride.currentOfferDriverId) {
+      const rider = await buildRiderPublic(ride.riderUserId);
+      await offerNextDriver(io, ride, rider);
+    }
+  }
+}
+
 function rankDriversByNearest(start: { lat: number; lon: number }, list: DriverPresence[]): DriverPresence[] {
   return [...list].sort((a, b) => haversineM(start, a) - haversineM(start, b));
 }
@@ -295,8 +584,7 @@ function packInsertDriverByDistance(ride: RideRecord, driverId: string): boolean
   if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) return false;
   const pres = onlineDrivers.get(driverId);
   if (!pres) return false;
-  const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind];
-  if (wantVehicle !== pres.vehicleType) return false;
+  if (!driverMatchesPackRideVehicle(ride, pres)) return false;
   if (driverIsBusyCrossModule(driverId)) return false;
   const myD = haversineM(ride.start, { lat: pres.lat, lon: pres.lon });
   let idx = ride.offeredDriverIds.length;
@@ -446,7 +734,7 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
   const timers = rideTimers.get(ride.id) ?? { offerTimeoutId: null, expireTimeoutId: null };
   rideTimers.set(ride.id, timers);
 
-  const pres = freshDriversForVehicle(ride.vehicleType);
+  const pres = freshDriversForRide(ride);
   const ranked = rankDriversByNearest(ride.start, pres);
   ride.offeredDriverIds = ranked.map((d) => d.userId);
   ride.offerIndex = 0;
@@ -457,9 +745,11 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
     if (driverIsBusyCrossModule(driverId)) continue;
     const declinedAt = ride.declinedAtByDriverId?.[driverId];
     if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
+    const driverPres = onlineDrivers.get(driverId);
+    if (!driverPres || !driverMatchesPackRideVehicle(ride, driverPres)) continue;
     ride.currentOfferDriverId = driverId;
     ride.offerExpiresAt = Date.now() + ttlMs;
-    io.to(`user:${driverId}`).emit("pack:ride:offer", {
+    const offerPayload = {
       rideId: ride.id,
       rider,
       start: ride.start,
@@ -472,9 +762,40 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
       estimatedUsd: ride.estimatedUsd,
       suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
       expiresAt: ride.offerExpiresAt,
-    });
+      storeOrderId: ride.storeOrderId ?? null,
+      storeId: ride.storeId ?? null,
+    };
+    io.to(`user:${driverId}`).emit("pack:ride:offer", offerPayload);
 
     pendingOfferByDriverId.set(driverId, { rideId: ride.id, expiresAt: ride.offerExpiresAt!, module: "pack" });
+
+    const offerTitle = isStoreOrderPackRide(ride) ? "Envío de tienda" : "Delivery";
+    const offerBody = isStoreOrderPackRide(ride)
+      ? `Orden #${ride.storeOrderId}: envío disponible. Acepta o rechaza.`
+      : "Tienes un envío disponible. Abre para aceptar o rechazar.";
+
+    void genFebStorage
+      .createNotification({
+        userId: driverId,
+        type: "pack_ride_offer",
+        data: {
+          rideId: ride.id,
+          storeOrderId: ride.storeOrderId ?? null,
+          storeId: ride.storeId ?? null,
+          url: "/go/driver",
+        },
+      })
+      .catch((err) => console.error("[pack] offer notification", err));
+
+    sendNotificationToUser(io, driverId, {
+      type: "pack_ride_offer",
+      data: {
+        rideId: ride.id,
+        storeOrderId: ride.storeOrderId ?? null,
+        title: offerTitle,
+        body: offerBody,
+      },
+    });
 
     // Push al driver si no está viendo la vista de driver.
     try {
@@ -486,8 +807,8 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
           !pth.startsWith("/go/pack/driver"))
       ) {
         void notificationService.sendPushToUser(driverId, {
-          title: "Delivery",
-          body: "Tienes un envío disponible. Abre para aceptar o rechazar.",
+          title: offerTitle,
+          body: offerBody,
           data: { url: "/go/driver", type: "pack_ride_offer", rideId: ride.id },
         });
       }
@@ -597,27 +918,9 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
       });
 
       // Si hay envíos en búsqueda, ofrecer también a drivers que se ponen online después.
-      void (async () => {
-        try {
-          const now = Date.now();
-          for (const ride of rides.values()) {
-            if (ride.status !== "searching") continue;
-            if (ride.driverUserId != null) continue;
-            const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind];
-            if (wantVehicle !== pres.vehicleType) continue;
-
-            if (ride.isNegotiated) continue;
-
-            // No interrumpir una oferta en curso; cuando no haya oferta activa, re-evaluar candidatos (incluye al nuevo driver).
-            if (!ride.currentOfferDriverId) {
-              const rider = await buildRiderPublic(ride.riderUserId);
-              await offerNextDriver(io, ride, rider);
-            }
-          }
-        } catch (e) {
-          console.error("[pack] presence offer", e);
-        }
-      })();
+      void reconcilePendingRidesForDriver(io, pres).catch((e) => {
+        console.error("[pack] presence offer", e);
+      });
       })();
     });
 
@@ -1192,6 +1495,10 @@ export function registerPackRideRoutes(app: Express) {
       }
       pendingOfferByDriverId.delete(driverId);
 
+      void notifyStoreOrderPackEvent(ride, "matched").catch((e) =>
+        console.error("[pack] store order matched", e),
+      );
+
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
         if (!pth || (!pth.startsWith("/go/delivery") && !pth.startsWith("/go/pack"))) {
@@ -1315,6 +1622,9 @@ export function registerPackRideRoutes(app: Express) {
           }
 
           io.to(`user:${driverUserId}`).emit("pack:ride:accepted", { rideId, rider, conversationId });
+          void notifyStoreOrderPackEvent(ride, "matched").catch((e) =>
+            console.error("[pack] store order matched", e),
+          );
         } catch (finalizeErr) {
           console.error("[pack] finalize accept", finalizeErr);
         }
@@ -1464,6 +1774,10 @@ export function registerPackRideRoutes(app: Express) {
       });
       io.to(`user:${driverId}`).emit("pack:ride:accepted", { rideId, rider, conversationId });
 
+      void notifyStoreOrderPackEvent(ride, "matched").catch((e) =>
+        console.error("[pack] store order matched", e),
+      );
+
       res.json({ ok: true, accepted: true, rideId, conversationId });
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
@@ -1534,6 +1848,9 @@ export function registerPackRideRoutes(app: Express) {
           console.error("[pack] seed chat on start", me);
         }
       }
+      void notifyStoreOrderPackEvent(ride, "started").catch((e) =>
+        console.error("[pack] store order started", e),
+      );
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
@@ -1630,6 +1947,9 @@ export function registerPackRideRoutes(app: Express) {
           console.error("[pack] ride chat completed", e);
         }
       }
+      void notifyStoreOrderPackEvent(ride, "completed").catch((err) =>
+        console.error("[pack] store order completed", err),
+      );
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
@@ -1682,6 +2002,11 @@ export function registerPackRideRoutes(app: Express) {
         } catch (e) {
           console.error("[pack] ride chat cancelled", e);
         }
+      }
+      if (isDriver && ride.storeOrderId != null) {
+        void notifyStoreOrderPackEvent(ride, "cancelled_driver").catch((err) =>
+          console.error("[pack] store order cancel", err),
+        );
       }
       res.json({ ok: true, rideId, cancelledBy: isDriver ? "driver" : "rider" });
     } catch (e: any) {
@@ -1792,22 +2117,9 @@ export function registerPackRideRoutes(app: Express) {
       // Si el driver se reporta tarde, intentar re-ofertar rides pendientes sin oferta activa.
       const io = getIO();
       if (io) {
-        const now = Date.now();
-        for (const ride of rides.values()) {
-          if (ride.status !== "searching") continue;
-          if (ride.driverUserId != null) continue;
-          const wantVehicle = PACK_TO_PROVIDER_VEHICLE[ride.vehicleType as PackVehicleKind];
-          if (wantVehicle !== pres.vehicleType) continue;
-
-          if (ride.isNegotiated) continue;
-
-          // Rides "por negociar" (market) no se ofertan automáticamente al activar presencia.
-          if (typeof (ride as any).marketVisibleUntil === "number") continue;
-          if (!ride.currentOfferDriverId) {
-            const rider = await buildRiderPublic(ride.riderUserId);
-            await offerNextDriver(io, ride, rider);
-          }
-        }
+        void reconcilePendingRidesForDriver(io, pres).catch((e) => {
+          console.error("[pack] http presence offer", e);
+        });
       }
       res.json({ ok: true });
     } catch (e: any) {

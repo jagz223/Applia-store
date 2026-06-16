@@ -11,6 +11,7 @@ import {
   StorePromotionProductPicker,
   type SelectedPromotionProduct,
 } from "@/components/store/StorePromotionProductPicker";
+import { StoreCoverPhotoPicker } from "@/components/store/StoreCoverPhotoPicker";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { uploadStorePromotionImage } from "@/lib/firebase-client";
+import { revokeBlobPreview } from "@/lib/store-image-draft";
 
 export function StorePromotionFormDialog({
   storeId,
@@ -44,6 +47,8 @@ export function StorePromotionFormDialog({
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
   const [selectedProducts, setSelectedProducts] = useState<SelectedPromotionProduct[]>([]);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
 
   const createMutation = useCreateStorePromotion(storeId);
   const updateMutation = useUpdateStorePromotion(storeId);
@@ -55,11 +60,15 @@ export function StorePromotionFormDialog({
       setName(promotion.name);
       setDescription(promotion.description ?? "");
       setPrice(String(promotion.price));
+      setImagePreviewUrl(promotion.imageUrl ?? null);
+      setPendingImageFile(null);
     } else {
       setName("");
       setDescription("");
       setPrice("");
       setSelectedProducts([]);
+      setImagePreviewUrl(null);
+      setPendingImageFile(null);
     }
   }, [open, promotion]);
 
@@ -67,6 +76,29 @@ export function StorePromotionFormDialog({
     if (!open || !promotion) return;
     setSelectedProducts(promotionProductsFromItems(products, promotion.items));
   }, [open, promotion, products]);
+
+  function handleOpenChange(next: boolean) {
+    if (!next) {
+      if (imagePreviewUrl?.startsWith("blob:")) revokeBlobPreview(imagePreviewUrl);
+      setPendingImageFile(null);
+    }
+    onOpenChange(next);
+  }
+
+  function handleImagePreviewChange(url: string | null, file?: File | null) {
+    setImagePreviewUrl(url);
+    setPendingImageFile(file ?? null);
+  }
+
+  async function resolveImageUrl(): Promise<string | null> {
+    if (pendingImageFile) {
+      return uploadStorePromotionImage(storeId, pendingImageFile);
+    }
+    if (imagePreviewUrl?.trim()) {
+      return imagePreviewUrl.trim();
+    }
+    return null;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -85,19 +117,21 @@ export function StorePromotionFormDialog({
       return;
     }
 
-    const payload = {
-      name: trimmedName,
-      description: description.trim() || null,
-      price: parsedPrice,
-      status: (promotion?.status ?? "active") as "active" | "inactive",
-      items: selectedProducts.map((p) => ({
-        productId: p.id,
-        quantity: p.quantity,
-        status: p.status,
-      })),
-    };
-
     try {
+      const imageUrl = await resolveImageUrl();
+      const payload = {
+        name: trimmedName,
+        description: description.trim() || null,
+        imageUrl,
+        price: parsedPrice,
+        status: (promotion?.status ?? "active") as "active" | "inactive",
+        items: selectedProducts.map((p) => ({
+          productId: p.id,
+          quantity: p.quantity,
+          status: p.status,
+        })),
+      };
+
       if (isEdit && promotion) {
         await updateMutation.mutateAsync({ promotionId: promotion.id, body: payload });
         toast({ title: "Promoción actualizada" });
@@ -105,7 +139,9 @@ export function StorePromotionFormDialog({
         await createMutation.mutateAsync(payload);
         toast({ title: "Promoción creada" });
       }
-      onOpenChange(false);
+      if (imagePreviewUrl?.startsWith("blob:")) revokeBlobPreview(imagePreviewUrl);
+      setPendingImageFile(null);
+      handleOpenChange(false);
     } catch (err) {
       toast({
         variant: "destructive",
@@ -116,7 +152,7 @@ export function StorePromotionFormDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent layer="elevated" className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Editar promoción" : "Crear promoción"}</DialogTitle>
@@ -150,6 +186,13 @@ export function StorePromotionFormDialog({
             />
           </div>
 
+          <StoreCoverPhotoPicker
+            label="Imagen de la promoción"
+            previewUrl={imagePreviewUrl}
+            disabled={saving}
+            onPreviewChange={handleImagePreviewChange}
+          />
+
           <div className="space-y-2">
             <Label htmlFor="promotion-price">Precio del pack (USD)</Label>
             <Input
@@ -171,7 +214,7 @@ export function StorePromotionFormDialog({
           />
 
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => handleOpenChange(false)}>
               Cancelar
             </Button>
             <Button type="submit" disabled={saving}>

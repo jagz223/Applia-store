@@ -25,7 +25,10 @@ export type StoreShowcasePromotion = {
   name: string;
   description: string | null;
   price: number;
+  /** Imagen resuelta (propia o fallback del pack). */
   imageUrl: string | null;
+  /** Imagen subida específicamente para la promoción. */
+  promotionImageUrl?: string | null;
   items: StoreShowcasePromotionItem[];
 };
 

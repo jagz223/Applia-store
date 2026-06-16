@@ -45,6 +45,7 @@ import {
   Building2,
   Ticket,
   Store,
+  ShoppingBag,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -527,6 +528,12 @@ export function Navigation() {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
+                    <Link href="/pedidos-tienda" className="flex items-center">
+                      <ShoppingBag className="mr-2 h-4 w-4" />
+                      Mis pedidos de tienda
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
                     <Link href="/vault" className="flex items-center">
                       <Vault className="mr-2 h-4 w-4" />
                       Mis documentos
@@ -662,6 +669,10 @@ export function Navigation() {
                     </Link>
                     <Link href="/bookings" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>
                       Mis Reservas
+                    </Link>
+                    <Link href="/pedidos-tienda" className="text-lg font-medium flex items-center gap-2" onClick={() => setMobileOpen(false)}>
+                      <ShoppingBag className="h-5 w-5 shrink-0" />
+                      Mis pedidos de tienda
                     </Link>
                     {showPromocionesNav && (
                       <Link href="/promociones" className="text-lg font-medium" onClick={() => setMobileOpen(false)}>

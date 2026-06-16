@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, Link, useSearch } from "wouter";
 import { navigate } from "wouter/use-browser-location";
-import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield, ShieldCheck, ShieldAlert, Ticket } from "lucide-react";
+import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield, ShieldCheck, ShieldAlert, Ticket, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,11 +40,22 @@ import {
   isPublicPromoNotificationType,
   shouldShowPublicPromoInNotificationList,
 } from "@/lib/public-promo-notification-ui";
+import { resolveStoreOrderNotificationPath } from "@/lib/store-order-notification-path";
 
 const PAGE_SIZE = 10;
 
 function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
   const data = notification.data ?? {};
+
+  const storeOrderPath = resolveStoreOrderNotificationPath(notification.type, data);
+  if (storeOrderPath) return storeOrderPath;
+
+  const nestedType = data.type ?? data.data?.type;
+  if (typeof nestedType === "string" && nestedType !== notification.type) {
+    const nestedPath = resolveStoreOrderNotificationPath(nestedType, data);
+    if (nestedPath) return nestedPath;
+  }
+
   switch (notification.type) {
     case "message":
       return data.conversationId != null ? `/chat?conversation=${encodeURIComponent(data.conversationId)}` : "/chat";
@@ -242,6 +253,10 @@ function getIcon(type: string, data?: any) {
       return <Bell className="h-4 w-4 text-green-500" />;
     case "vehicle_change_request_rejected":
       return <Bell className="h-4 w-4 text-amber-500" />;
+    case "store_order_new":
+    case "store_order_status":
+    case "store_order_delivery":
+      return <ShoppingBag className="h-4 w-4 text-primary" />;
     default:
       if (isPublicPromoNotificationType(type)) {
         return <Ticket className="h-4 w-4 text-orange-500" />;
@@ -309,6 +324,18 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
 
   if (type === "verification_welcome") return "¡Bienvenido Asociado!";
 
+  if (type === "store_order_new") return "Nueva orden de tienda";
+  if (type === "store_order_status") {
+    const title = d.title ?? d.data?.title;
+    if (typeof title === "string" && title.trim()) return title.trim();
+    return "Estado de tu pedido";
+  }
+  if (type === "store_order_delivery") {
+    const title = d.title ?? d.data?.title;
+    if (typeof title === "string" && title.trim()) return title.trim();
+    return "Delivery de tu orden";
+  }
+
   if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
     const t = d.title ?? d.data?.title;
     if (typeof t === "string" && t.trim()) return t.trim();
@@ -332,6 +359,23 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
   const d = data ?? {};
   if (isPublicPromoNotificationType(type)) {
     return getPublicPromoNotificationDescription(type, d);
+  }
+  if (type === "store_order_new") {
+    const body = d.body ?? d.data?.body;
+    if (typeof body === "string" && body.trim()) return body.trim();
+    const orderId = d.orderId ?? d.data?.orderId;
+    return orderId != null ? `Nueva orden #${orderId} en tu tienda.` : "Tienes una nueva orden en tu tienda.";
+  }
+  if (type === "store_order_status") {
+    const body = d.body ?? d.data?.body;
+    if (typeof body === "string" && body.trim()) return body.trim();
+    const statusLabel = d.statusLabel ?? d.data?.statusLabel;
+    return statusLabel ? `Tu pedido ahora está: ${statusLabel}.` : "El estado de tu pedido fue actualizado.";
+  }
+  if (type === "store_order_delivery") {
+    const body = d.body ?? d.data?.body;
+    if (typeof body === "string" && body.trim()) return body.trim();
+    return "Actualización del delivery de tu orden.";
   }
   // Booking update (Socket.io) con estado real
   if (type === "booking" && d.type === "booking_update") {

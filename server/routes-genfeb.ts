@@ -1766,6 +1766,20 @@ export async function registerGenFebRoutes(
         },
       });
 
+      const convMeta = conv as { kind?: string; mobilityRideId?: string };
+      if (convMeta.kind === "mobility_ride" && convMeta.mobilityRideId) {
+        void import("./store-order-delivery")
+          .then((m) =>
+            m.onStoreOrderDeliveryChatMessage({
+              mobilityRideId: String(convMeta.mobilityRideId),
+              senderUserId: String(userId),
+              recipientUserId: recipientIdStr,
+              preview: messagePreview,
+            }),
+          )
+          .catch((err) => console.error("[stores] delivery chat notify", err));
+      }
+
       void notificationService.sendNewMessageNotification({
         recipientId,
         conversationId: message.conversationId,

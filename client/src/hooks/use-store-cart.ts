@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AddStoreCartItem, RemoveStoreCartItem, UpdateStoreCartItem } from "@shared/store-cart-schema";
+import type {
+  AddStoreCartItem,
+  RemoveStoreCartItem,
+  UpdateStoreCartFulfillment,
+  UpdateStoreCartItem,
+} from "@shared/store-cart-schema";
+import type { SubmitStoreCheckout } from "@shared/store-order-schema";
+import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
+import type { StoreLocation } from "@shared/store-schema";
 
 export type StoreCartLine = {
   kind: "product" | "promotion";
@@ -12,12 +20,28 @@ export type StoreCartLine = {
   imageUrl: string | null;
 };
 
+export type StoreCartFulfillmentOption = {
+  mode: StoreFulfillmentMode;
+  label: string;
+};
+
+export type StoreCartPaymentMethodOption = {
+  id: number;
+  name: string;
+  accountNumber: string;
+  imageUrl: string | null;
+};
+
 export type StoreCartSummary = {
   storeId: number;
   items: StoreCartLine[];
   subtotal: number;
   itemCount: number;
   expiresAt: string | null;
+  fulfillmentMode: StoreFulfillmentMode | null;
+  fulfillmentOptions: StoreCartFulfillmentOption[];
+  paymentMethods: StoreCartPaymentMethodOption[];
+  storeLocation: StoreLocation | null;
 };
 
 function authHeaders(): HeadersInit {
@@ -81,6 +105,45 @@ export function useUpdateStoreCartItem(storeId: number) {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { message?: string }).message ?? "No se pudo actualizar el carrito");
+      }
+      const data = (await res.json()) as { cart: StoreCartSummary };
+      return data.cart;
+    },
+    onSuccess: () => invalidateCart(qc, storeId),
+  });
+}
+
+export function useSubmitStoreCheckout(storeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: SubmitStoreCheckout) => {
+      const res = await fetch(`/api/stores/${storeId}/cart/checkout`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudo completar la compra");
+      }
+      return res.json() as Promise<{ order: { id: number; status: string } }>;
+    },
+    onSuccess: () => invalidateCart(qc, storeId),
+  });
+}
+
+export function useUpdateStoreCartFulfillment(storeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: UpdateStoreCartFulfillment) => {
+      const res = await fetch(`/api/stores/${storeId}/cart/fulfillment`, {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudo actualizar la modalidad");
       }
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;

@@ -7,6 +7,7 @@ type StoreShowcaseAddToCartButtonProps = {
   busy?: boolean;
   ariaLabel: string;
   className?: string;
+  variant?: "overlay" | "footer";
 };
 
 export function StoreShowcaseAddToCartButton({
@@ -15,6 +16,7 @@ export function StoreShowcaseAddToCartButton({
   busy,
   ariaLabel,
   className,
+  variant = "overlay",
 }: StoreShowcaseAddToCartButtonProps) {
   return (
     <button
@@ -26,10 +28,19 @@ export function StoreShowcaseAddToCartButton({
         onClick();
       }}
       className={cn(
-        "absolute bottom-2 right-2 z-10",
+        variant === "overlay"
+          ? [
+              "absolute bottom-3 right-3 z-10",
+              "bg-primary text-primary-foreground shadow-md",
+              "hover:bg-primary/90",
+            ]
+          : [
+              "relative shrink-0",
+              "bg-card text-foreground border border-border shadow-sm",
+              "hover:bg-muted/60",
+            ],
         "flex h-9 w-9 items-center justify-center rounded-full",
-        "bg-primary text-primary-foreground shadow-md",
-        "hover:bg-primary/90 active:scale-95 transition-transform",
+        "active:scale-95 transition-transform",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         (disabled || busy) && "opacity-70 pointer-events-none",
         className,

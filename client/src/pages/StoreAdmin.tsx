@@ -3,6 +3,7 @@ import { Link, useLocation, useRoute } from "wouter";
 import { Loader2, Lock } from "lucide-react";
 import {
   STORE_ADMIN_SECTIONS,
+  STORE_ADMIN_SECTIONS_HIDDEN,
   normalizeStoreAdminSection,
   storeAdminSectionPath,
   type StoreAdminSectionId,
@@ -14,7 +15,10 @@ import { StoreAdminProductsPanel } from "@/components/store/StoreAdminProductsPa
 import { StoreAdminCategoriesPanel } from "@/components/store/StoreAdminCategoriesPanel";
 import { StoreAdminPromotionsPanel } from "@/components/store/StoreAdminPromotionsPanel";
 import { StoreAdminConfigPanel } from "@/components/store/StoreAdminConfigPanel";
+import { StoreAdminOrdersPanel } from "@/components/store/StoreAdminOrdersPanel";
 import { StoreAdminComingSoon } from "@/components/store/StoreAdminComingSoon";
+import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
+import type { StoreLocation } from "@shared/store-schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -27,11 +31,22 @@ function sectionPanel(
     description?: string | null;
     rubro?: string | null;
     coverImageUrl?: string | null;
+    fulfillmentOptions?: StoreFulfillmentMode[];
+    location?: StoreLocation | null;
   },
 ) {
   if (section === "productos") return <StoreAdminProductsPanel storeId={store.id} />;
   if (section === "categorias") return <StoreAdminCategoriesPanel storeId={store.id} />;
   if (section === "promociones") return <StoreAdminPromotionsPanel storeId={store.id} />;
+  if (section === "ordenes") {
+    return (
+      <StoreAdminOrdersPanel
+        storeId={store.id}
+        storeSlug={store.slug}
+        storeLocation={store.location ?? null}
+      />
+    );
+  }
   if (section === "configuracion") {
     return (
       <StoreAdminConfigPanel
@@ -41,6 +56,8 @@ function sectionPanel(
         initialDescription={store.description ?? null}
         initialRubro={store.rubro ?? null}
         initialCoverImageUrl={store.coverImageUrl ?? null}
+        initialFulfillmentOptions={store.fulfillmentOptions ?? []}
+        initialLocation={store.location ?? null}
       />
     );
   }
@@ -59,6 +76,12 @@ export default function StoreAdmin() {
   useEffect(() => {
     if (!slug) return;
     if (!sectionParam) {
+      setLocation(`/tienda/${encodeURIComponent(slug)}/admin/${storeAdminSectionPath("productos")}`, {
+        replace: true,
+      });
+      return;
+    }
+    if (STORE_ADMIN_SECTIONS_HIDDEN.some((id) => sectionParam === storeAdminSectionPath(id) || sectionParam === id)) {
       setLocation(`/tienda/${encodeURIComponent(slug)}/admin/${storeAdminSectionPath("productos")}`, {
         replace: true,
       });
@@ -176,7 +199,7 @@ export default function StoreAdmin() {
   }
 
   return (
-    <StoreAdminLayout slug={slug} storeName={store.name} activeSection={activeSection}>
+    <StoreAdminLayout slug={slug} storeName={store.name} storeId={store.id} activeSection={activeSection}>
       {sectionPanel(activeSection, store)}
     </StoreAdminLayout>
   );
