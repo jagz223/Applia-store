@@ -23,7 +23,7 @@ import { GoThreeServicesReminder } from "@/components/provider/GoThreeServicesRe
 import { useAuth } from "@/hooks/use-auth";
 import { hasFullAdminRole } from "@/lib/auth-utils";
 import { userCanActAsAssociate } from "@/lib/user-permissions";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { api } from "@shared/routes";
 import { setVerifyReturnPath } from "@/lib/verify-return-path";
 import { markAssociateOnboardingStarted, clearAssociateOnboardingStarted } from "@/lib/associate-onboarding-storage";
@@ -393,13 +393,23 @@ export default function BecomePro() {
   }
 
   if (!isAuthenticated) {
+    const goLogin = () => {
+      try {
+        sessionStorage.setItem("postLoginRedirect", "/become-pro");
+      } catch {
+        /* ignore */
+      }
+    };
+
     return (
       <div className="container mx-auto max-w-md px-4 py-20 text-center">
         <h1 className="text-2xl font-bold mb-4">Inicia sesión</h1>
         <p className="mb-6 text-muted-foreground">Necesitas una cuenta para registrarte como asociado.</p>
-        <a href={api.auth.replit.login.path}>
-          <Button className="w-full">Iniciar sesión / Registrarse</Button>
-        </a>
+        <Link href="/login">
+          <Button type="button" className="w-full" onClick={goLogin}>
+            Iniciar sesión / Registrarse
+          </Button>
+        </Link>
       </div>
     );
   }
