@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { AlertCircle, Clock, Loader2, Settings, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,9 +15,18 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useAuth } from "@/hooks/use-auth";
 import { useStoreBySlug } from "@/hooks/use-my-store";
 import { useStoreShowcaseProducts } from "@/hooks/use-store-showcase";
+import { useAddToStoreCart } from "@/hooks/use-store-cart";
 import { StoreShowcaseProductGrid } from "@/components/store/StoreShowcaseProductGrid";
+import { StoreShowcasePromotionGrid } from "@/components/store/StoreShowcasePromotionGrid";
+import { StoreCartPanel } from "@/components/store/StoreCartPanel";
+import { showcaseCartItemKey } from "@/components/store/StoreShowcaseAddToCartButton";
+import {
+  StoreShowcaseFilters,
+  type ShowcaseCategoryFilter,
+} from "@/components/store/StoreShowcaseFilters";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 type StorePayload = {
   id: number;
@@ -115,9 +124,14 @@ export default function StorePage() {
   const [, params] = useRoute("/tienda/:slug");
   const slug = params?.slug ?? "";
   const { isAuthenticated } = useAuth();
+  const { toast } = useToast();
   const [paymentSentDialogOpen, setPaymentSentDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<ShowcaseCategoryFilter>("all");
 
   const { data, isLoading, error } = useStoreBySlug(slug, Boolean(slug));
+  const storeId = data?.store?.id ?? 0;
+  const addToCartMutation = useAddToStoreCart(storeId);
   const canLoadShowcase = Boolean(slug) && !isLoading && Boolean(data?.store);
   const {
     data: showcaseData,
@@ -133,6 +147,42 @@ export default function StorePage() {
       window.history.replaceState({}, "", `/tienda/${encodeURIComponent(slug)}`);
     }
   }, [slug]);
+
+  useEffect(() => {
+    setSearchQuery("");
+    setCategoryFilter("all");
+  }, [slug]);
+
+  const showcaseProducts = showcaseData?.products ?? [];
+  const showcaseCategories = showcaseData?.categories ?? [];
+  const showcasePromotions = showcaseData?.promotions ?? [];
+  const hasShowcaseFilters = showcaseProducts.length > 0 || showcasePromotions.length > 0;
+  const showingPromotions = categoryFilter === "promotions";
+
+  const filteredShowcaseProducts = useMemo(() => {
+    let list = showcaseProducts;
+    if (typeof categoryFilter === "number") {
+      list = list.filter((p) => (p.categoryIds ?? []).includes(categoryFilter));
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter((p) => p.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [showcaseProducts, categoryFilter, searchQuery]);
+
+  const filteredShowcasePromotions = useMemo(() => {
+    let list = showcasePromotions;
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.description?.toLowerCase().includes(q) ?? false),
+      );
+    }
+    return list;
+  }, [showcasePromotions, searchQuery]);
 
   if (isLoading) {
     return (
@@ -170,19 +220,63 @@ export default function StorePage() {
 
   const showActivationBanner = isOwner && !visibilityActive;
   const paymentHref = `/tienda/${encodeURIComponent(store.slug)}/pago`;
-  const showcaseProducts = showcaseData?.products ?? [];
   const ownerPreview = isOwner && !visibilityActive;
+  const showCustomerCart = !isOwner && visibilityActive;
+  const cartActionsEnabled = showCustomerCart && isAuthenticated;
+
+  const addToCartBusyKey =
+    addToCartMutation.isPending && addToCartMutation.variables
+      ? addToCartMutation.variables.kind === "product"
+        ? showcaseCartItemKey("product", addToCartMutation.variables.productId!)
+        : showcaseCartItemKey("promotion", addToCartMutation.variables.promotionId!)
+      : null;
+
+  async function handleAddProductToCart(productId: number) {
+    try {
+      await addToCartMutation.mutateAsync({ kind: "product", productId, quantity: 1 });
+      toast({ title: "Añadido al carrito" });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo añadir",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
+    }
+  }
+
+  async function handleAddPromotionToCart(promotionId: number) {
+    try {
+      await addToCartMutation.mutateAsync({ kind: "promotion", promotionId, quantity: 1 });
+      toast({ title: "Promoción añadida al carrito" });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo añadir",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
+    }
+  }
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="relative min-h-[50vh]">
-        {isOwner && (
+      <div
+        className={cn(
+          "w-full",
+          showCustomerCart ? "flex flex-1 min-h-0 overflow-hidden bg-muted/20" : "relative min-h-[50vh]",
+        )}
+      >
+        {isOwner && !showCustomerCart ? (
           <div className="absolute top-4 right-4 z-10">
             <StoreOwnerSettingsButton store={store} visibilityActive={visibilityActive} />
           </div>
-        )}
-
-        <div className="container mx-auto max-w-3xl px-4 py-10 space-y-6">
+        ) : null}
+        <div
+          className={cn(
+            showCustomerCart
+              ? "flex-1 min-w-0 overflow-y-auto px-4 py-8 sm:px-6 lg:px-10 space-y-6"
+              : "mx-auto container max-w-3xl px-4 py-10 space-y-6",
+          )}
+        >
           {store.coverImageUrl ? (
             <div className="relative mx-auto aspect-[21/9] max-h-56 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-muted/30">
               <img src={store.coverImageUrl} alt="" className="h-full w-full object-cover" />
@@ -215,10 +309,10 @@ export default function StorePage() {
             </Link>
           )}
 
-          <header className="space-y-2 text-center px-2 sm:px-12">
+          <header className={cn("space-y-2 px-2", showCustomerCart ? "text-left sm:px-0" : "text-center sm:px-12")}>
             <h1 className="text-2xl font-bold tracking-tight">{store.name}</h1>
             {store.rubroLabel ? (
-              <div className="flex justify-center">
+              <div className={cn(showCustomerCart ? "" : "flex justify-center")}>
                 <Badge variant="secondary">{store.rubroLabel}</Badge>
               </div>
             ) : null}
@@ -245,18 +339,52 @@ export default function StorePage() {
 
           {(visibilityActive || ownerPreview) && (
             <section className="space-y-4">
-              <h2 className="text-lg font-semibold text-center">Productos</h2>
-              <StoreShowcaseProductGrid
-                centered
-                products={showcaseProducts}
-                isLoading={showcaseLoading}
-                error={showcaseError as Error | null}
-                emptyMessage={
-                  isOwner
-                    ? "Activa «En vitrina» en tus productos desde el panel para mostrarlos aquí."
-                    : "Esta tienda aún no tiene productos disponibles."
-                }
-              />
+              <h2 className={cn("text-lg font-semibold", showCustomerCart ? "text-left" : "text-center")}>
+                {showingPromotions ? "Promociones" : "Productos"}
+              </h2>
+              {!showcaseLoading && hasShowcaseFilters ? (
+                <StoreShowcaseFilters
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  categoryFilter={categoryFilter}
+                  onCategoryChange={setCategoryFilter}
+                  categories={showcaseCategories}
+                  showPromotionsFilter={showcasePromotions.length > 0}
+                />
+              ) : null}
+              {showingPromotions ? (
+                <StoreShowcasePromotionGrid
+                  largeCards
+                  centered={false}
+                  promotions={filteredShowcasePromotions}
+                  isLoading={showcaseLoading}
+                  error={showcaseError as Error | null}
+                  onAddPromotionToCart={cartActionsEnabled ? handleAddPromotionToCart : undefined}
+                  addToCartBusyKey={addToCartBusyKey}
+                  emptyMessage={
+                    showcasePromotions.length === 0
+                      ? "Esta tienda no tiene promociones activas."
+                      : "No hay promociones que coincidan con tu búsqueda."
+                  }
+                />
+              ) : (
+                <StoreShowcaseProductGrid
+                  largeCards={showCustomerCart}
+                  centered={!showCustomerCart}
+                  products={filteredShowcaseProducts}
+                  isLoading={showcaseLoading}
+                  error={showcaseError as Error | null}
+                  onAddProductToCart={cartActionsEnabled ? handleAddProductToCart : undefined}
+                  addToCartBusyKey={addToCartBusyKey}
+                  emptyMessage={
+                    showcaseProducts.length === 0
+                      ? isOwner
+                        ? "Activa «En vitrina» en tus productos desde el panel para mostrarlos aquí."
+                        : "Esta tienda aún no tiene productos disponibles."
+                      : "No hay productos que coincidan con tu búsqueda o categoría."
+                  }
+                />
+              )}
             </section>
           )}
 
@@ -269,6 +397,12 @@ export default function StorePage() {
             </p>
           )}
         </div>
+
+        {showCustomerCart ? (
+          <div className="shrink-0 flex min-h-0 self-stretch p-3 pr-4 pb-4 pt-3">
+            <StoreCartPanel storeId={store.id} storeName={store.name} enabled />
+          </div>
+        ) : null}
       </div>
 
       <Dialog open={paymentSentDialogOpen} onOpenChange={setPaymentSentDialogOpen}>

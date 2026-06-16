@@ -24,6 +24,8 @@ type StoreEntityMultiPickerProps = {
   options: SelectedEntity[];
   isLoading?: boolean;
   disabled?: boolean;
+  /** Dentro de Dialog usar `modal` para que el listado quede por encima del modal. */
+  popoverLayer?: "default" | "modal";
 };
 
 export function StoreEntityMultiPicker({
@@ -35,6 +37,7 @@ export function StoreEntityMultiPicker({
   options,
   isLoading,
   disabled,
+  popoverLayer = "modal",
 }: StoreEntityMultiPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -75,7 +78,11 @@ export function StoreEntityMultiPicker({
             {placeholder}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <PopoverContent
+          layer={popoverLayer}
+          className="w-[var(--radix-popover-trigger-width)] p-0"
+          align="start"
+        >
           <div className="p-2 border-b border-border">
             <Input
               placeholder="Escribe para filtrar…"

@@ -41,6 +41,7 @@ import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subc
 import { DEFAULT_CATEGORIES } from "@shared/default-categories";
 import {
   INGREDIENTS_MATERIALS_PAGE_SIZE,
+  normalizeStoreLocation,
   type Store,
   type IngredientMaterial,
   type InsertStore,
@@ -52,7 +53,23 @@ import {
   type StoreCategory,
   type InsertStoreCategory,
   type UpdateStoreCategory,
+  type StorePromotion,
+  type InsertStorePromotion,
+  type UpdateStorePromotion,
 } from "@shared/store-schema";
+import type {
+  InsertStorePaymentMethod,
+  StorePaymentMethod,
+  UpdateStorePaymentMethod,
+} from "@shared/store-payment-method-schema";
+import type { StoreOrder, StoreOrderListFilters } from "@shared/store-order-schema";
+import { filterStoreOrders } from "@shared/store-order-schema";
+import type { StoreCart, StoreCartItem } from "@shared/store-cart-schema";
+import { STORE_CART_TTL_MS } from "@shared/store-cart-schema";
+import {
+  normalizeStoreFulfillmentOptions,
+  type StoreFulfillmentMode,
+} from "@shared/store-fulfillment";
 import { STORE_SUBSCRIPTION_FEE_REPORT_TYPE } from "@shared/store-subscription-payment";
 import {
   ingredientMaterialKey,
@@ -465,6 +482,45 @@ export interface IStorage
     input: Omit<UpdateStoreCategory, "productIds">,
   ): Promise<StoreCategory>;
   deleteStoreCategory(storeId: number, categoryId: number): Promise<void>;
+  listStorePromotions(storeId: number): Promise<StorePromotion[]>;
+  getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined>;
+  createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion>;
+  updateStorePromotion(
+    storeId: number,
+    promotionId: number,
+    input: UpdateStorePromotion,
+  ): Promise<StorePromotion>;
+  deleteStorePromotion(storeId: number, promotionId: number): Promise<void>;
+  listStorePaymentMethods(storeId: number): Promise<StorePaymentMethod[]>;
+  getStorePaymentMethod(storeId: number, paymentMethodId: number): Promise<StorePaymentMethod | undefined>;
+  createStorePaymentMethod(storeId: number, input: InsertStorePaymentMethod): Promise<StorePaymentMethod>;
+  updateStorePaymentMethod(
+    storeId: number,
+    paymentMethodId: number,
+    input: UpdateStorePaymentMethod,
+  ): Promise<StorePaymentMethod>;
+  deleteStorePaymentMethod(storeId: number, paymentMethodId: number): Promise<void>;
+  createStoreOrder(input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt">): Promise<StoreOrder>;
+  listStoreOrders(storeId: number, filters?: StoreOrderListFilters): Promise<StoreOrder[]>;
+  listStoreOrdersForUser(userId: string, filters?: StoreOrderListFilters): Promise<StoreOrder[]>;
+  getStoreOrder(storeId: number, orderId: number): Promise<StoreOrder | undefined>;
+  getStoreOrderForUser(userId: string, orderId: number): Promise<StoreOrder | undefined>;
+  updateStoreOrderStatus(storeId: number, orderId: number, status: StoreOrder["status"]): Promise<StoreOrder>;
+  patchStoreOrder(
+    storeId: number,
+    orderId: number,
+    patch: Partial<Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount">>,
+  ): Promise<StoreOrder>;
+  incrementStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder>;
+  resetStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder>;
+  getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined>;
+  saveStoreCart(
+    userId: string,
+    storeId: number,
+    items: StoreCartItem[],
+    fulfillmentMode?: StoreFulfillmentMode | null,
+  ): Promise<StoreCart>;
+  deleteStoreCart(userId: string, storeId: number): Promise<void>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -3143,6 +3199,8 @@ export class InMemoryStorage implements IStorage {
       description: null,
       rubro: null,
       coverImageUrl: null,
+      location: null,
+      fulfillmentOptions: [],
       visibilitySubscriptionEndsAt: null,
       createdAt: now,
       updatedAt: now,
@@ -3164,6 +3222,14 @@ export class InMemoryStorage implements IStorage {
         : {}),
       ...(input.rubro !== undefined ? { rubro: input.rubro } : {}),
       coverImageUrl: input.coverImageUrl !== undefined ? input.coverImageUrl : current.coverImageUrl,
+      ...(input.fulfillmentOptions !== undefined
+        ? {
+            fulfillmentOptions: normalizeStoreFulfillmentOptions(input.fulfillmentOptions),
+          }
+        : {}),
+      ...(input.location !== undefined
+        ? { location: input.location === null ? null : normalizeStoreLocation(input.location) ?? input.location }
+        : {}),
       updatedAt: now,
     };
     this.stores[index] = updated;
@@ -3363,6 +3429,276 @@ export class InMemoryStorage implements IStorage {
     const idx = this.storeCategories.findIndex((c) => c.storeId === storeId && c.id === categoryId);
     if (idx === -1) throw new Error("STORE_CATEGORY_NOT_FOUND");
     this.storeCategories.splice(idx, 1);
+  }
+
+  private storePromotions: StorePromotion[] = [];
+  private storePromotionIdCounter = 1;
+
+  async listStorePromotions(storeId: number): Promise<StorePromotion[]> {
+    return this.storePromotions
+      .filter((p) => p.storeId === storeId)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined> {
+    return this.storePromotions.find((p) => p.storeId === storeId && p.id === promotionId);
+  }
+
+  async createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion> {
+    const now = new Date();
+    const promotion: StorePromotion = {
+      id: this.storePromotionIdCounter++,
+      storeId,
+      name: input.name.trim(),
+      description: input.description?.trim() ? input.description.trim() : null,
+      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      price: input.price,
+      items: input.items.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        status: item.status ?? "active",
+      })),
+      status: input.status ?? "active",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storePromotions.push(promotion);
+    return promotion;
+  }
+
+  async updateStorePromotion(
+    storeId: number,
+    promotionId: number,
+    input: UpdateStorePromotion,
+  ): Promise<StorePromotion> {
+    const idx = this.storePromotions.findIndex((p) => p.storeId === storeId && p.id === promotionId);
+    if (idx === -1) throw new Error("STORE_PROMOTION_NOT_FOUND");
+    const cur = this.storePromotions[idx];
+    const next: StorePromotion = {
+      ...cur,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description?.trim() ? input.description.trim() : null }
+        : {}),
+      ...(input.imageUrl !== undefined
+        ? { imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null }
+        : {}),
+      ...(input.price !== undefined ? { price: input.price } : {}),
+      ...(input.items !== undefined
+        ? {
+            items: input.items.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              status: item.status ?? "active",
+            })),
+          }
+        : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+      updatedAt: new Date(),
+    };
+    this.storePromotions[idx] = next;
+    return next;
+  }
+
+  async deleteStorePromotion(storeId: number, promotionId: number): Promise<void> {
+    const idx = this.storePromotions.findIndex((p) => p.storeId === storeId && p.id === promotionId);
+    if (idx === -1) throw new Error("STORE_PROMOTION_NOT_FOUND");
+    this.storePromotions.splice(idx, 1);
+  }
+
+  private storePaymentMethods: StorePaymentMethod[] = [];
+  private storePaymentMethodIdCounter = 1;
+
+  async listStorePaymentMethods(storeId: number): Promise<StorePaymentMethod[]> {
+    return this.storePaymentMethods
+      .filter((m) => m.storeId === storeId)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStorePaymentMethod(
+    storeId: number,
+    paymentMethodId: number,
+  ): Promise<StorePaymentMethod | undefined> {
+    return this.storePaymentMethods.find((m) => m.storeId === storeId && m.id === paymentMethodId);
+  }
+
+  async createStorePaymentMethod(
+    storeId: number,
+    input: InsertStorePaymentMethod,
+  ): Promise<StorePaymentMethod> {
+    const now = new Date();
+    const method: StorePaymentMethod = {
+      id: this.storePaymentMethodIdCounter++,
+      storeId,
+      name: input.name.trim(),
+      accountNumber: input.accountNumber.trim(),
+      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storePaymentMethods.push(method);
+    return method;
+  }
+
+  async updateStorePaymentMethod(
+    storeId: number,
+    paymentMethodId: number,
+    input: UpdateStorePaymentMethod,
+  ): Promise<StorePaymentMethod> {
+    const idx = this.storePaymentMethods.findIndex(
+      (m) => m.storeId === storeId && m.id === paymentMethodId,
+    );
+    if (idx === -1) throw new Error("STORE_PAYMENT_METHOD_NOT_FOUND");
+    const cur = this.storePaymentMethods[idx];
+    const next: StorePaymentMethod = {
+      ...cur,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.accountNumber !== undefined ? { accountNumber: input.accountNumber.trim() } : {}),
+      ...(input.imageUrl !== undefined
+        ? { imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null }
+        : {}),
+      updatedAt: new Date(),
+    };
+    this.storePaymentMethods[idx] = next;
+    return next;
+  }
+
+  async deleteStorePaymentMethod(storeId: number, paymentMethodId: number): Promise<void> {
+    const idx = this.storePaymentMethods.findIndex(
+      (m) => m.storeId === storeId && m.id === paymentMethodId,
+    );
+    if (idx === -1) throw new Error("STORE_PAYMENT_METHOD_NOT_FOUND");
+    this.storePaymentMethods.splice(idx, 1);
+  }
+
+  private storeOrders: StoreOrder[] = [];
+  private storeOrderIdCounter = 1;
+
+  async createStoreOrder(
+    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt">,
+  ): Promise<StoreOrder> {
+    const now = new Date();
+    const order: StoreOrder = {
+      id: this.storeOrderIdCounter++,
+      ...input,
+      packRideId: input.packRideId ?? null,
+      deliveryUnreadCount: input.deliveryUnreadCount ?? 0,
+      status: "pagado",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storeOrders.push(order);
+    return order;
+  }
+
+  async listStoreOrders(storeId: number, filters?: StoreOrderListFilters): Promise<StoreOrder[]> {
+    const list = this.storeOrders.filter((o) => o.storeId === storeId);
+    return filterStoreOrders(list, filters);
+  }
+
+  async listStoreOrdersForUser(userId: string, filters?: StoreOrderListFilters): Promise<StoreOrder[]> {
+    const list = this.storeOrders.filter((o) => o.userId === userId);
+    return filterStoreOrders(list, filters);
+  }
+
+  async getStoreOrder(storeId: number, orderId: number): Promise<StoreOrder | undefined> {
+    return this.storeOrders.find((o) => o.storeId === storeId && o.id === orderId);
+  }
+
+  async getStoreOrderForUser(userId: string, orderId: number): Promise<StoreOrder | undefined> {
+    const order = this.storeOrders.find((o) => o.id === orderId && o.userId === userId);
+    return order;
+  }
+
+  async updateStoreOrderStatus(
+    storeId: number,
+    orderId: number,
+    status: StoreOrder["status"],
+  ): Promise<StoreOrder> {
+    const idx = this.storeOrders.findIndex((o) => o.storeId === storeId && o.id === orderId);
+    if (idx === -1) throw new Error("STORE_ORDER_NOT_FOUND");
+    const now = new Date();
+    const updated: StoreOrder = {
+      ...this.storeOrders[idx],
+      status,
+      updatedAt: now,
+    };
+    this.storeOrders[idx] = updated;
+    return updated;
+  }
+
+  async patchStoreOrder(
+    storeId: number,
+    orderId: number,
+    patch: Partial<Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount">>,
+  ): Promise<StoreOrder> {
+    const idx = this.storeOrders.findIndex((o) => o.storeId === storeId && o.id === orderId);
+    if (idx === -1) throw new Error("STORE_ORDER_NOT_FOUND");
+    const now = new Date();
+    const updated: StoreOrder = {
+      ...this.storeOrders[idx],
+      ...patch,
+      updatedAt: now,
+    };
+    this.storeOrders[idx] = updated;
+    return updated;
+  }
+
+  async incrementStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder> {
+    const order = await this.getStoreOrder(storeId, orderId);
+    if (!order) throw new Error("STORE_ORDER_NOT_FOUND");
+    return this.patchStoreOrder(storeId, orderId, {
+      deliveryUnreadCount: Math.max(0, (order.deliveryUnreadCount ?? 0) + 1),
+    });
+  }
+
+  async resetStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder> {
+    return this.patchStoreOrder(storeId, orderId, { deliveryUnreadCount: 0 });
+  }
+
+  private storeCarts = new Map<string, StoreCart>();
+
+  private storeCartKey(userId: string, storeId: number) {
+    return `${userId}:${storeId}`;
+  }
+
+  async getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined> {
+    const key = this.storeCartKey(userId, storeId);
+    const cart = this.storeCarts.get(key);
+    if (!cart) return undefined;
+    if (new Date(cart.expiresAt).getTime() <= Date.now()) {
+      this.storeCarts.delete(key);
+      return undefined;
+    }
+    return cart;
+  }
+
+  async saveStoreCart(
+    userId: string,
+    storeId: number,
+    items: StoreCartItem[],
+    fulfillmentMode?: StoreFulfillmentMode | null,
+  ): Promise<StoreCart> {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + STORE_CART_TTL_MS);
+    const key = this.storeCartKey(userId, storeId);
+    const existing = this.storeCarts.get(key);
+    const cart: StoreCart = {
+      userId,
+      storeId,
+      items,
+      fulfillmentMode:
+        fulfillmentMode !== undefined ? fulfillmentMode : (existing?.fulfillmentMode ?? null),
+      expiresAt,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.storeCarts.set(key, cart);
+    return cart;
+  }
+
+  async deleteStoreCart(userId: string, storeId: number): Promise<void> {
+    this.storeCarts.delete(this.storeCartKey(userId, storeId));
   }
 
   async extendStoreVisibilitySubscription(args: {

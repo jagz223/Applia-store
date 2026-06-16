@@ -6,10 +6,36 @@ export type StoreShowcaseProduct = {
   description: string | null;
   price: number;
   imageUrls: string[];
+  categoryIds: number[];
+};
+
+export type StoreShowcaseCategory = {
+  id: number;
+  name: string;
+};
+
+export type StoreShowcasePromotionItem = {
+  productId: number;
+  productName: string;
+  quantity: number;
+};
+
+export type StoreShowcasePromotion = {
+  id: number;
+  name: string;
+  description: string | null;
+  price: number;
+  /** Imagen resuelta (propia o fallback del pack). */
+  imageUrl: string | null;
+  /** Imagen subida específicamente para la promoción. */
+  promotionImageUrl?: string | null;
+  items: StoreShowcasePromotionItem[];
 };
 
 export type StoreShowcaseResponse = {
   products: StoreShowcaseProduct[];
+  categories: StoreShowcaseCategory[];
+  promotions: StoreShowcasePromotion[];
   visibilityActive: boolean;
   inactive?: boolean;
   isOwner?: boolean;

@@ -43,6 +43,17 @@ import {
   removeCategoryFromAllProducts,
   syncCategoryProductMembership,
 } from "./store-category-sync";
+import { computeStoreDeliveryQuote } from "./store-delivery-quote";
+import {
+  getStoreDeliveryNotificationsSummary,
+  handleStoreOrderStatusListoParaEnvio,
+  handleStoreOrderRevertFromListoParaEnvio,
+} from "./store-order-delivery";
+import {
+  notifyCustomerStoreOrderStatusChanged,
+  notifyStoreOwnerNewOrder,
+} from "./store-order-notifications";
+import { getPackRideDeliveryDetail } from "./pack-rides";
 import {
   insertStoreSchema,
   insertIngredientMaterialSchema,
@@ -51,15 +62,47 @@ import {
   updateStoreSchema,
   insertStoreCategorySchema,
   updateStoreCategorySchema,
+  insertStorePromotionSchema,
+  updateStorePromotionSchema,
   INGREDIENTS_MATERIALS_PAGE_SIZE,
   type Store,
   type StoreProduct,
   type StoreCategory,
+  type StorePromotion,
+  resolveStorePromotionImageUrl,
+  canEnableStoreFulfillmentOptions,
+  STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE,
+  normalizeStoreLocation,
 } from "@shared/store-schema";
 import { storeSubscriptionPaymentBodySchema } from "@shared/store-subscription-payment";
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { filterStoresByCatalogQuery, getStoreRubroLabel } from "@shared/store-rubros";
 import { parsePositiveIntParam, requireStoreOwner } from "./store-product-auth";
+import {
+  addStoreCartItemSchema,
+  updateStoreCartItemSchema,
+  removeStoreCartItemSchema,
+  updateStoreCartFulfillmentSchema,
+} from "@shared/store-cart-schema";
+import { submitStoreCheckoutSchema, updateStoreOrderStatusSchema, canTransitionStoreOrderStatus, STORE_ORDER_STATUS_LABELS, fulfillmentLabel, getAllowedStoreOrderStatuses, getStoreOrderStatusTransitionLabel, storeOrderStatusSchema, parseStoreOrderDateFilter, type StoreOrder } from "@shared/store-order-schema";
+import {
+  insertStorePaymentMethodSchema,
+  updateStorePaymentMethodSchema,
+  type StorePaymentMethod,
+} from "@shared/store-payment-method-schema";
+import { normalizeStoreFulfillmentOptions } from "@shared/store-fulfillment";
+import {
+  addBodyToCartItem,
+  enrichStoreCart,
+  mergeAddCartItem,
+  pruneAndSaveCart,
+  removeCartItem,
+  setCartItemQuantity,
+  validateCartFulfillmentForStore,
+  validateCartItemForStore,
+  validateCheckoutFulfillment,
+  validateCheckoutPaymentMethod,
+} from "./store-cart";
 
 function serializeDate(value: Date | string | null | undefined): string | null {
   if (value == null) return null;
@@ -107,6 +150,38 @@ async function assertStoreProductIds(storeId: number, productIds: number[]): Pro
   }
 }
 
+function serializeStorePromotion(promotion: StorePromotion, products: StoreProduct[]) {
+  const nameById = new Map(products.map((p) => [p.id, p.name]));
+  return {
+    id: promotion.id,
+    storeId: promotion.storeId,
+    name: promotion.name,
+    description: promotion.description,
+    imageUrl: promotion.imageUrl ?? null,
+    price: promotion.price,
+    status: promotion.status,
+    items: promotion.items.map((item) => ({
+      productId: item.productId,
+      productName: nameById.get(item.productId) ?? `Producto #${item.productId}`,
+      quantity: item.quantity,
+      status: item.status,
+    })),
+    createdAt: serializeDate(promotion.createdAt),
+    updatedAt: serializeDate(promotion.updatedAt),
+  };
+}
+
+async function assertStorePromotionItems(
+  storeId: number,
+  items: { productId: number }[] | undefined,
+): Promise<void> {
+  if (!items?.length) return;
+  await assertStoreProductIds(
+    storeId,
+    items.map((i) => i.productId),
+  );
+}
+
 function serializeStoreShowcaseProduct(product: StoreProduct) {
   return {
     id: product.id,
@@ -114,6 +189,35 @@ function serializeStoreShowcaseProduct(product: StoreProduct) {
     description: product.description,
     price: product.price,
     imageUrls: product.imageUrls ?? [],
+    categoryIds: product.categoryIds ?? [],
+  };
+}
+
+function serializeShowcaseCategory(category: StoreCategory) {
+  return {
+    id: category.id,
+    name: category.name,
+  };
+}
+
+function serializeStoreShowcasePromotion(promotion: StorePromotion, products: StoreProduct[]) {
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const imageUrl = resolveStorePromotionImageUrl(promotion, products);
+
+  return {
+    id: promotion.id,
+    name: promotion.name,
+    description: promotion.description,
+    price: promotion.price,
+    imageUrl,
+    promotionImageUrl: promotion.imageUrl?.trim() || null,
+    items: promotion.items
+      .filter((item) => item.status === "active")
+      .map((item) => ({
+        productId: item.productId,
+        productName: productById.get(item.productId)?.name ?? `Producto #${item.productId}`,
+        quantity: item.quantity,
+      })),
   };
 }
 
@@ -126,6 +230,71 @@ function serializeStoreCatalogItem(store: Store) {
     rubro: store.rubro ?? null,
     rubroLabel: getStoreRubroLabel(store.rubro),
     coverImageUrl: store.coverImageUrl ?? null,
+  };
+}
+
+function serializeStorePaymentMethod(method: StorePaymentMethod) {
+  return {
+    id: method.id,
+    storeId: method.storeId,
+    name: method.name,
+    accountNumber: method.accountNumber,
+    imageUrl: method.imageUrl ?? null,
+    createdAt: serializeDate(method.createdAt),
+    updatedAt: serializeDate(method.updatedAt),
+  };
+}
+
+async function serializeStoreOrder(
+  order: StoreOrder,
+  includeAllowedStatuses = false,
+  storeOverride?: Store | null,
+) {
+  const user = (await genFebStorage.getUserById(order.userId)) as
+    | { name?: string; firstName?: string; lastName?: string; email?: string }
+    | undefined;
+  const store = storeOverride ?? (await genFebStorage.getStoreById(order.storeId));
+  const storeLocation = normalizeStoreLocation(store?.location ?? null);
+  const customerName = user
+    ? [user.name ?? user.firstName, user.lastName].filter(Boolean).join(" ").trim() || null
+    : null;
+  const base = {
+    id: order.id,
+    storeId: order.storeId,
+    storeName: store?.name ?? null,
+    storeSlug: store?.slug ?? null,
+    userId: order.userId,
+    customerName,
+    customerEmail: user?.email ?? null,
+    storeLocation,
+    paymentMethodId: order.paymentMethodId,
+    paymentMethodName: order.paymentMethodName,
+    paymentMethodAccountNumber: order.paymentMethodAccountNumber,
+    fulfillmentMode: order.fulfillmentMode,
+    fulfillmentLabel: fulfillmentLabel(order.fulfillmentMode),
+    reference: order.reference,
+    proofImageUrl: order.proofImageUrl,
+    amountDue: order.amountDue,
+    amountPaid: order.amountPaid,
+    deliveryFee: order.deliveryFee ?? 0,
+    deliveryDistanceM: order.deliveryDistanceM ?? null,
+    subtotal: order.subtotal,
+    deliveryLocation: order.deliveryLocation,
+    items: order.items,
+    status: order.status,
+    statusLabel: STORE_ORDER_STATUS_LABELS[order.status],
+    packRideId: order.packRideId ?? null,
+    deliveryUnreadCount: order.deliveryUnreadCount ?? 0,
+    createdAt: serializeDate(order.createdAt),
+    updatedAt: serializeDate(order.updatedAt),
+  };
+  if (!includeAllowedStatuses) return base;
+  return {
+    ...base,
+    allowedNextStatuses: getAllowedStoreOrderStatuses(order).map((status) => ({
+      status,
+      label: getStoreOrderStatusTransitionLabel(order.status, status),
+    })),
   };
 }
 
@@ -142,6 +311,8 @@ function serializeStore(
     rubro: store.rubro ?? null,
     rubroLabel: getStoreRubroLabel(store.rubro),
     coverImageUrl: store.coverImageUrl ?? null,
+    location: store.location ?? null,
+    fulfillmentOptions: normalizeStoreFulfillmentOptions(store.fulfillmentOptions),
     visibilitySubscriptionEndsAt: serializeDate(store.visibilitySubscriptionEndsAt),
     visibilityActive: isStoreVisibilityActive(store),
     hasPendingSubscriptionPayment: extra?.hasPendingSubscriptionPayment ?? false,
@@ -229,6 +400,15 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
+      const nextFulfillment =
+        parsed.data.fulfillmentOptions !== undefined
+          ? normalizeStoreFulfillmentOptions(parsed.data.fulfillmentOptions)
+          : normalizeStoreFulfillmentOptions(store.fulfillmentOptions);
+      const nextLocation =
+        parsed.data.location !== undefined ? parsed.data.location : store.location;
+      if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation)) {
+        return res.status(400).json({ message: STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE });
+      }
       const updated = await genFebStorage.updateStore(store.id, parsed.data);
       const hasPending = await storeHasPendingSubscriptionPayment(updated.id);
       return res.json({
@@ -273,6 +453,17 @@ export function registerStoreRoutes(app: Express): void {
           message: parsed.error.errors[0]?.message ?? "Datos inválidos",
           errors: parsed.error.errors,
         });
+      }
+      const existing = await genFebStorage.getStoreById(storeId);
+      if (!existing) return res.status(404).json({ message: "Tienda no encontrada." });
+      const nextFulfillment =
+        parsed.data.fulfillmentOptions !== undefined
+          ? normalizeStoreFulfillmentOptions(parsed.data.fulfillmentOptions)
+          : normalizeStoreFulfillmentOptions(existing.fulfillmentOptions);
+      const nextLocation =
+        parsed.data.location !== undefined ? parsed.data.location : existing.location;
+      if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation)) {
+        return res.status(400).json({ message: STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE });
       }
       const store = await genFebStorage.updateStore(storeId, parsed.data);
       return res.json({ store: serializeStore(store, { isOwner: true }) });
@@ -460,6 +651,771 @@ export function registerStoreRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/stores/:storeId/promotions", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const [promotions, products] = await Promise.all([
+        genFebStorage.listStorePromotions(storeId),
+        genFebStorage.listStoreProducts(storeId),
+      ]);
+      return res.json({ promotions: promotions.map((p) => serializeStorePromotion(p, products)) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      console.error("[stores] list promotions", e);
+      return res.status(500).json({ message: "No se pudieron cargar las promociones." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/promotions", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const parsed = insertStorePromotionSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      await assertStorePromotionItems(storeId, parsed.data.items);
+      const promotion = await genFebStorage.createStorePromotion(storeId, parsed.data);
+      const products = await genFebStorage.listStoreProducts(storeId);
+      return res.status(201).json({ promotion: serializeStorePromotion(promotion, products) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_PRODUCT_INVALID") {
+        return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
+      }
+      console.error("[stores] create promotion", e);
+      return res.status(500).json({ message: "No se pudo crear la promoción." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/promotions/:promotionId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const promotionId = parsePositiveIntParam(req.params.promotionId);
+      if (!storeId || !promotionId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      const promotion = await genFebStorage.getStorePromotion(storeId, promotionId);
+      if (!promotion) return res.status(404).json({ message: "Promoción no encontrada." });
+      const products = await genFebStorage.listStoreProducts(storeId);
+      return res.json({ promotion: serializeStorePromotion(promotion, products) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      console.error("[stores] get promotion", e);
+      return res.status(500).json({ message: "No se pudo cargar la promoción." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/promotions/:promotionId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const promotionId = parsePositiveIntParam(req.params.promotionId);
+      if (!storeId || !promotionId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      const parsed = updateStorePromotionSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      if (parsed.data.items != null) {
+        await assertStorePromotionItems(storeId, parsed.data.items);
+      }
+      const promotion = await genFebStorage.updateStorePromotion(storeId, promotionId, parsed.data);
+      const products = await genFebStorage.listStoreProducts(storeId);
+      return res.json({ promotion: serializeStorePromotion(promotion, products) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_PROMOTION_NOT_FOUND") return res.status(404).json({ message: "Promoción no encontrada." });
+      if (msg === "STORE_PRODUCT_INVALID") {
+        return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
+      }
+      console.error("[stores] update promotion", e);
+      return res.status(500).json({ message: "No se pudo actualizar la promoción." });
+    }
+  });
+
+  app.delete("/api/stores/:storeId/promotions/:promotionId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const promotionId = parsePositiveIntParam(req.params.promotionId);
+      if (!storeId || !promotionId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      await genFebStorage.deleteStorePromotion(storeId, promotionId);
+      return res.status(204).send();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_PROMOTION_NOT_FOUND") return res.status(404).json({ message: "Promoción no encontrada." });
+      console.error("[stores] delete promotion", e);
+      return res.status(500).json({ message: "No se pudo eliminar la promoción." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/payment-methods", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const methods = await genFebStorage.listStorePaymentMethods(storeId);
+      return res.json({ paymentMethods: methods.map(serializeStorePaymentMethod) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      console.error("[stores] list payment methods", e);
+      return res.status(500).json({ message: "No se pudieron cargar los métodos de pago." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/payment-methods", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const parsed = insertStorePaymentMethodSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const method = await genFebStorage.createStorePaymentMethod(storeId, parsed.data);
+      return res.status(201).json({ paymentMethod: serializeStorePaymentMethod(method) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      console.error("[stores] create payment method", e);
+      return res.status(500).json({ message: "No se pudo crear el método de pago." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/payment-methods/:paymentMethodId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const paymentMethodId = parsePositiveIntParam(req.params.paymentMethodId);
+      if (!storeId || !paymentMethodId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      const parsed = updateStorePaymentMethodSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const method = await genFebStorage.updateStorePaymentMethod(storeId, paymentMethodId, parsed.data);
+      return res.json({ paymentMethod: serializeStorePaymentMethod(method) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_PAYMENT_METHOD_NOT_FOUND") {
+        return res.status(404).json({ message: "Método de pago no encontrado." });
+      }
+      console.error("[stores] update payment method", e);
+      return res.status(500).json({ message: "No se pudo actualizar el método de pago." });
+    }
+  });
+
+  app.delete("/api/stores/:storeId/payment-methods/:paymentMethodId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const paymentMethodId = parsePositiveIntParam(req.params.paymentMethodId);
+      if (!storeId || !paymentMethodId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      await genFebStorage.deleteStorePaymentMethod(storeId, paymentMethodId);
+      return res.status(204).send();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_PAYMENT_METHOD_NOT_FOUND") {
+        return res.status(404).json({ message: "Método de pago no encontrado." });
+      }
+      console.error("[stores] delete payment method", e);
+      return res.status(500).json({ message: "No se pudo eliminar el método de pago." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/cart", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      let cart = await genFebStorage.getStoreCart(userId, storeId);
+      if (cart) cart = await pruneAndSaveCart(userId, cart);
+      const payload = await enrichStoreCart(cart, storeId);
+      return res.json({ cart: payload });
+    } catch (e: unknown) {
+      console.error("[stores] get cart", e);
+      return res.status(500).json({ message: "No se pudo cargar el carrito." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/cart/items", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const parsed = addStoreCartItemSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const incoming = addBodyToCartItem(parsed.data);
+      await validateCartItemForStore(storeId, incoming);
+
+      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const nextItems = mergeAddCartItem(existing, incoming);
+      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const payload = await enrichStoreCart(saved, storeId);
+      return res.status(201).json({ cart: payload });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_CART_ITEM_INVALID") {
+        return res.status(400).json({ message: "El artículo no está disponible en esta tienda." });
+      }
+      console.error("[stores] add cart item", e);
+      return res.status(500).json({ message: "No se pudo añadir al carrito." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/cart/items", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const parsed = updateStoreCartItemSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const nextItems = setCartItemQuantity(existing, parsed.data);
+      if (parsed.data.quantity > 0) {
+        const probe =
+          parsed.data.kind === "product"
+            ? { kind: "product" as const, productId: parsed.data.productId!, quantity: parsed.data.quantity }
+            : { kind: "promotion" as const, promotionId: parsed.data.promotionId!, quantity: parsed.data.quantity };
+        await validateCartItemForStore(storeId, probe);
+      }
+      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const payload = await enrichStoreCart(saved, storeId);
+      return res.json({ cart: payload });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_CART_ITEM_INVALID") {
+        return res.status(400).json({ message: "El artículo no está disponible en esta tienda." });
+      }
+      console.error("[stores] update cart item", e);
+      return res.status(500).json({ message: "No se pudo actualizar el carrito." });
+    }
+  });
+
+  app.delete("/api/stores/:storeId/cart/items", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const parsed = removeStoreCartItemSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const nextItems = removeCartItem(existing, parsed.data);
+      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const payload = await enrichStoreCart(saved, storeId);
+      return res.json({ cart: payload });
+    } catch (e: unknown) {
+      console.error("[stores] remove cart item", e);
+      return res.status(500).json({ message: "No se pudo quitar del carrito." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/cart/fulfillment", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const parsed = updateStoreCartFulfillmentSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      await validateCartFulfillmentForStore(storeId, parsed.data.fulfillmentMode);
+      const existing = await genFebStorage.getStoreCart(userId, storeId);
+      const saved = await genFebStorage.saveStoreCart(
+        userId,
+        storeId,
+        existing?.items ?? [],
+        parsed.data.fulfillmentMode,
+      );
+      const payload = await enrichStoreCart(saved, storeId);
+      return res.json({ cart: payload });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_CART_FULFILLMENT_INVALID") {
+        return res.status(400).json({ message: "Esa modalidad no está disponible en esta tienda." });
+      }
+      console.error("[stores] update cart fulfillment", e);
+      return res.status(500).json({ message: "No se pudo actualizar la modalidad del pedido." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/cart/checkout", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const parsed = submitStoreCheckoutSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      let cart = await genFebStorage.getStoreCart(userId, storeId);
+      if (!cart) return res.status(400).json({ message: "El carrito está vacío." });
+      cart = await pruneAndSaveCart(userId, cart);
+      const enriched = await enrichStoreCart(cart, storeId);
+      if (enriched.items.length === 0) {
+        return res.status(400).json({ message: "El carrito está vacío." });
+      }
+
+      await validateCheckoutPaymentMethod(storeId, parsed.data.paymentMethodId);
+      const fulfillmentMode = await validateCheckoutFulfillment(storeId, parsed.data.fulfillmentMode);
+      const paymentMethod = await genFebStorage.getStorePaymentMethod(storeId, parsed.data.paymentMethodId);
+      if (!paymentMethod) {
+        return res.status(400).json({ message: "Método de pago no válido." });
+      }
+
+      const orderItems = enriched.items.map((line) => ({
+        kind: line.kind,
+        productId: line.productId,
+        promotionId: line.promotionId,
+        name: line.name,
+        price: line.price,
+        quantity: line.quantity,
+        lineTotal: line.lineTotal,
+        imageUrl: line.imageUrl,
+      }));
+
+      let deliveryFee = 0;
+      let deliveryDistanceM: number | null = null;
+      const deliveryLocation =
+        fulfillmentMode === "delivery" ? (parsed.data.deliveryLocation ?? null) : null;
+
+      if (fulfillmentMode === "delivery") {
+        const storeLocation = normalizeStoreLocation(store.location);
+        if (!storeLocation) {
+          return res.status(400).json({
+            message: "La tienda no tiene ubicación configurada para delivery.",
+          });
+        }
+        if (!deliveryLocation) {
+          return res.status(400).json({ message: "Selecciona la ubicación de entrega." });
+        }
+        const quote = await computeStoreDeliveryQuote(storeLocation, deliveryLocation);
+        deliveryFee = quote.deliveryFee;
+        deliveryDistanceM = quote.distanceM;
+      }
+
+      const amountDue =
+        fulfillmentMode === "delivery" ? enriched.subtotal + deliveryFee : enriched.subtotal;
+
+      const order = await genFebStorage.createStoreOrder({
+        storeId,
+        userId,
+        paymentMethodId: parsed.data.paymentMethodId,
+        paymentMethodName: paymentMethod.name,
+        paymentMethodAccountNumber: paymentMethod.accountNumber,
+        fulfillmentMode,
+        reference: parsed.data.reference.trim(),
+        proofImageUrl: parsed.data.proofImageUrl.trim(),
+        amountDue,
+        amountPaid: parsed.data.amountPaid,
+        deliveryFee,
+        deliveryDistanceM,
+        deliveryLocation,
+        items: orderItems,
+        subtotal: enriched.subtotal,
+        packRideId: null,
+        deliveryUnreadCount: 0,
+      });
+
+      await genFebStorage.deleteStoreCart(userId, storeId);
+
+      void notifyStoreOwnerNewOrder(order, store).catch((err) =>
+        console.error("[stores] notify owner new order", err),
+      );
+
+      return res.status(201).json({
+        order: {
+          id: order.id,
+          storeId: order.storeId,
+          status: order.status,
+          statusLabel: STORE_ORDER_STATUS_LABELS[order.status],
+          subtotal: order.subtotal,
+          amountDue: order.amountDue,
+          amountPaid: order.amountPaid,
+          createdAt: serializeDate(order.createdAt),
+        },
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_PAYMENT_METHOD_NOT_FOUND") {
+        return res.status(400).json({ message: "Método de pago no válido." });
+      }
+      if (msg === "STORE_CART_FULFILLMENT_INVALID") {
+        return res.status(400).json({ message: "Selecciona cómo recibirás tu pedido." });
+      }
+      console.error("[stores] cart checkout", e);
+      return res.status(500).json({ message: "No se pudo registrar la compra." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/orders", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      const statusRaw = typeof req.query.status === "string" ? req.query.status.trim() : "";
+      const orderIdRaw = typeof req.query.orderId === "string" ? req.query.orderId.trim() : "";
+      const dateFromRaw = typeof req.query.dateFrom === "string" ? req.query.dateFrom.trim() : "";
+      const dateToRaw = typeof req.query.dateTo === "string" ? req.query.dateTo.trim() : "";
+      const deliveryQueue =
+        req.query.deliveryQueue === "1" || req.query.deliveryQueue === "true";
+      const orderId = orderIdRaw ? Number.parseInt(orderIdRaw, 10) : undefined;
+      const statusParsed = statusRaw ? storeOrderStatusSchema.safeParse(statusRaw) : null;
+
+      const orders = await genFebStorage.listStoreOrders(storeId, {
+        status: statusParsed?.success ? statusParsed.data : undefined,
+        orderId: Number.isFinite(orderId) ? orderId : undefined,
+        dateFrom: parseStoreOrderDateFilter(dateFromRaw),
+        dateTo: parseStoreOrderDateFilter(dateToRaw),
+        deliveryQueue: deliveryQueue || undefined,
+      });
+
+      const store = await genFebStorage.getStoreById(storeId);
+      const serialized = await Promise.all(orders.map((o) => serializeStoreOrder(o, false, store)));
+      return res.json({ orders: serialized });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_NOT_OWNER") {
+        return res.status(403).json({ message: "No tienes permiso para ver las órdenes." });
+      }
+      console.error("[stores] list orders", e);
+      return res.status(500).json({ message: "No se pudieron cargar las órdenes." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/orders/delivery-notifications", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const summary = await getStoreDeliveryNotificationsSummary(storeId);
+      return res.json(summary);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_NOT_OWNER") {
+        return res.status(403).json({ message: "No tienes permiso." });
+      }
+      console.error("[stores] delivery notifications summary", e);
+      return res.status(500).json({ message: "No se pudo cargar el resumen." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/orders/:orderId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      const order = await genFebStorage.getStoreOrder(storeId, orderId);
+      if (!order) return res.status(404).json({ message: "Orden no encontrada." });
+
+      const store = await genFebStorage.getStoreById(storeId);
+      return res.json({ order: await serializeStoreOrder(order, true, store) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_NOT_OWNER") {
+        return res.status(403).json({ message: "No tienes permiso para ver esta orden." });
+      }
+      console.error("[stores] get order", e);
+      return res.status(500).json({ message: "No se pudo cargar la orden." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/orders/:orderId/status", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      const parsed = updateStoreOrderStatusSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const existing = await genFebStorage.getStoreOrder(storeId, orderId);
+      if (!existing) return res.status(404).json({ message: "Orden no encontrada." });
+
+      if (!canTransitionStoreOrderStatus(existing, parsed.data.status)) {
+        return res.status(400).json({ message: "No puedes cambiar a ese estado desde el estado actual." });
+      }
+
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      if (parsed.data.status === "listo_para_envio") {
+        const order = await handleStoreOrderStatusListoParaEnvio(storeId, orderId, store);
+        void notifyCustomerStoreOrderStatusChanged(order, store).catch((err) =>
+          console.error("[stores] notify customer order status", err),
+        );
+        return res.json({ order: await serializeStoreOrder(order, true, store) });
+      }
+
+      if (parsed.data.status === "confirmado" && existing.status === "listo_para_envio") {
+        const order = await handleStoreOrderRevertFromListoParaEnvio(storeId, orderId);
+        void notifyCustomerStoreOrderStatusChanged(order, store).catch((err) =>
+          console.error("[stores] notify customer order status", err),
+        );
+        return res.json({ order: await serializeStoreOrder(order, true, store) });
+      }
+
+      const order = await genFebStorage.updateStoreOrderStatus(storeId, orderId, parsed.data.status);
+      void notifyCustomerStoreOrderStatusChanged(order, store).catch((err) =>
+        console.error("[stores] notify customer order status", err),
+      );
+      return res.json({ order: await serializeStoreOrder(order, true, store) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_NOT_OWNER") {
+        return res.status(403).json({ message: "No tienes permiso para actualizar esta orden." });
+      }
+      if (msg === "STORE_ORDER_NOT_FOUND") {
+        return res.status(404).json({ message: "Orden no encontrada." });
+      }
+      if (msg === "STORE_LOCATION_REQUIRED") {
+        return res.status(400).json({
+          message: "Configura la ubicación de la tienda antes de marcar listo para envío.",
+        });
+      }
+      if (msg === "STORE_ORDER_DELIVERY_LOCATION_REQUIRED") {
+        return res.status(400).json({ message: "La orden no tiene ubicación de entrega." });
+      }
+      if (msg === "STORE_ORDER_NOT_DELIVERY") {
+        return res.status(400).json({ message: "Esta orden no es delivery." });
+      }
+      if (msg === "STORE_ORDER_DELIVERY_SEARCH_ALREADY_ACTIVE") {
+        return res.status(409).json({ message: "Ya hay una búsqueda de conductor activa." });
+      }
+      if (msg === "STORE_ORDER_INVALID_STATUS_FOR_REVERT") {
+        return res.status(400).json({ message: "Solo puedes revertir desde Listo para envío." });
+      }
+      console.error("[stores] update order status", e);
+      return res.status(500).json({ message: "No se pudo actualizar el estado." });
+    }
+  });
+
+  app.post(
+    "/api/stores/:storeId/orders/:orderId/delivery-notifications/read",
+    authenticateJWT,
+    async (req: any, res) => {
+      try {
+        const userId = String(req.user?.id ?? "");
+        if (!userId) return res.status(401).json({ message: "Unauthorized" });
+        const storeId = parsePositiveIntParam(req.params.storeId);
+        const orderId = parsePositiveIntParam(req.params.orderId);
+        if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
+        await requireStoreOwner(userId, storeId);
+        const order = await genFebStorage.resetStoreOrderDeliveryUnread(storeId, orderId);
+        const store = await genFebStorage.getStoreById(storeId);
+        return res.json({ order: await serializeStoreOrder(order, false, store) });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg === "STORE_NOT_OWNER") {
+          return res.status(403).json({ message: "No tienes permiso." });
+        }
+        if (msg === "STORE_ORDER_NOT_FOUND") {
+          return res.status(404).json({ message: "Orden no encontrada." });
+        }
+        console.error("[stores] mark delivery notifications read", e);
+        return res.status(500).json({ message: "No se pudo marcar como leído." });
+      }
+    },
+  );
+
+  app.get("/api/stores/:storeId/orders/:orderId/delivery", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      const order = await genFebStorage.getStoreOrder(storeId, orderId);
+      if (!order) return res.status(404).json({ message: "Orden no encontrada." });
+      if (order.fulfillmentMode !== "delivery") {
+        return res.status(400).json({ message: "Esta orden no es delivery." });
+      }
+
+      await genFebStorage.resetStoreOrderDeliveryUnread(storeId, orderId);
+
+      const store = await genFebStorage.getStoreById(storeId);
+      const packRide = order.packRideId ? await getPackRideDeliveryDetail(order.packRideId) : null;
+
+      return res.json({
+        order: await serializeStoreOrder(order, true, store),
+        packRide,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_NOT_OWNER") {
+        return res.status(403).json({ message: "No tienes permiso." });
+      }
+      console.error("[stores] order delivery detail", e);
+      return res.status(500).json({ message: "No se pudo cargar el delivery." });
+    }
+  });
+
+  /** Órdenes del cliente autenticado (todas las tiendas). */
+  app.get("/api/me/store-orders", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const statusRaw = typeof req.query.status === "string" ? req.query.status.trim() : "";
+      const orderIdRaw = typeof req.query.orderId === "string" ? req.query.orderId.trim() : "";
+      const storeIdRaw = typeof req.query.storeId === "string" ? req.query.storeId.trim() : "";
+      const dateFromRaw = typeof req.query.dateFrom === "string" ? req.query.dateFrom.trim() : "";
+      const dateToRaw = typeof req.query.dateTo === "string" ? req.query.dateTo.trim() : "";
+      const orderId = orderIdRaw ? Number.parseInt(orderIdRaw, 10) : undefined;
+      const storeId = storeIdRaw ? Number.parseInt(storeIdRaw, 10) : undefined;
+      const statusParsed = statusRaw ? storeOrderStatusSchema.safeParse(statusRaw) : null;
+
+      const orders = await genFebStorage.listStoreOrdersForUser(userId, {
+        status: statusParsed?.success ? statusParsed.data : undefined,
+        orderId: Number.isFinite(orderId) ? orderId : undefined,
+        storeId: Number.isFinite(storeId) ? storeId : undefined,
+        dateFrom: parseStoreOrderDateFilter(dateFromRaw),
+        dateTo: parseStoreOrderDateFilter(dateToRaw),
+      });
+
+      const serialized = await Promise.all(orders.map((o) => serializeStoreOrder(o, false)));
+      return res.json({ orders: serialized });
+    } catch (e) {
+      console.error("[stores] list my orders", e);
+      return res.status(500).json({ message: "No se pudieron cargar tus pedidos." });
+    }
+  });
+
+  app.get("/api/me/store-orders/:orderId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!orderId) return res.status(400).json({ message: "ID inválido." });
+
+      const order = await genFebStorage.getStoreOrderForUser(userId, orderId);
+      if (!order) return res.status(404).json({ message: "Pedido no encontrado." });
+
+      const store = await genFebStorage.getStoreById(order.storeId);
+      return res.json({ order: await serializeStoreOrder(order, false, store) });
+    } catch (e) {
+      console.error("[stores] get my order", e);
+      return res.status(500).json({ message: "No se pudo cargar el pedido." });
+    }
+  });
+
   app.get("/api/stores/:storeId/products", authenticateJWT, async (req: any, res) => {
     try {
       const userId = String(req.user?.id ?? "");
@@ -595,16 +1551,27 @@ export function registerStoreRoutes(app: Express): void {
       const visibilityActive = isStoreVisibilityActive(storeForView);
 
       if (!visibilityActive && !isOwner) {
-        return res.json({ products: [], visibilityActive: false, inactive: true });
+        return res.json({ products: [], categories: [], promotions: [], visibilityActive: false, inactive: true });
       }
 
       const all = await genFebStorage.listStoreProducts(storeForView.id);
-      const products = all
-        .filter((p) => p.showOnShowcase !== false)
-        .map(serializeStoreShowcaseProduct);
+      const showcaseList = all.filter((p) => p.showOnShowcase !== false);
+      const products = showcaseList.map(serializeStoreShowcaseProduct);
+
+      const allCategories = await genFebStorage.listStoreCategories(storeForView.id);
+      const categories = allCategories
+        .filter((c) => productIdsForCategory(showcaseList, c.id).length > 0)
+        .map(serializeShowcaseCategory);
+
+      const allPromotions = await genFebStorage.listStorePromotions(storeForView.id);
+      const promotions = allPromotions
+        .filter((p) => p.status === "active" && p.items.some((item) => item.status === "active"))
+        .map((p) => serializeStoreShowcasePromotion(p, all));
 
       return res.json({
         products,
+        categories,
+        promotions,
         visibilityActive,
         isOwner,
       });

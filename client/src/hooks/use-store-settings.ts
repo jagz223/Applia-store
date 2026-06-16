@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { UpdateStore } from "@shared/store-schema";
+import type { UpdateStore, StoreLocation } from "@shared/store-schema";
 import { MY_STORE_QUERY_KEY } from "@/hooks/use-my-store";
 
 function authHeaders(): HeadersInit {
@@ -29,6 +29,8 @@ export function useUpdateStore(slug: string) {
           rubro?: string | null;
           rubroLabel?: string | null;
           slug?: string;
+          fulfillmentOptions?: import("@shared/store-fulfillment").StoreFulfillmentMode[];
+          location?: StoreLocation | null;
         };
       };
       return data.store;

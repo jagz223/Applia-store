@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2, Building2, Ticket } from "lucide-react";
+import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2, Building2, Ticket, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
@@ -33,10 +33,21 @@ import {
   isPublicPromoNotificationType,
   shouldShowPublicPromoInNotificationList,
 } from "@/lib/public-promo-notification-ui";
+import { resolveStoreOrderNotificationPath } from "@/lib/store-order-notification-path";
 
 /** Devuelve la ruta a la que debe ir el usuario al hacer clic en la notificaci?n (con highlight para resaltar el elemento). */
 function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
   const data = notification.data ?? {};
+
+  const storeOrderPath = resolveStoreOrderNotificationPath(notification.type, data);
+  if (storeOrderPath) return storeOrderPath;
+
+  const nestedType = data.type ?? data.data?.type;
+  if (typeof nestedType === "string" && nestedType !== notification.type) {
+    const nestedPath = resolveStoreOrderNotificationPath(nestedType, data);
+    if (nestedPath) return nestedPath;
+  }
+
   switch (notification.type) {
     case "message":
       const convId = data.conversationId;
@@ -350,6 +361,10 @@ export function NotificationBell() {
         return <Building2 className="h-4 w-4 text-primary" />;
       case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED:
         return <Building2 className="h-4 w-4 text-amber-600" />;
+      case "store_order_new":
+      case "store_order_status":
+      case "store_order_delivery":
+        return <ShoppingBag className="h-4 w-4 text-primary" />;
       default:
         if (isPublicPromoNotificationType(type)) {
           return <Ticket className="h-4 w-4 text-orange-500" />;
@@ -501,6 +516,23 @@ export function NotificationBell() {
         ? "Tu central aprobó tu solicitud de afiliación."
         : "Tu central no aprobó tu solicitud de afiliación.";
     }
+    if (type === "store_order_new") {
+      const body = data?.body ?? data?.data?.body;
+      if (typeof body === "string" && body.trim()) return body.trim();
+      const orderId = data?.orderId ?? data?.data?.orderId;
+      return orderId != null ? `Nueva orden #${orderId} en tu tienda.` : "Tienes una nueva orden en tu tienda.";
+    }
+    if (type === "store_order_status") {
+      const body = data?.body ?? data?.data?.body;
+      if (typeof body === "string" && body.trim()) return body.trim();
+      const statusLabel = data?.statusLabel ?? data?.data?.statusLabel;
+      return statusLabel ? `Tu pedido ahora está: ${statusLabel}.` : "El estado de tu pedido fue actualizado.";
+    }
+    if (type === "store_order_delivery") {
+      const body = data?.body ?? data?.data?.body;
+      if (typeof body === "string" && body.trim()) return body.trim();
+      return "Actualización del delivery de tu orden.";
+    }
     return null;
   };
 
@@ -573,6 +605,17 @@ export function NotificationBell() {
     }
     if (type === NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED) {
       return "Afiliación no aprobada";
+    }
+    if (type === "store_order_new") return "Nueva orden de tienda";
+    if (type === "store_order_status") {
+      const title = data?.title ?? data?.data?.title;
+      if (typeof title === "string" && title.trim()) return title.trim();
+      return "Estado de tu pedido";
+    }
+    if (type === "store_order_delivery") {
+      const title = data?.title ?? data?.data?.title;
+      if (typeof title === "string" && title.trim()) return title.trim();
+      return "Delivery de tu orden";
     }
     if (type === "message") {
       const d = data ?? ({} as any);

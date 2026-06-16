@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
+import type { StoreLocation } from "@shared/store-schema";
 
 export type MyStoreSummary = {
   id: number;
@@ -9,6 +11,8 @@ export type MyStoreSummary = {
   rubro?: string | null;
   rubroLabel?: string | null;
   coverImageUrl?: string | null;
+  location?: StoreLocation | null;
+  fulfillmentOptions?: StoreFulfillmentMode[];
   visibilityActive: boolean;
   hasPendingSubscriptionPayment?: boolean;
 };

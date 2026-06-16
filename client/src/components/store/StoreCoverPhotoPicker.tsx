@@ -11,12 +11,14 @@ type StoreCoverPhotoPickerProps = {
   previewUrl: string | null;
   onPreviewChange: (url: string | null, pendingFile?: File | null) => void;
   disabled?: boolean;
+  label?: string;
 };
 
 export function StoreCoverPhotoPicker({
   previewUrl,
   onPreviewChange,
   disabled,
+  label = "Foto de la tienda",
 }: StoreCoverPhotoPickerProps) {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -78,7 +80,7 @@ export function StoreCoverPhotoPicker({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label>Foto de la tienda</Label>
+        <Label>{label}</Label>
         <div className="max-w-md">
           {previewUrl ? (
             <div className="relative aspect-[4/3] rounded-lg border border-border overflow-hidden bg-muted/30">

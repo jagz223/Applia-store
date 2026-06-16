@@ -290,7 +290,7 @@ export default function DriverGoGenfeb() {
   const [rateDialogOpen, setRateDialogOpen] = useState(false);
   const [rateStars, setRateStars] = useState(5);
   const [rateBusy, setRateBusy] = useState(false);
-  const rateTargetRef = useRef<{ rideId: string; targetName: string } | null>(null);
+  const rateTargetRef = useRef<{ rideId: string; targetName: string; module: "cargo" | "pack" } | null>(null);
   /** Modal grande solo para ofertas clásicas (precio estándar / cola). El regateo va al tablero (sheet). */
   const classicOfferModalOpen =
     incomingOpen && !!incomingOffer && !incomingOffer.isNegotiated && !rateDialogOpen;
@@ -591,8 +591,16 @@ export default function DriverGoGenfeb() {
       }
     };
     void run();
+    const pollMs = isReceivingDeliveryMode(receiveMode) ? 12_000 : 0;
+    const intervalId =
+      pollMs > 0
+        ? window.setInterval(() => {
+            void run();
+          }, pollMs)
+        : null;
     return () => {
       cancelled = true;
+      if (intervalId != null) window.clearInterval(intervalId);
     };
   }, [goDriverUi, receiveMode]);
 
@@ -664,12 +672,7 @@ export default function DriverGoGenfeb() {
 
   useEffect(() => {
     if (!socket) return;
-    const onPay = (p: { rideId: string }) => {
-      if (!p?.rideId) return;
-      if (p.rideId !== activeRideIdRef.current) return;
-      setPaymentConfirmed(true);
-    };
-    const onCompleted = (p: { rideId: string }) => {
+    const onCompleted = (p: { rideId: string }, completedModule: "cargo" | "pack") => {
       if (!p?.rideId) return;
       if (p.rideId !== activeRideIdRef.current) return;
       const snap = activeRideOfferRef.current;
@@ -678,14 +681,18 @@ export default function DriverGoGenfeb() {
           notifyMobilityRideHistoryChanged();
           void queryClient.invalidateQueries({ queryKey: ["mobility-ride-history"] });
         }, 600);
-        rateTargetRef.current = { rideId: p.rideId, targetName: snap.rider?.name ?? "Cliente" };
+        rateTargetRef.current = {
+          rideId: p.rideId,
+          targetName: snap.rider?.name ?? "Cliente",
+          module: activeServiceModuleRef.current ?? completedModule,
+        };
         setRateStars(5);
         setRateDialogOpen(true);
       } else if (canReceive && providerVehicle?.vehicle_type) {
         const mod = activeServiceModuleRef.current ?? receiveModeToGoSlug(receiveModeRef.current);
         setReceiveMode(mod === "pack" ? "delivery" : "taxi");
       }
-      const endedMod = activeServiceModuleRef.current ?? receiveModeToGoSlug(receiveModeRef.current);
+      const endedMod = activeServiceModuleRef.current ?? completedModule;
       clearGoDriverActiveRideId(endedMod === "pack" ? "pack" : "cargo");
       setActiveServiceModule(null);
       setActiveRideId(null);
@@ -702,6 +709,11 @@ export default function DriverGoGenfeb() {
       if (activeConversationId != null) purgeConversationCache(queryClient, activeConversationId);
       resetChat();
       setActiveConversationId(null);
+    };
+    const onPay = (p: { rideId: string }) => {
+      if (!p?.rideId) return;
+      if (p.rideId !== activeRideIdRef.current) return;
+      setPaymentConfirmed(true);
     };
     const onCancelled = (p: { rideId: string; cancelledBy?: "rider" | "driver" }) => {
       if (p?.rideId) {
@@ -748,13 +760,21 @@ export default function DriverGoGenfeb() {
         void queryClient.invalidateQueries({ queryKey: ["mobility-ride-history"] });
       }, 600);
     };
-    socket.on(`${rideSocketPrefix}payment_confirmed`, onPay);
-    socket.on(`${rideSocketPrefix}completed`, onCompleted);
-    socket.on(`${rideSocketPrefix}cancelled`, onCancelled);
+    const onCargoCompleted = (p: { rideId: string }) => onCompleted(p, "cargo");
+    const onPackCompleted = (p: { rideId: string }) => onCompleted(p, "pack");
+    socket.on("cargo:ride:payment_confirmed", onPay);
+    socket.on("pack:ride:payment_confirmed", onPay);
+    socket.on("cargo:ride:completed", onCargoCompleted);
+    socket.on("pack:ride:completed", onPackCompleted);
+    socket.on("cargo:ride:cancelled", onCancelled);
+    socket.on("pack:ride:cancelled", onCancelled);
     return () => {
-      socket.off(`${rideSocketPrefix}payment_confirmed`, onPay);
-      socket.off(`${rideSocketPrefix}completed`, onCompleted);
-      socket.off(`${rideSocketPrefix}cancelled`, onCancelled);
+      socket.off("cargo:ride:payment_confirmed", onPay);
+      socket.off("pack:ride:payment_confirmed", onPay);
+      socket.off("cargo:ride:completed", onCargoCompleted);
+      socket.off("pack:ride:completed", onPackCompleted);
+      socket.off("cargo:ride:cancelled", onCancelled);
+      socket.off("pack:ride:cancelled", onCancelled);
     };
   }, [
     socket,
@@ -765,7 +785,6 @@ export default function DriverGoGenfeb() {
     rideSocketPrefix,
     goDriverUi,
     goSlug,
-    user?.id,
     canReceive,
     providerVehicle?.vehicle_type,
   ]);
@@ -777,7 +796,9 @@ export default function DriverGoGenfeb() {
     if (!token) return;
     setRateBusy(true);
     try {
-      const res = await fetch(`${rideApiBase}/${encodeURIComponent(tgt.rideId)}/rate`, {
+      const rideApi =
+        tgt.module === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+      const res = await fetch(`${rideApi}/${encodeURIComponent(tgt.rideId)}/rate`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ stars: rateStars, target: "rider" }),
@@ -787,7 +808,7 @@ export default function DriverGoGenfeb() {
       setRateDialogOpen(false);
       rateTargetRef.current = null;
       if (canReceive && providerVehicle?.vehicle_type) {
-        setReceiveMode(serviceModule === "pack" ? "delivery" : "taxi");
+        setReceiveMode(tgt.module === "pack" ? "delivery" : "taxi");
       }
       toast({ title: "¡Gracias!", description: "Calificación enviada." });
     } catch (e) {
@@ -795,7 +816,7 @@ export default function DriverGoGenfeb() {
     } finally {
       setRateBusy(false);
     }
-  }, [rateStars, toast, rideApiBase, canReceive, providerVehicle?.vehicle_type, goSlug]);
+  }, [rateStars, toast, canReceive, providerVehicle?.vehicle_type]);
 
   const emitDriverPresenceOffline = useCallback(() => {
     /** No borrar presencia en servidor durante un viaje: la central sigue mostrando posición. */
@@ -2210,7 +2231,7 @@ export default function DriverGoGenfeb() {
 
       <GoRideRatingDialog
         open={rateDialogOpen}
-        module={goSlugToRatingModule(goSlug)}
+        module={goSlugToRatingModule(rateTargetRef.current?.module ?? goSlug)}
         perspective="driver"
         targetName={rateTargetRef.current?.targetName ?? "Tu cliente"}
         stars={rateStars}

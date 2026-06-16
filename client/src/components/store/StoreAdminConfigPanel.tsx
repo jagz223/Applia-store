@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { STORE_RUBROS, getStoreRubroLabel } from "@shared/store-rubros";
+import { STORE_RUBROS, getStoreRubroLabel, isStoreRubroId } from "@shared/store-rubros";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   StoreCoverPhotoPicker,
@@ -22,6 +22,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { StoreFulfillmentConfigCard } from "@/components/store/StoreFulfillmentConfigCard";
+import { StoreLocationConfigCard } from "@/components/store/StoreLocationConfigCard";
+import { StorePaymentMethodsConfigCard } from "@/components/store/StorePaymentMethodsConfigCard";
+import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
+import type { StoreLocation } from "@shared/store-schema";
 
 type StoreAdminConfigPanelProps = {
   storeId: number;
@@ -30,6 +35,8 @@ type StoreAdminConfigPanelProps = {
   initialDescription: string | null;
   initialRubro: string | null;
   initialCoverImageUrl: string | null;
+  initialFulfillmentOptions: StoreFulfillmentMode[];
+  initialLocation: StoreLocation | null;
 };
 
 const NO_RUBRO = "__none__";
@@ -83,6 +90,8 @@ export function StoreAdminConfigPanel({
   initialDescription,
   initialRubro,
   initialCoverImageUrl,
+  initialFulfillmentOptions,
+  initialLocation,
 }: StoreAdminConfigPanelProps) {
   const { toast } = useToast();
   const updateStore = useUpdateStore(slug);
@@ -147,7 +156,7 @@ export function StoreAdminConfigPanel({
       const store = await updateStore.mutateAsync({
         name: trimmedName,
         description: description.trim() || null,
-        rubro,
+        rubro: rubro && isStoreRubroId(rubro) ? rubro : null,
       });
       setSavedName(store.name ?? trimmedName);
       setSavedDescription(store.description ?? "");
@@ -304,6 +313,17 @@ export function StoreAdminConfigPanel({
           ) : null}
         </CardContent>
       </Card>
+
+      <StoreLocationConfigCard slug={slug} initialLocation={initialLocation} disabled={saving} />
+
+      <StoreFulfillmentConfigCard
+        slug={slug}
+        initialOptions={initialFulfillmentOptions}
+        storeLocation={initialLocation}
+        disabled={saving}
+      />
+
+      <StorePaymentMethodsConfigCard storeId={storeId} />
     </div>
   );
 }

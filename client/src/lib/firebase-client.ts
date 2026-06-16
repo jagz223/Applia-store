@@ -296,6 +296,93 @@ export async function uploadStoreCoverImage(storeId: number, file: File): Promis
   return getDownloadURL(storageRef);
 }
 
+/** Imagen de promoción de tienda (1 por promoción). Path: store-promotions/{storeId}/… */
+export async function uploadStorePromotionImage(storeId: number, file: File): Promise<string> {
+  if (file.size > MAX_STORE_PRODUCT_IMAGE_MB * 1024 * 1024) {
+    throw new Error(`La imagen no debe superar ${MAX_STORE_PRODUCT_IMAGE_MB} MB`);
+  }
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+  const path = `store-promotions/${storeId}/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on(
+      "state_changed",
+      () => {},
+      (err) => reject(err),
+      () => resolve(),
+    );
+  });
+
+  return getDownloadURL(storageRef);
+}
+
+/** Imagen / QR de método de pago de tienda. Path: store-payment-methods/{storeId}/… */
+export async function uploadStorePaymentMethodImage(storeId: number, file: File): Promise<string> {
+  if (file.size > MAX_STORE_PRODUCT_IMAGE_MB * 1024 * 1024) {
+    throw new Error(`La imagen no debe superar ${MAX_STORE_PRODUCT_IMAGE_MB} MB`);
+  }
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+  const path = `store-payment-methods/${storeId}/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on(
+      "state_changed",
+      () => {},
+      (err) => reject(err),
+      () => resolve(),
+    );
+  });
+
+  return getDownloadURL(storageRef);
+}
+
+/** Comprobante de pago de pedido en tienda. Path: store-orders/{storeId}/… */
+export async function uploadStoreCheckoutProofImage(storeId: number, file: File): Promise<string> {
+  if (file.size > MAX_STORE_PRODUCT_IMAGE_MB * 1024 * 1024) {
+    throw new Error(`La imagen no debe superar ${MAX_STORE_PRODUCT_IMAGE_MB} MB`);
+  }
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Formato no válido. Usa JPG, PNG, WebP o GIF.");
+  }
+  const storage = getFirebaseStorage();
+  if (!storage) throw new Error("Firebase Storage no está configurado. Revisa las variables VITE_FIREBASE_*.");
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext) ? ext : "jpg";
+  const path = `store-orders/${storeId}/${crypto.randomUUID()}_${Date.now()}.${safeExt}`;
+  const storageRef = ref(storage, path);
+
+  await new Promise<void>((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+    task.on(
+      "state_changed",
+      () => {},
+      (err) => reject(err),
+      () => resolve(),
+    );
+  });
+
+  return getDownloadURL(storageRef);
+}
+
 export async function getMessagingIfSupported(): Promise<Messaging | null> {
   if (typeof window === "undefined") return null;
 

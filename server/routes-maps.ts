@@ -153,17 +153,23 @@ export function registerMapRoutes(app: Express): void {
    * Parámetros: from=lon,lat y to=lon,lat
    */
   app.get("/api/maps/route", async (req: Request, res: Response) => {
+    if (!requireGeoapify(res)) return;
     const from = parseLonLatPair(String(req.query.from ?? ""));
     const to = parseLonLatPair(String(req.query.to ?? ""));
     if (!from || !to) return res.status(400).json({ message: "Usa from=lon,lat y to=lon,lat" });
     try {
       const payload = await computeDrivingRoute(from, to);
+      if (payload.source === "fallback") {
+        return res.status(502).json({
+          message: "No se pudo trazar la ruta por calles. Intenta de nuevo.",
+        });
+      }
       res.json({
         distanceM: payload.distanceM,
         durationSec: payload.durationSec,
         geometry: payload.geometry,
         source: payload.source,
-        fallback: payload.source === "fallback",
+        fallback: false,
       });
     } catch (e) {
       console.error("[maps] route failed", e);

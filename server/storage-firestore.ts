@@ -58,6 +58,7 @@ import { countVerificationsAwaitingAdminReview } from "./associate-verification-
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
   INGREDIENTS_MATERIALS_PAGE_SIZE,
+  normalizeStoreLocation,
   type Store,
   type IngredientMaterial,
   type InsertStore,
@@ -69,7 +70,24 @@ import {
   type StoreCategory,
   type InsertStoreCategory,
   type UpdateStoreCategory,
+  type StorePromotion,
+  type InsertStorePromotion,
+  type UpdateStorePromotion,
+  type StorePromotionLineItem,
 } from "@shared/store-schema";
+import type {
+  InsertStorePaymentMethod,
+  StorePaymentMethod,
+  UpdateStorePaymentMethod,
+} from "@shared/store-payment-method-schema";
+import type { StoreOrder, StoreOrderListFilters } from "@shared/store-order-schema";
+import { filterStoreOrders, storeOrderStatusSchema } from "@shared/store-order-schema";
+import type { StoreCart, StoreCartItem } from "@shared/store-cart-schema";
+import { STORE_CART_TTL_MS } from "@shared/store-cart-schema";
+import {
+  normalizeStoreFulfillmentOptions,
+  type StoreFulfillmentMode,
+} from "@shared/store-fulfillment";
 import {
   ingredientMaterialKey,
   normalizeIngredientMaterialName,
@@ -4279,6 +4297,8 @@ class FirestoreStorageImpl implements IStorage {
       description: null,
       rubro: null,
       coverImageUrl: null,
+      location: null,
+      fulfillmentOptions: [],
       visibilitySubscriptionEndsAt: null,
       createdAt: now,
       updatedAt: now,
@@ -4301,17 +4321,19 @@ class FirestoreStorageImpl implements IStorage {
     if (input.coverImageUrl !== undefined) {
       patch.coverImageUrl = input.coverImageUrl;
     }
-    await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(storeId)).update(patch);
-    return {
-      ...store,
-      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
-      ...(input.description !== undefined
-        ? { description: input.description?.trim() ? input.description.trim() : null }
-        : {}),
-      ...(input.rubro !== undefined ? { rubro: input.rubro } : {}),
-      coverImageUrl: input.coverImageUrl !== undefined ? input.coverImageUrl : store.coverImageUrl,
-      updatedAt: now,
-    };
+    if (input.fulfillmentOptions !== undefined) {
+      patch.fulfillmentOptions = normalizeStoreFulfillmentOptions(input.fulfillmentOptions);
+    }
+    if (input.location !== undefined) {
+      patch.location =
+        input.location === null
+          ? null
+          : normalizeStoreLocation(input.location) ?? input.location;
+    }
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(storeId)).set(patch, { merge: true });
+    const refreshed = await this.getStoreById(storeId);
+    if (!refreshed) throw new Error("STORE_NOT_FOUND");
+    return refreshed;
   }
 
   async getStoreById(id: number): Promise<Store | undefined> {
@@ -4647,6 +4669,483 @@ class FirestoreStorageImpl implements IStorage {
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(categoryId)).delete();
   }
 
+  async listStorePromotions(storeId: number): Promise<StorePromotion[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_PROMOTIONS)
+      .where("storeId", "==", storeId)
+      .get();
+    return snap.docs
+      .map((doc) => this.mapStorePromotionDoc(doc.id, doc.data()))
+      .filter((p): p is StorePromotion => p != null)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PROMOTIONS).doc(String(promotionId)).get();
+    if (!doc.exists) return undefined;
+    const promotion = this.mapStorePromotionDoc(doc.id, doc.data());
+    if (!promotion || promotion.storeId !== storeId) return undefined;
+    return promotion;
+  }
+
+  async createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("store_promotions");
+    const now = new Date();
+    const payload: StorePromotion = {
+      id,
+      storeId,
+      name: input.name.trim(),
+      description: input.description?.trim() ? input.description.trim() : null,
+      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      price: input.price,
+      items: this.normalizePromotionItems(input.items),
+      status: input.status ?? "active",
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PROMOTIONS).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async updateStorePromotion(
+    storeId: number,
+    promotionId: number,
+    input: UpdateStorePromotion,
+  ): Promise<StorePromotion> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStorePromotion(storeId, promotionId);
+    if (!existing) throw new Error("STORE_PROMOTION_NOT_FOUND");
+    const now = new Date();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (input.name !== undefined) patch.name = input.name.trim();
+    if (input.description !== undefined) {
+      patch.description = input.description?.trim() ? input.description.trim() : null;
+    }
+    if (input.imageUrl !== undefined) {
+      patch.imageUrl = input.imageUrl?.trim() ? input.imageUrl.trim() : null;
+    }
+    if (input.price !== undefined) patch.price = input.price;
+    if (input.items !== undefined) patch.items = this.normalizePromotionItems(input.items);
+    if (input.status !== undefined) patch.status = input.status;
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PROMOTIONS).doc(String(promotionId)).update(patch);
+    return { ...existing, ...patch, updatedAt: now } as StorePromotion;
+  }
+
+  async deleteStorePromotion(storeId: number, promotionId: number): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStorePromotion(storeId, promotionId);
+    if (!existing) throw new Error("STORE_PROMOTION_NOT_FOUND");
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PROMOTIONS).doc(String(promotionId)).delete();
+  }
+
+  async listStorePaymentMethods(storeId: number): Promise<StorePaymentMethod[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_PAYMENT_METHODS)
+      .where("storeId", "==", storeId)
+      .get();
+    return snap.docs
+      .map((doc) => this.mapStorePaymentMethodDoc(doc.id, doc.data()))
+      .filter((m): m is StorePaymentMethod => m != null)
+      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+
+  async getStorePaymentMethod(
+    storeId: number,
+    paymentMethodId: number,
+  ): Promise<StorePaymentMethod | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_PAYMENT_METHODS)
+      .doc(String(paymentMethodId))
+      .get();
+    if (!doc.exists) return undefined;
+    const method = this.mapStorePaymentMethodDoc(doc.id, doc.data());
+    if (!method || method.storeId !== storeId) return undefined;
+    return method;
+  }
+
+  async createStorePaymentMethod(
+    storeId: number,
+    input: InsertStorePaymentMethod,
+  ): Promise<StorePaymentMethod> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("store_payment_methods");
+    const now = new Date();
+    const payload: StorePaymentMethod = {
+      id,
+      storeId,
+      name: input.name.trim(),
+      accountNumber: input.accountNumber.trim(),
+      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PAYMENT_METHODS).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async updateStorePaymentMethod(
+    storeId: number,
+    paymentMethodId: number,
+    input: UpdateStorePaymentMethod,
+  ): Promise<StorePaymentMethod> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStorePaymentMethod(storeId, paymentMethodId);
+    if (!existing) throw new Error("STORE_PAYMENT_METHOD_NOT_FOUND");
+    const now = new Date();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (input.name !== undefined) patch.name = input.name.trim();
+    if (input.accountNumber !== undefined) patch.accountNumber = input.accountNumber.trim();
+    if (input.imageUrl !== undefined) {
+      patch.imageUrl = input.imageUrl?.trim() ? input.imageUrl.trim() : null;
+    }
+    await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_PAYMENT_METHODS)
+      .doc(String(paymentMethodId))
+      .update(patch);
+    return { ...existing, ...patch, updatedAt: now } as StorePaymentMethod;
+  }
+
+  async deleteStorePaymentMethod(storeId: number, paymentMethodId: number): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStorePaymentMethod(storeId, paymentMethodId);
+    if (!existing) throw new Error("STORE_PAYMENT_METHOD_NOT_FOUND");
+    await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_PAYMENT_METHODS)
+      .doc(String(paymentMethodId))
+      .delete();
+  }
+
+  async createStoreOrder(
+    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt">,
+  ): Promise<StoreOrder> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const id = await this.getNextId("store_orders");
+    const now = new Date();
+    const payload: StoreOrder = {
+      id,
+      ...input,
+      packRideId: input.packRideId ?? null,
+      deliveryUnreadCount: input.deliveryUnreadCount ?? 0,
+      status: "pagado",
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_ORDERS).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async listStoreOrders(storeId: number, filters?: StoreOrderListFilters): Promise<StoreOrder[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_ORDERS)
+      .where("storeId", "==", storeId)
+      .get();
+    const list = snap.docs
+      .map((doc) => this.mapStoreOrderDoc(doc.data()))
+      .filter((o): o is StoreOrder => o != null);
+    return filterStoreOrders(list, filters);
+  }
+
+  async listStoreOrdersForUser(userId: string, filters?: StoreOrderListFilters): Promise<StoreOrder[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_ORDERS)
+      .where("userId", "==", userId)
+      .get();
+    const list = snap.docs
+      .map((doc) => this.mapStoreOrderDoc(doc.data()))
+      .filter((o): o is StoreOrder => o != null);
+    return filterStoreOrders(list, filters);
+  }
+
+  async getStoreOrder(storeId: number, orderId: number): Promise<StoreOrder | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.STORE_ORDERS).doc(String(orderId)).get();
+    if (!doc.exists) return undefined;
+    const order = this.mapStoreOrderDoc(doc.data());
+    if (!order || order.storeId !== storeId) return undefined;
+    return order;
+  }
+
+  async getStoreOrderForUser(userId: string, orderId: number): Promise<StoreOrder | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.STORE_ORDERS).doc(String(orderId)).get();
+    if (!doc.exists) return undefined;
+    const order = this.mapStoreOrderDoc(doc.data());
+    if (!order || order.userId !== userId) return undefined;
+    return order;
+  }
+
+  async updateStoreOrderStatus(
+    storeId: number,
+    orderId: number,
+    status: StoreOrder["status"],
+  ): Promise<StoreOrder> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreOrder(storeId, orderId);
+    if (!existing) throw new Error("STORE_ORDER_NOT_FOUND");
+    const now = new Date();
+    const payload: StoreOrder = { ...existing, status, updatedAt: now };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_ORDERS).doc(String(orderId)).set(payload);
+    return payload;
+  }
+
+  async patchStoreOrder(
+    storeId: number,
+    orderId: number,
+    patch: Partial<Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount">>,
+  ): Promise<StoreOrder> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreOrder(storeId, orderId);
+    if (!existing) throw new Error("STORE_ORDER_NOT_FOUND");
+    const now = new Date();
+    const payload: StoreOrder = { ...existing, ...patch, updatedAt: now };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_ORDERS).doc(String(orderId)).set(payload);
+    return payload;
+  }
+
+  async incrementStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder> {
+    const order = await this.getStoreOrder(storeId, orderId);
+    if (!order) throw new Error("STORE_ORDER_NOT_FOUND");
+    return this.patchStoreOrder(storeId, orderId, {
+      deliveryUnreadCount: Math.max(0, (order.deliveryUnreadCount ?? 0) + 1),
+    });
+  }
+
+  async resetStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder> {
+    return this.patchStoreOrder(storeId, orderId, { deliveryUnreadCount: 0 });
+  }
+
+  private mapStoreOrderDoc(data: FirebaseFirestore.DocumentData | undefined): StoreOrder | null {
+    if (!data) return null;
+    const id = Number(data.id);
+    const storeId = Number(data.storeId);
+    if (!Number.isFinite(id) || !Number.isFinite(storeId)) return null;
+    return {
+      id,
+      storeId,
+      userId: String(data.userId ?? ""),
+      paymentMethodId: Number(data.paymentMethodId),
+      paymentMethodName: String(data.paymentMethodName ?? ""),
+      paymentMethodAccountNumber: String(data.paymentMethodAccountNumber ?? ""),
+      fulfillmentMode: data.fulfillmentMode ?? null,
+      reference: String(data.reference ?? ""),
+      proofImageUrl: String(data.proofImageUrl ?? ""),
+      amountDue: Number(data.amountDue ?? data.subtotal ?? 0),
+      amountPaid: Number(data.amountPaid ?? 0),
+      deliveryFee: Number(data.deliveryFee ?? 0),
+      deliveryDistanceM:
+        data.deliveryDistanceM != null && Number.isFinite(Number(data.deliveryDistanceM))
+          ? Number(data.deliveryDistanceM)
+          : null,
+      deliveryLocation: normalizeStoreLocation(data.deliveryLocation),
+      items: Array.isArray(data.items) ? data.items : [],
+      subtotal: Number(data.subtotal ?? 0),
+      packRideId: data.packRideId != null ? String(data.packRideId) : null,
+      deliveryUnreadCount: Number.isFinite(Number(data.deliveryUnreadCount))
+        ? Math.max(0, Number(data.deliveryUnreadCount))
+        : 0,
+      status:
+        data.status === "pending"
+          ? "pagado"
+          : storeOrderStatusSchema.safeParse(data.status).success
+            ? (data.status as StoreOrder["status"])
+            : "pagado",
+      createdAt: data.createdAt ?? new Date(),
+      updatedAt: data.updatedAt ?? new Date(),
+    };
+  }
+
+  private storeCartDocId(userId: string, storeId: number): string {
+    return `${userId}_${storeId}`;
+  }
+
+  async getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_CARTS)
+      .doc(this.storeCartDocId(userId, storeId))
+      .get();
+    if (!doc.exists) return undefined;
+    const cart = this.mapStoreCartDoc(doc.data());
+    if (!cart || cart.storeId !== storeId || cart.userId !== userId) return undefined;
+    if (new Date(cart.expiresAt).getTime() <= Date.now()) {
+      await this.deleteStoreCart(userId, storeId);
+      return undefined;
+    }
+    return cart;
+  }
+
+  async saveStoreCart(
+    userId: string,
+    storeId: number,
+    items: StoreCartItem[],
+    fulfillmentMode?: StoreFulfillmentMode | null,
+  ): Promise<StoreCart> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + STORE_CART_TTL_MS);
+    const docId = this.storeCartDocId(userId, storeId);
+    const existing = await this.getStoreCart(userId, storeId);
+    const payload: StoreCart = {
+      userId,
+      storeId,
+      items: this.normalizeStoreCartItems(items),
+      fulfillmentMode:
+        fulfillmentMode !== undefined ? fulfillmentMode : (existing?.fulfillmentMode ?? null),
+      expiresAt,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CARTS).doc(docId).set(payload);
+    return payload;
+  }
+
+  async deleteStoreCart(userId: string, storeId: number): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CARTS).doc(this.storeCartDocId(userId, storeId)).delete();
+  }
+
+  private normalizeStoreCartItems(items: StoreCartItem[]): StoreCartItem[] {
+    return items.map((item) => {
+      if (item.kind === "product") {
+        return {
+          kind: "product" as const,
+          productId: item.productId,
+          quantity: Math.max(1, Math.min(9999, Math.floor(item.quantity))),
+        };
+      }
+      return {
+        kind: "promotion" as const,
+        promotionId: item.promotionId,
+        quantity: Math.max(1, Math.min(99, Math.floor(item.quantity))),
+      };
+    });
+  }
+
+  private mapStoreCartDoc(data: Record<string, unknown> | undefined): StoreCart | undefined {
+    if (!data) return undefined;
+    const userId = String(data.userId ?? "");
+    const storeId = Number(data.storeId);
+    if (!userId || !Number.isFinite(storeId)) return undefined;
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const items: StoreCartItem[] = rawItems
+      .map((row) => {
+        if (!row || typeof row !== "object") return null;
+        const r = row as Record<string, unknown>;
+        const kind = r.kind === "promotion" ? "promotion" : r.kind === "product" ? "product" : null;
+        if (!kind) return null;
+        const quantity = Number(r.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0) return null;
+        if (kind === "product") {
+          const productId = Number(r.productId);
+          if (!Number.isFinite(productId) || productId <= 0) return null;
+          return { kind: "product" as const, productId, quantity: Math.floor(quantity) };
+        }
+        const promotionId = Number(r.promotionId);
+        if (!Number.isFinite(promotionId) || promotionId <= 0) return null;
+        return { kind: "promotion" as const, promotionId, quantity: Math.floor(quantity) };
+      })
+      .filter((x): x is StoreCartItem => x != null);
+    const expiresAt = this.readFirestoreDate(data.expiresAt) ?? new Date();
+    const fulfillmentModeRaw = data.fulfillmentMode;
+    const fulfillmentMode =
+      fulfillmentModeRaw === "delivery" ||
+      fulfillmentModeRaw === "pickup" ||
+      fulfillmentModeRaw === "in_site"
+        ? fulfillmentModeRaw
+        : null;
+    return {
+      userId,
+      storeId,
+      items,
+      fulfillmentMode,
+      expiresAt,
+      createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
+      updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
+    };
+  }
+
+  private normalizePromotionItems(items: StorePromotionLineItem[]): StorePromotionLineItem[] {
+    return items.map((item) => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      status: item.status === "inactive" ? "inactive" : "active",
+    }));
+  }
+
+  private mapStorePromotionDoc(
+    docId: string,
+    data: Record<string, unknown> | undefined,
+  ): StorePromotion | undefined {
+    if (!data) return undefined;
+    const id = Number(data.id ?? docId);
+    if (!Number.isFinite(id)) return undefined;
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const items: StorePromotionLineItem[] = rawItems
+      .map((row) => {
+        if (!row || typeof row !== "object") return null;
+        const r = row as Record<string, unknown>;
+        const productId = Number(r.productId);
+        const quantity = Number(r.quantity);
+        if (!Number.isFinite(productId) || productId <= 0) return null;
+        if (!Number.isFinite(quantity) || quantity <= 0) return null;
+        return {
+          productId,
+          quantity: Math.floor(quantity),
+          status: r.status === "inactive" ? "inactive" : "active",
+        } satisfies StorePromotionLineItem;
+      })
+      .filter((x): x is StorePromotionLineItem => x != null);
+    const status = data.status === "inactive" ? "inactive" : "active";
+    return {
+      id,
+      storeId: Number(data.storeId),
+      name: String(data.name ?? ""),
+      description:
+        data.description != null && String(data.description).trim()
+          ? String(data.description).trim()
+          : null,
+      imageUrl:
+        data.imageUrl != null && String(data.imageUrl).trim()
+          ? String(data.imageUrl).trim()
+          : null,
+      price: Number(data.price),
+      items,
+      status,
+      createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
+      updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
+    };
+  }
+
+  private mapStorePaymentMethodDoc(
+    docId: string,
+    data: Record<string, unknown> | undefined,
+  ): StorePaymentMethod | undefined {
+    if (!data) return undefined;
+    const id = Number(data.id ?? docId);
+    if (!Number.isFinite(id)) return undefined;
+    const storeId = Number(data.storeId);
+    if (!Number.isFinite(storeId)) return undefined;
+    return {
+      id,
+      storeId,
+      name: String(data.name ?? "").trim(),
+      accountNumber: String(data.accountNumber ?? "").trim(),
+      imageUrl:
+        data.imageUrl != null && String(data.imageUrl).trim()
+          ? String(data.imageUrl).trim()
+          : null,
+      createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
+      updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
+    };
+  }
+
   private mapStoreCategoryDoc(
     docId: string,
     data: Record<string, unknown> | undefined,
@@ -4712,6 +5211,8 @@ class FirestoreStorageImpl implements IStorage {
       coverImageUrl: data.coverImageUrl != null && String(data.coverImageUrl).trim()
         ? String(data.coverImageUrl).trim()
         : null,
+      location: normalizeStoreLocation(data.location),
+      fulfillmentOptions: normalizeStoreFulfillmentOptions(data.fulfillmentOptions),
       visibilitySubscriptionEndsAt: this.readFirestoreDate(data.visibilitySubscriptionEndsAt),
       createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
       updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),

@@ -67,7 +67,9 @@ import StorePage from "@/pages/StorePage";
 import StoreCreate from "@/pages/StoreCreate";
 import StoreSubscriptionPayment from "@/pages/StoreSubscriptionPayment";
 import StoreAdmin from "@/pages/StoreAdmin";
+import StoreAdminOrderDelivery from "@/pages/StoreAdminOrderDelivery";
 import StoresCatalog from "@/pages/StoresCatalog";
+import MyStoreOrders from "@/pages/MyStoreOrders";
 import { GoShellLayout } from "@/components/go/GoShellLayout";
 import { useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { GoCategoryGate } from "@/components/go/GoCategoryGate";
@@ -155,7 +157,9 @@ function MainRouter() {
       <Route path="/professional/verify/payment" component={VerifyProfessionalPayment} />
       <Route path="/tienda/crear" component={StoreCreate} />
       <Route path="/tiendas" component={StoresCatalog} />
+      <Route path="/pedidos-tienda" component={MyStoreOrders} />
       <Route path="/tienda/:slug/pago" component={StoreSubscriptionPayment} />
+      <Route path="/tienda/:slug/admin/ordenes/delivery/:orderId" component={StoreAdminOrderDelivery} />
       <Route path="/tienda/:slug/admin/:section?" component={StoreAdmin} />
       <Route path="/tienda/:slug" component={StorePage} />
       <Route path="/politics" component={Politics} />
@@ -225,8 +229,14 @@ function App() {
   const compactViewport = useGoCompactViewport();
   /** Móvil en /central: mapa a pantalla completa con barra propia (sin nav/footer global). */
   const centralMobileShell = inCentralPanel && compactViewport;
+  /** Vitrina de tienda (/tienda/:slug): layout con carrito lateral, sin footer global. */
+  const isStoreVitrinaPage = /^\/tienda\/[^/]+$/.test(pathname);
   /** En /chat el input va fijo abajo; el footer global quedaría “entre” mensajes y barra — se oculta en esta ruta. */
-  const showGlobalFooter = pathname !== "/chat" && !centralMobileShell;
+  const showGlobalFooter =
+    pathname !== "/chat" &&
+    pathname !== "/pedidos-tienda" &&
+    !centralMobileShell &&
+    !isStoreVitrinaPage;
 
   return (
     <QueryClientProvider client={queryClient}>
