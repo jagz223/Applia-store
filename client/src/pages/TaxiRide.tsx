@@ -218,6 +218,12 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   );
 
   const [mapTarget, setMapTarget] = useState<"start" | "end">("start");
+  const mapTargetRef = useRef<"start" | "end">("start");
+  const clientGpsRef = useRef<{ lat: number; lon: number } | null>(null);
+  const mapBootstrapSeededRef = useRef(false);
+  useEffect(() => {
+    mapTargetRef.current = mapTarget;
+  }, [mapTarget]);
   const [start, setStart] = useState<Place | null>(null);
   const [end, setEnd] = useState<Place | null>(null);
   const [startInput, setStartInput] = useState("");
@@ -1527,8 +1533,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     resetVehicleChoice();
   };
 
-  const reverseAt = async (lat: number, lon: number) => {
-    setReverseLoading(true);
+  const reverseAt = async (lat: number, lon: number, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setReverseLoading(true);
     try {
       const res = await fetch(`/api/maps/reverse?lat=${lat}&lon=${lon}`);
       if (!res.ok) throw new Error();
@@ -1541,7 +1547,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         label: `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
       } as Place;
     } finally {
-      setReverseLoading(false);
+      if (!opts?.silent) setReverseLoading(false);
     }
   };
 
@@ -1633,36 +1639,115 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     }
   }, [start, end, loadRoute]);
 
-  /** GPS para partida: fix fresco y de alta precisión; el usuario sigue en paso 1 para afinar en el mapa y luego elige «2. Llegada». */
-  const useMyLocationAsStart = () => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
-        const place = await reverseAt(latitude, longitude);
+  const applyGpsCoordsToTarget = useCallback(
+    (lat: number, lon: number) => {
+      const label = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+      const place: Place = { lat, lon, label };
+      if (mapTargetRef.current === "start") {
+        setStart(place);
+        setStartInput(label);
+      } else {
+        setEnd(place);
+        setEndInput(label);
+      }
+      clientGpsRef.current = { lat, lon };
+      setMapBootstrapCenter([lat, lon]);
+      setMapBootstrapZoom(15);
+      setRouteGeometry(null);
+      setRouteMeta(null);
+      setRouteError(null);
+      resetVehicleChoice();
+    },
+    [resetVehicleChoice],
+  );
+
+  const refreshAddressLabelForTarget = useCallback(
+    async (lat: number, lon: number, targetWhenRequested: "start" | "end") => {
+      const place = await reverseAt(lat, lon, { silent: true });
+      if (mapTargetRef.current !== targetWhenRequested) return;
+      if (targetWhenRequested === "start") {
         setStart(place);
         setStartInput(place.label);
-        setRouteGeometry(null);
-        setRouteMeta(null);
-        resetVehicleChoice();
+      } else {
+        setEnd(place);
+        setEndInput(place.label);
+      }
+    },
+    [],
+  );
+
+  /** GPS rápido como en DriverCargoMap: posición al instante; la calle se completa en segundo plano. */
+  const useMyLocationAtMapTarget = useCallback(() => {
+    if (!navigator.geolocation) {
+      toast({
+        title: "GPS no disponible",
+        description: "Tu navegador no permite obtener la ubicación.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const target = mapTargetRef.current;
+    if (target === "end" && !start) {
+      toast({
+        title: goSlug === "pack" ? "Define primero el retiro" : "Define primero el origen",
+        description: "Elige el punto de salida antes de usar tu ubicación como destino.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const onCoords = (lat: number, lon: number) => {
+      applyGpsCoordsToTarget(lat, lon);
+      setGeoLoading(false);
+      void refreshAddressLabelForTarget(lat, lon, target);
+    };
+
+    const cached = clientGpsRef.current;
+    if (cached) {
+      onCoords(cached.lat, cached.lon);
+      return;
+    }
+
+    setGeoLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => onCoords(pos.coords.latitude, pos.coords.longitude),
+      (err) => {
+        setGeoLoading(false);
+        const description =
+          err.code === err.PERMISSION_DENIED
+            ? "Activa el permiso de ubicación para este sitio e inténtalo de nuevo."
+            : err.code === err.TIMEOUT
+              ? "No pudimos obtener tu posición a tiempo. Revisa el GPS e inténtalo otra vez."
+              : "No se pudo leer tu ubicación. Intenta de nuevo.";
+        toast({
+          title: "Ubicación no disponible",
+          description,
+          variant: "destructive",
+        });
       },
-      () => {},
       {
         enableHighAccuracy: true,
-        maximumAge: 0,
+        maximumAge: 60_000,
         timeout: 25_000,
-      }
+      },
     );
-  };
+  }, [applyGpsCoordsToTarget, goSlug, refreshAddressLabelForTarget, toast]);
 
-  /** Mismo flujo que móvil: GPS de partida + pestaña origen (mapa Go escritorio y fullscreen). */
-  const goClientMapRecenter =
-    matchedDriverInfo
-      ? null
-      : () => {
-          setMapTarget("start");
-          useMyLocationAsStart();
-        };
+  const goClientMapRecenter = matchedDriverInfo ? null : useMyLocationAtMapTarget;
+
+  const mapRouteFocusPoint = useMemo(() => {
+    if (mapTarget === "start") return start;
+    return end ?? start;
+  }, [mapTarget, start, end]);
+
+  const mapRecenterAriaLabel =
+    mapTarget === "start"
+      ? goSlug === "pack"
+        ? "Usar mi ubicación como retiro"
+        : "Usar mi ubicación como origen"
+      : goSlug === "pack"
+        ? "Usar mi ubicación como entrega"
+        : "Usar mi ubicación como destino";
 
   const FALLBACK_CENTER: [number, number] = [-0.22, -78.5];
   const FALLBACK_ZOOM = 7;
@@ -1671,16 +1756,35 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
   useEffect(() => {
     if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setMapBootstrapCenter([pos.coords.latitude, pos.coords.longitude]);
+    let cancelled = false;
+    const apply = (pos: GeolocationPosition) => {
+      if (cancelled) return;
+      const p = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      clientGpsRef.current = p;
+      if (!mapBootstrapSeededRef.current) {
+        mapBootstrapSeededRef.current = true;
+        setMapBootstrapCenter([p.lat, p.lon]);
         setMapBootstrapZoom(15);
-      },
+      }
+    };
+    navigator.geolocation.getCurrentPosition(
+      apply,
       () => {
-        /* permiso denegado o error: se mantiene el centro por defecto */
+        /* permiso denegado o timeout: se mantiene el centro por defecto */
       },
-      { enableHighAccuracy: true, maximumAge: 120_000, timeout: 18_000 }
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 25_000 },
     );
+    const watchId = navigator.geolocation.watchPosition(
+      apply,
+      () => {
+        /* errores transitorios: conservar última posición conocida */
+      },
+      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 60_000 },
+    );
+    return () => {
+      cancelled = true;
+      navigator.geolocation.clearWatch(watchId);
+    };
   }, []);
 
   return (
@@ -1751,7 +1855,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   nearbyDemoVehicles={nearbyDriverMarkers}
                   markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                   suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
+                  focusPoint={matchedDriverInfo ? null : mapRouteFocusPoint}
                   onRecenter={goClientMapRecenter}
+                  recenterAriaLabel={mapRecenterAriaLabel}
                   wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full"
                 />
               ) : (
@@ -1883,7 +1989,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                 {geoLoading && (
                   <p className="flex items-center gap-2 rounded-xl border border-border bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-sm">
                     <Loader2 className="h-3 w-3 animate-spin" />
-                    Buscando direcciones…
+                    Obteniendo tu ubicación…
                   </p>
                 )}
 
@@ -2218,6 +2324,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   id="taxi-start"
                   placeholder="Escribe y elige una sugerencia, o coloca el punto en el mapa"
                   value={startInput}
+                  onFocus={() => setMapTarget("start")}
                   onChange={(e) => onStartInput(e.target.value)}
                   autoComplete="off"
                 />
@@ -2249,6 +2356,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   id="taxi-end"
                   placeholder="Escribe y elige una sugerencia, o coloca el punto en el mapa"
                   value={endInput}
+                  onFocus={() => setMapTarget("end")}
                   onChange={(e) => onEndInput(e.target.value)}
                   autoComplete="off"
                 />
@@ -2294,6 +2402,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                     nearbyDemoVehicles={nearbyDriverMarkers}
                     markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                     suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
+                    focusPoint={matchedDriverInfo ? null : mapRouteFocusPoint}
+                    onRecenter={goClientMapRecenter}
+                    recenterAriaLabel={mapRecenterAriaLabel}
                   />
                   {(reverseLoading || routeLoading) && (
                     <div className="absolute bottom-3 left-3 z-[55] flex items-center gap-2 rounded-lg border bg-background/90 px-3 py-2 text-xs shadow">
@@ -2322,7 +2433,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           {geoLoading && (
             <p className="text-xs text-muted-foreground flex items-center gap-2">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Buscando direcciones…
+              Obteniendo tu ubicación…
             </p>
           )}
 
@@ -2544,7 +2655,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                     nearbyDemoVehicles={nearbyDriverMarkers}
                     markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                     suppressMapPick={vehicleModalStep === "searching" || !!matchedDriverInfo}
+                    focusPoint={matchedDriverInfo ? null : mapRouteFocusPoint}
                     onRecenter={goClientMapRecenter}
+                    recenterAriaLabel={mapRecenterAriaLabel}
                     wrapperClassName="!rounded-none !border-0 !shadow-none h-full min-h-0 w-full flex-1"
                   />
                 ) : (
@@ -2622,7 +2735,9 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                   nearbyDemoVehicles={nearbyDriverMarkers}
                   markerVehicleTypeFallback={matchedDriverInfo?.driver?.vehicle?.type ?? selectedVehicle ?? null}
                   suppressMapPick={vehicleModalStep === "searching"}
+                  focusPoint={matchedDriverInfo ? null : mapRouteFocusPoint}
                   onRecenter={goClientMapRecenter}
+                  recenterAriaLabel={mapRecenterAriaLabel}
                 />
                 {(reverseLoading || routeLoading) && !matchedDriverInfo ? (
                   <div className="absolute bottom-3 left-3 z-[55] flex items-center gap-2 rounded-lg border bg-background/90 px-3 py-2 text-xs shadow">

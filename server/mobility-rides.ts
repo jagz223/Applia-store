@@ -373,6 +373,27 @@ function clearRideTimers(rideId: string) {
   rideTimers.delete(rideId);
 }
 
+function driverCanDeclineClassicOffer(ride: RideRecord, driverUserId: string, rideId: string): boolean {
+  if (ride.status !== "searching" || ride.isNegotiated) return false;
+  if (ride.currentOfferDriverId === driverUserId) return true;
+  const pending = pendingOfferByDriverId.get(driverUserId);
+  if (pending?.rideId === rideId) return true;
+  return ride.offeredDriverIds.includes(driverUserId);
+}
+
+function releaseClassicOfferFromDriver(rideId: string, ride: RideRecord, driverUserId: string): void {
+  ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
+  ride.declinedAtByDriverId[driverUserId] = Date.now();
+  ride.currentOfferDriverId = null;
+  ride.offerExpiresAt = null;
+  pendingOfferByDriverId.delete(driverUserId);
+  const timers = rideTimers.get(rideId);
+  if (timers?.offerTimeoutId) {
+    clearTimeout(timers.offerTimeoutId);
+    timers.offerTimeoutId = null;
+  }
+}
+
 function emitRideFailed(io: SocketIOServer, ride: RideRecord, reason: "timeout" | "no_driver") {
   ride.status = "expired";
   clearRideTimers(ride.id);
@@ -1284,28 +1305,43 @@ export function registerMobilityRideRoutes(app: Express) {
       const rideId = req.params.rideId as string;
       const accept = !!req.body?.accept;
       const ride = rides.get(rideId);
-      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (!ride) {
+        if (!accept) {
+          pendingOfferByDriverId.delete(driverUserId);
+          return res.json({ ok: true, accepted: false, alreadyResolved: true });
+        }
+        return res.status(404).json({ message: "Viaje no encontrado" });
+      }
       if (ride.isNegotiated) {
         return res.status(409).json({ message: "Este servicio es por regateo. Envía tu monto con la opción de regateo." });
       }
+      const io = getIO();
+      if (!io) return res.status(500).json({ message: "Socket no disponible" });
+
+      if (!accept) {
+        if (ride.status !== "searching" || ride.isNegotiated) {
+          pendingOfferByDriverId.delete(driverUserId);
+          return res.json({ ok: true, accepted: false, alreadyResolved: true });
+        }
+        if (driverCanDeclineClassicOffer(ride, driverUserId, rideId)) {
+          releaseClassicOfferFromDriver(rideId, ride, driverUserId);
+          try {
+            const rider = await buildRiderPublic(ride.riderUserId);
+            await offerNextDriver(io, ride, rider);
+          } catch (declineErr) {
+            console.error("[mobility] decline offerNextDriver", declineErr);
+          }
+        } else {
+          pendingOfferByDriverId.delete(driverUserId);
+        }
+        return res.json({ ok: true, accepted: false });
+      }
+
       if (ride.status !== "searching") {
         return res.status(409).json({ message: "Este viaje ya no está disponible" });
       }
       if (ride.currentOfferDriverId !== driverUserId) {
         return res.status(409).json({ message: "La oferta expiró o fue reasignada" });
-      }
-
-      const io = getIO();
-      if (!io) return res.status(500).json({ message: "Socket no disponible" });
-
-      if (!accept) {
-        ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
-        ride.declinedAtByDriverId[driverUserId] = Date.now();
-        ride.currentOfferDriverId = null;
-        ride.offerExpiresAt = null;
-        const rider = await buildRiderPublic(ride.riderUserId);
-        await offerNextDriver(io, ride, rider);
-        return res.json({ ok: true, accepted: false });
       }
 
       /** Carrera: solo un conductor gana. */
