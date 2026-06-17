@@ -30,6 +30,9 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
       origin: "*",
       methods: ["GET", "POST"],
     },
+    // Render y proxies suelen cerrar conexiones inactivas antes que el default de Socket.IO.
+    pingInterval: 25_000,
+    pingTimeout: 60_000,
   });
 
   // Authentication middleware

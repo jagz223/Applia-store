@@ -610,6 +610,27 @@ function clearRideTimers(rideId: string) {
   rideTimers.delete(rideId);
 }
 
+function driverCanDeclineClassicOffer(ride: RideRecord, driverUserId: string, rideId: string): boolean {
+  if (ride.status !== "searching" || ride.isNegotiated) return false;
+  if (ride.currentOfferDriverId === driverUserId) return true;
+  const pending = pendingOfferByDriverId.get(driverUserId);
+  if (pending?.rideId === rideId) return true;
+  return ride.offeredDriverIds.includes(driverUserId);
+}
+
+function releaseClassicOfferFromDriver(rideId: string, ride: RideRecord, driverUserId: string): void {
+  ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
+  ride.declinedAtByDriverId[driverUserId] = Date.now();
+  ride.currentOfferDriverId = null;
+  ride.offerExpiresAt = null;
+  pendingOfferByDriverId.delete(driverUserId);
+  const timers = rideTimers.get(rideId);
+  if (timers?.offerTimeoutId) {
+    clearTimeout(timers.offerTimeoutId);
+    timers.offerTimeoutId = null;
+  }
+}
+
 async function buildRiderPublic(riderUserId: string) {
   const u = await genFebStorage.getUserById(riderUserId);
   const rec = (u ?? undefined) as Record<string, unknown> | undefined;
@@ -1526,27 +1547,43 @@ export function registerPackRideRoutes(app: Express) {
         return res.status(403).json({ message: GO_DRIVER_SUBSCRIPTION_INACTIVE_MESSAGE });
       }
       const rideId = String(req.params.rideId);
+      const accept = !!(req.body as any)?.accept;
       const ride = rides.get(rideId);
-      if (!ride) return res.status(404).json({ message: "Viaje no encontrado" });
+      if (!ride) {
+        if (!accept) {
+          pendingOfferByDriverId.delete(driverUserId);
+          return res.json({ ok: true, accepted: false, alreadyResolved: true });
+        }
+        return res.status(404).json({ message: "Viaje no encontrado" });
+      }
       if (ride.isNegotiated) {
         return res.status(409).json({ message: "Este envío es por regateo. Envía tu monto con la opción de regateo." });
       }
-      if (ride.status !== "searching") return res.status(409).json({ message: "Oferta ya no válida" });
-      if (ride.currentOfferDriverId !== driverUserId) return res.status(403).json({ message: "No eres el driver ofertado" });
-      const accept = !!(req.body as any)?.accept;
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
 
       if (!accept) {
-        ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
-        ride.declinedAtByDriverId[driverUserId] = Date.now();
-        ride.currentOfferDriverId = null;
-        ride.offerExpiresAt = null;
-        const rider = await buildRiderPublic(ride.riderUserId);
-        void offerNextDriver(io, ride, rider);
+        if (ride.status !== "searching" || ride.isNegotiated) {
+          pendingOfferByDriverId.delete(driverUserId);
+          return res.json({ ok: true, accepted: false, alreadyResolved: true });
+        }
+        if (driverCanDeclineClassicOffer(ride, driverUserId, rideId)) {
+          releaseClassicOfferFromDriver(rideId, ride, driverUserId);
+          try {
+            const rider = await buildRiderPublic(ride.riderUserId);
+            void offerNextDriver(io, ride, rider);
+          } catch (declineErr) {
+            console.error("[pack] decline offerNextDriver", declineErr);
+          }
+        } else {
+          pendingOfferByDriverId.delete(driverUserId);
+        }
         return res.json({ ok: true, accepted: false });
       }
+
+      if (ride.status !== "searching") return res.status(409).json({ message: "Oferta ya no válida" });
+      if (ride.currentOfferDriverId !== driverUserId) return res.status(403).json({ message: "No eres el driver ofertado" });
 
       if (ride.driverUserId != null) return res.status(409).json({ message: "Otro driver ya tomó este envío" });
       if (driverIsBusyCrossModule(driverUserId)) {

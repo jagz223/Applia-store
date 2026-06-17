@@ -11,6 +11,7 @@ type ModalState = {
 type ModalAction =
   | { type: "PUSH_OFFER"; module: "cargo" | "pack"; offer: CargoRideOfferPayload }
   | { type: "RESOLVE_CURRENT"; rideId: string }
+  | { type: "DISMISS_OFFER"; rideId: string }
   | { type: "CLEAR_ALL" };
 
 function offerModalReducer(state: ModalState, action: ModalAction): ModalState {
@@ -19,8 +20,21 @@ function offerModalReducer(state: ModalState, action: ModalAction): ModalState {
       return { currentOffer: null, offerQueue: [] };
     case "PUSH_OFFER": {
       const entry: GoDriverQueuedOffer = { module: action.module, offer: action.offer };
+      const rideId = entry.offer.rideId;
+      if (state.currentOffer?.offer.rideId === rideId) return state;
+      if (state.offerQueue.some((e) => e.offer.rideId === rideId)) return state;
       if (!state.currentOffer) return { ...state, currentOffer: entry };
       return { ...state, offerQueue: [...state.offerQueue, entry] };
+    }
+    case "DISMISS_OFFER": {
+      const rideId = action.rideId;
+      const queue = state.offerQueue.filter((e) => e.offer.rideId !== rideId);
+      const cur = state.currentOffer;
+      if (cur?.offer.rideId === rideId) {
+        const [next, ...rest] = queue;
+        return { currentOffer: next ?? null, offerQueue: rest };
+      }
+      return { ...state, offerQueue: queue };
     }
     case "RESOLVE_CURRENT": {
       const cur = state.currentOffer;
@@ -46,6 +60,8 @@ type GoDriverUiState = {
   offerQueue: GoDriverQueuedOffer[];
   /** Entra una oferta: si ya hay una visible, se encola; si no, se muestra. */
   pushOffer: (module: "cargo" | "pack", offer: CargoRideOfferPayload) => void;
+  /** Cierra/descarta una oferta (actual o en cola) por rideId. */
+  dismissOffer: (rideId: string) => void;
   /** Cierra la oferta actual (si coincide rideId) y muestra la siguiente en cola. */
   resolveOfferAndShowNext: (rideId: string) => void;
   /** Limpia modal + cola de ofertas (ej. al aceptar un servicio). */
@@ -82,6 +98,10 @@ export function GoDriverUiProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "PUSH_OFFER", module, offer });
   }, []);
 
+  const dismissOffer = useCallback((rideId: string) => {
+    dispatch({ type: "DISMISS_OFFER", rideId });
+  }, []);
+
   const resolveOfferAndShowNext = useCallback((rideId: string) => {
     dispatch({ type: "RESOLVE_CURRENT", rideId });
   }, []);
@@ -99,6 +119,7 @@ export function GoDriverUiProvider({ children }: { children: ReactNode }) {
       currentOffer,
       offerQueue,
       pushOffer,
+      dismissOffer,
       resolveOfferAndShowNext,
       clearOffers,
     }),
@@ -110,6 +131,7 @@ export function GoDriverUiProvider({ children }: { children: ReactNode }) {
       currentOffer,
       offerQueue,
       pushOffer,
+      dismissOffer,
       resolveOfferAndShowNext,
       clearOffers,
     ]

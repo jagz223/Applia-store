@@ -104,6 +104,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     const newSocket = io(window.location.origin, {
       auth: { token },
       transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelayMax: 10_000,
+      timeout: 20_000,
     });
 
     newSocket.on("connect", () => {

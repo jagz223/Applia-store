@@ -140,9 +140,11 @@ function SyncBootstrapView({ center, zoom }: { center: [number, number]; zoom: n
 function RecenterControl({
   onClick,
   zoomPosition,
+  ariaLabel = "Usar mi ubicación en el punto seleccionado",
 }: {
   onClick: () => void;
   zoomPosition: TaxiRouteMapProps["zoomPosition"];
+  ariaLabel?: string;
 }) {
   const map = useMap();
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -229,7 +231,8 @@ function RecenterControl({
           "h-12 w-12 rounded-full border-2 border-foreground/30 bg-background text-foreground",
           "shadow-md ring-2 ring-foreground/10 hover:bg-muted hover:ring-foreground/25"
         )}
-        aria-label="Usar mi ubicación"
+        aria-label={ariaLabel}
+        title={ariaLabel}
         onClick={(e) => {
           e.stopPropagation();
           onClick();
@@ -256,6 +259,8 @@ export interface TaxiRouteMapProps {
   /** Remount de GeoJSON al cambiar de tramo (p. ej. matched → en curso). */
   routeGeometryKey?: number;
   routeGeometry: GeoJsonObject | null;
+  /** Centra la vista en este punto (p. ej. pestaña origen/destino activa o tras GPS). */
+  focusPoint?: MapPoint | null;
   onMapPick: (lat: number, lon: number) => void;
   nearbyDemoVehicles?: ReadonlyArray<TaxiRouteVehicleMarker>;
   /** Marcadores extra (p. ej. ubicación del conductor). */
@@ -274,6 +279,7 @@ export interface TaxiRouteMapProps {
   zoomPosition?: "default" | "topright" | "bottomleft" | "bottomright";
   /** Botón flotante tipo “recenter” como drivers (ej. usar GPS para origen). */
   onRecenter?: (() => void) | null;
+  recenterAriaLabel?: string;
 }
 
 export function TaxiRouteMap({
@@ -284,6 +290,7 @@ export function TaxiRouteMap({
   routeFocus = null,
   routeGeometryKey = 0,
   routeGeometry,
+  focusPoint = null,
   onMapPick,
   nearbyDemoVehicles = NO_NEARBY_VEHICLES,
   extraMarkers,
@@ -294,6 +301,7 @@ export function TaxiRouteMap({
   syncDefaultView = false,
   zoomPosition = "default",
   onRecenter = null,
+  recenterAriaLabel,
 }: TaxiRouteMapProps) {
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
@@ -301,7 +309,8 @@ export function TaxiRouteMap({
   const mapBehavior = getLeafletMapContainerBehaviorProps();
   const tileMaxZoom = getEffectiveLeafletMaxZoom(raster.maxZoom);
   const perspectiveEnabled = MAP_PERSPECTIVE_CONTROLS_VISIBLE;
-  const singleFocus = start && !end ? start : !start && end ? end : null;
+  const cameraFocus =
+    focusPoint ?? (start && !end ? start : !start && end ? end : null);
   const pickHandler = suppressMapPick ? () => {} : onMapPick;
   const customZoom = zoomPosition !== "default";
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: fullscreen ? 120 : 64 });
@@ -401,9 +410,17 @@ export function TaxiRouteMap({
               <LeafletMapLayoutFix />
               {syncDefaultView ? <SyncBootstrapView center={defaultCenter} zoom={defaultZoom} /> : null}
               <MapClickLayer onPick={pickHandler} />
-              {onRecenter ? <RecenterControl onClick={onRecenter} zoomPosition={zoomPosition} /> : null}
-              {fitStart && fitEnd && !routeFocus ? <FitRouteBounds start={fitStart} end={fitEnd} /> : null}
-              {singleFocus && <FocusSinglePoint point={singleFocus} />}
+              {onRecenter ? (
+                <RecenterControl
+                  onClick={onRecenter}
+                  zoomPosition={zoomPosition}
+                  ariaLabel={recenterAriaLabel}
+                />
+              ) : null}
+              {fitStart && fitEnd && !routeFocus && !focusPoint ? (
+                <FitRouteBounds start={fitStart} end={fitEnd} />
+              ) : null}
+              {cameraFocus && <FocusSinglePoint point={cameraFocus} />}
               {start && (
                 <CircleMarker
                   center={[start.lat, start.lon]}

@@ -192,11 +192,47 @@ export default function DriverGoGenfeb() {
   /** Mantiene la oferta visible mientras el backend confirma aceptar (evita parpadeo del modal). */
   const [pinnedOfferEntry, setPinnedOfferEntry] = useState<GoDriverQueuedOffer | null>(null);
   const acceptingRideIdRef = useRef<string | null>(null);
+  const respondBusyRef = useRef(false);
+  /** Evita que el polling HTTP vuelva a abrir una oferta que el conductor acaba de rechazar. */
+  const dismissedClassicOfferUntilRef = useRef<Map<string, number>>(new Map());
   const modalOfferEntry = pinnedOfferEntry ?? goDriverUi?.currentOffer ?? null;
   const incomingOffer = modalOfferEntry?.offer ?? null;
   const incomingModule = modalOfferEntry?.module ?? null;
   const incomingOpen = incomingOffer != null;
   const [respondBusy, setRespondBusy] = useState(false);
+  useEffect(() => {
+    respondBusyRef.current = respondBusy;
+  }, [respondBusy]);
+
+  const isClassicOfferDismissed = useCallback((rideId: string) => {
+    const until = dismissedClassicOfferUntilRef.current.get(rideId);
+    if (until == null) return false;
+    if (Date.now() > until) {
+      dismissedClassicOfferUntilRef.current.delete(rideId);
+      return false;
+    }
+    return true;
+  }, []);
+
+  const dismissDriverOfferUi = useCallback(
+    (rideId: string) => {
+      dismissedClassicOfferUntilRef.current.set(rideId, Date.now() + 90_000);
+      setPinnedOfferEntry(null);
+      goDriverUi?.dismissOffer(rideId);
+    },
+    [goDriverUi],
+  );
+
+  const queueDriverOffer = useCallback(
+    (module: "cargo" | "pack", offer: CargoRideOfferPayload) => {
+      if (!offer?.rideId || offer.isNegotiated) return;
+      if (isClassicOfferDismissed(offer.rideId)) return;
+      if (respondBusyRef.current) return;
+      if (acceptingRideIdRef.current) return;
+      goDriverUi?.pushOffer(module, offer);
+    },
+    [goDriverUi, isClassicOfferDismissed],
+  );
   const [negotiationBoardOpen, setNegotiationBoardOpen] = useState(false);
   const [negotiationViewModule, setNegotiationViewModule] = useState<"cargo" | "pack">("cargo");
   /** Tras enviar oferta de regateo: recordatorio compacto hasta match / retiro / servicio activo. */
@@ -397,14 +433,14 @@ export default function DriverGoGenfeb() {
       if (acceptingRideIdRef.current) return;
       if (!isReceivingTaxiMode(receiveModeRef.current)) return;
       if (p?.isNegotiated) return;
-      goDriverUi?.pushOffer("cargo", p);
+      queueDriverOffer("cargo", p);
     };
     const onPackOffer = (p: CargoRideOfferPayload) => {
       if (activeRideIdRef.current) return;
       if (acceptingRideIdRef.current) return;
       if (!isReceivingDeliveryMode(receiveModeRef.current)) return;
       if (p?.isNegotiated) return;
-      goDriverUi?.pushOffer("pack", p);
+      queueDriverOffer("pack", p);
     };
     const onCargoTaken = (p: { rideId: string }) => {
       if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
@@ -443,7 +479,7 @@ export default function DriverGoGenfeb() {
       socket.off("cargo:ride:cancelled", onCargoCancelled);
       socket.off("pack:ride:cancelled", onPackCancelled);
     };
-  }, [socket, goDriverUi]);
+  }, [socket, goDriverUi, queueDriverOffer]);
 
   useEffect(() => {
     if (!socket || !user?.id) return;
@@ -577,7 +613,7 @@ export default function DriverGoGenfeb() {
           const body = res.ok ? await res.json().catch(() => null) : null;
           if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
           const offer = body?.offer ?? null;
-          if (offer && !offer.isNegotiated) goDriverUi.pushOffer(module, offer);
+          if (offer && !offer.isNegotiated) queueDriverOffer(module, offer);
         };
         if (mode === "both") {
           await Promise.all([fetchPending("cargo"), fetchPending("pack")]);
@@ -591,18 +627,31 @@ export default function DriverGoGenfeb() {
       }
     };
     void run();
-    const pollMs = isReceivingDeliveryMode(receiveMode) ? 12_000 : 0;
+    // HTTP fallback si el socket pierde `cargo:ride:offer` / `pack:ride:offer` (común en Render free).
+    const pollMs =
+      receiveMode === "off"
+        ? 0
+        : receiveMode === "both"
+          ? 10_000
+          : isReceivingTaxiMode(receiveMode)
+            ? 10_000
+            : 12_000;
     const intervalId =
       pollMs > 0
         ? window.setInterval(() => {
             void run();
           }, pollMs)
         : null;
+    const onSocketConnect = () => {
+      void run();
+    };
+    socket?.on("connect", onSocketConnect);
     return () => {
       cancelled = true;
+      socket?.off("connect", onSocketConnect);
       if (intervalId != null) window.clearInterval(intervalId);
     };
-  }, [goDriverUi, receiveMode]);
+  }, [goDriverUi, receiveMode, socket, queueDriverOffer]);
 
   /** Al activar “recibir pedidos” con una búsqueda de regateo ya en curso, traer oferta pendiente al instante. */
   useEffect(() => {
@@ -625,7 +674,7 @@ export default function DriverGoGenfeb() {
           if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
           const offer = body?.offer ?? null;
           if (!offer || offer.isNegotiated) return;
-          goDriverUi.pushOffer(module, offer);
+          queueDriverOffer(module, offer);
         };
         if (receiveMode === "both") {
           await Promise.all([tryPush("cargo"), tryPush("pack")]);
@@ -642,7 +691,7 @@ export default function DriverGoGenfeb() {
     return () => {
       cancelled = true;
     };
-  }, [goDriverUi, receiveMode, canReceive, providerVehicle?.vehicle_type]);
+  }, [goDriverUi, receiveMode, canReceive, providerVehicle?.vehicle_type, queueDriverOffer]);
 
   useEffect(() => {
     if (!classicOfferModalOpen) return;
@@ -833,22 +882,28 @@ export default function DriverGoGenfeb() {
     emitDriverPresenceOffline();
   }, [isAdmin, hasActiveSubscription, stopReceiving, emitDriverPresenceOffline]);
 
-  const resetReceivingAfterSocketLoss = useCallback(() => {
-    stopReceiving();
-    emitDriverPresenceOffline();
-  }, [emitDriverPresenceOffline, stopReceiving]);
+  const socketDisconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** Tras caída del socket (reinicio servidor) el conductor debe deslizar otra vez. */
+  /** Cortes breves (Render free, redeploy): no apagar «recibir»; solo marcar offline hasta reconectar. */
   useEffect(() => {
     if (!socket) return;
     const onSocketDisconnect = () => {
-      resetReceivingAfterSocketLoss();
+      emitDriverPresenceOffline();
+      if (socketDisconnectTimerRef.current) clearTimeout(socketDisconnectTimerRef.current);
+      socketDisconnectTimerRef.current = setTimeout(() => {
+        socketDisconnectTimerRef.current = null;
+        stopReceiving();
+      }, 90_000);
     };
     socket.on("disconnect", onSocketDisconnect);
     return () => {
       socket.off("disconnect", onSocketDisconnect);
+      if (socketDisconnectTimerRef.current) {
+        clearTimeout(socketDisconnectTimerRef.current);
+        socketDisconnectTimerRef.current = null;
+      }
     };
-  }, [socket, resetReceivingAfterSocketLoss]);
+  }, [socket, emitDriverPresenceOffline, stopReceiving]);
 
   useEffect(() => {
     if (!socket) return;
@@ -909,7 +964,17 @@ export default function DriverGoGenfeb() {
       syncFleetPresence();
     }, 4000);
 
+    const onSocketConnect = () => {
+      if (socketDisconnectTimerRef.current) {
+        clearTimeout(socketDisconnectTimerRef.current);
+        socketDisconnectTimerRef.current = null;
+      }
+      syncFleetPresence();
+    };
+    socket.on("connect", onSocketConnect);
+
     return () => {
+      socket.off("connect", onSocketConnect);
       window.clearInterval(t);
       emitDriverPresenceOffline();
     };
@@ -988,7 +1053,7 @@ export default function DriverGoGenfeb() {
       acceptingRideIdRef.current = snapOffer.rideId;
       setPinnedOfferEntry(entry);
     } else {
-      goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+      dismissDriverOfferUi(snapOffer.rideId);
     }
     setRespondBusy(true);
     try {
@@ -998,20 +1063,25 @@ export default function DriverGoGenfeb() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ accept }),
       });
-      const data = (await res.json().catch(() => ({}))) as { conversationId?: number; message?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        conversationId?: number;
+        message?: string;
+        alreadyResolved?: boolean;
+      };
       if (!res.ok) {
-        const msg = data.message || "No se pudo responder";
-        if (accept) {
-          acceptingRideIdRef.current = null;
-          setPinnedOfferEntry(null);
+        if (!accept) {
+          dismissDriverOfferUi(snapOffer.rideId);
+          return;
         }
-        if (!accept) goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+        const msg = data.message || "No se pudo responder";
+        acceptingRideIdRef.current = null;
+        setPinnedOfferEntry(null);
+        goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
         if (
-          accept &&
-          (msg.toLowerCase().includes("expir") ||
-            msg.toLowerCase().includes("reasign") ||
-            msg.toLowerCase().includes("ya no") ||
-            msg.toLowerCase().includes("no está disponible"))
+          msg.toLowerCase().includes("expir") ||
+          msg.toLowerCase().includes("reasign") ||
+          msg.toLowerCase().includes("ya no") ||
+          msg.toLowerCase().includes("no está disponible")
         ) {
           goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
         }
@@ -1019,9 +1089,9 @@ export default function DriverGoGenfeb() {
       }
       acceptingRideIdRef.current = null;
       setPinnedOfferEntry(null);
-      goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
-      goDriverUi?.clearOffers?.();
       if (accept) {
+        goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
+        goDriverUi?.clearOffers?.();
         setDriverNegotiationSent(null);
         syncRideConversation(data.conversationId ?? null);
         if (data.conversationId == null) {
@@ -1046,13 +1116,14 @@ export default function DriverGoGenfeb() {
         stopReceiving();
       }
       if (!accept) {
-        setActiveConversationId(null);
-        setActiveRideId(null);
-        setActiveRideOffer(null);
-        setActiveRideStarted(false);
-        setPaymentConfirmed(false);
+        dismissDriverOfferUi(snapOffer.rideId);
+        return;
       }
     } catch (e) {
+      if (!accept) {
+        dismissDriverOfferUi(snapOffer.rideId);
+        return;
+      }
       if (accept) {
         acceptingRideIdRef.current = null;
         setPinnedOfferEntry(null);
