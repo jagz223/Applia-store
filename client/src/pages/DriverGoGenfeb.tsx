@@ -65,6 +65,7 @@ import { historyToDriverTripLog } from "@/lib/mobility-ride-history-mappers";
 import { notifyMobilityRideHistoryChanged } from "@/lib/mobility-ride-history-events";
 import { GoChatDrawer } from "@/components/go/GoChatDrawer";
 import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
+import { pollClassicDriverOffer, GO_CLASSIC_OFFER_POLL_MS } from "@/lib/go-driver-classic-offer-poll";
 import { useSocket } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
 import { startCargoOfferBellLoop } from "@/lib/cargo-offer-bell";
@@ -229,6 +230,8 @@ export default function DriverGoGenfeb() {
       if (isClassicOfferDismissed(offer.rideId)) return;
       if (respondBusyRef.current) return;
       if (acceptingRideIdRef.current) return;
+      const entry: GoDriverQueuedOffer = { module, offer };
+      setPinnedOfferEntry(entry);
       goDriverUi?.pushOffer(module, offer);
     },
     [goDriverUi, isClassicOfferDismissed],
@@ -593,98 +596,73 @@ export default function DriverGoGenfeb() {
     };
   }, [socket, goDriverUi, toast]);
 
-  // Recovery: oferta pendiente del modo activo (taxi, delivery o híbrido).
+  /**
+   * Ofertas clásicas: polling HTTP como el tablero de regateo (Render no depende del socket).
+   * El servidor registra presencia, asigna al más cercano y devuelve la oferta pendiente.
+   */
   useEffect(() => {
-    if (!goDriverUi) return;
-    const mode = receiveModeRef.current;
-    if (mode === "off") return;
+    if (receiveMode === "off") return;
+    if (!canReceive || !providerVehicle?.vehicle_type) return;
+
     let cancelled = false;
+
+    const pollInput = () => {
+      const pos = geoPosRef.current;
+      const vehicleType = providerVehicle?.vehicle_type?.trim() ?? "";
+      if (!pos || !vehicleType) return null;
+      return {
+        lat: pos.lat,
+        lon: pos.lon,
+        vehicleType,
+        isPetFriendly: !!providerVehicle?.is_pet_friendly,
+      };
+    };
+
     const run = async () => {
-      try {
-        const auth = localStorage.getItem("token");
-        const headers: Record<string, string> = auth ? { Authorization: `Bearer ${auth}` } : {};
-        const fetchPending = async (module: "cargo" | "pack") => {
-          if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
-          const url =
-            module === "pack"
-              ? "/api/pack/driver/pending-offer"
-              : "/api/mobility/driver/pending-offer";
-          const res = await fetch(url, { headers });
-          const body = res.ok ? await res.json().catch(() => null) : null;
-          if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
-          const offer = body?.offer ?? null;
-          if (offer && !offer.isNegotiated) queueDriverOffer(module, offer);
-        };
-        if (mode === "both") {
-          await Promise.all([fetchPending("cargo"), fetchPending("pack")]);
-        } else if (mode === "delivery") {
-          await fetchPending("pack");
-        } else {
-          await fetchPending("cargo");
-        }
-      } catch {
-        /* recovery silencioso */
+      if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
+      const base = pollInput();
+      if (!base) return;
+
+      const mode = receiveModeRef.current;
+      const tasks: Promise<void>[] = [];
+
+      if (isReceivingTaxiMode(mode)) {
+        tasks.push(
+          pollClassicDriverOffer("cargo", { ...base, receiving: true }).then((offer) => {
+            if (cancelled || !offer) return;
+            queueDriverOffer("cargo", offer);
+          }),
+        );
       }
+      if (isReceivingDeliveryMode(mode)) {
+        tasks.push(
+          pollClassicDriverOffer("pack", { ...base, receiving: true }).then((offer) => {
+            if (cancelled || !offer) return;
+            queueDriverOffer("pack", offer);
+          }),
+        );
+      }
+      await Promise.all(tasks);
     };
+
     void run();
-    // HTTP fallback si el socket pierde `cargo:ride:offer` / `pack:ride:offer` (común en Render free).
-    const pollMs = receiveMode === "off" ? 0 : 3_000;
-    const intervalId =
-      pollMs > 0
-        ? window.setInterval(() => {
-            void run();
-          }, pollMs)
-        : null;
-    const onSocketConnect = () => {
-      void run();
-    };
+    const intervalId = window.setInterval(() => void run(), GO_CLASSIC_OFFER_POLL_MS);
+    const onSocketConnect = () => void run();
     socket?.on("connect", onSocketConnect);
+
     return () => {
       cancelled = true;
       socket?.off("connect", onSocketConnect);
-      if (intervalId != null) window.clearInterval(intervalId);
+      window.clearInterval(intervalId);
     };
-  }, [goDriverUi, receiveMode, socket, queueDriverOffer]);
-
-  /** Al activar “recibir pedidos” con una búsqueda de regateo ya en curso, traer oferta pendiente al instante. */
-  useEffect(() => {
-    if (!goDriverUi) return;
-    if (receiveMode === "off") return;
-    if (!canReceive || !providerVehicle?.vehicle_type) return;
-    if (activeRideIdRef.current) return;
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const auth = localStorage.getItem("token");
-        const headers: Record<string, string> = auth ? { Authorization: `Bearer ${auth}` } : {};
-        const tryPush = async (module: "cargo" | "pack") => {
-          const url =
-            module === "pack"
-              ? "/api/pack/driver/pending-offer"
-              : "/api/mobility/driver/pending-offer";
-          const res = await fetch(url, { headers });
-          const body = res.ok ? await res.json().catch(() => null) : null;
-          if (cancelled || activeRideIdRef.current || acceptingRideIdRef.current) return;
-          const offer = body?.offer ?? null;
-          if (!offer || offer.isNegotiated) return;
-          queueDriverOffer(module, offer);
-        };
-        if (receiveMode === "both") {
-          await Promise.all([tryPush("cargo"), tryPush("pack")]);
-        } else if (receiveMode === "delivery") {
-          await tryPush("pack");
-        } else {
-          await tryPush("cargo");
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [goDriverUi, receiveMode, canReceive, providerVehicle?.vehicle_type, queueDriverOffer]);
+  }, [
+    receiveMode,
+    canReceive,
+    providerVehicle?.vehicle_type,
+    providerVehicle?.is_pet_friendly,
+    socket,
+    queueDriverOffer,
+  ]);
 
   useEffect(() => {
     if (!classicOfferModalOpen) return;
