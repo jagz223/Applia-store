@@ -55,10 +55,12 @@ import {
   deleteActiveMobilityRide,
   findActiveClassicOfferForDriver,
   loadActiveMobilityRideById,
+  loadAllActiveMobilityRides,
   nextActiveMobilityRidePersistEpoch,
   persistActiveMobilityRide,
   type ActiveMobilityRidePayload,
 } from "./mobility-active-rides-store";
+import { classicOfferPollBodySchema, type ClassicOfferPollBody } from "./go-driver-classic-offer-poll";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
   ensureMobilityRideConversation,
@@ -796,6 +798,131 @@ export async function listCargoGoActiveRidesForAdmin(): Promise<AdminCargoGoRide
   return rows;
 }
 
+/** Restaura viajes clásicos en búsqueda desde Firestore (multi-instancia / cold start). */
+async function hydrateSearchingClassicCargoRides(): Promise<void> {
+  const all = await loadAllActiveMobilityRides();
+  for (const row of all) {
+    if (row.module !== "cargo") continue;
+    const ride = row.ride as RideRecord;
+    if (isTerminalRideStatus(ride.status)) continue;
+    if (ride.status !== "searching" || ride.isNegotiated) continue;
+    rides.set(ride.id, ride);
+  }
+}
+
+async function syncClassicPollCargoPresence(
+  driverUserId: string,
+  role: string | undefined,
+  body: ClassicOfferPollBody,
+): Promise<DriverPresence | null> {
+  if (!body.receiving) return null;
+  const lat = Number(body.lat);
+  const lon = Number(body.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const vehicleType = String(body.vehicleType ?? "").trim();
+  if (!vehicleType) return null;
+
+  const subscriptionOk = await driverGoSubscriptionAllowsOperation(driverUserId, role);
+  if (!subscriptionOk) return null;
+
+  const provider = await catalogService.getProviderByUserId(driverUserId);
+  return upsertCargoDriverPresence({
+    userId: driverUserId,
+    receiving: true,
+    vehicleType,
+    isPetFriendly: !!body.isPetFriendly,
+    lat,
+    lon,
+    dispatchCompanyId: normalizeDispatchCompanyId(
+      (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
+    ),
+    idleOnMapDuringRide: false,
+  });
+}
+
+async function buildClassicCargoOfferResponse(driverUserId: string): Promise<{ offer: Record<string, unknown> | null }> {
+  let p = pendingOfferByDriverId.get(driverUserId);
+  let ride: RideRecord | undefined;
+  if (p) {
+    if (Date.now() > p.expiresAt) {
+      pendingOfferByDriverId.delete(driverUserId);
+      p = undefined;
+    } else {
+      ride = await ensureCargoRideInMemory(p.rideId);
+    }
+  }
+  if (!ride) {
+    const fromStore = await findActiveClassicOfferForDriver("cargo", driverUserId);
+    if (fromStore) {
+      const existing = rides.get(fromStore.id);
+      if (existing && isTerminalRideStatus(existing.status)) {
+        void deleteActiveMobilityRide(fromStore.id);
+      } else {
+        ride = fromStore as RideRecord;
+        rides.set(ride.id, ride);
+        if (typeof ride.offerExpiresAt === "number") {
+          p = { rideId: ride.id, expiresAt: ride.offerExpiresAt, module: "cargo" };
+          pendingOfferByDriverId.set(driverUserId, p);
+        }
+      }
+    }
+  }
+  if (!ride || ride.status !== "searching") {
+    if (p) pendingOfferByDriverId.delete(driverUserId);
+    return { offer: null };
+  }
+  const classic = ride.currentOfferDriverId === driverUserId;
+  const neg =
+    !!ride.isNegotiated &&
+    ride.offeredDriverIds.includes(driverUserId) &&
+    (ride.negotiationExpiresAt == null || Date.now() <= ride.negotiationExpiresAt);
+  if (!classic && !neg) {
+    pendingOfferByDriverId.delete(driverUserId);
+    return { offer: null };
+  }
+  const rider = await buildRiderPublic(ride.riderUserId);
+  const expiresAt = ride.isNegotiated
+    ? ride.negotiationExpiresAt ?? p?.expiresAt ?? ride.offerExpiresAt
+    : ride.offerExpiresAt;
+  return {
+    offer: {
+      rideId: ride.id,
+      rider,
+      start: ride.start,
+      end: ride.end,
+      routeGeometry: ride.routeGeometry,
+      distanceM: ride.distanceM,
+      durationSec: ride.durationSec,
+      vehicleType: ride.vehicleType,
+      paymentMethod: ride.paymentMethod,
+      estimatedUsd: ride.estimatedUsd,
+      suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
+      petEnabled: ride.petEnabled,
+      expiresAt,
+      isNegotiated: !!ride.isNegotiated,
+    },
+  };
+}
+
+/** Estilo tablero regateo: HTTP poll registra presencia, re-asigna al más cercano y devuelve oferta. */
+async function runClassicCargoOfferPoll(
+  driverUserId: string,
+  role: string | undefined,
+  body: ClassicOfferPollBody,
+): Promise<{ offer: Record<string, unknown> | null }> {
+  await hydrateSearchingClassicCargoRides();
+  const pres = await syncClassicPollCargoPresence(driverUserId, role, body);
+  const io = getIO();
+  if (pres && io) {
+    for (const ride of rides.values()) {
+      if (ride.status !== "searching" || ride.isNegotiated || ride.driverUserId != null) continue;
+      clearStaleActiveOffer(ride);
+    }
+    await reconcilePendingRidesForDriver(io, pres);
+  }
+  return buildClassicCargoOfferResponse(driverUserId);
+}
+
 export function registerMobilityRideRoutes(app: Express) {
   void runMobilityRideChatStartupSweep(genFebStorage);
 
@@ -820,69 +947,28 @@ export function registerMobilityRideRoutes(app: Express) {
     try {
       const driverUserId = req.user?.id as string;
       if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
-      let p = pendingOfferByDriverId.get(driverUserId);
-      let ride: RideRecord | undefined;
-      if (p) {
-        if (Date.now() > p.expiresAt) {
-          pendingOfferByDriverId.delete(driverUserId);
-          p = undefined;
-        } else {
-          ride = await ensureCargoRideInMemory(p.rideId);
-        }
-      }
-      if (!ride) {
-        const fromStore = await findActiveClassicOfferForDriver("cargo", driverUserId);
-        if (fromStore) {
-          const existing = rides.get(fromStore.id);
-          if (existing && isTerminalRideStatus(existing.status)) {
-            void deleteActiveMobilityRide(fromStore.id);
-          } else {
-            ride = fromStore as RideRecord;
-            rides.set(ride.id, ride);
-            if (typeof ride.offerExpiresAt === "number") {
-              p = { rideId: ride.id, expiresAt: ride.offerExpiresAt, module: "cargo" };
-              pendingOfferByDriverId.set(driverUserId, p);
-            }
-          }
-        }
-      }
-      if (!ride || ride.status !== "searching") {
-        if (p) pendingOfferByDriverId.delete(driverUserId);
-        return res.json({ offer: null });
-      }
-      const classic = ride.currentOfferDriverId === driverUserId;
-      const neg =
-        !!ride.isNegotiated &&
-        ride.offeredDriverIds.includes(driverUserId) &&
-        (ride.negotiationExpiresAt == null || Date.now() <= ride.negotiationExpiresAt);
-      if (!classic && !neg) {
-        pendingOfferByDriverId.delete(driverUserId);
-        return res.json({ offer: null });
-      }
-      const rider = await buildRiderPublic(ride.riderUserId);
-      const expiresAt = ride.isNegotiated
-        ? ride.negotiationExpiresAt ?? p?.expiresAt ?? ride.offerExpiresAt
-        : ride.offerExpiresAt;
-      return res.json({
-        offer: {
-          rideId: ride.id,
-          rider,
-          start: ride.start,
-          end: ride.end,
-          routeGeometry: ride.routeGeometry,
-          distanceM: ride.distanceM,
-          durationSec: ride.durationSec,
-          vehicleType: ride.vehicleType,
-          paymentMethod: ride.paymentMethod,
-          estimatedUsd: ride.estimatedUsd,
-          suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
-          petEnabled: ride.petEnabled,
-          expiresAt,
-          isNegotiated: !!ride.isNegotiated,
-        },
-      });
+      const payload = await buildClassicCargoOfferResponse(driverUserId);
+      return res.json(payload);
     } catch (e: any) {
       return res.status(500).json({ message: e?.message ?? "Error" });
+    }
+  });
+
+  /**
+   * POST /api/mobility/driver/classic-offer-poll
+   * Igual que el tablero de regateo: polling HTTP con presencia + matching al más cercano.
+   */
+  app.post("/api/mobility/driver/classic-offer-poll", authenticateJWT, async (req: any, res) => {
+    try {
+      const driverUserId = req.user?.id as string;
+      if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
+      const parsed = classicOfferPollBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Payload inválido", offer: null });
+      const payload = await runClassicCargoOfferPoll(driverUserId, req.user?.role, parsed.data);
+      return res.json(payload);
+    } catch (e: any) {
+      console.error("[mobility] classic-offer-poll", e);
+      return res.status(500).json({ message: e?.message ?? "Error", offer: null });
     }
   });
 

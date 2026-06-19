@@ -4,6 +4,9 @@ export const GO_NEGOTIATION_OFFER_WINDOW_MS = 5 * 60 * 1000;
 /** Intervalo recomendado para refrescar el tablero de regateo en el cliente. */
 export const GO_NEGOTIATION_BOARD_POLL_MS = 5000;
 
+/** Polling de ofertas clásicas (modal aceptar/rechazar) — mismo enfoque HTTP que regateo. */
+export const GO_CLASSIC_OFFER_POLL_MS = 5000;
+
 /** Respuesta HTTP / UI cuando el conductor intenta enviar otra oferta al mismo viaje. */
 export const DRIVER_NEGOTIATION_OFFER_ALREADY_SENT_MESSAGE =
   "Ya enviaste una propuesta para este viaje. Esperá la respuesta del cliente.";
