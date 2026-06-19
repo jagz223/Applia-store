@@ -628,14 +628,7 @@ export default function DriverGoGenfeb() {
     };
     void run();
     // HTTP fallback si el socket pierde `cargo:ride:offer` / `pack:ride:offer` (común en Render free).
-    const pollMs =
-      receiveMode === "off"
-        ? 0
-        : receiveMode === "both"
-          ? 5_000
-          : isReceivingTaxiMode(receiveMode)
-            ? 5_000
-            : 5_000;
+    const pollMs = receiveMode === "off" ? 0 : 3_000;
     const intervalId =
       pollMs > 0
         ? window.setInterval(() => {
@@ -904,6 +897,13 @@ export default function DriverGoGenfeb() {
     };
   }, [socket, stopReceiving]);
 
+  /** Al salir de la vista conductor: marcar offline en servidor. */
+  useEffect(() => {
+    return () => {
+      emitDriverPresenceOffline();
+    };
+  }, [emitDriverPresenceOffline]);
+
   useEffect(() => {
     if (!socket) return;
 
@@ -955,7 +955,6 @@ export default function DriverGoGenfeb() {
     };
 
     if (!syncFleetPresence()) {
-      if (!activeRideIdRef.current) emitDriverPresenceOffline();
       return;
     }
 
@@ -975,7 +974,6 @@ export default function DriverGoGenfeb() {
     return () => {
       socket.off("connect", onSocketConnect);
       window.clearInterval(t);
-      emitDriverPresenceOffline();
     };
   }, [
     socket,
@@ -983,7 +981,6 @@ export default function DriverGoGenfeb() {
     canReceive,
     providerVehicle?.vehicle_type,
     providerVehicle?.is_pet_friendly,
-    emitDriverPresenceOffline,
     activeRideId,
     activeServiceModule,
   ]);
