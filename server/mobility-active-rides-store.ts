@@ -31,6 +31,22 @@ type StoredActiveRideDoc = {
 };
 
 const memoryActive = new Map<string, StoredActiveRideDoc>();
+/** Evita que un persist async tardío reescriba Firestore tras cancelar/completar. */
+const persistEpochByRideId = new Map<string, number>();
+
+export function nextActiveMobilityRidePersistEpoch(rideId: string): number {
+  const id = String(rideId ?? "").trim();
+  if (!id) return 0;
+  const next = (persistEpochByRideId.get(id) ?? 0) + 1;
+  persistEpochByRideId.set(id, next);
+  return next;
+}
+
+function isPersistEpochCurrent(rideId: string, epoch: number): boolean {
+  const id = String(rideId ?? "").trim();
+  if (!id) return false;
+  return epoch === (persistEpochByRideId.get(id) ?? 0);
+}
 
 function isActiveStatus(status: string): status is ActiveMobilityRideStatus {
   return status === "searching" || status === "matched" || status === "in_progress";
@@ -105,14 +121,14 @@ function toStoredDoc(module: MobilityRideHistoryModule, ride: ActiveMobilityRide
 
 function docFromFirestore(id: string, data: Record<string, unknown>): StoredActiveRideDoc | null {
   const module = data.module === "pack" ? "pack" : "cargo";
-  const status = String(data.status ?? "");
-  if (!isActiveStatus(status)) return null;
   const payload = data.payload;
   if (!payload || typeof payload !== "object") return null;
   const ridePayload = deserializePayloadFromFirestore({
     ...(payload as Record<string, unknown>),
     id,
   });
+  const status = String(ridePayload.status ?? data.status ?? "");
+  if (!isActiveStatus(status)) return null;
   return {
     module,
     status,
@@ -141,13 +157,18 @@ function docFromFirestore(id: string, data: Record<string, unknown>): StoredActi
 export async function persistActiveMobilityRide(
   module: MobilityRideHistoryModule,
   ride: ActiveMobilityRidePayload,
+  persistEpoch?: number,
 ): Promise<void> {
+  const rideId = String(ride.id);
+  const epochAtStart = persistEpoch ?? persistEpochByRideId.get(rideId) ?? 0;
   const doc = toStoredDoc(module, ride);
   if (!doc) {
-    await deleteActiveMobilityRide(String(ride.id));
+    nextActiveMobilityRidePersistEpoch(rideId);
+    await deleteActiveMobilityRide(rideId);
     return;
   }
-  memoryActive.set(String(ride.id), doc);
+  if (!isPersistEpochCurrent(rideId, epochAtStart)) return;
+  memoryActive.set(rideId, doc);
 
   const db = getFirestore();
   if (!db) {
@@ -158,7 +179,8 @@ export async function persistActiveMobilityRide(
   }
 
   try {
-    await db.collection(COLLECTION).doc(String(ride.id)).set({
+    if (!isPersistEpochCurrent(rideId, epochAtStart)) return;
+    await db.collection(COLLECTION).doc(rideId).set({
       module: doc.module,
       status: doc.status,
       riderUserId: doc.riderUserId,
@@ -243,10 +265,11 @@ export async function findActiveClassicOfferForDriver(
   for (const row of all) {
     if (row.module !== module) continue;
     const ride = row.ride;
-    if (ride.status !== "searching" || ride.isNegotiated) continue;
+    const status = String(ride.status ?? "");
+    if (status !== "searching" || ride.isNegotiated) continue;
     if (ride.currentOfferDriverId !== uid) continue;
     const exp = ride.offerExpiresAt;
-    if (typeof exp === "number" && now > exp) continue;
+    if (typeof exp !== "number" || now > exp) continue;
     return ride;
   }
   return null;

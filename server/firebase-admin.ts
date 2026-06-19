@@ -195,6 +195,8 @@ export const FIRESTORE_COLLECTIONS = {
   MOBILITY_RIDE_HISTORY: "mobility_ride_history",
   /** Viajes Go en curso (searching / matched / in_progress); se borran al terminar. */
   MOBILITY_ACTIVE_RIDES: "mobility_active_rides",
+  /** Conductores Go recibiendo pedidos (taxi/delivery); TTL lógico ~45s. */
+  GO_DRIVER_PRESENCE: "go_driver_presence",
   /** Tiendas online (1 por dueño en MVP). */
   STORES: "stores",
   /** Productos de una tienda. */

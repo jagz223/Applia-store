@@ -632,10 +632,10 @@ export default function DriverGoGenfeb() {
       receiveMode === "off"
         ? 0
         : receiveMode === "both"
-          ? 10_000
+          ? 5_000
           : isReceivingTaxiMode(receiveMode)
-            ? 10_000
-            : 12_000;
+            ? 5_000
+            : 5_000;
     const intervalId =
       pollMs > 0
         ? window.setInterval(() => {
@@ -888,7 +888,6 @@ export default function DriverGoGenfeb() {
   useEffect(() => {
     if (!socket) return;
     const onSocketDisconnect = () => {
-      emitDriverPresenceOffline();
       if (socketDisconnectTimerRef.current) clearTimeout(socketDisconnectTimerRef.current);
       socketDisconnectTimerRef.current = setTimeout(() => {
         socketDisconnectTimerRef.current = null;
@@ -903,7 +902,7 @@ export default function DriverGoGenfeb() {
         socketDisconnectTimerRef.current = null;
       }
     };
-  }, [socket, emitDriverPresenceOffline, stopReceiving]);
+  }, [socket, stopReceiving]);
 
   useEffect(() => {
     if (!socket) return;
@@ -984,7 +983,6 @@ export default function DriverGoGenfeb() {
     canReceive,
     providerVehicle?.vehicle_type,
     providerVehicle?.is_pet_friendly,
-    geoPos,
     emitDriverPresenceOffline,
     activeRideId,
     activeServiceModule,
