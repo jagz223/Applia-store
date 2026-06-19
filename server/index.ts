@@ -99,6 +99,11 @@ app.use((req, res, next) => {
     log(`Firestore en uso: proyecto "${projectId}" (cuenta: ${process.env.FIREBASE_CLIENT_EMAIL || "?"})`);
     const { bootstrapActiveMobilityRidesFromFirestore } = await import("./mobility-active-rides-boot");
     await bootstrapActiveMobilityRidesFromFirestore();
+    const { bootstrapGoDriverPresenceFromFirestore } = await import("./go-driver-presence-store");
+    const presenceCount = await bootstrapGoDriverPresenceFromFirestore();
+    if (presenceCount > 0) {
+      log(`[go-presence] Conductores con presencia reciente restaurados: ${presenceCount}`);
+    }
     const { startPublicPromotionalCodeNotificationScheduler } = await import("./public-promotional-code-notify");
     startPublicPromotionalCodeNotificationScheduler();
   } else {
