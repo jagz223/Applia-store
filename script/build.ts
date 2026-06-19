@@ -36,6 +36,8 @@ async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
+  const { generateServiceWorker } = await import("./generate-sw.ts");
+  await generateServiceWorker();
   await viteBuild();
 
   console.log("building server...");

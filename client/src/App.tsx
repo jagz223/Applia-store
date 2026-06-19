@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { PushForegroundHandler } from "@/components/PushForegroundHandler";
+import { PushAutoRegister } from "@/components/PushAutoRegister";
 import { PushPermissionReminder } from "@/components/PushPermissionReminder";
 import { SocketProvider } from "@/hooks/use-socket";
 import { ServiceBookingChatListener } from "@/components/chat/ServiceBookingChatListener";
@@ -245,6 +246,7 @@ function App() {
           <ExploreCategoryProvider>
             <ServiceBookingChatListener />
             <PushForegroundHandler />
+            <PushAutoRegister />
             {/* Recordatorio global para activar push si están apagadas */}
             <div className="pointer-events-none fixed left-1/2 top-2 z-[80] w-[min(100%,28rem)] -translate-x-1/2 px-3">
               <PushPermissionReminder />
