@@ -34,6 +34,13 @@ import { normalizeDispatchCompanyId } from "@shared/dispatch-company";
 import { toCentralActiveServiceForPanel } from "@shared/central-active-service-for-central";
 import { emitCentralFleetUpdate, CENTRAL_FLEET_IN_SERVICE_RECEIVING } from "./central-fleet-notify";
 import { persistMobilityRideToHistory } from "./mobility-ride-archive-helper";
+import {
+  deleteActiveMobilityRide,
+  findActiveClassicOfferForDriver,
+  loadActiveMobilityRideById,
+  persistActiveMobilityRide,
+  type ActiveMobilityRidePayload,
+} from "./mobility-active-rides-store";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
   ensureMobilityRideConversation,
@@ -225,6 +232,8 @@ export function cancelStoreOrderPackSearch(storeOrderId: number): boolean {
       void persistMobilityRideToHistory(ride, "pack", "cancelled", { cancelledBy: "rider" });
     }
 
+    dropPackActiveRide(ride.id);
+
     if (ride.conversationId != null && ride.driverUserId != null) {
       void onMobilityRideChatCancelled(genFebStorage, {
         conversationId: Number(ride.conversationId),
@@ -332,7 +341,7 @@ export async function createPackRideForStoreOrder(input: {
     storeOrderId: input.storeOrderId,
     storeId: input.storeId,
   };
-  rides.set(id, ride);
+  commitPackRide(ride);
 
   const timers = { offerTimeoutId: null, expireTimeoutId: null };
   rideTimers.set(id, timers);
@@ -366,6 +375,25 @@ const pendingOfferByDriverId = new Map<
   string,
   { rideId: string; expiresAt: number; module: "pack" }
 >();
+
+function commitPackRide(ride: RideRecord): void {
+  rides.set(ride.id, ride);
+  void persistActiveMobilityRide("pack", ride as unknown as ActiveMobilityRidePayload);
+}
+
+function dropPackActiveRide(rideId: string): void {
+  void deleteActiveMobilityRide(rideId);
+}
+
+async function ensurePackRideInMemory(rideId: string): Promise<RideRecord | undefined> {
+  const cached = rides.get(rideId);
+  if (cached) return cached;
+  const loaded = await loadActiveMobilityRideById(rideId);
+  if (!loaded || loaded.module !== "pack") return undefined;
+  const ride = loaded.ride as RideRecord;
+  rides.set(ride.id, ride);
+  return ride;
+}
 
 type DriverPresence = {
   userId: string;
@@ -629,6 +657,7 @@ function releaseClassicOfferFromDriver(rideId: string, ride: RideRecord, driverU
     clearTimeout(timers.offerTimeoutId);
     timers.offerTimeoutId = null;
   }
+  commitPackRide(ride);
 }
 
 async function buildRiderPublic(riderUserId: string) {
@@ -716,6 +745,7 @@ function emitPackNegotiationOffersUpdated(io: SocketIOServer, ride: RideRecord) 
     offers: ride.offers ?? [],
     riderOfferUsd: ride.estimatedUsd,
   });
+  commitPackRide(ride);
 }
 
 function withdrawDriverPackNegotiationOffersElsewhere(
@@ -744,6 +774,7 @@ registerPackNegotiationWithdraw(withdrawDriverPackNegotiationOffersElsewhere);
 /** Regateo Delivery: ventana + aviso al cliente. Conductores usan GET /negotiation-board (no modal / no marketplace). */
 function broadcastPackNegotiationInvites(io: SocketIOServer, ride: RideRecord, _rider: Awaited<ReturnType<typeof buildRiderPublic>>) {
   ride.negotiationExpiresAt = Date.now() + GO_NEGOTIATION_OFFER_WINDOW_MS;
+  commitPackRide(ride);
   emitPackNegotiationOffersUpdated(io, ride);
 }
 
@@ -846,14 +877,15 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
       pendingOfferByDriverId.delete(fixedDriverId);
       live.currentOfferDriverId = null;
       live.offerExpiresAt = null;
+      commitPackRide(live);
       void offerNextDriver(io, live, rider);
     }, ttlMs + 150);
+    commitPackRide(ride);
     return;
   }
 
   // No finalizamos la búsqueda solo porque no hay drivers "en este instante".
-  // El ride seguirá en `searching` hasta el TTL; cuando un driver se conecte (presence),
-  // se ejecutará `offerNextDriver` y se retomarán las ofertas.
+  commitPackRide(ride);
 }
 
 export function registerPackMobilitySocket(io: SocketIOServer) {
@@ -1028,6 +1060,73 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
   });
 }
 
+/** Restaura envíos delivery activos desde Firestore tras reinicio (Render). */
+export async function hydratePackMobilityRidesFromFirestore(): Promise<number> {
+  const { loadAllActiveMobilityRides } = await import("./mobility-active-rides-store");
+  const all = await loadAllActiveMobilityRides();
+  let count = 0;
+  for (const row of all) {
+    if (row.module !== "pack") continue;
+    const ride = row.ride as RideRecord;
+    rides.set(ride.id, ride);
+    count += 1;
+    if (
+      ride.status === "searching" &&
+      !ride.isNegotiated &&
+      ride.currentOfferDriverId &&
+      typeof ride.offerExpiresAt === "number"
+    ) {
+      pendingOfferByDriverId.set(ride.currentOfferDriverId, {
+        rideId: ride.id,
+        expiresAt: ride.offerExpiresAt,
+        module: "pack",
+      });
+    }
+  }
+
+  const io = getIO();
+  if (!io || count === 0) return count;
+
+  for (const ride of rides.values()) {
+    if (ride.status !== "searching" || ride.isNegotiated) continue;
+    const rider = await buildRiderPublic(ride.riderUserId);
+    if (ride.currentOfferDriverId && ride.offerExpiresAt) {
+      const remaining = ride.offerExpiresAt - Date.now();
+      if (remaining > 800) {
+        const fixedDriverId = ride.currentOfferDriverId;
+        const timers = rideTimers.get(ride.id) ?? { offerTimeoutId: null, expireTimeoutId: null };
+        rideTimers.set(ride.id, timers);
+        if (timers.offerTimeoutId) clearTimeout(timers.offerTimeoutId);
+        timers.offerTimeoutId = setTimeout(() => {
+          const live = rides.get(ride.id);
+          if (!live || live.status !== "searching") return;
+          if (live.currentOfferDriverId !== fixedDriverId) return;
+          live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
+          live.declinedAtByDriverId[fixedDriverId] = Date.now();
+          io.to(`user:${fixedDriverId}`).emit("pack:ride:offer_expired", { rideId: live.id });
+          pendingOfferByDriverId.delete(fixedDriverId);
+          live.currentOfferDriverId = null;
+          live.offerExpiresAt = null;
+          commitPackRide(live);
+          void offerNextDriver(io, live, rider);
+        }, remaining + 150);
+        continue;
+      }
+      ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
+      ride.declinedAtByDriverId[ride.currentOfferDriverId] = Date.now();
+      pendingOfferByDriverId.delete(ride.currentOfferDriverId);
+      ride.currentOfferDriverId = null;
+      ride.offerExpiresAt = null;
+      commitPackRide(ride);
+    }
+    if (!ride.currentOfferDriverId) {
+      await offerNextDriver(io, ride, rider);
+    }
+  }
+
+  return count;
+}
+
 export function registerPackRideRoutes(app: Express) {
   void runMobilityRideChatStartupSweep(genFebStorage);
 
@@ -1036,15 +1135,29 @@ export function registerPackRideRoutes(app: Express) {
     try {
       const driverUserId = req.user?.id as string;
       if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
-      const p = pendingOfferByDriverId.get(driverUserId);
-      if (!p) return res.json({ offer: null });
-      if (Date.now() > p.expiresAt) {
-        pendingOfferByDriverId.delete(driverUserId);
-        return res.json({ offer: null });
+      let p = pendingOfferByDriverId.get(driverUserId);
+      let ride: RideRecord | undefined;
+      if (p) {
+        if (Date.now() > p.expiresAt) {
+          pendingOfferByDriverId.delete(driverUserId);
+          p = undefined;
+        } else {
+          ride = await ensurePackRideInMemory(p.rideId);
+        }
       }
-      const ride = rides.get(p.rideId);
+      if (!ride) {
+        const fromStore = await findActiveClassicOfferForDriver("pack", driverUserId);
+        if (fromStore) {
+          ride = fromStore as RideRecord;
+          rides.set(ride.id, ride);
+          if (typeof ride.offerExpiresAt === "number") {
+            p = { rideId: ride.id, expiresAt: ride.offerExpiresAt, module: "pack" };
+            pendingOfferByDriverId.set(driverUserId, p);
+          }
+        }
+      }
       if (!ride || ride.status !== "searching") {
-        pendingOfferByDriverId.delete(driverUserId);
+        if (p) pendingOfferByDriverId.delete(driverUserId);
         return res.json({ offer: null });
       }
       const classic = ride.currentOfferDriverId === driverUserId;
@@ -1057,7 +1170,9 @@ export function registerPackRideRoutes(app: Express) {
         return res.json({ offer: null });
       }
       const rider = await buildRiderPublic(ride.riderUserId);
-      const expiresAt = ride.isNegotiated ? ride.negotiationExpiresAt ?? p.expiresAt : ride.offerExpiresAt;
+      const expiresAt = ride.isNegotiated
+        ? ride.negotiationExpiresAt ?? p?.expiresAt ?? ride.offerExpiresAt
+        : ride.offerExpiresAt;
       return res.json({
         offer: {
           rideId: ride.id,
@@ -1288,7 +1403,7 @@ export function registerPackRideRoutes(app: Express) {
         offerExpiresAt: null,
         declinedAtByDriverId: {},
       };
-      rides.set(id, ride);
+      commitPackRide(ride);
 
       const timers = { offerTimeoutId: null, expireTimeoutId: null };
       rideTimers.set(id, timers);
@@ -1428,6 +1543,7 @@ export function registerPackRideRoutes(app: Express) {
       ride.offeredDriverIds = ride.offeredDriverIds.filter((id) => id !== driverUserId);
       const p = pendingOfferByDriverId.get(driverUserId);
       if (p?.rideId === ride.id) pendingOfferByDriverId.delete(driverUserId);
+      commitPackRide(ride);
       res.json({ ok: true });
     } catch (e: any) {
       console.error("[pack] negotiation decline-invite", e);
@@ -1467,6 +1583,7 @@ export function registerPackRideRoutes(app: Express) {
       ride.isNegotiated = true;
       ride.paymentConfirmed = false;
       clearRideTimers(ride.id);
+      commitPackRide(ride);
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
@@ -1601,6 +1718,7 @@ export function registerPackRideRoutes(app: Express) {
       ride.offerExpiresAt = null;
       clearRideTimers(ride.id);
       pendingOfferByDriverId.delete(driverUserId);
+      commitPackRide(ride);
 
       withdrawDriverNegotiationOffersEverywhere(io, driverUserId, rideId);
 
@@ -1777,6 +1895,7 @@ export function registerPackRideRoutes(app: Express) {
       ride.marketVisibleUntil = undefined;
       ride.counterOffers = undefined;
       clearRideTimers(ride.id);
+      commitPackRide(ride);
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
@@ -1864,6 +1983,7 @@ export function registerPackRideRoutes(app: Express) {
       if (ride.driverUserId !== driverUserId) return res.status(403).json({ message: "Sin acceso" });
       if (ride.status !== "matched") return res.status(409).json({ message: "Estado inválido" });
       ride.status = "in_progress";
+      commitPackRide(ride);
       const io = getIO();
       io?.to(`user:${ride.riderUserId}`).emit("pack:ride:started", { rideId });
       io?.to(`user:${driverUserId}`).emit("pack:ride:started", { rideId });
@@ -1967,6 +2087,7 @@ export function registerPackRideRoutes(app: Express) {
 
       ride.status = "expired";
       void persistMobilityRideToHistory(ride, "pack", "completed");
+      dropPackActiveRide(ride.id);
       void bumpGoUserCompletedTrips(ride.riderUserId);
       void bumpGoUserCompletedTrips(driverUserId);
       const io = getIO();
@@ -2028,6 +2149,7 @@ export function registerPackRideRoutes(app: Express) {
         }
         void persistMobilityRideToHistory(ride, "pack", "cancelled", { cancelledBy });
       }
+      dropPackActiveRide(ride.id);
 
       if (ride.conversationId != null && ride.driverUserId != null) {
         try {

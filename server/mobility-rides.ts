@@ -38,6 +38,13 @@ import { normalizeDispatchCompanyId } from "@shared/dispatch-company";
 import { toCentralActiveServiceForPanel } from "@shared/central-active-service-for-central";
 import { emitCentralFleetUpdate, CENTRAL_FLEET_IN_SERVICE_RECEIVING } from "./central-fleet-notify";
 import { persistMobilityRideToHistory } from "./mobility-ride-archive-helper";
+import {
+  deleteActiveMobilityRide,
+  findActiveClassicOfferForDriver,
+  loadActiveMobilityRideById,
+  persistActiveMobilityRide,
+  type ActiveMobilityRidePayload,
+} from "./mobility-active-rides-store";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
   ensureMobilityRideConversation,
@@ -207,6 +214,25 @@ const pendingOfferByDriverId = new Map<
   string,
   { rideId: string; expiresAt: number; module: "cargo" }
 >();
+
+function commitCargoRide(ride: RideRecord): void {
+  rides.set(ride.id, ride);
+  void persistActiveMobilityRide("cargo", ride as unknown as ActiveMobilityRidePayload);
+}
+
+function dropCargoActiveRide(rideId: string): void {
+  void deleteActiveMobilityRide(rideId);
+}
+
+async function ensureCargoRideInMemory(rideId: string): Promise<RideRecord | undefined> {
+  const cached = rides.get(rideId);
+  if (cached) return cached;
+  const loaded = await loadActiveMobilityRideById(rideId);
+  if (!loaded || loaded.module !== "cargo") return undefined;
+  const ride = loaded.ride as RideRecord;
+  rides.set(ride.id, ride);
+  return ride;
+}
 
 /** Conductores en línea (recibiendo) con posición reciente. */
 type DriverPresence = {
@@ -392,12 +418,14 @@ function releaseClassicOfferFromDriver(rideId: string, ride: RideRecord, driverU
     clearTimeout(timers.offerTimeoutId);
     timers.offerTimeoutId = null;
   }
+  commitCargoRide(ride);
 }
 
 function emitRideFailed(io: SocketIOServer, ride: RideRecord, reason: "timeout" | "no_driver") {
   ride.status = "expired";
   clearRideTimers(ride.id);
   void persistMobilityRideToHistory(ride, "cargo", "expired", { failReason: reason });
+  dropCargoActiveRide(ride.id);
   io.to(`user:${ride.riderUserId}`).emit("cargo:ride:failed", { rideId: ride.id, reason });
 }
 
@@ -466,6 +494,7 @@ async function offerNextDriver(
   if (driverId == null) {
     // No matamos la búsqueda solo porque "por ahora" no hay conductores disponibles.
     // El ride seguirá en `searching` hasta el TTL, y la presencia de nuevos drivers disparará nuevas ofertas.
+    commitCargoRide(ride);
     return;
   }
 
@@ -520,8 +549,10 @@ async function offerNextDriver(
     pendingOfferByDriverId.delete(fixedDriverId);
     live.currentOfferDriverId = null;
     live.offerExpiresAt = null;
+    commitCargoRide(live);
     void offerNextDriver(io, live, rider);
   }, offerTtlMs + 150);
+  commitCargoRide(ride);
 }
 
 function safeNumber(v: unknown, fallback = 0): number {
@@ -628,6 +659,7 @@ function emitNegotiationOffersUpdated(io: SocketIOServer, ride: RideRecord) {
     /** Oferta publicada por el pasajero (referencia en UI de regateo). */
     riderOfferUsd: ride.estimatedUsd,
   });
+  commitCargoRide(ride);
 }
 
 /** Quita al conductor de las listas de regateo de otros viajes (mismo módulo). */
@@ -657,6 +689,7 @@ registerMobilityNegotiationWithdraw(withdrawDriverMobilityNegotiationOffersElsew
 /** Regateo: ventana de ofertas + aviso al pasajero. Los conductores ven solicitudes en GET /negotiation-board (no modal ni marketplace). */
 function broadcastNegotiationInvites(io: SocketIOServer, ride: RideRecord, _rider: Awaited<ReturnType<typeof buildRiderPublic>>) {
   ride.negotiationExpiresAt = Date.now() + GO_NEGOTIATION_OFFER_WINDOW_MS;
+  commitCargoRide(ride);
   emitNegotiationOffersUpdated(io, ride);
 }
 
@@ -763,15 +796,29 @@ export function registerMobilityRideRoutes(app: Express) {
     try {
       const driverUserId = req.user?.id as string;
       if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
-      const p = pendingOfferByDriverId.get(driverUserId);
-      if (!p) return res.json({ offer: null });
-      if (Date.now() > p.expiresAt) {
-        pendingOfferByDriverId.delete(driverUserId);
-        return res.json({ offer: null });
+      let p = pendingOfferByDriverId.get(driverUserId);
+      let ride: RideRecord | undefined;
+      if (p) {
+        if (Date.now() > p.expiresAt) {
+          pendingOfferByDriverId.delete(driverUserId);
+          p = undefined;
+        } else {
+          ride = await ensureCargoRideInMemory(p.rideId);
+        }
       }
-      const ride = rides.get(p.rideId);
+      if (!ride) {
+        const fromStore = await findActiveClassicOfferForDriver("cargo", driverUserId);
+        if (fromStore) {
+          ride = fromStore as RideRecord;
+          rides.set(ride.id, ride);
+          if (typeof ride.offerExpiresAt === "number") {
+            p = { rideId: ride.id, expiresAt: ride.offerExpiresAt, module: "cargo" };
+            pendingOfferByDriverId.set(driverUserId, p);
+          }
+        }
+      }
       if (!ride || ride.status !== "searching") {
-        pendingOfferByDriverId.delete(driverUserId);
+        if (p) pendingOfferByDriverId.delete(driverUserId);
         return res.json({ offer: null });
       }
       const classic = ride.currentOfferDriverId === driverUserId;
@@ -784,7 +831,9 @@ export function registerMobilityRideRoutes(app: Express) {
         return res.json({ offer: null });
       }
       const rider = await buildRiderPublic(ride.riderUserId);
-      const expiresAt = ride.isNegotiated ? ride.negotiationExpiresAt ?? p.expiresAt : ride.offerExpiresAt;
+      const expiresAt = ride.isNegotiated
+        ? ride.negotiationExpiresAt ?? p?.expiresAt ?? ride.offerExpiresAt
+        : ride.offerExpiresAt;
       return res.json({
         offer: {
           rideId: ride.id,
@@ -1040,6 +1089,7 @@ export function registerMobilityRideRoutes(app: Express) {
         declinedAtByDriverId: {},
       };
       rides.set(id, ride);
+      commitCargoRide(ride);
 
       const rider = await buildRiderPublic(riderUserId);
       const io = getIO();
@@ -1187,6 +1237,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.offeredDriverIds = ride.offeredDriverIds.filter((id) => id !== driverUserId);
       const p = pendingOfferByDriverId.get(driverUserId);
       if (p?.rideId === ride.id) pendingOfferByDriverId.delete(driverUserId);
+      commitCargoRide(ride);
       res.json({ ok: true });
     } catch (e: any) {
       console.error("[mobility] negotiation decline-invite", e);
@@ -1227,6 +1278,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.paymentConfirmed = false;
       await applyDriverFareToRide(ride, driverId, "taxi");
       clearRideTimers(ride.id);
+      commitCargoRide(ride);
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
@@ -1304,7 +1356,8 @@ export function registerMobilityRideRoutes(app: Express) {
       }
       const rideId = req.params.rideId as string;
       const accept = !!req.body?.accept;
-      const ride = rides.get(rideId);
+      let ride = rides.get(rideId);
+      if (!ride) ride = await ensureCargoRideInMemory(rideId);
       if (!ride) {
         if (!accept) {
           pendingOfferByDriverId.delete(driverUserId);
@@ -1363,6 +1416,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.offerExpiresAt = null;
       clearRideTimers(ride.id);
       pendingOfferByDriverId.delete(driverUserId);
+      commitCargoRide(ride);
 
       withdrawDriverNegotiationOffersEverywhere(io, driverUserId, rideId);
 
@@ -1543,6 +1597,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.marketVisibleUntil = undefined;
       ride.counterOffers = undefined;
       clearRideTimers(ride.id);
+      commitCargoRide(ride);
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
@@ -1623,6 +1678,7 @@ export function registerMobilityRideRoutes(app: Express) {
       const cancelledBy: "rider" | "driver" = isDriver ? "driver" : "rider";
       emitRideCancelled(io, ride, cancelledBy, prevStatus);
       archiveCargoRideCancelled(ride, cancelledBy);
+      dropCargoActiveRide(ride.id);
 
       if (ride.conversationId != null && ride.driverUserId != null) {
         try {
@@ -1657,6 +1713,7 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
 
       ride.status = "in_progress";
+      commitCargoRide(ride);
       if (ride.conversationId != null) {
         try {
           await onMobilityRideChatStarted(genFebStorage, ride.conversationId);
@@ -1776,6 +1833,7 @@ export function registerMobilityRideRoutes(app: Express) {
 
       ride.status = "expired";
       void persistMobilityRideToHistory(ride, "cargo", "completed");
+      dropCargoActiveRide(ride.id);
       void bumpGoUserCompletedTrips(ride.riderUserId);
       void bumpGoUserCompletedTrips(driverUserId);
       io.to(`user:${ride.riderUserId}`).emit("cargo:ride:completed", { rideId });
@@ -1851,7 +1909,9 @@ export function registerMobilityRideRoutes(app: Express) {
   app.get("/api/mobility/rides/:rideId", authenticateJWT, async (req: any, res) => {
     try {
       const uid = req.user?.id as string;
-      const ride = rides.get(req.params.rideId as string);
+      const rideId = req.params.rideId as string;
+      let ride = rides.get(rideId);
+      if (!ride) ride = await ensureCargoRideInMemory(rideId);
       if (!ride) return res.status(404).json({ message: "No encontrado" });
       if (ride.riderUserId !== uid && ride.driverUserId !== uid) {
         return res.status(403).json({ message: "Sin acceso" });
@@ -1887,6 +1947,72 @@ export function registerMobilityRideRoutes(app: Express) {
       res.status(500).json({ message: e?.message ?? "Error" });
     }
   });
+}
+
+/** Restaura viajes taxi activos desde Firestore tras reinicio (Render). */
+export async function hydrateCargoMobilityRidesFromFirestore(): Promise<number> {
+  const { loadAllActiveMobilityRides } = await import("./mobility-active-rides-store");
+  const all = await loadAllActiveMobilityRides();
+  let count = 0;
+  for (const row of all) {
+    if (row.module !== "cargo") continue;
+    const ride = row.ride as RideRecord;
+    rides.set(ride.id, ride);
+    count += 1;
+    if (
+      ride.status === "searching" &&
+      !ride.isNegotiated &&
+      ride.currentOfferDriverId &&
+      typeof ride.offerExpiresAt === "number"
+    ) {
+      pendingOfferByDriverId.set(ride.currentOfferDriverId, {
+        rideId: ride.id,
+        expiresAt: ride.offerExpiresAt,
+        module: "cargo",
+      });
+    }
+  }
+
+  const io = getIO();
+  if (!io || count === 0) return count;
+
+  for (const ride of rides.values()) {
+    if (ride.status !== "searching" || ride.isNegotiated) continue;
+    const rider = await buildRiderPublic(ride.riderUserId);
+    if (ride.currentOfferDriverId && ride.offerExpiresAt) {
+      const remaining = ride.offerExpiresAt - Date.now();
+      if (remaining > 800) {
+        const fixedDriverId = ride.currentOfferDriverId;
+        const timers = ensureRideTimers(ride.id);
+        if (timers.offerTimeoutId) clearTimeout(timers.offerTimeoutId);
+        timers.offerTimeoutId = setTimeout(() => {
+          const live = rides.get(ride.id);
+          if (!live || live.status !== "searching") return;
+          if (live.currentOfferDriverId !== fixedDriverId) return;
+          live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
+          live.declinedAtByDriverId[fixedDriverId] = Date.now();
+          io.to(`user:${fixedDriverId}`).emit("cargo:ride:offer_expired", { rideId: live.id });
+          pendingOfferByDriverId.delete(fixedDriverId);
+          live.currentOfferDriverId = null;
+          live.offerExpiresAt = null;
+          commitCargoRide(live);
+          void offerNextDriver(io, live, rider);
+        }, remaining + 150);
+        continue;
+      }
+      ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
+      ride.declinedAtByDriverId[ride.currentOfferDriverId] = Date.now();
+      pendingOfferByDriverId.delete(ride.currentOfferDriverId);
+      ride.currentOfferDriverId = null;
+      ride.offerExpiresAt = null;
+      commitCargoRide(ride);
+    }
+    if (!ride.currentOfferDriverId) {
+      await offerNextDriver(io, ride, rider);
+    }
+  }
+
+  return count;
 }
 
 export function registerCargoMobilitySocket(io: SocketIOServer) {
