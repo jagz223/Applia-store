@@ -97,6 +97,8 @@ app.use((req, res, next) => {
     }
     const projectId = process.env.FIREBASE_PROJECT_ID || "(no set)";
     log(`Firestore en uso: proyecto "${projectId}" (cuenta: ${process.env.FIREBASE_CLIENT_EMAIL || "?"})`);
+    const { bootstrapActiveMobilityRidesFromFirestore } = await import("./mobility-active-rides-boot");
+    await bootstrapActiveMobilityRidesFromFirestore();
     const { startPublicPromotionalCodeNotificationScheduler } = await import("./public-promotional-code-notify");
     startPublicPromotionalCodeNotificationScheduler();
   } else {
