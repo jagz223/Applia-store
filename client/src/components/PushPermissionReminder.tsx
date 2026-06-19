@@ -3,28 +3,47 @@ import { BellRing, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 
+function isIosSafari(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /iphone|ipad|ipod/i.test(ua) && !(window as unknown as { MSStream?: unknown }).MSStream;
+}
+
+function isStandalonePwa(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+}
+
 export function PushPermissionReminder({ className }: { className?: string }) {
   const push = usePushNotifications();
   const [dismissed, setDismissed] = useState(false);
+
+  const iosNeedsInstall = isIosSafari() && !isStandalonePwa();
 
   const shouldShow = useMemo(() => {
     if (dismissed) return false;
     if (!push.isSupported) return false;
     if (push.permission === "unsupported") return false;
-    // Si ya están activas y con token, no molestar.
     if (push.permission === "granted" && push.token) return false;
-    // Si el usuario las bloqueó, igual recordamos (solo informativo).
-    return push.permission !== "granted";
-  }, [dismissed, push.isSupported, push.permission, push.token]);
+    return push.permission !== "granted" || iosNeedsInstall;
+  }, [dismissed, push.isSupported, push.permission, push.token, iosNeedsInstall]);
 
-  // Reset del “dismiss” si el usuario cambia manualmente permisos y vuelve.
   useEffect(() => {
-    if (push.permission === "granted" && push.token) setDismissed(true);
-  }, [push.permission, push.token]);
+    if (push.permission === "granted" && push.token && !iosNeedsInstall) setDismissed(true);
+  }, [push.permission, push.token, iosNeedsInstall]);
 
   if (!shouldShow) return null;
 
   const blocked = push.permission === "denied";
+
+  const description = iosNeedsInstall
+    ? "En iPhone, toca Compartir → «Añadir a pantalla de inicio» e instala Genfeb. Luego activa las notificaciones para recibir avisos."
+    : blocked
+      ? "Las notificaciones están bloqueadas. Actívalas en la configuración del navegador para no perder servicios."
+      : "Recibe avisos aunque cierres la app (servicios, mensajes y alertas importantes).";
 
   return (
     <div
@@ -40,21 +59,19 @@ export function PushPermissionReminder({ className }: { className?: string }) {
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-foreground">Activa las notificaciones</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {blocked
-            ? "Las notificaciones están bloqueadas. Actívalas en la configuración del navegador para no perder servicios."
-            : "Recibe avisos aunque cierres la app (servicios, mensajes y alertas importantes)."}
-        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
         <div className="mt-2 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            className="h-8"
-            onClick={() => push.register()}
-            disabled={blocked || push.isRegistering}
-          >
-            {blocked ? "Bloqueadas" : push.isRegistering ? "Activando…" : "Activar ahora"}
-          </Button>
+          {!iosNeedsInstall && (
+            <Button
+              type="button"
+              size="sm"
+              className="h-8"
+              onClick={() => push.register()}
+              disabled={blocked || push.isRegistering}
+            >
+              {blocked ? "Bloqueadas" : push.isRegistering ? "Activando…" : "Activar ahora"}
+            </Button>
+          )}
           <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setDismissed(true)}>
             Más tarde
           </Button>
@@ -73,4 +90,3 @@ export function PushPermissionReminder({ className }: { className?: string }) {
     </div>
   );
 }
-

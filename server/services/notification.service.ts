@@ -37,7 +37,12 @@ class NotificationService {
       .get();
 
     if (!existing.empty) {
-      console.log("[push] Token ya registrado para usuario:", uid);
+      const doc = existing.docs[0];
+      await doc.ref.update({
+        platform: platform || "unknown",
+        updatedAt: new Date(),
+      });
+      console.log("[push] Token ya registrado, actualizado para usuario:", uid);
       return;
     }
 

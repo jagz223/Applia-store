@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
 import { getMessagingIfSupported } from "@/lib/firebase-client";
+import { parseFcmNotificationPayload, showSystemNotification } from "@/lib/fcm-notification-payload";
 import { useAuth } from "@/hooks/use-auth";
 
 /**
- * Suscribe a mensajes FCM en primer plano.
- * En primer plano no mostramos toast ni notificación extra: Socket.IO ya actualiza
- * la campanita, así evitamos duplicar (1 mensaje = 1 notificación en la campana).
- * El push en segundo plano lo maneja el Service Worker.
+ * Mensajes FCM en primer plano.
+ * - Pestaña visible: solo campana (Socket.IO); no duplicamos toast.
+ * - Pestaña en segundo plano / minimizada: notificación del sistema (útil en móvil).
  */
 export function PushForegroundHandler() {
   const { isAuthenticated } = useAuth();
@@ -24,8 +24,12 @@ export function PushForegroundHandler() {
 
         const { onMessage } = await import("firebase/messaging");
         const unsubscribe = onMessage(messaging, (payload) => {
-          const t = payload.data?.type;
-          if (t === "go_panic") {
+          const parsed = parseFcmNotificationPayload({
+            notification: payload.notification,
+            data: payload.data as Record<string, string | undefined> | undefined,
+          });
+
+          if (parsed.isPanic) {
             try {
               const Ctx =
                 window.AudioContext ||
@@ -60,10 +64,14 @@ export function PushForegroundHandler() {
               /* ignore */
             }
           }
+
+          if (document.hidden) {
+            void showSystemNotification(parsed);
+          }
         });
         unsubRef.current = unsubscribe;
       } catch {
-        // Silently ignore if messaging not supported or onMessage fails
+        /* messaging no disponible */
       }
     })();
 
