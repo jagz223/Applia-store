@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { ExternalLink, ImageIcon, Loader2, MapPin, Package, Truck } from "lucide-react";
 import {
@@ -367,6 +367,12 @@ export function StoreAdminOrdersPanel({
   const [dateFromFilter, setDateFromFilter] = useState("");
   const [dateToFilter, setDateToFilter] = useState("");
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const onCloseOrderDetail = () => setSelectedOrderId(null);
+    window.addEventListener("store-admin:close-order-detail", onCloseOrderDetail);
+    return () => window.removeEventListener("store-admin:close-order-detail", onCloseOrderDetail);
+  }, []);
 
   const filters = useMemo(
     () => ({

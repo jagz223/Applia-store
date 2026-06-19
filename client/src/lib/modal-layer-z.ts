@@ -19,6 +19,12 @@ export const MODAL_Z_DIALOG_ELEVATED_SHELL = "z-[2147483200]";
 /** AlertDialog con ModalPortalShell. */
 export const MODAL_Z_ALERT_SHELL = "z-[2147483000]";
 
+/**
+ * Modales obligatorios (calificación post-servicio, etc.) por encima de `elevated`
+ * (p. ej. detalle de orden en admin tienda).
+ */
+export const MODAL_Z_DIALOG_PRIORITY_SHELL = "z-[2147483400]";
+
 /** Contenido dentro de ModalPortalShell (overlay absolute en el mismo shell). */
 export const MODAL_CONTENT_ABOVE_OVERLAY = "relative z-10 pointer-events-auto";
 
