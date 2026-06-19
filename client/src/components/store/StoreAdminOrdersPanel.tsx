@@ -369,6 +369,15 @@ export function StoreAdminOrdersPanel({
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("orderId");
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      setSelectedOrderId(parsed);
+    }
+  }, []);
+
+  useEffect(() => {
     const onCloseOrderDetail = () => setSelectedOrderId(null);
     window.addEventListener("store-admin:close-order-detail", onCloseOrderDetail);
     return () => window.removeEventListener("store-admin:close-order-detail", onCloseOrderDetail);

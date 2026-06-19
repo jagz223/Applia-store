@@ -7,8 +7,7 @@ import {
   type StoreOrderStatus,
 } from "@shared/store-order-schema";
 import { useAuth } from "@/hooks/use-auth";
-import { useMyStoreOrderDetail, useMyStoreOrders } from "@/hooks/use-store-orders";
-import { useSocket } from "@/hooks/use-socket";
+import { useMyStoreOrderDetail, useMyStoreOrders, useMyStoreOrdersLiveSync } from "@/hooks/use-store-orders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -199,7 +198,6 @@ function MyOrderDetailContent({ orderId }: { orderId: number }) {
 export default function MyStoreOrders() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const searchQs = useSearch();
-  const { socket } = useSocket();
   const [statusFilter, setStatusFilter] = useState("all");
   const [orderIdFilter, setOrderIdFilter] = useState("");
   const [storeFilter, setStoreFilter] = useState("all");
@@ -223,6 +221,8 @@ export default function MyStoreOrders() {
     isAuthenticated,
   );
 
+  useMyStoreOrdersLiveSync(isAuthenticated);
+
   useEffect(() => {
     const orderIdRaw = new URLSearchParams(searchQs || "").get("orderId");
     const parsed = orderIdRaw ? Number.parseInt(orderIdRaw, 10) : NaN;
@@ -230,17 +230,6 @@ export default function MyStoreOrders() {
       setSelectedOrderId(parsed);
     }
   }, [searchQs]);
-
-  useEffect(() => {
-    if (!socket) return;
-    const handler = () => {
-      void refetch();
-    };
-    socket.on("store:order:customer:updated", handler);
-    return () => {
-      socket.off("store:order:customer:updated", handler);
-    };
-  }, [socket, refetch]);
 
   const storeOptions = useMemo(() => {
     const map = new Map<number, string>();

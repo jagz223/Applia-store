@@ -17,6 +17,12 @@ import { buildStoreSubscriptionReportDescription } from "./subscription-invoice-
 import type { Store } from "@shared/store-schema";
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { parseVisibilitySubscriptionEndMs } from "@shared/professional-listing-subscription";
+import {
+  buildAdminStoreSubscriptionPendingNotification,
+  buildStoreSubscriptionApprovedNotification,
+  buildStoreSubscriptionRejectedNotification,
+  storePushDataStrings,
+} from "@shared/store-notification-copy";
 
 function storePaymentKey(receipt: string, transferDate: string, months: number): string {
   return `${receipt.trim()}|${transferDate.trim()}|${months}`;
@@ -74,25 +80,38 @@ export async function submitStoreSubscriptionPayment(args: {
       u != null
         ? [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.email || args.userId
         : args.userId;
-    const msg = `${name} envió comprobante de mensualidad para la tienda «${store.name}».`;
+    const adminCopy = buildAdminStoreSubscriptionPendingNotification({
+      storeName: store.name,
+      ownerName: name,
+    });
     for (const admin of admins) {
       const adminId = String(admin.id);
       await genFebStorage.createNotification({
         userId: adminId,
         type: "admin_store_subscription_payment",
         data: {
-          message: msg,
-          url: "/admin?tab=store-payments",
+          title: adminCopy.title,
+          body: adminCopy.body,
+          message: adminCopy.body,
+          url: adminCopy.url,
           storeId: args.storeId,
+          storeName: store.name,
           reportId: report.id,
         },
       });
       const io = getIO();
       io?.to(`user:${adminId}`).emit("notification", {
         type: "admin_store_subscription_payment",
-        title: "Pago de tienda pendiente",
-        body: msg,
-        data: { url: "/admin?tab=store-payments", storeId: args.storeId, reportId: report.id },
+        title: adminCopy.title,
+        body: adminCopy.body,
+        data: {
+          title: adminCopy.title,
+          body: adminCopy.body,
+          url: adminCopy.url,
+          storeId: args.storeId,
+          storeName: store.name,
+          reportId: report.id,
+        },
       });
     }
   } catch (err) {
@@ -205,15 +224,21 @@ export async function reviewStoreSubscriptionPayment(args: {
       }
     }
 
-    const msg = "Tu comprobante de pago de tienda ha sido verificado correctamente.";
+    const copy = buildStoreSubscriptionApprovedNotification({
+      storeName: store.name,
+      storeSlug: store.slug,
+    });
     const notifyData = {
       status: "approved",
-      message: msg,
-      url: `/tienda/${store.slug}`,
+      message: copy.body,
+      title: copy.title,
+      body: copy.body,
+      url: copy.url,
       storeId,
       storeSlug: store.slug,
+      storeName: store.name,
     };
-    await notifyStorePaymentResult(userId, "Pago de tienda verificado", msg, notifyData);
+    await notifyStorePaymentResult(userId, copy.title, copy.body, notifyData);
     return { ok: true, store: updatedStore };
   }
 
@@ -222,17 +247,24 @@ export async function reviewStoreSubscriptionPayment(args: {
 
   await genFebStorage.updateFinancialReportStatus(args.reportId, "rejected");
 
-  const msg = `Tu comprobante de pago de tienda fue rechazado. Motivo: ${rejectReason}`;
+  const copy = buildStoreSubscriptionRejectedNotification({
+    storeName: store.name,
+    storeSlug: store.slug,
+    rejectReason,
+  });
   const notifyData = {
     status: "rejected",
-    message: msg,
-    url: `/tienda/${store.slug}/pago`,
+    message: copy.body,
+    title: copy.title,
+    body: copy.body,
+    url: copy.url,
     chatUrl: "/chat?support=1",
     storeId,
     storeSlug: store.slug,
+    storeName: store.name,
     rejectReason,
   };
-  await notifyStorePaymentResult(userId, "Pago de tienda rechazado", msg, notifyData);
+  await notifyStorePaymentResult(userId, copy.title, copy.body, notifyData);
   return { ok: true };
 }
 
@@ -259,9 +291,7 @@ async function notifyStorePaymentResult(
     .sendPushToUser(userId, {
       title,
       body,
-      data: Object.fromEntries(
-        Object.entries(data).map(([k, v]) => [k, v == null ? "" : String(v)]),
-      ),
+      data: storePushDataStrings("store_subscription_result", data),
     })
     .catch((err) => console.error("[store-subscription] push:", err));
 }

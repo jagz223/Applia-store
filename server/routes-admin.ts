@@ -1978,6 +1978,7 @@ export function registerAdminRoutes(app: Express): void {
     email: z.string().email().optional(),
     phone: z.string().trim().max(50).optional().nullable(),
     role: z.string().trim().min(1).max(50).optional(),
+    newPassword: z.string().min(6).max(100).optional(),
   });
 
   const adminProviderDetailProviderPatchSchema = z.object({
@@ -2237,6 +2238,10 @@ export function registerAdminRoutes(app: Express): void {
         if (Object.keys(userPatch).length > 0) await userService.updateUser(userId, userPatch);
         if (roleChanged && body.user.role !== undefined) {
           await applyRoleChangeSideEffects(userId, previousRole, body.user.role);
+        }
+        if (body.user.newPassword) {
+          const hashed = await bcrypt.hash(body.user.newPassword, 10);
+          await genFebStorage.updateUserPassword(userId, hashed);
         }
       }
 

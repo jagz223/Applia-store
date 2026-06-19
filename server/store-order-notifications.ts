@@ -1,6 +1,10 @@
 import { STORE_ORDER_STATUS_LABELS, type StoreOrder } from "@shared/store-order-schema";
-import { storeAdminSectionPath } from "@shared/store-admin-sections";
 import type { Store } from "@shared/store-schema";
+import {
+  buildStoreOrderNewNotification,
+  buildStoreOrderStatusNotification,
+  storePushDataStrings,
+} from "@shared/store-notification-copy";
 import { genFebStorage } from "./storage-genfeb";
 import { getIO, sendNotificationToUser } from "./socket";
 import { notificationService } from "./services/notification.service";
@@ -17,19 +21,25 @@ export async function notifyStoreOwnerNewOrder(order: StoreOrder, store: Store):
   if (!ownerUserId) return;
 
   const customer = await genFebStorage.getUserById(order.userId);
-  const customerRec = (customer ?? undefined) as Record<string, unknown> | undefined;
-  const customerName = customerDisplayName(customerRec);
-  const adminUrl = `/tienda/${encodeURIComponent(store.slug)}/admin/${storeAdminSectionPath("ordenes")}`;
-
-  const title = "Nueva orden";
-  const body = `${customerName} realizó la orden #${order.id} · ${formatMoney(order.amountDue)}`;
-
-  const data = {
-    storeId: order.storeId,
+  const customerName = customerDisplayName((customer ?? undefined) as Record<string, unknown> | undefined);
+  const copy = buildStoreOrderNewNotification({
+    storeName: store.name,
+    storeSlug: store.slug,
     orderId: order.id,
     customerName,
     amountDue: order.amountDue,
-    url: adminUrl,
+  });
+
+  const data = {
+    storeId: order.storeId,
+    storeSlug: store.slug,
+    storeName: store.name,
+    orderId: order.id,
+    customerName,
+    amountDue: order.amountDue,
+    title: copy.title,
+    body: copy.body,
+    url: copy.url,
   };
 
   await genFebStorage.createNotification({
@@ -49,9 +59,9 @@ export async function notifyStoreOwnerNewOrder(order: StoreOrder, store: Store):
 
   try {
     await notificationService.sendPushToUser(ownerUserId, {
-      title,
-      body,
-      data: { type: "store_order_new", storeId: String(order.storeId), orderId: String(order.id), url: adminUrl },
+      title: copy.title,
+      body: copy.body,
+      data: storePushDataStrings("store_order_new", data),
     });
   } catch {
     /* push opcional */
@@ -62,18 +72,23 @@ export async function notifyCustomerStoreOrderStatusChanged(order: StoreOrder, s
   const customerUserId = String(order.userId);
   if (!customerUserId) return;
 
-  const statusLabel = STORE_ORDER_STATUS_LABELS[order.status];
-  const title = `Pedido #${order.id} · ${store.name}`;
-  const body = `Tu orden ahora está: ${statusLabel}.`;
-  const url = `/pedidos-tienda?orderId=${order.id}`;
+  const copy = buildStoreOrderStatusNotification({
+    storeName: store.name,
+    storeSlug: store.slug,
+    orderId: order.id,
+    status: order.status,
+  });
 
   const data = {
     storeId: order.storeId,
-    orderId: order.id,
+    storeSlug: store.slug,
     storeName: store.name,
+    orderId: order.id,
     status: order.status,
-    statusLabel,
-    url,
+    statusLabel: copy.statusLabel,
+    title: copy.title,
+    body: copy.body,
+    url: copy.url,
   };
 
   await genFebStorage.createNotification({
@@ -93,20 +108,11 @@ export async function notifyCustomerStoreOrderStatusChanged(order: StoreOrder, s
 
   try {
     await notificationService.sendPushToUser(customerUserId, {
-      title,
-      body,
-      data: {
-        type: "store_order_status",
-        storeId: String(order.storeId),
-        orderId: String(order.id),
-        url,
-      },
+      title: copy.title,
+      body: copy.body,
+      data: storePushDataStrings("store_order_status", data),
     });
   } catch {
     /* push opcional */
   }
-}
-
-function formatMoney(value: number): string {
-  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
 }

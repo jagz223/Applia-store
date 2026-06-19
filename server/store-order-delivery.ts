@@ -3,6 +3,11 @@ import type { Store, StoreLocation } from "@shared/store-schema";
 import { genFebStorage } from "./storage-genfeb";
 import { getIO, sendNotificationToUser } from "./socket";
 import { notificationService } from "./services/notification.service";
+import {
+  buildStoreOrderDeliveryNotification,
+  storePushDataStrings,
+  type StoreOrderDeliveryEventType,
+} from "@shared/store-notification-copy";
 import { normalizeStoreLocation } from "@shared/store-schema";
 import {
   createPackRideForStoreOrder,
@@ -12,13 +17,7 @@ import {
 } from "./pack-rides";
 import { notifyCustomerStoreOrderStatusChanged } from "./store-order-notifications";
 
-export type StoreOrderDeliveryEventType =
-  | "search_started"
-  | "driver_accepted"
-  | "driver_started"
-  | "driver_cancelled"
-  | "driver_completed"
-  | "driver_message";
+export type { StoreOrderDeliveryEventType };
 
 async function getStoreOwnerUserId(storeId: number): Promise<string | null> {
   const store = await genFebStorage.getStoreById(storeId);
@@ -30,21 +29,34 @@ export async function notifyStoreOwnerDeliveryEvent(input: {
   orderId: number;
   ownerUserId: string;
   eventType: StoreOrderDeliveryEventType;
-  title: string;
-  body: string;
+  preview?: string;
   incrementUnread?: boolean;
   packRideId?: string | null;
 }): Promise<void> {
+  const store = await genFebStorage.getStoreById(input.storeId);
+  if (!store) return;
+
+  const copy = buildStoreOrderDeliveryNotification({
+    storeName: store.name,
+    storeSlug: store.slug,
+    orderId: input.orderId,
+    eventType: input.eventType,
+    preview: input.preview,
+  });
+
   if (input.incrementUnread !== false) {
     await genFebStorage.incrementStoreOrderDeliveryUnread(input.storeId, input.orderId);
   }
 
   const data = {
     storeId: input.storeId,
+    storeSlug: store.slug,
+    storeName: store.name,
     orderId: input.orderId,
     eventType: input.eventType,
-    title: input.title,
-    body: input.body,
+    title: copy.title,
+    body: copy.body,
+    url: copy.url,
     packRideId: input.packRideId ?? null,
   };
 
@@ -70,13 +82,9 @@ export async function notifyStoreOwnerDeliveryEvent(input: {
 
   try {
     await notificationService.sendPushToUser(input.ownerUserId, {
-      title: input.title,
-      body: input.body,
-      data: {
-        type: "store_order_delivery",
-        storeId: String(input.storeId),
-        orderId: String(input.orderId),
-      },
+      title: copy.title,
+      body: copy.body,
+      data: storePushDataStrings("store_order_delivery", data),
     });
   } catch {
     /* push opcional */
@@ -145,8 +153,6 @@ export async function launchStoreOrderDeliverySearch(
     orderId: order.id,
     ownerUserId,
     eventType: "search_started",
-    title: "Buscando conductor",
-    body: `Orden #${order.id}: se inició la búsqueda de delivery.`,
     incrementUnread: false,
     packRideId,
   });
@@ -215,8 +221,6 @@ export async function onStoreOrderPackRideMatched(ride: PackRideRecordSnapshot):
     orderId: ride.storeOrderId,
     ownerUserId,
     eventType: "driver_accepted",
-    title: "Conductor asignado",
-    body: `Orden #${ride.storeOrderId}: un conductor aceptó el delivery.`,
     packRideId: ride.id,
   });
 }
@@ -251,8 +255,6 @@ export async function onStoreOrderPackRideStarted(ride: PackRideRecordSnapshot):
     orderId: ride.storeOrderId,
     ownerUserId,
     eventType: "driver_started",
-    title: "Pedido en camino",
-    body: `Orden #${ride.storeOrderId}: el conductor inició el envío.`,
     packRideId: ride.id,
   });
 }
@@ -274,8 +276,6 @@ export async function onStoreOrderPackRideCancelledByDriver(ride: PackRideRecord
       orderId: order.id,
       ownerUserId,
       eventType: "driver_cancelled",
-      title: "Conductor canceló",
-      body: `Orden #${order.id}: el conductor canceló. Se reinició la búsqueda de delivery.`,
       packRideId: null,
     });
   }
@@ -300,8 +300,6 @@ export async function onStoreOrderPackRideCompleted(ride: PackRideRecordSnapshot
     orderId: ride.storeOrderId,
     ownerUserId,
     eventType: "driver_completed",
-    title: "Entrega completada",
-    body: `Orden #${ride.storeOrderId}: el conductor completó el envío.`,
     packRideId: ride.id,
   });
 }
@@ -325,8 +323,7 @@ export async function onStoreOrderDeliveryChatMessage(input: {
     orderId: ride.storeOrderId,
     ownerUserId,
     eventType: "driver_message",
-    title: `Mensaje del conductor · Orden #${ride.storeOrderId}`,
-    body: input.preview,
+    preview: input.preview,
     packRideId: ride.id,
   });
 }
