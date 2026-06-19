@@ -9,6 +9,7 @@ import {
   MODAL_CONTENT_ABOVE_OVERLAY,
   MODAL_Z_DIALOG_CONTENT,
   MODAL_Z_DIALOG_ELEVATED_SHELL,
+  MODAL_Z_DIALOG_PRIORITY_SHELL,
   MODAL_Z_DIALOG_OVERLAY,
 } from "@/lib/modal-layer-z"
 import { mergeModalOverlayClassName } from "@/lib/modal-overlay-utils"
@@ -57,13 +58,14 @@ type DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.
   hideClose?: boolean;
   /** Solo estilos visuales (opacidad, blur). Sin position ni z-index. */
   overlayClassName?: string;
-  /** Clases extra en el shell (solo `layer="elevated"`). */
+  /** Clases extra en el shell (`layer="elevated"` | `"priority"`). */
   shellClassName?: string;
   /**
    * `elevated`: shell con overlay detrás del contenido (admin, visores de documento).
+   * `priority`: por encima de `elevated` (calificación obligatoria, etc.).
    * `default`: layout legacy sin cambios (Go, taxi, usuario común).
    */
-  layer?: "default" | "elevated";
+  layer?: "default" | "elevated" | "priority";
 };
 
 const DialogContent = React.forwardRef<
@@ -77,11 +79,13 @@ const DialogContent = React.forwardRef<
     </DialogPrimitive.Close>
   ) : null
 
-  if (layer === "elevated") {
+  if (layer === "elevated" || layer === "priority") {
+    const shellZ =
+      layer === "priority" ? MODAL_Z_DIALOG_PRIORITY_SHELL : MODAL_Z_DIALOG_ELEVATED_SHELL;
     return (
       <DialogPortal>
         <ModalPortalShell
-          zIndexClass={MODAL_Z_DIALOG_ELEVATED_SHELL}
+          zIndexClass={shellZ}
           className={cn("overflow-y-auto", shellClassName)}
           overlay={
             <DialogOverlayElevated

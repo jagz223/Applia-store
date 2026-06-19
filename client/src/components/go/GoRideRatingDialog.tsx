@@ -105,6 +105,8 @@ export type GoRideRatingDialogProps = {
   onStarsChange: (stars: number) => void;
   onSubmit: () => void;
   isSubmitting?: boolean;
+  /** Capa del modal; `priority` queda por encima de dialogs admin `elevated`. */
+  layer?: "default" | "priority";
 };
 
 export function GoRideRatingDialog({
@@ -116,6 +118,7 @@ export function GoRideRatingDialog({
   onStarsChange,
   onSubmit,
   isSubmitting = false,
+  layer = "priority",
 }: GoRideRatingDialogProps) {
   const copy = getCopy(module, perspective);
   const HeaderIcon = copy.HeaderIcon;
@@ -124,6 +127,7 @@ export function GoRideRatingDialog({
     <Dialog open={open} onOpenChange={() => { /* bloqueado: obligatorio calificar */ }}>
       <DialogContent
         hideClose
+        layer={layer}
         className="gap-0 overflow-hidden border-border/80 p-0 shadow-2xl sm:max-w-[420px]"
         overlayClassName="bg-black/55 backdrop-blur-[2px]"
         onPointerDownOutside={(e) => e.preventDefault()}

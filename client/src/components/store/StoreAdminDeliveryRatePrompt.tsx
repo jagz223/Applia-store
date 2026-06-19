@@ -39,6 +39,7 @@ export function StoreAdminDeliveryRatePrompt({ storeId }: { storeId: number }) {
     setTargetName(pending.driverName);
     setStars(5);
     setOpen(true);
+    window.dispatchEvent(new CustomEvent("store-admin:close-order-detail"));
   }, []);
 
   const resolvePendingFromDeliveryApi = useCallback(
