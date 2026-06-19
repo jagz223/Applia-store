@@ -159,15 +159,10 @@ async function persistRow(row: GoDriverPresenceRow, force = false): Promise<void
   }
 }
 
-/** Hidrata presencia fresca desde Firestore si la RAM está fría (post cold start). */
+/** Hidrata / fusiona presencia fresca desde Firestore (cold start, otra instancia Render). */
 async function hydrateFreshFromFirestoreIfNeeded(): Promise<void> {
   const now = Date.now();
-  if (memory.size > 0 && now - lastFirestoreHydrateAt < HYDRATE_COOLDOWN_MS) return;
-  if (now - lastFirestoreHydrateAt < HYDRATE_COOLDOWN_MS && memory.size === 0) {
-    /* primera carga tras arranque */
-  } else if (memory.size > 0) {
-    return;
-  }
+  if (now - lastFirestoreHydrateAt < HYDRATE_COOLDOWN_MS) return;
 
   const db = getFirestore();
   if (!db) return;
@@ -184,7 +179,10 @@ async function hydrateFreshFromFirestoreIfNeeded(): Promise<void> {
     for (const doc of snap.docs) {
       const row = rowFromFirestore(doc.id, doc.data() as Record<string, unknown>);
       if (!isFresh(row, now)) continue;
-      memory.set(row.userId, row);
+      const existing = memory.get(row.userId);
+      if (!existing || row.updatedAt >= existing.updatedAt) {
+        memory.set(row.userId, row);
+      }
     }
   } catch (e) {
     console.error("[go-presence] hydrate", e);
@@ -405,11 +403,23 @@ export function isGoDriverPresenceFresh(userId: string): boolean {
   return row ? isFresh(row) : false;
 }
 
+/** Conductor taxi disponible para oferta clásica (recibiendo + heartbeat reciente). */
+export function isReceivingTaxiForMatching(userId: string): boolean {
+  const row = memory.get(userId);
+  return !!row?.receivingTaxi && isFresh(row);
+}
+
+/** Conductor delivery disponible para oferta clásica. */
+export function isReceivingDeliveryForMatching(userId: string): boolean {
+  const row = memory.get(userId);
+  return !!row?.receivingDelivery && isFresh(row);
+}
+
 /** Lista conductores taxi disponibles para matching (RAM + fallback Firestore). */
 export async function listFreshTaxiDriversForMatching(
   predicate: (row: TaxiDriverPresenceView) => boolean,
 ): Promise<TaxiDriverPresenceView[]> {
-  if (memory.size === 0) await hydrateFreshFromFirestoreIfNeeded();
+  await hydrateFreshFromFirestoreIfNeeded();
   const now = Date.now();
   const out: TaxiDriverPresenceView[] = [];
   for (const row of memory.values()) {
@@ -425,7 +435,7 @@ export async function listFreshTaxiDriversForMatching(
 export async function listFreshPackDriversForMatching(
   predicate: (row: PackDriverPresenceView) => boolean,
 ): Promise<PackDriverPresenceView[]> {
-  if (memory.size === 0) await hydrateFreshFromFirestoreIfNeeded();
+  await hydrateFreshFromFirestoreIfNeeded();
   const now = Date.now();
   const out: PackDriverPresenceView[] = [];
   for (const row of memory.values()) {
@@ -446,7 +456,10 @@ export async function bootstrapGoDriverPresenceFromFirestore(): Promise<number> 
   return memory.size;
 }
 
-/** Socket disconnect: no borrar de golpe; dejar expirar por TTL salvo force. */
+/**
+ * Socket disconnect: en viaje activo pasa a idleOnMap; si no hay viaje, conserva «recibiendo».
+ * El TTL (45s sin heartbeat) decide cuándo dejar de ofertar — evita cortes breves en Render.
+ */
 export function markGoDriverPresenceDisconnected(userId: string, opts?: { inActiveRide?: boolean }): void {
   const prev = memory.get(userId);
   if (!prev) return;
@@ -457,12 +470,5 @@ export function markGoDriverPresenceDisconnected(userId: string, opts?: { inActi
       idleOnMapTaxi: prev.receivingTaxi || prev.idleOnMapTaxi,
       idleOnMapDelivery: prev.receivingDelivery || prev.idleOnMapDelivery,
     });
-    return;
   }
-  mergeRow(userId, {
-    receivingTaxi: false,
-    receivingDelivery: false,
-    idleOnMapTaxi: false,
-    idleOnMapDelivery: false,
-  });
 }

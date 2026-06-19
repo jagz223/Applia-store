@@ -40,9 +40,9 @@ import {
   getPackOnlineDriversSnapshot,
   getPackPresenceRow,
   GO_DRIVER_PRESENCE_TTL_MS,
-  isGoDriverPresenceFresh,
   listFreshPackDriversForMatching,
   markGoDriverPresenceDisconnected,
+  isReceivingDeliveryForMatching,
   type PackDriverPresenceView,
   updateGoDriverPresenceDispatchCompany,
   updateGoDriverPresenceLocation,
@@ -576,17 +576,12 @@ async function freshDriversForRide(
   return freshDriversForVehicle(ride.vehicleType);
 }
 
-function isDriverPresenceFresh(pres: DriverPresence | undefined): boolean {
-  if (!pres) return false;
-  return isGoDriverPresenceFresh(pres.userId);
-}
-
 /** Oferta activa a un conductor que ya no está online: liberar y re-ofertar. */
 function clearStaleActiveOffer(ride: RideRecord): void {
   if (!ride.currentOfferDriverId) return;
   const driverId = ride.currentOfferDriverId;
   const expired = ride.offerExpiresAt != null && Date.now() > ride.offerExpiresAt;
-  const offline = !isDriverPresenceFresh(getPackPresenceRow(driverId));
+  const offline = !isReceivingDeliveryForMatching(driverId);
   if (!expired && !offline) return;
   pendingOfferByDriverId.delete(driverId);
   ride.currentOfferDriverId = null;
@@ -811,7 +806,8 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
     const declinedAt = ride.declinedAtByDriverId?.[driverId];
     if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
     const driverPres = getPackPresenceRow(driverId);
-    if (!driverPres || !driverMatchesPackRideVehicle(ride, driverPres)) continue;
+    if (!driverPres || !driverMatchesPackRideVehicle(ride, driverPres) || !isReceivingDeliveryForMatching(driverId))
+      continue;
     ride.currentOfferDriverId = driverId;
     ride.offerExpiresAt = Date.now() + ttlMs;
     const offerPayload = {

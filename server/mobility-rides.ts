@@ -46,6 +46,7 @@ import {
   GO_DRIVER_PRESENCE_TTL_MS,
   listFreshTaxiDriversForMatching,
   markGoDriverPresenceDisconnected,
+  isReceivingTaxiForMatching,
   type TaxiDriverPresenceView,
   upsertCargoDriverPresence,
   updateGoDriverPresenceLocation,
@@ -371,17 +372,12 @@ function rideWantsPresence(ride: RideRecord, pres: DriverPresence): boolean {
   return true;
 }
 
-function isDriverPresenceFresh(pres: DriverPresence | undefined): boolean {
-  if (!pres) return false;
-  return Date.now() - pres.updatedAt <= PRESENCE_TTL_MS;
-}
-
 /** Oferta activa a un conductor offline o expirada: liberar slot para re-ofertar. */
 function clearStaleActiveOffer(ride: RideRecord): void {
   if (!ride.currentOfferDriverId) return;
   const driverId = ride.currentOfferDriverId;
   const expired = ride.offerExpiresAt != null && Date.now() > ride.offerExpiresAt;
-  const offline = !isDriverPresenceFresh(getTaxiPresenceRow(driverId));
+  const offline = !isReceivingTaxiForMatching(driverId);
   if (!expired && !offline) return;
   pendingOfferByDriverId.delete(driverId);
   ride.currentOfferDriverId = null;
@@ -520,7 +516,7 @@ async function offerNextDriver(
     const declinedAt = ride.declinedAtByDriverId?.[driverId];
     if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
     const driverPres = getTaxiPresenceRow(driverId);
-    if (!driverPres || !rideWantsPresence(ride, driverPres) || !isDriverPresenceFresh(driverPres)) continue;
+    if (!driverPres || !rideWantsPresence(ride, driverPres) || !isReceivingTaxiForMatching(driverId)) continue;
 
     ride.currentOfferDriverId = driverId;
     ride.offerExpiresAt = Date.now() + offerTtlMs;
