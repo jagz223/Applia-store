@@ -55,7 +55,12 @@ export function AdminProviderDetailPanel({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<AdminProviderDetailPayload | null>(null);
+  const [baselineDraft, setBaselineDraft] = useState<AdminProviderDetailPayload | null>(null);
   const [subscriptionEndsLocal, setSubscriptionEndsLocal] = useState("");
+  const [baselineSubscriptionEndsLocal, setBaselineSubscriptionEndsLocal] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [baselineKey, setBaselineKey] = useState<string | null>(null);
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(initialDocumentsOpen);
@@ -78,15 +83,20 @@ export function AdminProviderDetailPanel({
       const nextDraft = structuredClone(data);
       const subEnd = toDatetimeLocalValue(data.provider.visibilitySubscriptionEndsAt);
       setDraft(nextDraft);
+      setBaselineDraft(structuredClone(data));
       setSubscriptionEndsLocal(subEnd);
+      setBaselineSubscriptionEndsLocal(subEnd);
+      setNewPassword("");
+      setConfirmNewPassword("");
       setBaselineKey(snapshotKey(nextDraft, subEnd));
     }
   }, [data]);
 
   const isDirty = useMemo(() => {
     if (!draft || baselineKey == null) return false;
+    if (newPassword.trim() || confirmNewPassword.trim()) return true;
     return snapshotKey(draft, subscriptionEndsLocal) !== baselineKey;
-  }, [draft, subscriptionEndsLocal, baselineKey]);
+  }, [draft, subscriptionEndsLocal, baselineKey, newPassword, confirmNewPassword]);
 
   useEffect(() => {
     if (!isDirty) return;
@@ -108,11 +118,29 @@ export function AdminProviderDetailPanel({
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!draft) throw new Error("Sin datos");
-      return patchAdminProviderDetail(providerId, buildProviderDetailPatchBody(draft, subscriptionEndsLocal));
+      if (!draft || !baselineDraft) throw new Error("Sin datos");
+      const password = newPassword.trim();
+      if (password) {
+        if (password.length < 6) throw new Error("La contraseña debe tener al menos 6 caracteres.");
+        if (password !== confirmNewPassword.trim()) {
+          throw new Error("Las contraseñas no coinciden.");
+        }
+      }
+      return patchAdminProviderDetail(
+        providerId,
+        buildProviderDetailPatchBody(
+          draft,
+          subscriptionEndsLocal,
+          baselineDraft,
+          baselineSubscriptionEndsLocal,
+          password ? { newPassword: password } : undefined,
+        ),
+      );
     },
     onSuccess: async () => {
       toast({ title: "Guardado", description: "Los datos del asociado se actualizaron." });
+      setNewPassword("");
+      setConfirmNewPassword("");
       await queryClient.invalidateQueries({ queryKey: ["admin-active-services"] });
       await queryClient.invalidateQueries({ queryKey: ["admin-provider-detail", providerId] });
       const refreshed = await refetch();
@@ -120,9 +148,13 @@ export function AdminProviderDetailPanel({
         const nextDraft = structuredClone(refreshed.data);
         const subEnd = toDatetimeLocalValue(refreshed.data.provider.visibilitySubscriptionEndsAt);
         setDraft(nextDraft);
+        setBaselineDraft(structuredClone(refreshed.data));
         setSubscriptionEndsLocal(subEnd);
+        setBaselineSubscriptionEndsLocal(subEnd);
         setBaselineKey(snapshotKey(nextDraft, subEnd));
       } else if (draft) {
+        setBaselineDraft(structuredClone(draft));
+        setBaselineSubscriptionEndsLocal(subscriptionEndsLocal);
         setBaselineKey(snapshotKey(draft, subscriptionEndsLocal));
       }
     },
@@ -155,6 +187,32 @@ export function AdminProviderDetailPanel({
     else next.add(brand);
     setDraft({ ...draft, provider: { ...draft.provider, goBrands: Array.from(next) } });
   };
+
+  const requestSave = useCallback(() => {
+    if (!draft || !baselineDraft) return;
+    const password = newPassword.trim();
+    if (password) {
+      if (password.length < 6) {
+        toast({
+          title: "Contraseña corta",
+          description: "Debe tener al menos 6 caracteres.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (password !== confirmNewPassword.trim()) {
+        toast({
+          title: "Contraseñas distintas",
+          description: "La confirmación debe coincidir con la nueva contraseña.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setSaveConfirmOpen(true);
+      return;
+    }
+    saveMutation.mutate();
+  }, [draft, baselineDraft, newPassword, confirmNewPassword, saveMutation, toast]);
 
   const extendSubscription = async (months: number) => {
     if (!canEdit) return;
@@ -216,7 +274,7 @@ export function AdminProviderDetailPanel({
                   size="sm"
                   className="gap-1.5"
                   disabled={!draft || saveMutation.isPending}
-                  onClick={() => saveMutation.mutate()}
+                  onClick={() => requestSave()}
                 >
                   {saveMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -310,6 +368,32 @@ export function AdminProviderDetailPanel({
                           }
                         />
                       </div>
+                      {canEdit ? (
+                        <>
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <Label htmlFor="admin-prov-new-password">Nueva contraseña</Label>
+                            <Input
+                              id="admin-prov-new-password"
+                              type="password"
+                              autoComplete="new-password"
+                              placeholder="Dejar en blanco para no cambiar"
+                              value={newPassword}
+                              onChange={(e) => setNewPassword(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <Label htmlFor="admin-prov-confirm-password">Confirmar nueva contraseña</Label>
+                            <Input
+                              id="admin-prov-confirm-password"
+                              type="password"
+                              autoComplete="new-password"
+                              placeholder="Repite la nueva contraseña"
+                              value={confirmNewPassword}
+                              onChange={(e) => setConfirmNewPassword(e.target.value)}
+                            />
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Reservas: {draft.bookingsCount} · Valoración: {draft.user?.rating?.toFixed(1) ?? "—"} (
@@ -662,6 +746,36 @@ export function AdminProviderDetailPanel({
             <AlertDialogCancel>Seguir editando</AlertDialogCancel>
             <Button type="button" variant="destructive" asChild>
               <Link href={returnHref}>Salir sin guardar</Link>
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Cambiar la contraseña de este usuario?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vas a establecer una nueva contraseña para{" "}
+              <strong>
+                {draft?.user
+                  ? `${draft.user.name} ${draft.user.lastName}`.trim() || draft.user.email || "este usuario"
+                  : "este usuario"}
+              </strong>
+              . El cambio es inmediato y el usuario deberá usar la nueva contraseña para iniciar sesión.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <Button
+              type="button"
+              onClick={() => {
+                setSaveConfirmOpen(false);
+                saveMutation.mutate();
+              }}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sí, cambiar contraseña"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
 import type { StoreLocation } from "@shared/store-schema";
-import type { StoreOrderDeliveryLocation, StoreOrderLineItem, StoreOrderStatus } from "@shared/store-order-schema";
+import {
+  STORE_ORDER_STATUS_LABELS,
+  type StoreOrderDeliveryLocation,
+  type StoreOrderLineItem,
+  type StoreOrderStatus,
+} from "@shared/store-order-schema";
+import { useSocket } from "@/hooks/use-socket";
 
 export type StoreOrderSummary = {
   id: number;
@@ -252,4 +259,49 @@ export function useMyStoreOrderDetail(orderId: number | null, enabled = true) {
     },
     enabled: enabled && orderId != null && orderId > 0,
   });
+}
+
+/** Actualiza en vivo la lista y el detalle del comprador (barra de progreso, badges, etc.). */
+export function useMyStoreOrdersLiveSync(enabled = true) {
+  const queryClient = useQueryClient();
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!enabled || !socket) return;
+
+    const handler = (payload: { orderId?: number; status?: string }) => {
+      const orderId = payload?.orderId != null ? Number(payload.orderId) : NaN;
+      const statusRaw = payload?.status;
+      const status =
+        typeof statusRaw === "string" && statusRaw in STORE_ORDER_STATUS_LABELS
+          ? (statusRaw as StoreOrderStatus)
+          : null;
+
+      if (Number.isFinite(orderId) && orderId > 0 && status) {
+        const statusLabel = STORE_ORDER_STATUS_LABELS[status];
+
+        queryClient.setQueriesData<StoreOrderSummary[]>(
+          { queryKey: ["/api/me/store-orders"] },
+          (old) => {
+            if (!Array.isArray(old)) return old;
+            return old.map((order) =>
+              order.id === orderId ? { ...order, status, statusLabel } : order,
+            );
+          },
+        );
+
+        queryClient.setQueryData<MyStoreOrderDetail>(
+          myStoreOrderDetailQueryKey(orderId),
+          (old) => (old?.id === orderId ? { ...old, status, statusLabel } : old),
+        );
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ["/api/me/store-orders"] });
+    };
+
+    socket.on("store:order:customer:updated", handler);
+    return () => {
+      socket.off("store:order:customer:updated", handler);
+    };
+  }, [enabled, socket, queryClient]);
 }

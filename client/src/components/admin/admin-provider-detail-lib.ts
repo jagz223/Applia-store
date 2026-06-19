@@ -152,23 +152,116 @@ export function normalizeListingSkills(skills: string[] | undefined | null): str
   return (skills ?? []).map((s) => String(s).trim()).filter(Boolean).slice(0, 20);
 }
 
+function normalizeGoBrands(brands: string[] | undefined | null): ("transport" | "delivery")[] {
+  return (brands ?? [])
+    .filter((b): b is "transport" | "delivery" => b === "transport" || b === "delivery")
+    .sort();
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function pickChangedFields<T extends Record<string, unknown>>(
+  current: T,
+  original: T,
+  keys: readonly (keyof T)[],
+): Partial<T> | undefined {
+  const patch: Partial<T> = {};
+  for (const key of keys) {
+    if (!valuesEqual(current[key], original[key])) {
+      patch[key] = current[key];
+    }
+  }
+  return Object.keys(patch).length > 0 ? patch : undefined;
+}
+
+function buildServicePatch(
+  current: AdminProviderDetailService,
+  original: AdminProviderDetailService | undefined,
+): Record<string, unknown> | null {
+  if (!original) return null;
+  const normalizedCurrent = {
+    title: current.title,
+    description: current.description,
+    price: current.price,
+    imageUrl: current.imageUrl,
+    isActive: current.isActive,
+    categoryId: current.categoryId,
+    subcategoryId: current.subcategoryId,
+    listingBio: current.listingBio,
+    listingProfession: current.listingProfession,
+    listingYearsExperience: current.listingYearsExperience,
+    listingSkills: normalizeListingSkills(current.listingSkills),
+    listingPreparationLevel: current.listingPreparationLevel,
+    listingCertifications: current.listingCertifications,
+  };
+  const normalizedOriginal = {
+    title: original.title,
+    description: original.description,
+    price: original.price,
+    imageUrl: original.imageUrl,
+    isActive: original.isActive,
+    categoryId: original.categoryId,
+    subcategoryId: original.subcategoryId,
+    listingBio: original.listingBio,
+    listingProfession: original.listingProfession,
+    listingYearsExperience: original.listingYearsExperience,
+    listingSkills: normalizeListingSkills(original.listingSkills),
+    listingPreparationLevel: original.listingPreparationLevel,
+    listingCertifications: original.listingCertifications,
+  };
+  const patch = pickChangedFields(
+    normalizedCurrent as Record<string, unknown>,
+    normalizedOriginal as Record<string, unknown>,
+    Object.keys(normalizedCurrent) as (keyof typeof normalizedCurrent)[],
+  );
+  if (!patch) return null;
+  return { id: current.id, ...patch };
+}
+
+/** Envía solo los campos que cambiaron respecto al baseline (evita rechazos Zod por datos legados incompletos). */
 export function buildProviderDetailPatchBody(
   draft: AdminProviderDetailPayload,
   subscriptionEndsLocal: string,
+  baseline: AdminProviderDetailPayload,
+  baselineSubscriptionEndsLocal: string,
+  extras?: { newPassword?: string },
 ): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+
+  if (draft.user && baseline.user) {
+    const userPatch = pickChangedFields(
+      {
+        name: draft.user.name,
+        lastName: draft.user.lastName,
+        email: draft.user.email,
+        phone: draft.user.phone,
+        role: draft.user.role,
+      },
+      {
+        name: baseline.user.name,
+        lastName: baseline.user.lastName,
+        email: baseline.user.email,
+        phone: baseline.user.phone,
+        role: baseline.user.role,
+      },
+      ["name", "lastName", "email", "phone", "role"],
+    );
+    if (userPatch) {
+      body.user = userPatch;
+    }
+  }
+
+  const password = extras?.newPassword?.trim();
+  if (password) {
+    body.user = { ...(body.user as Record<string, unknown> | undefined), newPassword: password };
+  }
+
   const p = draft.provider;
-  const u = draft.user;
-  return {
-    user: u
-      ? {
-          name: u.name,
-          lastName: u.lastName,
-          email: u.email ?? undefined,
-          phone: u.phone,
-          role: u.role,
-        }
-      : undefined,
-    provider: {
+  const bp = baseline.provider;
+  const providerPatch = pickChangedFields(
+    {
       profession: p.profession,
       bio: p.bio,
       yearsExperience: p.yearsExperience,
@@ -179,34 +272,87 @@ export function buildProviderDetailPatchBody(
       secondCategoryId: p.secondCategoryId,
       thirdCategoryId: p.thirdCategoryId,
       subcategoryId: p.subcategoryId,
-      goBrands: p.goBrands.length
-        ? p.goBrands.filter((b): b is "transport" | "delivery" =>
-            b === "transport" || b === "delivery",
-          )
-        : null,
+      goBrands: normalizeGoBrands(p.goBrands),
       preparationLevel: p.preparationLevel || null,
       certifications: p.certifications || null,
       subscriptionCategorySlug: p.subscriptionCategorySlug,
-      visibilitySubscriptionEndsAt: fromDatetimeLocalValue(subscriptionEndsLocal),
       goDriverOfferTitle: p.goDriverOfferTitle,
       goDriverOfferDescription: p.goDriverOfferDescription,
     },
-    services: draft.services.map((s) => ({
-      id: s.id,
-      title: s.title,
-      description: s.description,
-      price: s.price,
-      imageUrl: s.imageUrl,
-      isActive: s.isActive,
-      categoryId: s.categoryId,
-      subcategoryId: s.subcategoryId,
-      listingBio: s.listingBio,
-      listingProfession: s.listingProfession,
-      listingYearsExperience: s.listingYearsExperience,
-      listingSkills: normalizeListingSkills(s.listingSkills),
-      listingPreparationLevel: s.listingPreparationLevel,
-      listingCertifications: s.listingCertifications,
-    })),
-    vehicle: draft.vehicle,
+    {
+      profession: bp.profession,
+      bio: bp.bio,
+      yearsExperience: bp.yearsExperience,
+      hourlyRate: bp.hourlyRate,
+      skills: bp.skills,
+      isVerified: bp.isVerified,
+      categoryId: bp.categoryId,
+      secondCategoryId: bp.secondCategoryId,
+      thirdCategoryId: bp.thirdCategoryId,
+      subcategoryId: bp.subcategoryId,
+      goBrands: normalizeGoBrands(bp.goBrands),
+      preparationLevel: bp.preparationLevel || null,
+      certifications: bp.certifications || null,
+      subscriptionCategorySlug: bp.subscriptionCategorySlug,
+      goDriverOfferTitle: bp.goDriverOfferTitle,
+      goDriverOfferDescription: bp.goDriverOfferDescription,
+    },
+    [
+      "profession",
+      "bio",
+      "yearsExperience",
+      "hourlyRate",
+      "skills",
+      "isVerified",
+      "categoryId",
+      "secondCategoryId",
+      "thirdCategoryId",
+      "subcategoryId",
+      "goBrands",
+      "preparationLevel",
+      "certifications",
+      "subscriptionCategorySlug",
+      "goDriverOfferTitle",
+      "goDriverOfferDescription",
+    ],
+  );
+
+  const nextVisibilityEnds = fromDatetimeLocalValue(subscriptionEndsLocal);
+  const prevVisibilityEnds = fromDatetimeLocalValue(baselineSubscriptionEndsLocal);
+  const finalizeProviderPatch = (patch: Record<string, unknown>): Record<string, unknown> => {
+    if (Array.isArray(patch.goBrands) && patch.goBrands.length === 0) {
+      return { ...patch, goBrands: null };
+    }
+    return patch;
   };
+
+  if (!valuesEqual(nextVisibilityEnds, prevVisibilityEnds)) {
+    body.provider = finalizeProviderPatch({
+      ...(providerPatch ?? {}),
+      visibilitySubscriptionEndsAt: nextVisibilityEnds,
+    });
+  } else if (providerPatch) {
+    body.provider = finalizeProviderPatch(providerPatch as Record<string, unknown>);
+  }
+
+  const baselineServicesById = new Map(baseline.services.map((s) => [s.id, s]));
+  const servicePatches = draft.services
+    .map((svc) => buildServicePatch(svc, baselineServicesById.get(svc.id)))
+    .filter((patch): patch is Record<string, unknown> => patch != null);
+  if (servicePatches.length > 0) {
+    body.services = servicePatches;
+  }
+
+  if (draft.vehicle && baseline.vehicle) {
+    const vehiclePatch = pickChangedFields(
+      draft.vehicle as Record<string, unknown>,
+      baseline.vehicle as Record<string, unknown>,
+      Object.keys({ ...baseline.vehicle, ...draft.vehicle }),
+    );
+    if (vehiclePatch) body.vehicle = vehiclePatch;
+  } else if (!valuesEqual(draft.vehicle, baseline.vehicle)) {
+    body.vehicle = draft.vehicle;
+  }
+
+  return body;
 }

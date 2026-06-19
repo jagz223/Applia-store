@@ -44,18 +44,24 @@ import { fetchAdminJson } from "@/lib/admin-api";
 import { filterVisibleCatalogRoles } from "@/lib/role-catalog-utils";
 import type { AdminUserDetail } from "@/lib/admin-user-edit";
 
-const editUserSchema = z.object({
-  name: z.string().min(1, "El nombre es requerido").max(100),
-  lastName: z.string().min(1, "El apellido es requerido").max(100),
-  email: z.string().email("Correo inválido"),
-  phone: z.string().max(50).optional(),
-  role: z.string().min(1, "El rol es requerido"),
-  newPassword: z
-    .string()
-    .max(100)
-    .optional()
-    .refine((v) => !v || v.length >= 6, "Mínimo 6 caracteres"),
-});
+const editUserSchema = z
+  .object({
+    name: z.string().min(1, "El nombre es requerido").max(100),
+    lastName: z.string().min(1, "El apellido es requerido").max(100),
+    email: z.string().email("Correo inválido"),
+    phone: z.string().max(50).optional(),
+    role: z.string().min(1, "El rol es requerido"),
+    newPassword: z
+      .string()
+      .max(100)
+      .optional()
+      .refine((v) => !v || v.length >= 6, "Mínimo 6 caracteres"),
+    confirmNewPassword: z.string().max(100).optional(),
+  })
+  .refine((data) => !data.newPassword?.trim() || data.newPassword === data.confirmNewPassword, {
+    message: "Las contraseñas no coinciden",
+    path: ["confirmNewPassword"],
+  });
 
 type EditUserFormValues = z.infer<typeof editUserSchema>;
 
@@ -91,6 +97,7 @@ export function AdminEditUserDialog({
       phone: "",
       role: "client",
       newPassword: "",
+      confirmNewPassword: "",
     },
   });
 
@@ -126,6 +133,7 @@ export function AdminEditUserDialog({
       phone: userDetail.phone ?? "",
       role: userDetail.role ?? "client",
       newPassword: "",
+      confirmNewPassword: "",
     });
   }, [userDetail, open, form]);
 
@@ -315,7 +323,27 @@ export function AdminEditUserDialog({
                         <FormControl>
                           <Input
                             type="password"
+                            autoComplete="new-password"
                             placeholder="Dejar en blanco para no cambiar"
+                            {...field}
+                            value={field.value ?? ""}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="confirmNewPassword"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Confirmar nueva contraseña</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="password"
+                            autoComplete="new-password"
+                            placeholder="Repite la nueva contraseña"
                             {...field}
                             value={field.value ?? ""}
                           />
@@ -353,8 +381,15 @@ export function AdminEditUserDialog({
           <AlertDialogHeader>
             <AlertDialogTitle>¿Guardar los cambios de la cuenta?</AlertDialogTitle>
             <AlertDialogDescription>
-              Vas a actualizar los datos de <strong>{displayName}</strong>. El rol y la contraseña (si la
-              indicaste) se aplicarán de inmediato en la plataforma.
+              Vas a actualizar los datos de <strong>{displayName}</strong>.
+              {pendingValues?.newPassword?.trim() ? (
+                <>
+                  {" "}
+                  También cambiarás su contraseña: el usuario deberá usar la nueva clave para iniciar sesión.
+                </>
+              ) : (
+                <> El rol se aplicará de inmediato en la plataforma.</>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -41,11 +41,19 @@ import {
   shouldShowPublicPromoInNotificationList,
 } from "@/lib/public-promo-notification-ui";
 import { resolveStoreOrderNotificationPath } from "@/lib/store-order-notification-path";
+import {
+  getStoreNotificationBody,
+  getStoreNotificationTitle,
+  resolveStoreNotificationPath,
+} from "@shared/store-notification-copy";
 
 const PAGE_SIZE = 10;
 
 function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
   const data = notification.data ?? {};
+
+  const storePath = resolveStoreNotificationPath(notification.type, data);
+  if (storePath) return storePath;
 
   const storeOrderPath = resolveStoreOrderNotificationPath(notification.type, data);
   if (storeOrderPath) return storeOrderPath;
@@ -324,17 +332,11 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
 
   if (type === "verification_welcome") return "¡Bienvenido Asociado!";
 
-  if (type === "store_order_new") return "Nueva orden de tienda";
-  if (type === "store_order_status") {
-    const title = d.title ?? d.data?.title;
-    if (typeof title === "string" && title.trim()) return title.trim();
-    return "Estado de tu pedido";
-  }
-  if (type === "store_order_delivery") {
-    const title = d.title ?? d.data?.title;
-    if (typeof title === "string" && title.trim()) return title.trim();
-    return "Delivery de tu orden";
-  }
+  if (type === "store_order_new") return getStoreNotificationTitle(type, d) ?? "Nueva compra en tu tienda";
+  if (type === "store_order_status") return getStoreNotificationTitle(type, d) ?? "Estado de tu pedido";
+  if (type === "store_order_delivery") return getStoreNotificationTitle(type, d) ?? "Delivery de tu orden";
+  if (type === "store_subscription_result") return getStoreNotificationTitle(type, d) ?? "Suscripción de tienda";
+  if (type === "admin_store_subscription_payment") return getStoreNotificationTitle(type, d) ?? "Pago de tienda pendiente";
 
   if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
     const t = d.title ?? d.data?.title;
@@ -361,21 +363,19 @@ function getDescription(type: string, data?: any, conversationSenderName?: strin
     return getPublicPromoNotificationDescription(type, d);
   }
   if (type === "store_order_new") {
-    const body = d.body ?? d.data?.body;
-    if (typeof body === "string" && body.trim()) return body.trim();
-    const orderId = d.orderId ?? d.data?.orderId;
-    return orderId != null ? `Nueva orden #${orderId} en tu tienda.` : "Tienes una nueva orden en tu tienda.";
+    return getStoreNotificationBody(type, d) ?? "Tienes una nueva compra en tu tienda.";
   }
   if (type === "store_order_status") {
-    const body = d.body ?? d.data?.body;
-    if (typeof body === "string" && body.trim()) return body.trim();
-    const statusLabel = d.statusLabel ?? d.data?.statusLabel;
-    return statusLabel ? `Tu pedido ahora está: ${statusLabel}.` : "El estado de tu pedido fue actualizado.";
+    return getStoreNotificationBody(type, d) ?? "El estado de tu pedido fue actualizado.";
   }
   if (type === "store_order_delivery") {
-    const body = d.body ?? d.data?.body;
-    if (typeof body === "string" && body.trim()) return body.trim();
-    return "Actualización del delivery de tu orden.";
+    return getStoreNotificationBody(type, d) ?? "Actualización del delivery de tu orden.";
+  }
+  if (type === "store_subscription_result") {
+    return getStoreNotificationBody(type, d) ?? "Resultado del pago de suscripción de tu tienda.";
+  }
+  if (type === "admin_store_subscription_payment") {
+    return getStoreNotificationBody(type, d) ?? "Nuevo comprobante de tienda pendiente de revisión.";
   }
   // Booking update (Socket.io) con estado real
   if (type === "booking" && d.type === "booking_update") {
