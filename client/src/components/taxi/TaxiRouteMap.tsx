@@ -16,9 +16,11 @@ import { Loader2, Navigation } from "lucide-react";
 import {
   getEffectiveLeafletMaxZoom,
   getLeafletMapContainerBehaviorProps,
+  getLeafletRotateMapOptions,
   getLeafletTileLayerBehaviorProps,
   getTaxiRasterLayerProps,
 } from "@/components/taxi/leaflet-config";
+import "@/components/taxi/leaflet-config";
 import { useTheme } from "@/contexts/ThemeContext";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
@@ -27,11 +29,8 @@ import { cn } from "@/lib/utils";
 import { mapBoundsFitKey, mapPointFitKey } from "@/lib/leaflet-map-camera";
 import { isLeafletMapContainerLive, safeInvalidateSize } from "@/lib/safe-leaflet";
 import { Button } from "@/components/ui/button";
-import {
-  MAP_PERSPECTIVE_CONTROLS_VISIBLE,
-  MapPaneBearing,
-  MapPerspectiveControls,
-} from "@/components/taxi/MapPerspectiveControls";
+import { LeafletMapMotionEnhancer } from "@/components/taxi/LeafletMapMotionEnhancer";
+import { MapRotateControls } from "@/components/taxi/MapPerspectiveControls";
 import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
 
 export type MapPoint = { lat: number; lon: number; label?: string };
@@ -308,13 +307,12 @@ export function TaxiRouteMap({
   const tileBehavior = getLeafletTileLayerBehaviorProps();
   const mapBehavior = getLeafletMapContainerBehaviorProps();
   const tileMaxZoom = getEffectiveLeafletMaxZoom(raster.maxZoom);
-  const perspectiveEnabled = MAP_PERSPECTIVE_CONTROLS_VISIBLE;
+  const rotateOptions = getLeafletRotateMapOptions();
   const cameraFocus =
     focusPoint ?? (start && !end ? start : !start && end ? end : null);
   const pickHandler = suppressMapPick ? () => {} : onMapPick;
   const customZoom = zoomPosition !== "default";
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: fullscreen ? 120 : 64 });
-  const [tiltDeg, setTiltDeg] = useState(0);
   const [bearingDeg, setBearingDeg] = useState(0);
   const markers =
     extraMarkers ??
@@ -372,17 +370,8 @@ export function TaxiRouteMap({
           Preparando mapa…
         </div>
       ) : (
-        <div
-          className={
-            fullscreen
-              ? cn("relative h-full min-h-0 flex-1", perspectiveEnabled && "[perspective:960px]")
-              : cn("relative h-full min-h-[400px]", perspectiveEnabled && "[perspective:960px]")
-          }
-        >
-          <div
-            className="h-full w-full overflow-hidden rounded-xl transition-transform duration-300 ease-out"
-            style={perspectiveEnabled ? { transform: `rotateX(${tiltDeg}deg)` } : undefined}
-          >
+        <div className={fullscreen ? "relative h-full min-h-0 flex-1" : "relative h-full min-h-[400px]"}>
+          <div className="h-full w-full overflow-hidden rounded-xl">
             <MapContainer
               center={defaultCenter}
               zoom={defaultZoom}
@@ -393,11 +382,12 @@ export function TaxiRouteMap({
               scrollWheelZoom
               maxZoom={tileMaxZoom}
               {...mapBehavior}
+              {...rotateOptions}
             >
               {zoomPosition === "topright" ? <ZoomControl position="topright" /> : null}
               {zoomPosition === "bottomleft" ? <ZoomControl position="bottomleft" /> : null}
               {zoomPosition === "bottomright" ? <ZoomControl position="bottomright" /> : null}
-              {bearingDeg !== 0 ? <MapPaneBearing degrees={bearingDeg} /> : null}
+              <LeafletMapMotionEnhancer bearingDeg={bearingDeg} onBearingChange={setBearingDeg} />
               <TileLayer
                 key={`tiles-${theme}`}
                 attribution={raster.attribution}
@@ -458,14 +448,7 @@ export function TaxiRouteMap({
             </MapContainer>
           </div>
           <GeoapifyMapAttribution />
-          {MAP_PERSPECTIVE_CONTROLS_VISIBLE ? (
-            <MapPerspectiveControls
-              tiltDeg={tiltDeg}
-              onTiltChange={setTiltDeg}
-              bearingDeg={bearingDeg}
-              onBearingChange={setBearingDeg}
-            />
-          ) : null}
+          <MapRotateControls bearingDeg={bearingDeg} onBearingChange={setBearingDeg} />
         </div>
       )}
     </div>

@@ -1,112 +1,35 @@
-import { useCallback, useEffect, useState } from "react";
-import { useMap } from "react-leaflet";
+import { useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { RotateCcw, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { safeInvalidateSize } from "@/lib/safe-leaflet";
+import { isLeafletDesktopMap } from "@/components/taxi/leaflet-config";
+import { normalizeMapBearing } from "@/lib/leaflet-map-rotate";
 
-const TILT_STEP = 4;
-const TILT_MAX = 22;
-const BEARING_STEP = 15;
+const BEARING_STEP = 12;
 
-/**
- * Panel flotante (inclinar / girar / restablecer). Desactivado hasta afinar la interacción.
- * Poner en `true` para volver a mostrarlo en cliente y conductor.
- */
-export const MAP_PERSPECTIVE_CONTROLS_VISIBLE = false;
-
-/** Aplica rotación al plano del mapa (Leaflet). Mejor con ángulos moderados. */
-export function MapPaneBearing({ degrees }: { degrees: number }) {
-  const map = useMap();
-  useEffect(() => {
-    if (degrees === 0) return;
-    let pane: HTMLElement | undefined;
-    try {
-      pane = map.getPane("mapPane") as HTMLElement | undefined;
-    } catch {
-      return;
-    }
-    if (!pane) return;
-
-    const prev = pane.style.transform;
-    const prevOrigin = pane.style.transformOrigin;
-    pane.style.transformOrigin = "50% 50%";
-    pane.style.transform = `rotate(${degrees}deg)`;
-
-    const raf = requestAnimationFrame(() => safeInvalidateSize(map));
-    return () => {
-      cancelAnimationFrame(raf);
-      try {
-        if (!pane?.isConnected) return;
-        pane.style.transform = prev;
-        pane.style.transformOrigin = prevOrigin;
-      } catch {
-        /* pane ya no existe */
-      }
-    };
-  }, [map, degrees]);
-  return null;
-}
-
-type MapPerspectiveControlsProps = {
-  /** Inclinación visual (rotateX) en grados, 0 = plano. */
-  tiltDeg: number;
-  onTiltChange: (n: number) => void;
-  /** Rotación del plano del mapa (yaw), grados. */
+type MapRotateControlsProps = {
   bearingDeg: number;
   onBearingChange: (n: number) => void;
   className?: string;
 };
 
-/**
- * Controles flotantes: inclinación del lienzo (perspectiva) y giro del mapa.
- * La inclinación se aplica al envoltorio exterior; el giro al pane interno de Leaflet.
- */
-export function MapPerspectiveControls({
-  tiltDeg,
-  onTiltChange,
-  bearingDeg,
-  onBearingChange,
-  className,
-}: MapPerspectiveControlsProps) {
-  const normalizeBearing = useCallback((d: number) => ((d % 360) + 360) % 360, []);
+/** Botones de giro del mapa — solo escritorio (móvil usa dos dedos). */
+export function MapRotateControls({ bearingDeg, onBearingChange, className }: MapRotateControlsProps) {
+  const normalizeBearing = useCallback((d: number) => normalizeMapBearing(d), []);
+
+  if (!isLeafletDesktopMap()) return null;
 
   return (
     <div
       className={cn(
-        "pointer-events-none absolute bottom-3 left-3 z-[500] flex max-w-[min(100%-1.5rem,220px)] flex-col gap-1.5 rounded-2xl border border-border/80 bg-background/92 p-2 shadow-md backdrop-blur-sm",
-        className
+        "pointer-events-none absolute bottom-3 left-3 z-[500] flex max-w-[min(100%-1.5rem,200px)] flex-col gap-1.5 rounded-2xl border border-border/80 bg-background/92 p-2 shadow-md backdrop-blur-sm",
+        className,
       )}
     >
       <p className="pointer-events-none px-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Vista del mapa
+        Girar mapa
       </p>
       <div className="pointer-events-auto flex flex-wrap items-center gap-1">
-        <span className="text-[10px] text-muted-foreground w-full">Inclinar</span>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="h-8 min-w-[2.25rem] px-2 text-xs"
-          aria-label="Menos inclinación"
-          onClick={() => onTiltChange(Math.max(0, tiltDeg - TILT_STEP))}
-        >
-          −
-        </Button>
-        <span className="min-w-[2.5rem] text-center text-[11px] tabular-nums text-foreground">{tiltDeg}°</span>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="h-8 min-w-[2.25rem] px-2 text-xs"
-          aria-label="Más inclinación"
-          onClick={() => onTiltChange(Math.min(TILT_MAX, tiltDeg + TILT_STEP))}
-        >
-          +
-        </Button>
-      </div>
-      <div className="pointer-events-auto flex flex-wrap items-center gap-1 border-t border-border/60 pt-1.5">
-        <span className="text-[10px] text-muted-foreground w-full">Girar</span>
         <Button
           type="button"
           variant="secondary"
@@ -117,7 +40,9 @@ export function MapPerspectiveControls({
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </Button>
-        <span className="min-w-[2.25rem] flex-1 text-center text-[11px] tabular-nums text-foreground">{bearingDeg}°</span>
+        <span className="min-w-[2.25rem] flex-1 text-center text-[11px] tabular-nums text-foreground">
+          {bearingDeg}°
+        </span>
         <Button
           type="button"
           variant="secondary"
@@ -133,21 +58,12 @@ export function MapPerspectiveControls({
           variant="outline"
           size="sm"
           className="h-8 w-full text-[11px]"
-          onClick={() => {
-            onTiltChange(0);
-            onBearingChange(0);
-          }}
+          disabled={bearingDeg === 0}
+          onClick={() => onBearingChange(0)}
         >
-          Restablecer
+          Restablecer norte
         </Button>
       </div>
     </div>
   );
-}
-
-/** Hook local opcional para mapas que no reciben estado externo. */
-export function useMapPerspectiveState() {
-  const [tiltDeg, setTiltDeg] = useState(0);
-  const [bearingDeg, setBearingDeg] = useState(0);
-  return { tiltDeg, setTiltDeg, bearingDeg, setBearingDeg };
 }

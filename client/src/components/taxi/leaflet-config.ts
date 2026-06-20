@@ -6,6 +6,18 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import type { MapOptions } from "leaflet";
 
+declare global {
+  interface Window {
+    L?: typeof L;
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.L = L;
+}
+
+import "leaflet-rotate/dist/leaflet-rotate.js";
+
 const geoapifyKey = String(import.meta.env.VITE_GEOAPIFY_API_KEY ?? "").trim();
 
 /** Móvil / pantalla táctil: menos animación y teselas más ligeras. */
@@ -118,19 +130,18 @@ export function getEffectiveLeafletMaxZoom(maxZoom: number): number {
 }
 
 /**
- * Opciones del mapa para reducir huecos blancos al zoom.
- * En móvil el zoom es instantáneo (sin estirar teselas viejas).
+ * Animaciones del mapa: zoom suave y marcadores; teselas con fade sutil.
+ * El pinch en móvil usa `_animateZoom` al soltar; +/- pasa por `flyTo` en `LeafletMapMotionEnhancer`.
  */
 export function getLeafletMapContainerBehaviorProps(): Pick<
   MapOptions,
   "fadeAnimation" | "zoomAnimation" | "zoomAnimationThreshold" | "markerZoomAnimation"
 > {
-  const mobile = isLeafletMobileMap();
   return {
-    fadeAnimation: false,
-    zoomAnimation: !mobile,
-    zoomAnimationThreshold: mobile ? 0 : 4,
-    markerZoomAnimation: !mobile,
+    fadeAnimation: true,
+    zoomAnimation: true,
+    zoomAnimationThreshold: 4,
+    markerZoomAnimation: true,
   };
 }
 
@@ -143,9 +154,32 @@ export function getLeafletTileLayerBehaviorProps(): {
   const mobile = isLeafletMobileMap();
   return {
     updateWhenIdle: true,
-    // Escritorio: precargar durante zoom para tapar huecos; móvil: zoom sin animación.
-    updateWhenZooming: !mobile,
-    keepBuffer: mobile ? 3 : 5,
+    updateWhenZooming: true,
+    keepBuffer: mobile ? 4 : 5,
+  };
+}
+
+/** Escritorio con puntero fino (controles de giro con botones). */
+export function isLeafletDesktopMap(): boolean {
+  return !isLeafletMobileMap();
+}
+
+/**
+ * Rotación nativa (plugin leaflet-rotate):
+ * - Móvil: dos dedos para girar (`touchRotate`).
+ * - Escritorio: botones en UI (`MapRotateControls`); sin shift+rueda.
+ */
+export function getLeafletRotateMapOptions(): Pick<
+  MapOptions,
+  "rotate" | "bearing" | "touchRotate" | "shiftKeyRotate" | "rotateControl"
+> {
+  const mobile = isLeafletMobileMap();
+  return {
+    rotate: true,
+    bearing: 0,
+    touchRotate: mobile,
+    shiftKeyRotate: false,
+    rotateControl: false,
   };
 }
 

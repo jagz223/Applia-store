@@ -8,6 +8,7 @@ import type { GeoJsonObject } from "geojson";
 import {
   getEffectiveLeafletMaxZoom,
   getLeafletMapContainerBehaviorProps,
+  getLeafletRotateMapOptions,
   getLeafletTileLayerBehaviorProps,
   getTaxiRasterLayerProps,
 } from "@/components/taxi/leaflet-config";
@@ -18,11 +19,8 @@ import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { cn } from "@/lib/utils";
 import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
-import {
-  MAP_PERSPECTIVE_CONTROLS_VISIBLE,
-  MapPaneBearing,
-  MapPerspectiveControls,
-} from "@/components/taxi/MapPerspectiveControls";
+import { LeafletMapMotionEnhancer } from "@/components/taxi/LeafletMapMotionEnhancer";
+import { MapRotateControls } from "@/components/taxi/MapPerspectiveControls";
 
 const DEFAULT_CENTER: [number, number] = [-0.22, -78.5];
 const DEFAULT_ZOOM = 7;
@@ -417,7 +415,7 @@ export function DriverCargoMap({
   const tileBehavior = getLeafletTileLayerBehaviorProps();
   const mapBehavior = getLeafletMapContainerBehaviorProps();
   const tileMaxZoom = getEffectiveLeafletMaxZoom(raster.maxZoom);
-  const perspectiveEnabled = MAP_PERSPECTIVE_CONTROLS_VISIBLE;
+  const rotateOptions = getLeafletRotateMapOptions();
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: fullscreen ? 120 : 64 });
   const [me, setMe] = useState<{ lat: number; lon: number } | null>(null);
   const meRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -429,7 +427,6 @@ export function DriverCargoMap({
       setMe(meRef.current);
     }
   }, []);
-  const [tiltDeg, setTiltDeg] = useState(0);
   const [bearingDeg, setBearingDeg] = useState(0);
 
   const driverIcon = useMemo(() => createDriverVehicleIcon(vehicleType), [vehicleType]);
@@ -470,20 +467,13 @@ export function DriverCargoMap({
           Preparando mapa…
         </div>
       ) : (
-        <div
-          className={
-            fullscreen
-              ? cn("relative h-full min-h-0 flex-1", perspectiveEnabled && "[perspective:960px]")
-              : cn("relative h-full min-h-[260px]", perspectiveEnabled && "[perspective:960px]")
-          }
-        >
+        <div className={fullscreen ? "relative h-full min-h-0 flex-1" : "relative h-full min-h-[260px]"}>
           <div
             className={
               fullscreen
-                ? "h-full w-full overflow-hidden rounded-none transition-transform duration-300 ease-out"
-                : "h-full w-full overflow-hidden rounded-2xl transition-transform duration-300 ease-out"
+                ? "h-full w-full overflow-hidden rounded-none"
+                : "h-full w-full overflow-hidden rounded-2xl"
             }
-            style={perspectiveEnabled ? { transform: `rotateX(${tiltDeg}deg)` } : undefined}
           >
             <MapContainer
               center={initialFrame.center}
@@ -495,6 +485,7 @@ export function DriverCargoMap({
               scrollWheelZoom
               maxZoom={tileMaxZoom}
               {...mapBehavior}
+              {...rotateOptions}
             >
               {/* topright: evita solaparse con chips/banners en la esquina superior izquierda del overlay */}
               {fullscreen ? <ZoomControl position="topright" /> : null}
@@ -503,7 +494,7 @@ export function DriverCargoMap({
                 receiving={receiving}
                 searchingClient={searchingClient}
               />
-              {bearingDeg !== 0 ? <MapPaneBearing degrees={bearingDeg} /> : null}
+              <LeafletMapMotionEnhancer bearingDeg={bearingDeg} onBearingChange={setBearingDeg} />
               <TileLayer
                 key={`tiles-${theme}`}
                 attribution={raster.attribution}
@@ -554,14 +545,7 @@ export function DriverCargoMap({
             </MapContainer>
           </div>
           <GeoapifyMapAttribution />
-          {MAP_PERSPECTIVE_CONTROLS_VISIBLE ? (
-            <MapPerspectiveControls
-              tiltDeg={tiltDeg}
-              onTiltChange={setTiltDeg}
-              bearingDeg={bearingDeg}
-              onBearingChange={setBearingDeg}
-            />
-          ) : null}
+          <MapRotateControls bearingDeg={bearingDeg} onBearingChange={setBearingDeg} />
         </div>
       )}
       {!hideLocationSearchingHint && !me && ready && (

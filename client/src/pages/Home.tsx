@@ -24,6 +24,7 @@ import {
   MAN_GO_CATEGORY_SLUG,
 } from "@shared/default-categories";
 import { cn } from "@/lib/utils";
+import { UI_Z_GO_FLOATING } from "@/lib/modal-layer-z";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { isCentralRole } from "@shared/roles";
 import { 
@@ -826,7 +827,7 @@ export default function HomePage() {
       {/* Botón flotante hacia módulos Go: solo conductores con categoría Car Go. */}
       {isCarGoDriver && anyMobilityAllowed && typeof document !== "undefined"
         ? createPortal(
-                <div className="fixed bottom-5 right-5 z-[450]">
+                <div className={cn("fixed bottom-5 right-5", UI_Z_GO_FLOATING)}>
                   {goQuickOpen ? (
                     <div className="w-[280px] rounded-2xl border border-border bg-background/95 p-3 shadow-xl backdrop-blur">
                       <div className="flex items-center justify-between gap-2">
