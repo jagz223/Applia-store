@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { MapContainer, TileLayer, Marker, ZoomControl, useMap, useMapEvents, GeoJSON, CircleMarker } from "react-leaflet";
+import { MapContainer, TileLayer, ZoomControl, useMap, useMapEvents, GeoJSON, CircleMarker } from "react-leaflet";
 import L from "leaflet";
 import { Loader2, LocateFixed, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,12 @@ import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { cn } from "@/lib/utils";
-import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
+import { VehicleMapMarker } from "@/components/taxi/VehicleMapMarker";
+import {
+  bearingFromLatLon,
+  headingFromGeolocation,
+  smoothHeadingDeg,
+} from "@/lib/vehicle-movement-heading";
 import { LeafletMapMotionEnhancer } from "@/components/taxi/LeafletMapMotionEnhancer";
 import { MapRotateControls } from "@/components/taxi/MapPerspectiveControls";
 
@@ -70,18 +75,37 @@ function getInitialDriverMapFrame(): {
 
 function WatchDriverPosition({
   onPosition,
+  onHeading,
+  trackHeading = false,
 }: {
   onPosition: (p: { lat: number; lon: number } | null) => void;
+  onHeading?: (deg: number | null) => void;
+  trackHeading?: boolean;
 }) {
+  const prevRef = useRef<{ lat: number; lon: number } | null>(null);
+  const headingRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!navigator.geolocation) return;
     let cancelled = false;
     const apply = (pos: GeolocationPosition) => {
       if (cancelled) return;
-      onPosition({
+      const next = {
         lat: pos.coords.latitude,
         lon: pos.coords.longitude,
-      });
+      };
+      onPosition(next);
+
+      if (trackHeading && onHeading) {
+        let target = headingFromGeolocation(pos.coords);
+        if (target == null && prevRef.current) {
+          target = bearingFromLatLon(prevRef.current, next);
+        }
+        headingRef.current = smoothHeadingDeg(headingRef.current, target);
+        onHeading(headingRef.current);
+      }
+
+      prevRef.current = next;
     };
     navigator.geolocation.getCurrentPosition(
       apply,
@@ -101,7 +125,7 @@ function WatchDriverPosition({
       cancelled = true;
       navigator.geolocation.clearWatch(id);
     };
-  }, [onPosition]);
+  }, [onPosition, onHeading, trackHeading]);
   return null;
 }
 
@@ -428,8 +452,8 @@ export function DriverCargoMap({
     }
   }, []);
   const [bearingDeg, setBearingDeg] = useState(0);
-
-  const driverIcon = useMemo(() => createDriverVehicleIcon(vehicleType), [vehicleType]);
+  const [vehicleHeadingDeg, setVehicleHeadingDeg] = useState<number | null>(null);
+  const inService = end != null;
 
   const initialFrame = useMemo(() => getInitialDriverMapFrame(), []);
 
@@ -506,16 +530,27 @@ export function DriverCargoMap({
               />
               <LeafletMapLayoutFix />
               <PersistDriverMapView />
-              <WatchDriverPosition onPosition={onPosition} />
+              <WatchDriverPosition
+                onPosition={onPosition}
+                onHeading={setVehicleHeadingDeg}
+                trackHeading={inService}
+              />
               {showRecenter ? (
                 <DriverMapRecenterToolbar me={me} onLocated={onPosition} fullscreen={!!fullscreen} />
               ) : null}
-              {me && (
+              {me ? (
                 <>
-                  <Marker position={[me.lat, me.lon]} icon={driverIcon} interactive={false} zIndexOffset={600} />
+                  <VehicleMapMarker
+                    position={[me.lat, me.lon]}
+                    vehicleType={vehicleType}
+                    headingDeg={vehicleHeadingDeg}
+                    rotateWithHeading={inService}
+                    interactive={false}
+                    zIndexOffset={600}
+                  />
                   <InitialFlyToGpsIfNoPersisted hadPersistedView={initialFrame.hadPersistedView} me={me} />
                 </>
-              )}
+              ) : null}
               {end ? <FitToService start={start} end={end} me={me} /> : null}
               {start ? (
                 <CircleMarker

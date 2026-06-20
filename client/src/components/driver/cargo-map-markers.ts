@@ -4,31 +4,12 @@ import type { FleetWorkAccent } from "@/lib/central-fleet-work-accent";
 /** Clase base para iconos HTML sin caja blanca por defecto de Leaflet. */
 const MARKER_BASE_CLASS = "cargo-leaflet-marker !border-0 !bg-transparent !shadow-none";
 
-/**
- * Pictogramas laterales para mapa: capas + contraste para modo oscuro en tiles.
- * Sin `<defs>` con ids globales (varios marcadores en el mismo mapa).
- */
-const SVG_MOTO = `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <ellipse cx="28" cy="47" rx="22" ry="3.5" fill="rgba(15,23,42,0.35)"/>
-  <circle cx="14" cy="38" r="7.5" fill="#0f172a"/><circle cx="14" cy="38" r="4.5" fill="#334155" opacity="0.85"/>
-  <circle cx="40" cy="38" r="7.5" fill="#0f172a"/><circle cx="40" cy="38" r="4.5" fill="#334155" opacity="0.85"/>
-  <path d="M8 34 L8 30 L18 30 L22 22 L34 22 L38 30 L48 30 L48 34 Z" fill="#0369a1"/>
-  <path d="M10 30 L20 30 L24 22 L34 22 L36 30 Z" fill="#0ea5e9"/>
-  <path d="M24 22 L28 14 L36 14 L34 22 Z" fill="#38bdf8" opacity="0.95"/>
-  <path d="M26 14 L30 10 L36 10 L36 14" fill="none" stroke="#e0f2fe" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>
-  <path d="M18 30 L22 24 L32 24 L34 30" fill="none" stroke="#075985" stroke-width="1.2" opacity="0.6"/>
-</svg>`;
-
-const SVG_CAR = `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <ellipse cx="28" cy="47" rx="23" ry="3.5" fill="rgba(15,23,42,0.35)"/>
-  <ellipse cx="15" cy="39" rx="6.5" ry="5" fill="#0f172a"/><circle cx="15" cy="39" r="3.2" fill="#475569"/>
-  <ellipse cx="41" cy="39" rx="6.5" ry="5" fill="#0f172a"/><circle cx="41" cy="39" r="3.2" fill="#475569"/>
-  <path d="M8 34 L10 26 L18 18 L38 18 L46 26 L48 34 L48 38 L8 38 Z" fill="#047857"/>
-  <path d="M12 34 L14 28 L20 22 L36 22 L42 28 L44 34 Z" fill="#10b981"/>
-  <path d="M14 28 L18 20 L38 20 L42 28 Z" fill="#6ee7b7" opacity="0.85"/>
-  <path d="M18 20 L22 14 L34 14 L38 20 Z" fill="#a7f3d0" opacity="0.75"/>
-  <path d="M12 34 L44 34" stroke="#065f46" stroke-width="1" opacity="0.35"/>
-</svg>`;
+/** Iconos top-down en `client/public` (frente del vehículo hacia arriba). */
+export const VEHICLE_RASTER_ICON_URL: Partial<Record<CargoVehicleKind, string>> = {
+  car: "/Carro.png",
+  motorcycle: "/Moto.png",
+  pickup_truck: "/Camioneta.png",
+};
 
 const SVG_PICKUP = `<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <ellipse cx="28" cy="47" rx="24" ry="3.5" fill="rgba(15,23,42,0.35)"/>
@@ -63,21 +44,7 @@ const WORK_ACCENT_COLOR: Record<Exclude<FleetWorkAccent, null>, string> = {
 
 type VehicleShadeKey = "dark" | "base" | "light" | "highlight" | "stroke" | "strokeLight";
 
-const VEHICLE_TINT_MAPS: Record<CargoVehicleKind, readonly (readonly [string, VehicleShadeKey])[]> = {
-  motorcycle: [
-    ["#0369a1", "dark"],
-    ["#0ea5e9", "base"],
-    ["#38bdf8", "light"],
-    ["#075985", "stroke"],
-    ["#e0f2fe", "strokeLight"],
-  ],
-  car: [
-    ["#047857", "dark"],
-    ["#10b981", "base"],
-    ["#6ee7b7", "light"],
-    ["#a7f3d0", "highlight"],
-    ["#065f46", "stroke"],
-  ],
+const VEHICLE_TINT_MAPS: Record<"pickup_truck" | "truck", readonly (readonly [string, VehicleShadeKey])[]> = {
   pickup_truck: [
     ["#c2410c", "dark"],
     ["#fb923c", "base"],
@@ -132,8 +99,7 @@ function markerColorShades(base: string): Record<VehicleShadeKey, string> {
   };
 }
 
-/** Sustituye los tonos de carrocería del pictograma por una paleta derivada del color del conductor. */
-function tintVehicleSvg(svg: string, kind: CargoVehicleKind, markerColor: string): string {
+function tintVehicleSvg(svg: string, kind: "pickup_truck" | "truck", markerColor: string): string {
   const shades = markerColorShades(markerColor.trim());
   let out = svg;
   for (const [original, key] of VEHICLE_TINT_MAPS[kind]) {
@@ -142,7 +108,19 @@ function tintVehicleSvg(svg: string, kind: CargoVehicleKind, markerColor: string
   return out;
 }
 
-function wrapSvg(
+function buildRasterVehicleShape(url: string, accentColor?: string): string {
+  if (accentColor) {
+    const glow = `${accentColor}99`;
+    return `<div class="vehicle-marker-shape vehicle-marker-shape--accent" style="position:relative;width:100%;height:100%;">
+      <div aria-hidden="true" style="position:absolute;left:50%;bottom:7%;width:68%;height:20%;transform:translateX(-50%);border-radius:9999px;background:${accentColor};opacity:0.28;"></div>
+      <div aria-hidden="true" style="position:absolute;left:50%;bottom:5%;width:54%;height:16%;transform:translateX(-50%);border-radius:9999px;border:2px solid ${accentColor};box-shadow:0 0 0 1px rgba(255,255,255,0.75);opacity:0.95;"></div>
+      <img src="${url}" alt="" draggable="false" style="position:relative;z-index:1;width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 4px rgba(15,23,42,0.45)) drop-shadow(0 0 5px ${glow});" />
+    </div>`;
+  }
+  return `<img src="${url}" alt="" draggable="false" class="vehicle-marker-shape" style="width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 4px rgba(15,23,42,0.35));" />`;
+}
+
+function wrapVehicleMarkerHtml(
   inner: string,
   w: number,
   h: number,
@@ -156,7 +134,7 @@ function wrapSvg(
     accent != null
       ? `<span aria-hidden="true" style="position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:9999px;background:${WORK_ACCENT_COLOR[accent]};border:2px solid #fff;box-shadow:0 0 0 1px rgba(15,23,42,0.35);z-index:3;"></span>`
       : "";
-  return `<div class="relative flex items-end justify-center" style="width:${w}px;height:${h}px;${staleFx}"><div style="position:relative;z-index:1;width:100%;height:100%;">${inner}</div>${badge}</div>`;
+  return `<div class="relative flex items-center justify-center" style="width:${w}px;height:${h}px;${staleFx}"><div class="vehicle-marker-inner" style="position:relative;z-index:1;width:100%;height:100%;transform:rotate(0deg);transform-origin:50% 50%;transition:transform 0.35s cubic-bezier(0.22,1,0.36,1);">${inner}</div>${badge}</div>`;
 }
 
 export function resolveVehicleKind(vehicleType: string | null | undefined): CargoVehicleKind {
@@ -174,36 +152,40 @@ export function createDriverVehicleIcon(
     stale?: boolean;
     sizePx?: number;
     workAccent?: FleetWorkAccent;
-    /** Tinte de carrocería por conductor (mapa de central). */
+    /** Anillo de color por conductor (mapa central). Sin color: PNG original. */
     markerColor?: string;
   },
 ): L.DivIcon {
   const kind = resolveVehicleKind(vehicleType);
-  const baseInner =
-    kind === "motorcycle"
-      ? SVG_MOTO
-      : kind === "pickup_truck"
-        ? SVG_PICKUP
-        : kind === "truck"
-          ? SVG_TRUCK
-          : SVG_CAR;
+  const rasterUrl = VEHICLE_RASTER_ICON_URL[kind];
   const markerColor = options?.markerColor?.trim();
-  const inner =
-    markerColor != null && markerColor.length > 0
-      ? tintVehicleSvg(baseInner, kind, markerColor)
-      : baseInner;
-  const w = Math.max(16, Math.round(options?.sizePx ?? 48));
+  const w = Math.max(16, Math.round(options?.sizePx ?? (rasterUrl ? 52 : 48)));
   const h = w;
   const enterClass = options?.entering ? " fleet-marker-enter" : "";
+
+  let inner: string;
+  let centerAnchor = false;
+
+  if (rasterUrl) {
+    inner = buildRasterVehicleShape(rasterUrl, markerColor && markerColor.length > 0 ? markerColor : undefined);
+    centerAnchor = true;
+  } else {
+    const baseInner = kind === "pickup_truck" ? SVG_PICKUP : SVG_TRUCK;
+    inner =
+      markerColor != null && markerColor.length > 0
+        ? tintVehicleSvg(baseInner, kind as "pickup_truck" | "truck", markerColor)
+        : baseInner;
+  }
+
   return L.divIcon({
     className: MARKER_BASE_CLASS + enterClass,
-    html: wrapSvg(inner, w, h, {
+    html: wrapVehicleMarkerHtml(inner, w, h, {
       stale: options?.stale,
       workAccent: options?.workAccent,
     }),
     iconSize: [w, h],
-    iconAnchor: [w / 2, h],
-    popupAnchor: [0, -h],
+    iconAnchor: centerAnchor ? [w / 2, h / 2] : [w / 2, h],
+    popupAnchor: centerAnchor ? [0, -Math.round(h * 0.35)] : [0, -h],
   });
 }
 
@@ -213,7 +195,7 @@ export function createRiderRequestIcon(): L.DivIcon {
   const h = 52;
   return L.divIcon({
     className: MARKER_BASE_CLASS,
-    html: wrapSvg(SVG_PERSON, w, h),
+    html: wrapVehicleMarkerHtml(SVG_PERSON, w, h),
     iconSize: [w, h],
     iconAnchor: [w / 2, h],
     popupAnchor: [0, -h],

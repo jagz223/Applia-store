@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, ZoomControl } from "react-leaflet";
+import { MapContainer, TileLayer, Popup, useMap, useMapEvents, ZoomControl } from "react-leaflet";
 import L from "leaflet";
 import { Bookmark, Loader2, MapPinned, RefreshCw } from "lucide-react";
 import type { CentralServiceMapView } from "@shared/dispatch-company";
@@ -10,7 +10,7 @@ import {
   getLeafletTileLayerBehaviorProps,
   getTaxiRasterLayerProps,
 } from "@/components/taxi/leaflet-config";
-import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
+import { VehicleMapMarker } from "@/components/taxi/VehicleMapMarker";
 import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
@@ -20,7 +20,8 @@ import { formatCentralFleetMapHint } from "@/lib/central-fleet-position";
 import { fleetMarkerSizeForZoom } from "@/lib/fleet-map-marker-size";
 import { fleetMapMarkerColorForUser } from "@/lib/fleet-map-marker-color";
 import { spreadFleetMapMarkerPositions } from "@/lib/fleet-map-marker-spread";
-import { fleetWorkAccentForDriver, centralDriverReceivingModeLabel, type FleetWorkAccent } from "@/lib/central-fleet-work-accent";
+import { fleetWorkAccentForDriver, centralDriverReceivingModeLabel, fleetWorkAccentLabelClass, type FleetWorkAccent } from "@/lib/central-fleet-work-accent";
+import { bearingFromLatLon, smoothHeadingDeg } from "@/lib/vehicle-movement-heading";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -104,7 +105,7 @@ function FleetMapDriverPopup({
 }) {
   const markerColor = fleetMapMarkerColorForUser(driver.userId);
   return (
-    <div className="flex max-w-[220px] items-start gap-2.5 text-sm">
+    <div className="central-fleet-map-popup flex max-w-[220px] items-start gap-2.5 text-sm text-popover-foreground">
       <Avatar
         className="h-9 w-9 shrink-0 ring-2 ring-background"
         style={{ boxShadow: `0 0 0 2px ${markerColor}` }}
@@ -116,26 +117,17 @@ function FleetMapDriverPopup({
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium leading-tight">
+        <p className="truncate font-medium leading-tight text-popover-foreground">
           {driver.name} {driver.lastName}
         </p>
         {receivingLabel ? (
-          <p
-            className={cn(
-              "mt-0.5 text-xs font-medium leading-snug",
-              workAccent === "taxi"
-                ? "text-sky-700 dark:text-sky-300"
-                : workAccent === "delivery"
-                  ? "text-violet-700 dark:text-violet-300"
-                  : "text-emerald-800 dark:text-emerald-200",
-            )}
-          >
+          <p className={cn("mt-0.5 text-xs font-semibold leading-snug", fleetWorkAccentLabelClass(workAccent))}>
             {receivingLabel}
           </p>
         ) : driver.inService ? (
-          <p className="mt-0.5 text-xs font-medium text-primary">En servicio</p>
+          <p className="mt-0.5 text-xs font-semibold text-primary">En servicio</p>
         ) : (
-          <p className="mt-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">Activo</p>
+          <p className="mt-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">Activo</p>
         )}
         {mapHint ? <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{mapHint}</p> : null}
       </div>
@@ -155,6 +147,33 @@ function FleetVehicleMarkers({
   onSelectDriver: (driver: CentralFleetDriver) => void;
 }) {
   const markerSizePx = fleetMarkerSizeForZoom(mapZoom);
+  const prevPosRef = useRef(new Map<string, { lat: number; lon: number }>());
+  const headingRef = useRef(new Map<string, number | null>());
+  const [, bumpHeadings] = useState(0);
+
+  useEffect(() => {
+    let changed = false;
+    for (const d of drivers) {
+      if (!d.inService || d.lat == null || d.lon == null) {
+        if (headingRef.current.delete(d.userId)) changed = true;
+        prevPosRef.current.delete(d.userId);
+        continue;
+      }
+      const next = { lat: d.lat, lon: d.lon };
+      const prev = prevPosRef.current.get(d.userId);
+      if (prev) {
+        const target = bearingFromLatLon(prev, next);
+        const current = headingRef.current.get(d.userId) ?? null;
+        const smoothed = smoothHeadingDeg(current, target);
+        if (smoothed !== current) {
+          headingRef.current.set(d.userId, smoothed);
+          changed = true;
+        }
+      }
+      prevPosRef.current.set(d.userId, next);
+    }
+    if (changed) bumpHeadings((v) => v + 1);
+  }, [drivers]);
 
   const displayPositions = useMemo(() => {
     const points = drivers
@@ -174,18 +193,20 @@ function FleetVehicleMarkers({
         const position: [number, number] =
           display != null ? [display.lat, display.lon] : [d.lat!, d.lon!];
         const markerColor = fleetMapMarkerColorForUser(d.userId);
+        const headingDeg = d.inService ? (headingRef.current.get(d.userId) ?? null) : null;
         return (
-          <Marker
+          <VehicleMapMarker
             key={d.userId}
             position={position}
-            icon={createDriverVehicleIcon(d.vehicleType, {
-              entering: enteringDriverIds.has(d.userId),
-              stale,
-              sizePx: markerSizePx,
-              workAccent,
-              markerColor,
-            })}
-            eventHandlers={{ click: () => onSelectDriver(d) }}
+            vehicleType={d.vehicleType}
+            headingDeg={headingDeg}
+            rotateWithHeading={d.inService}
+            markerColor={markerColor}
+            entering={enteringDriverIds.has(d.userId)}
+            stale={stale}
+            sizePx={markerSizePx}
+            workAccent={workAccent}
+            onClick={() => onSelectDriver(d)}
           >
             <Popup minWidth={180} maxWidth={240}>
               <FleetMapDriverPopup
@@ -195,7 +216,7 @@ function FleetVehicleMarkers({
                 workAccent={workAccent}
               />
             </Popup>
-          </Marker>
+          </VehicleMapMarker>
         );
       })}
     </>
@@ -411,8 +432,8 @@ export function CentralFleetMap({
       ref={shellRef}
       className={
         fullscreen
-          ? "central-fleet-map-fs relative h-full min-h-0 w-full flex-1 overflow-hidden"
-          : "relative w-full overflow-hidden rounded-b-lg"
+          ? "central-fleet-map-shell central-fleet-map-fs relative h-full min-h-0 w-full flex-1 overflow-hidden"
+          : "central-fleet-map-shell relative w-full overflow-hidden rounded-b-lg"
       }
       style={
         fullscreen

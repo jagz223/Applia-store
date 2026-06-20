@@ -62,6 +62,7 @@ import {
   trimRouteAtDriver,
   type StoredDrivingRoute,
 } from "@/lib/driving-route-geometry";
+import { bearingFromLatLon, smoothHeadingDeg } from "@/lib/vehicle-movement-heading";
 import {
   computeMobilitySuggestedByVehicle,
   computeMobilitySuggestedUsd,
@@ -251,10 +252,19 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     [goSlug]
   );
   const [nearbyDriverMarkers, setNearbyDriverMarkers] = useState<
-    { id: string; lat: number; lon: number; vehicleType?: string }[]
+    {
+      id: string;
+      lat: number;
+      lon: number;
+      vehicleType?: string;
+      headingDeg?: number | null;
+      rotateWithHeading?: boolean;
+    }[]
   >([]);
   const [assignedDriverPos, setAssignedDriverPos] = useState<{ lat: number; lon: number } | null>(null);
   const assignedDriverPosRef = useRef<{ lat: number; lon: number } | null>(null);
+  const assignedDriverPrevPosRef = useRef<{ lat: number; lon: number } | null>(null);
+  const assignedDriverHeadingRef = useRef<number | null>(null);
   const endPlaceRef = useRef<Place | null>(null);
   const [driverToPickupGeometry, setDriverToPickupGeometry] = useState<GeoJsonObject | null>(null);
   const [driverToPickupMeta, setDriverToPickupMeta] = useState<{ distanceM: number; durationSec: number } | null>(null);
@@ -322,6 +332,32 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   useEffect(() => {
     endPlaceRef.current = end;
   }, [end]);
+
+  const syncAssignedDriverMarker = useCallback((pos: { lat: number; lon: number }, vehicleType?: string) => {
+    setAssignedDriverPos(pos);
+
+    let headingDeg: number | null = null;
+    let rotateWithHeading = false;
+    if (riderTripInProgressRef.current) {
+      rotateWithHeading = true;
+      const prev = assignedDriverPrevPosRef.current;
+      const target = prev ? bearingFromLatLon(prev, pos) : null;
+      assignedDriverHeadingRef.current = smoothHeadingDeg(assignedDriverHeadingRef.current, target);
+      headingDeg = assignedDriverHeadingRef.current;
+    }
+
+    assignedDriverPrevPosRef.current = pos;
+
+    setNearbyDriverMarkers([
+      {
+        id: "assigned",
+        lat: pos.lat,
+        lon: pos.lon,
+        ...(vehicleType ? { vehicleType } : {}),
+        ...(rotateWithHeading ? { headingDeg, rotateWithHeading: true } : {}),
+      },
+    ]);
+  }, []);
 
   type MatchedDriverState = {
     driver: {
@@ -575,6 +611,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     setVehicleModalStep("ready");
     setMatchedDriverInfo(null);
     setAssignedDriverPos(null);
+    assignedDriverPrevPosRef.current = null;
+    assignedDriverHeadingRef.current = null;
     setNearbyDriverMarkers([]);
     setDriverToPickupGeometry(null);
     setDriverToPickupMeta(null);
@@ -1159,16 +1197,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       });
       if (p.driverLat != null && p.driverLon != null) {
         const pos = { lat: p.driverLat, lon: p.driverLon };
-        setAssignedDriverPos(pos);
         const vt = p.driver?.vehicle?.type;
-        setNearbyDriverMarkers([
-          {
-            id: "assigned",
-            lat: p.driverLat,
-            lon: p.driverLon,
-            ...(vt ? { vehicleType: vt } : {}),
-          },
-        ]);
+        syncAssignedDriverMarker(pos, vt);
         if (start) handleDriverRoutePosition(pos, start, true);
       }
       setVehicleModalStep("done");
@@ -1178,16 +1208,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     const onDriverLoc = (p: { rideId: string; lat: number; lon: number }) => {
       if (p.rideId !== activeRideIdRef.current) return;
       const pos = { lat: p.lat, lon: p.lon };
-      setAssignedDriverPos(pos);
       const vt = matchedDriverInfoRef.current?.driver?.vehicle?.type;
-      setNearbyDriverMarkers([
-        {
-          id: "assigned",
-          lat: p.lat,
-          lon: p.lon,
-          ...(vt ? { vehicleType: vt } : {}),
-        },
-      ]);
+      syncAssignedDriverMarker(pos, vt);
       const target = resolveDriverRouteTarget();
       if (target) handleDriverRoutePosition(pos, target);
     };
@@ -1198,6 +1220,10 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       const pos = assignedDriverPosRef.current;
       const dest = endPlaceRef.current;
       if (pos && dest) handleDriverRoutePosition(pos, dest, true);
+      if (pos) {
+        const vt = matchedDriverInfoRef.current?.driver?.vehicle?.type;
+        syncAssignedDriverMarker(pos, vt);
+      }
     };
     const onDriverSearching = (p: { rideId: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
@@ -1331,6 +1357,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     end,
     handleDriverRoutePosition,
     resolveDriverRouteTarget,
+    syncAssignedDriverMarker,
     rideSocketPrefix,
     goSlug,
     user?.id,
