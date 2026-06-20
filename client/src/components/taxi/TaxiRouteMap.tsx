@@ -5,7 +5,6 @@ import {
   TileLayer,
   CircleMarker,
   GeoJSON,
-  Marker,
   ZoomControl,
   useMap,
   useMapEvents,
@@ -31,7 +30,7 @@ import { isLeafletMapContainerLive, safeInvalidateSize } from "@/lib/safe-leafle
 import { Button } from "@/components/ui/button";
 import { LeafletMapMotionEnhancer } from "@/components/taxi/LeafletMapMotionEnhancer";
 import { MapRotateControls } from "@/components/taxi/MapPerspectiveControls";
-import { createDriverVehicleIcon } from "@/components/driver/cargo-map-markers";
+import { VehicleMapMarker } from "@/components/taxi/VehicleMapMarker";
 
 export type MapPoint = { lat: number; lon: number; label?: string };
 
@@ -43,6 +42,9 @@ export type TaxiRouteVehicleMarker = {
   kind?: "vehicle" | "driver";
   /** Código de vehículo (`motorcycle`, `car`, …); si falta se usa `markerVehicleTypeFallback`. */
   vehicleType?: string | null;
+  /** Rumbo en servicio activo (0 = norte). */
+  headingDeg?: number | null;
+  rotateWithHeading?: boolean;
 };
 
 const NO_NEARBY_VEHICLES: readonly TaxiRouteVehicleMarker[] = [];
@@ -324,19 +326,6 @@ export function TaxiRouteMap({
       vehicleType: v.vehicleType,
     }));
 
-  const getVehicleMarkerIcon = useMemo(() => {
-    const cache = new Map<string, L.DivIcon>();
-    return (vehicleType: string | null | undefined) => {
-      const key = vehicleType ?? "__default";
-      let icon = cache.get(key);
-      if (!icon) {
-        icon = createDriverVehicleIcon(vehicleType);
-        cache.set(key, icon);
-      }
-      return icon;
-    };
-  }, []);
-
   const resolveMarkerVehicleType = (v: TaxiRouteVehicleMarker) =>
     v.vehicleType ?? markerVehicleTypeFallback ?? undefined;
 
@@ -437,10 +426,12 @@ export function TaxiRouteMap({
                 />
               )}
               {markers.map((v) => (
-                <Marker
+                <VehicleMapMarker
                   key={v.id}
                   position={[v.lat, v.lon]}
-                  icon={getVehicleMarkerIcon(resolveMarkerVehicleType(v))}
+                  vehicleType={resolveMarkerVehicleType(v)}
+                  headingDeg={v.headingDeg}
+                  rotateWithHeading={v.rotateWithHeading ?? v.headingDeg != null}
                   interactive={false}
                   zIndexOffset={v.kind === "driver" ? 620 : 600}
                 />

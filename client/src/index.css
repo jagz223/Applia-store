@@ -435,6 +435,25 @@
     touch-action: manipulation;
   }
 
+  /** Popups Leaflet en central: fondo acorde al tema (evita texto claro sobre blanco en dark). */
+  .dark .central-fleet-map-shell .leaflet-popup-content-wrapper,
+  .dark .central-fleet-map-shell .leaflet-popup-tip {
+    background: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
+    border: 1px solid hsl(var(--popover-border));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+  .dark .central-fleet-map-shell .leaflet-popup-content {
+    color: hsl(var(--popover-foreground));
+  }
+  .dark .central-fleet-map-shell .leaflet-popup-close-button {
+    color: hsl(var(--popover-foreground));
+    opacity: 0.72;
+  }
+  .dark .central-fleet-map-shell .leaflet-popup-close-button:hover {
+    opacity: 1;
+  }
+
   /** Controles Leaflet más legibles en modo oscuro (teselas oscuras Carto). */
   .dark .leaflet-bar a {
     background-color: hsl(220 18% 18%);

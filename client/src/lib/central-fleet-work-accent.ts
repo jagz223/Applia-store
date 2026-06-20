@@ -42,3 +42,17 @@ export function fleetWorkAccentForDriver(driver: CentralFleetDriver): FleetWorkA
   if (driver.receivingDelivery) return "delivery";
   return null;
 }
+
+/** Texto de estado en popup del mapa (contraste en fondo claro y en popup oscuro). */
+export function fleetWorkAccentLabelClass(workAccent: FleetWorkAccent): string {
+  switch (workAccent) {
+    case "taxi":
+      return "text-sky-700 dark:text-sky-400";
+    case "delivery":
+      return "text-violet-700 dark:text-violet-400";
+    case "both":
+      return "text-emerald-800 dark:text-emerald-400";
+    default:
+      return "text-muted-foreground";
+  }
+}
