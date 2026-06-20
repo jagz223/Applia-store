@@ -1,8 +1,11 @@
 /**
  * Capas de modales (Radix portales). Valores altos para quedar por encima de:
  * - Leaflet (~1000), mapas embebidos, Home hero (glass-card / motion)
- * - Botones flotantes Go (z-[450]), nav sticky (z-50)
+ * - Botones flotantes Go (`UI_Z_GO_FLOATING`, z-40), nav sticky / menú móvil (z-50)
  */
+
+/** Botón/popover flotante hacia módulos Go (Home). Debajo del menú móvil (Sheet z-50). */
+export const UI_Z_GO_FLOATING = "z-40";
 
 /** Dialog legacy: overlay (hermano anterior al contenido). */
 export const MODAL_Z_DIALOG_OVERLAY = "z-[2147482000]";
