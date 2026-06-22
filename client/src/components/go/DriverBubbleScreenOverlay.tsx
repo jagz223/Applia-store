@@ -9,9 +9,9 @@ import { isDriverBubbleMainPath } from "@/lib/go-driver-bubble-mode";
  */
 export function DriverBubbleScreenOverlay() {
   const [location] = useLocation();
-  const { active, shellCollapsed, pipActive, expand } = useGoDriverBubble();
+  const { active, overlaySupported, shellCollapsed, pipActive, expand } = useGoDriverBubble();
 
-  if (!active || !shellCollapsed || pipActive || !isDriverBubbleMainPath(location)) return null;
+  if (!active || !overlaySupported || !shellCollapsed || pipActive || !isDriverBubbleMainPath(location)) return null;
 
   return createPortal(
     <button

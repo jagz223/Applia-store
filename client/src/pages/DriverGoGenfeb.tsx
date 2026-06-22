@@ -53,7 +53,7 @@ import {
 import { extractUserPublicPhone } from "@/lib/user-public-phone";
 import { fetchGoRideConversationId } from "@/lib/go-active-ride-chat";
 import { useGoDriverSession } from "@/contexts/GoDriverSessionContext";
-import { useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
+import { notifyAndroidDriverReceiving } from "@/lib/android-driver-foreground";
 import { Button } from "@/components/ui/button";
 import { GoChatProvider, useGoChat } from "@/contexts/GoChatContext";
 import { GoDriverUiProvider } from "@/contexts/GoDriverUiContext";
@@ -68,7 +68,7 @@ import { GoChatDrawer } from "@/components/go/GoChatDrawer";
 import { GoClientPresenceReporter } from "@/components/go/GoClientPresenceReporter";
 import { DriverFloatingBubble } from "@/components/go/DriverFloatingBubble";
 import { DriverBubbleScreenOverlay } from "@/components/go/DriverBubbleScreenOverlay";
-import { GoDriverBubbleProvider } from "@/contexts/GoDriverBubbleContext";
+import { GoDriverBubbleProvider, useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
 import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
 import { pollClassicDriverOffer, GO_CLASSIC_OFFER_POLL_MS } from "@/lib/go-driver-classic-offer-poll";
 import { useSocket } from "@/hooks/use-socket";
@@ -408,6 +408,7 @@ export default function DriverGoGenfeb() {
 
   useEffect(() => {
     driverBubble?.setReceiveMode(receiveMode, canReceive);
+    notifyAndroidDriverReceiving(receiveMode !== "off" && canReceive, receiveMode);
   }, [driverBubble, receiveMode, canReceive]);
 
   const { data: serverTripHistory = [] } = useQuery({
