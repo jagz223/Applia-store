@@ -4,6 +4,7 @@ export type ParsedFcmNotification = {
   url: string;
   tag: string;
   isPanic: boolean;
+  isRideOffer: boolean;
 };
 
 /** Parsea payload FCM (web push / onMessage) al formato de notificación del sistema. */
@@ -20,7 +21,9 @@ export function parseFcmNotificationPayload(payload: {
   const tagId = data.bookingId || data.messageId || data.transferId || data.conversationId || String(Date.now());
   const tag = `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
   const isPanic = String(data.type || "").toLowerCase() === "go_panic";
-  return { title, body, url, tag, isPanic };
+  const offerType = String(data.type || "").toLowerCase();
+  const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+  return { title, body, url, tag, isPanic, isRideOffer };
 }
 
 export async function showSystemNotification(parsed: ParsedFcmNotification): Promise<void> {
@@ -38,7 +41,12 @@ export async function showSystemNotification(parsed: ParsedFcmNotification): Pro
           requireInteraction: true,
           vibrate: [300, 200, 300, 200, 300, 200, 500],
         }
-      : {}),
+      : parsed.isRideOffer
+        ? {
+            requireInteraction: true,
+            vibrate: [200, 120, 200, 120, 200, 120, 400],
+          }
+        : {}),
   };
 
   if ("serviceWorker" in navigator) {

@@ -17,6 +17,10 @@ export async function bootstrapActiveMobilityRidesFromFirestore(): Promise<void>
       console.log(
         `[mobility-active] Viajes activos restaurados desde Firestore: ${cargoCount} taxi, ${packCount} delivery`,
       );
+      const { getIO } = await import("./socket");
+      const { scheduleReconcileSearchingClassicRides } = await import("./go-driver-classic-offer-reconcile");
+      const io = getIO();
+      if (io) scheduleReconcileSearchingClassicRides(io);
     }
   } catch (e) {
     console.error("[mobility-active] bootstrap failed", e);

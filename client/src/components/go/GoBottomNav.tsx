@@ -15,6 +15,8 @@ import { mobilityHistorySheetTitle, mobilityServiceLabel } from "@shared/mobilit
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DriverEarningsPanel } from "@/components/go/DriverEarningsPanel";
+import { DriverBubbleModeSettings } from "@/components/go/DriverBubbleModeSettings";
+import { useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
 import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
 import { historyToRiderTripLog } from "@/lib/mobility-ride-history-mappers";
 import { useSocket } from "@/hooks/use-socket";
@@ -64,6 +66,7 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   const { data: chatConversations = [] } = useConversations(isAuthenticated);
   const { openNotifications } = useGoNotifications();
   const goDriverUi = useGoDriverUi();
+  const driverBubble = useGoDriverBubbleOptional();
   const { notifications } = useSocket();
   const { toast } = useToast();
   const { data: categories = [] } = useCategories();
@@ -286,6 +289,13 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
     ]
   );
 
+  const bubbleMinimized =
+    isDriverView && driverBubble?.enabled === true && driverBubble.isMinimized;
+
+  if (bubbleMinimized) {
+    return null;
+  }
+
   return (
     <>
       <div className={goViewportBottomNavWrapperClass(pinToViewportBottom, desktopNav)}>
@@ -418,6 +428,11 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
             <SheetTitle className="font-display text-lg">Conductor</SheetTitle>
             <SheetDescription>Historial, ingresos y configuración del servicio.</SheetDescription>
           </SheetHeader>
+          <DriverBubbleModeSettings
+            variant="menu"
+            className="mb-1"
+            onAfterAction={() => setDriverMoreMenuOpen(false)}
+          />
           <div className="flex flex-col gap-2 py-2">
             {goDriverUi ? (
               <Button

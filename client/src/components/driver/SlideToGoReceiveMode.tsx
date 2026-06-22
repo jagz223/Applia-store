@@ -199,6 +199,9 @@ export function SlideToGoReceiveMode({
 
   const isHybridVisual = mode === "both";
 
+  const showTaxiTrackHint = canTaxi && mode !== "taxi";
+  const showDeliveryTrackHint = canDelivery && mode !== "delivery";
+
   const trackTone =
     mode === "taxi"
       ? "border-sky-600/45 bg-sky-500/15 dark:border-sky-500/50 dark:bg-sky-500/10"
@@ -306,7 +309,7 @@ export function SlideToGoReceiveMode({
         >
           {!disabled ? (
             <>
-              {canTaxi ? (
+              {showTaxiTrackHint ? (
                 <span
                   className={cn(
                     "pointer-events-none absolute left-3 top-1/2 z-[1] flex -translate-y-1/2 items-center gap-1 text-[10px] font-semibold",
@@ -319,7 +322,7 @@ export function SlideToGoReceiveMode({
                   Taxi
                 </span>
               ) : null}
-              {canDelivery ? (
+              {showDeliveryTrackHint ? (
                 <span
                   className={cn(
                     "pointer-events-none absolute right-3 top-1/2 z-[1] flex -translate-y-1/2 items-center gap-1 text-[10px] font-semibold",

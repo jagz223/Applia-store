@@ -11,10 +11,12 @@ import { GoNotificationsDrawer } from "@/components/go/GoNotificationsDrawer";
 import { Button } from "@/components/ui/button";
 import { useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { useSocket } from "@/hooks/use-socket";
 import { GoChatAutoCloseOnRideEnd } from "@/components/go/GoChatAutoCloseOnRideEnd";
 import { GoChatBadgeOnMessage } from "@/components/go/GoChatBadgeOnMessage";
 import { GoChatOpenFromQuery } from "@/components/go/GoChatOpenFromQuery";
+import { GoClientPresenceReporter } from "@/components/go/GoClientPresenceReporter";
+import { DriverFloatingBubble } from "@/components/go/DriverFloatingBubble";
+import { GoDriverBubbleProvider, useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
 import { ListingSubscriptionRibbon } from "@/components/ListingSubscriptionRibbon";
 import {
   goViewportClasses,
@@ -29,7 +31,7 @@ import {
 
 export function GoShellLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
-  const { socket } = useSocket();
+  const driverBubble = useGoDriverBubbleOptional();
   const isUnifiedDriver =
     location === "/go/driver" || location.startsWith("/go/driver/");
   const headerTitle = isUnifiedDriver
@@ -68,11 +70,8 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
   const pathname = location.split("?")[0] ?? location;
   const compactGoViewport = useGoCompactViewport();
   const showCompactGoHomeFab = shouldShowCompactGoShellHomeFab(isGoMapView, pathname);
-
-  useEffect(() => {
-    if (!socket) return;
-    socket.emit("go:path", { path: location });
-  }, [socket, location]);
+  const hideShellChromeForBubble =
+    isUnifiedDriver && driverBubble?.enabled === true && driverBubble.isMinimized;
 
   /** Evita scroll del documento en móvil: el mapa no debe “robar” el gesto de llegar a la barra inferior. */
   useEffect(() => {
@@ -91,8 +90,11 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
     <GoChatProvider>
       <GoNotificationsProvider>
         <GoDriverSessionProvider>
-          <GoDriverUiProvider>
-            <GoChatAutoCloseOnRideEnd />
+          <GoDriverBubbleProvider>
+            <GoDriverUiProvider>
+              <GoChatAutoCloseOnRideEnd />
+              <GoClientPresenceReporter path={location} />
+              <DriverFloatingBubble />
           <GoChatBadgeOnMessage />
           <GoChatOpenFromQuery />
           <div className={cn(goViewportShellRootSurfaceClass(isGoMapView), goViewportShellRootClass(isGoMapView))}>
@@ -104,6 +106,7 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
                 className={cn(
                   "sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70 lg:rounded-t-[inherit]",
                   isGoMapView && compactGoViewport && "hidden",
+                  hideShellChromeForBubble && "max-lg:hidden",
                 )}
               >
                 <div className="flex items-center justify-between px-4 py-2.5 md:px-6 md:py-3">
@@ -169,6 +172,7 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
             <GoNotificationsDrawer />
           </div>
           </GoDriverUiProvider>
+          </GoDriverBubbleProvider>
         </GoDriverSessionProvider>
       </GoNotificationsProvider>
     </GoChatProvider>

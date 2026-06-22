@@ -5,6 +5,11 @@ import { isFullAdmin } from "@shared/roles";
 import { registerCargoMobilitySocket } from "./mobility-rides";
 import { registerPackMobilitySocket } from "./pack-rides";
 import { registerCentralSocket } from "./routes-central";
+import { startClassicOfferReconcileLoop } from "./go-driver-classic-offer-reconcile";
+import {
+  clearUserGoPresence,
+  updateUserGoPresence,
+} from "./go-user-presence";
 
 const JWT_SECRET = process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024";
 
@@ -15,8 +20,6 @@ interface ConnectedUser {
 
 // Store connected users
 const connectedUsers: Map<string, ConnectedUser> = new Map();
-/** Última ruta/pantalla visible del usuario (para condicionar push). */
-const userActivePath: Map<string, string> = new Map();
 
 let ioInstance: SocketIOServer | null = null;
 
@@ -65,11 +68,20 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     // Join user's personal room
     socket.join(`user:${user.id}`);
 
-    // Ruta activa (SPA): el cliente reporta su ubicación para decidir si enviar push.
-    socket.on("go:path", (data: { path?: string }) => {
-      const p = typeof data?.path === "string" ? data.path : "";
-      if (!p) return;
-      userActivePath.set(String(user.id), p);
+    const applyGoPresence = (data: { path?: string; hidden?: boolean }) => {
+      const patch: { path?: string; hidden?: boolean } = {};
+      if (typeof data?.path === "string" && data.path.trim()) patch.path = data.path.trim();
+      if (typeof data?.hidden === "boolean") patch.hidden = data.hidden;
+      if (patch.path === undefined && patch.hidden === undefined) return;
+      updateUserGoPresence(String(user.id), patch);
+    };
+
+    // Ruta + visibilidad (SPA): condicionar push de ofertas al conductor.
+    socket.on("go:path", (data: { path?: string; hidden?: boolean }) => {
+      applyGoPresence(data);
+    });
+    socket.on("go:presence", (data: { path?: string; hidden?: boolean }) => {
+      applyGoPresence(data);
     });
 
     socket.on("driver:work_mode", (data: { mode?: string; at?: number }) => {
@@ -130,7 +142,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     socket.on("disconnect", () => {
       console.log(`🔌 User disconnected: ${user.email} (${socket.id})`);
       connectedUsers.delete(user.id);
-      userActivePath.delete(String(user.id));
+      clearUserGoPresence(String(user.id));
     });
 
     // Send confirmation to client
@@ -141,6 +153,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
   });
 
   ioInstance = io;
+  startClassicOfferReconcileLoop(() => ioInstance);
   return io;
 }
 
@@ -159,8 +172,6 @@ export function broadcastToAll(io: SocketIOServer, event: string, data: any) {
   io.emit(event, data);
 }
 
-export function getUserActivePath(userId: string): string | null {
-  return userActivePath.get(String(userId)) ?? null;
-}
+export { getUserActivePath } from "./go-user-presence";
 
 export { connectedUsers };

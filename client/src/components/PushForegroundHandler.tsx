@@ -29,7 +29,7 @@ export function PushForegroundHandler() {
             data: payload.data as Record<string, string | undefined> | undefined,
           });
 
-          if (parsed.isPanic) {
+          if (parsed.isPanic || parsed.isRideOffer) {
             try {
               const Ctx =
                 window.AudioContext ||
@@ -38,9 +38,9 @@ export function PushForegroundHandler() {
                 const ctx = new Ctx();
                 const o = ctx.createOscillator();
                 const g = ctx.createGain();
-                o.type = "square";
-                o.frequency.value = 880;
-                g.gain.value = 0.12;
+                o.type = parsed.isPanic ? "square" : "sine";
+                o.frequency.value = parsed.isPanic ? 880 : 880;
+                g.gain.value = parsed.isPanic ? 0.12 : 0.35;
                 o.connect(g);
                 g.connect(ctx.destination);
                 o.start();
@@ -51,14 +51,16 @@ export function PushForegroundHandler() {
                   } catch {
                     /* ignore */
                   }
-                }, 180);
+                }, parsed.isPanic ? 180 : 280);
               }
             } catch {
               /* ignore */
             }
             try {
               if ("vibrate" in navigator && typeof navigator.vibrate === "function") {
-                navigator.vibrate([350, 150, 350, 150, 350]);
+                navigator.vibrate(
+                  parsed.isPanic ? [350, 150, 350, 150, 350] : [200, 120, 200, 120, 200, 120, 400],
+                );
               }
             } catch {
               /* ignore */

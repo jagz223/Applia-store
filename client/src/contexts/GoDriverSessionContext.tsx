@@ -15,11 +15,22 @@ import {
   type GoDriverReceiveMode,
 } from "@/lib/cargo-driver-storage";
 import { emitDriverWorkModeTelemetry } from "@/lib/driver-work-mode-telemetry";
+import {
+  readLastKnownDriverGeo,
+  requestDriverGeolocationNow,
+  startDriverGeolocationWatch,
+  type DriverGeolocationError,
+  type DriverGeoPoint,
+} from "@/lib/driver-geolocation";
+import { isLeafletMobileMap } from "@/components/taxi/leaflet-config";
 import { useSocket } from "@/hooks/use-socket";
 
 type GoDriverSessionValue = {
-  geoPos: { lat: number; lon: number } | null;
-  geoPosRef: React.MutableRefObject<{ lat: number; lon: number } | null>;
+  geoPos: DriverGeoPoint | null;
+  geoPosRef: React.MutableRefObject<DriverGeoPoint | null>;
+  geoLocating: boolean;
+  geoError: DriverGeolocationError | null;
+  requestLocation: () => void;
   receiveMode: GoDriverReceiveMode;
   setReceiveMode: (mode: GoDriverReceiveMode) => void;
   stopReceiving: () => void;
@@ -29,7 +40,9 @@ const GoDriverSessionContext = createContext<GoDriverSessionValue | null>(null);
 
 export function GoDriverSessionProvider({ children }: { children: ReactNode }) {
   const { socket } = useSocket();
-  const [geoPos, setGeoPos] = useState<{ lat: number; lon: number } | null>(null);
+  const [geoPos, setGeoPos] = useState<DriverGeoPoint | null>(() => readLastKnownDriverGeo());
+  const [geoLocating, setGeoLocating] = useState(() => !readLastKnownDriverGeo());
+  const [geoError, setGeoError] = useState<DriverGeolocationError | null>(null);
   const [receiveMode, setReceiveModeState] = useState<GoDriverReceiveMode>(() => loadGoDriverReceiveMode());
   const geoPosRef = useRef(geoPos);
   geoPosRef.current = geoPos;
@@ -52,38 +65,70 @@ export function GoDriverSessionProvider({ children }: { children: ReactNode }) {
     clearAllGoReceiving();
   }, []);
 
+  const applyPosition = useCallback((p: DriverGeoPoint) => {
+    setGeoPos(p);
+    setGeoError(null);
+  }, []);
+
+  const requestLocation = useCallback(() => {
+    requestDriverGeolocationNow(applyPosition, setGeoError, setGeoLocating);
+  }, [applyPosition]);
+
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    const stop = startDriverGeolocationWatch({
+      onPosition: applyPosition,
+      onError: setGeoError,
+      onLocatingChange: setGeoLocating,
+      requestPermissionOnMount: isLeafletMobileMap(),
+    });
+    return stop;
+  }, [applyPosition]);
+
+  /** Móvil: reaccionar si el usuario cambia el permiso en ajustes del sistema. */
+  useEffect(() => {
+    if (!isLeafletMobileMap()) return;
+    if (typeof navigator.permissions?.query !== "function") return;
+
     let cancelled = false;
-    const apply = (p: GeolocationPosition) => {
-      if (cancelled) return;
-      setGeoPos({ lat: p.coords.latitude, lon: p.coords.longitude });
-    };
-    navigator.geolocation.getCurrentPosition(
-      apply,
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 25_000 },
-    );
-    const id = navigator.geolocation.watchPosition(
-      apply,
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 60_000 },
-    );
+    let status: PermissionStatus | null = null;
+
+    void navigator.permissions
+      .query({ name: "geolocation" })
+      .then((s) => {
+        if (cancelled) return;
+        status = s;
+        status.onchange = () => {
+          if (status?.state === "granted") {
+            setGeoError(null);
+            requestLocation();
+          } else if (status?.state === "denied") {
+            setGeoError("denied");
+            setGeoLocating(false);
+          }
+        };
+      })
+      .catch(() => {
+        /* Safari/iOS: sin Permissions API; el watch ya gestiona prompt/granted */
+      });
+
     return () => {
       cancelled = true;
-      navigator.geolocation.clearWatch(id);
+      if (status) status.onchange = null;
     };
-  }, []);
+  }, [requestLocation]);
 
   const value = useMemo(
     () => ({
       geoPos,
       geoPosRef,
+      geoLocating,
+      geoError,
+      requestLocation,
       receiveMode,
       setReceiveMode,
       stopReceiving,
     }),
-    [geoPos, receiveMode, setReceiveMode, stopReceiving],
+    [geoPos, geoLocating, geoError, requestLocation, receiveMode, setReceiveMode, stopReceiving],
   );
 
   return <GoDriverSessionContext.Provider value={value}>{children}</GoDriverSessionContext.Provider>;

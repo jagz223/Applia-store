@@ -26,6 +26,7 @@ import {
 } from "@/lib/vehicle-movement-heading";
 import { LeafletMapMotionEnhancer } from "@/components/taxi/LeafletMapMotionEnhancer";
 import { MapRotateControls } from "@/components/taxi/MapPerspectiveControls";
+import { readLastKnownDriverGeo } from "@/lib/driver-geolocation";
 
 const DEFAULT_CENTER: [number, number] = [-0.22, -78.5];
 const DEFAULT_ZOOM = 7;
@@ -70,7 +71,38 @@ function getInitialDriverMapFrame(): {
   if (p) {
     return { center: [p.lat, p.lng], zoom: p.zoom, hadPersistedView: true };
   }
+  const last = readLastKnownDriverGeo();
+  if (last) {
+    return { center: [last.lat, last.lon], zoom: 15, hadPersistedView: false };
+  }
   return { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, hadPersistedView: false };
+}
+
+/** Rumbo del vehículo a partir de actualizaciones de posición (sin segundo watch GPS). */
+function TrackDriverHeadingFromPosition({
+  position,
+  onHeading,
+  enabled,
+}: {
+  position: { lat: number; lon: number } | null;
+  onHeading: (deg: number | null) => void;
+  enabled: boolean;
+}) {
+  const prevRef = useRef<{ lat: number; lon: number } | null>(null);
+  const headingRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !position) return;
+    const next = position;
+    let target = bearingFromLatLon(prevRef.current, next);
+    if (target != null) {
+      headingRef.current = smoothHeadingDeg(headingRef.current, target);
+      onHeading(headingRef.current);
+    }
+    prevRef.current = next;
+  }, [enabled, position?.lat, position?.lon, onHeading]);
+
+  return null;
 }
 
 function WatchDriverPosition({
@@ -110,9 +142,9 @@ function WatchDriverPosition({
     navigator.geolocation.getCurrentPosition(
       apply,
       () => {
-        /* timeout/permiso: no borrar marcador; el watch puede recuperar */
+        /* timeout/permiso: el watch puede recuperar */
       },
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 25_000 },
+      { enableHighAccuracy: false, maximumAge: 300_000, timeout: 12_000 },
     );
     const id = navigator.geolocation.watchPosition(
       apply,
@@ -162,20 +194,31 @@ function PersistDriverMapView() {
 }
 
 /**
- * Solo la primera vez sin vista guardada: acerca al GPS. Si ya hay vista en sessionStorage (p. ej. tras cambiar de pestaña),
- * no movemos la cámara: el marcador sigue al conductor sin resetear el encuadre.
+ * Primera vez con GPS en esta sesión: acerca si el mapa está lejos o muy abierto.
  */
-function InitialFlyToGpsIfNoPersisted({
-  hadPersistedView,
+function InitialFlyToGpsOnFirstFix({
   me,
+  initialZoom,
 }: {
-  hadPersistedView: boolean;
   me: { lat: number; lon: number } | null;
+  initialZoom: number;
 }) {
   const map = useMap();
   const done = useRef(false);
   useEffect(() => {
-    if (hadPersistedView || !me || done.current) return;
+    if (!me || done.current) return;
+    if (initialZoom >= 14) {
+      try {
+        const c = map.getCenter();
+        const distDeg = Math.hypot(c.lat - me.lat, c.lng - me.lon);
+        if (distDeg < 0.02) {
+          done.current = true;
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     done.current = true;
     try {
       const c = map.getContainer();
@@ -185,7 +228,7 @@ function InitialFlyToGpsIfNoPersisted({
     } catch {
       /* contenedor Leaflet no listo o ya desmontado */
     }
-  }, [hadPersistedView, map, me]);
+  }, [initialZoom, map, me]);
   return null;
 }
 
@@ -265,10 +308,14 @@ function PositionLeafletZoomStack({
 function DriverMapRecenterToolbar({
   me,
   onLocated,
+  onRequestLocation,
+  geoLocating = false,
   fullscreen,
 }: {
   me: { lat: number; lon: number } | null;
   onLocated: (p: { lat: number; lon: number }) => void;
+  onRequestLocation?: () => void;
+  geoLocating?: boolean;
   fullscreen: boolean;
 }) {
   const map = useMap();
@@ -353,6 +400,10 @@ function DriverMapRecenterToolbar({
       centerOn(me.lat, me.lon);
       return;
     }
+    if (onRequestLocation) {
+      onRequestLocation();
+      return;
+    }
     if (!navigator.geolocation) return;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
@@ -363,13 +414,14 @@ function DriverMapRecenterToolbar({
         setLocating(false);
       },
       () => setLocating(false),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 25_000 }
+      { enableHighAccuracy: false, maximumAge: 120_000, timeout: 12_000 },
     );
-  }, [me, onLocated, centerOn]);
+  }, [me, onLocated, onRequestLocation, centerOn]);
 
   if (!host) return null;
 
   const hasFix = me != null;
+  const busy = locating || geoLocating;
 
   return createPortal(
     <div className="!mt-3 w-full border-t border-foreground/20 pt-3">
@@ -377,17 +429,17 @@ function DriverMapRecenterToolbar({
         type="button"
         size="icon"
         variant="secondary"
-        disabled={locating}
+        disabled={busy}
         className={cn(
           "h-12 w-12 rounded-full border-2 border-foreground/30 bg-background text-foreground",
           "shadow-md ring-2 ring-foreground/10 hover:bg-muted hover:ring-foreground/25",
-          locating && "opacity-80"
+          busy && "opacity-80"
         )}
         aria-label={hasFix ? "Centrar mapa en mi posición" : "Obtener mi ubicación y centrar el mapa"}
         title={hasFix ? "Centrar en mi posición" : "Buscar de nuevo mi GPS y centrar"}
         onClick={handleClick}
       >
-        {locating ? (
+        {busy ? (
           <Loader2 className="h-5 w-5 animate-spin text-foreground" aria-hidden />
         ) : hasFix ? (
           <Navigation className="h-5 w-5 text-foreground" strokeWidth={2.5} aria-hidden />
@@ -420,6 +472,11 @@ export type DriverCargoMapProps = {
   routeRenderKey?: number;
   /** Oculta el aviso inferior «Buscando tu ubicación…» (p. ej. cuando hay control deslizante encima). */
   hideLocationSearchingHint?: boolean;
+  /** Si se pasa, el mapa no abre un segundo watch GPS (usar GoDriverSession). */
+  driverPos?: { lat: number; lon: number } | null;
+  onRequestLocation?: () => void;
+  geoLocating?: boolean;
+  geoError?: "denied" | "unavailable" | "timeout" | null;
 };
 
 export function DriverCargoMap({
@@ -433,6 +490,10 @@ export function DriverCargoMap({
   routeGeometry = null,
   routeRenderKey = 0,
   hideLocationSearchingHint = false,
+  driverPos: driverPosProp,
+  onRequestLocation,
+  geoLocating = false,
+  geoError = null,
 }: DriverCargoMapProps) {
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
@@ -441,8 +502,11 @@ export function DriverCargoMap({
   const tileMaxZoom = getEffectiveLeafletMaxZoom(raster.maxZoom);
   const rotateOptions = getLeafletRotateMapOptions();
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: fullscreen ? 120 : 64 });
-  const [me, setMe] = useState<{ lat: number; lon: number } | null>(null);
-  const meRef = useRef<{ lat: number; lon: number } | null>(null);
+  const usesExternalPos = driverPosProp !== undefined;
+  const [me, setMe] = useState<{ lat: number; lon: number } | null>(() =>
+    usesExternalPos ? driverPosProp ?? readLastKnownDriverGeo() : null,
+  );
+  const meRef = useRef<{ lat: number; lon: number } | null>(me);
   const onPosition = useCallback((p: { lat: number; lon: number } | null) => {
     if (p) {
       meRef.current = p;
@@ -451,6 +515,14 @@ export function DriverCargoMap({
       setMe(meRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!usesExternalPos) return;
+    if (driverPosProp) {
+      meRef.current = driverPosProp;
+      setMe(driverPosProp);
+    }
+  }, [usesExternalPos, driverPosProp?.lat, driverPosProp?.lon]);
   const [bearingDeg, setBearingDeg] = useState(0);
   const [vehicleHeadingDeg, setVehicleHeadingDeg] = useState<number | null>(null);
   const inService = end != null;
@@ -530,13 +602,27 @@ export function DriverCargoMap({
               />
               <LeafletMapLayoutFix />
               <PersistDriverMapView />
-              <WatchDriverPosition
-                onPosition={onPosition}
-                onHeading={setVehicleHeadingDeg}
-                trackHeading={inService}
-              />
+              {!usesExternalPos ? (
+                <WatchDriverPosition
+                  onPosition={onPosition}
+                  onHeading={setVehicleHeadingDeg}
+                  trackHeading={inService}
+                />
+              ) : (
+                <TrackDriverHeadingFromPosition
+                  position={me}
+                  onHeading={setVehicleHeadingDeg}
+                  enabled={inService}
+                />
+              )}
               {showRecenter ? (
-                <DriverMapRecenterToolbar me={me} onLocated={onPosition} fullscreen={!!fullscreen} />
+                <DriverMapRecenterToolbar
+                  me={me}
+                  onLocated={onPosition}
+                  onRequestLocation={onRequestLocation}
+                  geoLocating={geoLocating}
+                  fullscreen={!!fullscreen}
+                />
               ) : null}
               {me ? (
                 <>
@@ -548,7 +634,7 @@ export function DriverCargoMap({
                     interactive={false}
                     zIndexOffset={600}
                   />
-                  <InitialFlyToGpsIfNoPersisted hadPersistedView={initialFrame.hadPersistedView} me={me} />
+                  <InitialFlyToGpsOnFirstFix me={me} initialZoom={initialFrame.zoom} />
                 </>
               ) : null}
               {end ? <FitToService start={start} end={end} me={me} /> : null}
@@ -586,8 +672,9 @@ export function DriverCargoMap({
       {!hideLocationSearchingHint && !me && ready && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3">
           <p className="rounded-full border border-border bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow">
-            Buscando tu ubicación… activa el GPS. Si tarda, usa el botón de ubicación junto a +/− en el mapa para
-            intentar de nuevo.
+            {geoError === "denied"
+              ? "Activa el permiso de ubicación para este sitio en los ajustes del teléfono o del navegador."
+              : "Buscando tu ubicación… Si tarda, usa el botón de ubicación junto a +/− en el mapa."}
           </p>
         </div>
       )}

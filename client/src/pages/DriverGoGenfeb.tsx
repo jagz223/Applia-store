@@ -53,6 +53,7 @@ import {
 import { extractUserPublicPhone } from "@/lib/user-public-phone";
 import { fetchGoRideConversationId } from "@/lib/go-active-ride-chat";
 import { useGoDriverSession } from "@/contexts/GoDriverSessionContext";
+import { useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
 import { Button } from "@/components/ui/button";
 import { GoChatProvider, useGoChat } from "@/contexts/GoChatContext";
 import { GoDriverUiProvider } from "@/contexts/GoDriverUiContext";
@@ -64,6 +65,9 @@ import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api
 import { historyToDriverTripLog } from "@/lib/mobility-ride-history-mappers";
 import { notifyMobilityRideHistoryChanged } from "@/lib/mobility-ride-history-events";
 import { GoChatDrawer } from "@/components/go/GoChatDrawer";
+import { GoClientPresenceReporter } from "@/components/go/GoClientPresenceReporter";
+import { DriverFloatingBubble } from "@/components/go/DriverFloatingBubble";
+import { GoDriverBubbleProvider } from "@/contexts/GoDriverBubbleContext";
 import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
 import { pollClassicDriverOffer, GO_CLASSIC_OFFER_POLL_MS } from "@/lib/go-driver-classic-offer-poll";
 import { useSocket } from "@/hooks/use-socket";
@@ -91,6 +95,7 @@ import {
   trimRouteAtDriver,
   type StoredDrivingRoute,
 } from "@/lib/driving-route-geometry";
+import { isRouteFetchInFailureBackoff } from "@/lib/driving-route-fetch-backoff";
 import {
   GO_DRIVER_SUBSCRIPTION_INACTIVE_DRIVER_BANNER,
   GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT,
@@ -147,7 +152,9 @@ function mapApiRideToOffer(ride: MobilityRideHydration): CargoRideOfferPayload {
 
 export default function DriverGoGenfeb() {
   const queryClient = useQueryClient();
-  const { geoPos, geoPosRef, receiveMode, setReceiveMode, stopReceiving } = useGoDriverSession();
+  const { geoPos, geoPosRef, geoLocating, geoError, requestLocation, receiveMode, setReceiveMode, stopReceiving } =
+    useGoDriverSession();
+  const driverBubble = useGoDriverBubbleOptional();
   const [activeServiceModule, setActiveServiceModule] = useState<"cargo" | "pack" | null>(() => {
     const cargo = loadGoDriverActiveRideId("cargo");
     const pack = loadGoDriverActiveRideId("pack");
@@ -174,6 +181,18 @@ export default function DriverGoGenfeb() {
   const presenceEvent = serviceModule === "pack" ? "pack:driver:presence" : "cargo:driver:presence";
   const locationEvent = serviceModule === "pack" ? "pack:ride:location" : "cargo:ride:location";
   const { toast } = useToast();
+  const geoDeniedToastShownRef = useRef(false);
+
+  useEffect(() => {
+    if (geoError !== "denied" || geoDeniedToastShownRef.current) return;
+    geoDeniedToastShownRef.current = true;
+    toast({
+      title: "Ubicación desactivada",
+      description:
+        "Para recibir viajes necesitamos tu GPS. Activa el permiso de ubicación para este sitio en el teléfono o el navegador.",
+      variant: "destructive",
+    });
+  }, [geoError, toast]);
   const goDriverUi = useGoDriverUi();
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -347,7 +366,9 @@ export default function DriverGoGenfeb() {
   const [activeRidePanelCollapsed, setActiveRidePanelCollapsed] = useState(false);
   const activeServiceRouteRef = useRef<StoredDrivingRoute | null>(null);
   const serviceRouteTrimIndexRef = useRef(0);
+  const serviceRouteFetchInFlightRef = useRef(false);
   const lastServiceRouteDeviationFetchRef = useRef<{ at: number; targetKey: string } | null>(null);
+  const lastServiceRouteFailureRef = useRef<{ at: number; targetKey: string } | null>(null);
   const isGoCompact = useGoCompactViewport();
 
   const { data: providerVehicle } = useQuery({
@@ -375,12 +396,18 @@ export default function DriverGoGenfeb() {
   const meetsDriverBasics =
     !!provider?.isVerified && (isCarGoDriver || isPackGoDriver) && hasVehicle;
   const canReceive = meetsDriverBasics && hasActiveSubscription;
+  const bubbleMinimized =
+    !!driverBubble?.enabled && !!driverBubble.isMinimized && isGoCompact;
   const canUseDriverNegotiation =
     (isAdmin || provider?.isVerified === true) && hasActiveSubscription;
   const slideDisabledHint =
     meetsDriverBasics && !hasActiveSubscription ? GO_DRIVER_SUBSCRIPTION_INACTIVE_SLIDE_HINT : undefined;
 
   const slideDockRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    driverBubble?.setReceiveMode(receiveMode, canReceive);
+  }, [driverBubble, receiveMode, canReceive]);
 
   const { data: serverTripHistory = [] } = useQuery({
     queryKey: ["mobility-ride-history", "driver", user?.id],
@@ -531,6 +558,7 @@ export default function DriverGoGenfeb() {
         activeServiceRouteRef.current = null;
         serviceRouteTrimIndexRef.current = 0;
         lastServiceRouteDeviationFetchRef.current = null;
+        lastServiceRouteFailureRef.current = null;
         stopReceiving();
       } catch {
         /* ignore */
@@ -725,6 +753,7 @@ export default function DriverGoGenfeb() {
       activeServiceRouteRef.current = null;
       serviceRouteTrimIndexRef.current = 0;
       lastServiceRouteDeviationFetchRef.current = null;
+      lastServiceRouteFailureRef.current = null;
       if (activeConversationId != null) addHiddenConversationId(activeConversationId);
       if (activeConversationId != null) purgeConversationCache(queryClient, activeConversationId);
       resetChat();
@@ -764,6 +793,7 @@ export default function DriverGoGenfeb() {
       activeServiceRouteRef.current = null;
       serviceRouteTrimIndexRef.current = 0;
       lastServiceRouteDeviationFetchRef.current = null;
+      lastServiceRouteFailureRef.current = null;
       if (activeConversationId != null) addHiddenConversationId(activeConversationId);
       if (activeConversationId != null) purgeConversationCache(queryClient, activeConversationId);
       resetChat();
@@ -1086,6 +1116,7 @@ export default function DriverGoGenfeb() {
         activeServiceRouteRef.current = null;
         serviceRouteTrimIndexRef.current = 0;
         lastServiceRouteDeviationFetchRef.current = null;
+        lastServiceRouteFailureRef.current = null;
         stopReceiving();
       }
       if (!accept) {
@@ -1192,6 +1223,7 @@ export default function DriverGoGenfeb() {
       activeServiceRouteRef.current = null;
       serviceRouteTrimIndexRef.current = 0;
       lastServiceRouteDeviationFetchRef.current = null;
+      lastServiceRouteFailureRef.current = null;
       void queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
       disconnectReceivingIfSubscriptionLapsed();
     } catch (e) {
@@ -1237,6 +1269,7 @@ export default function DriverGoGenfeb() {
       activeServiceRouteRef.current = null;
       serviceRouteTrimIndexRef.current = 0;
       lastServiceRouteDeviationFetchRef.current = null;
+      lastServiceRouteFailureRef.current = null;
       toast({ title: "Viaje cancelado", description: "El servicio quedó anulado." });
       setCancelServiceOpen(false);
       disconnectReceivingIfSubscriptionLapsed();
@@ -1298,6 +1331,7 @@ export default function DriverGoGenfeb() {
     activeServiceRouteRef.current = null;
     serviceRouteTrimIndexRef.current = 0;
     lastServiceRouteDeviationFetchRef.current = null;
+    lastServiceRouteFailureRef.current = null;
   }, [activeRideId, activeRideStarted, serviceNavTarget?.lat, serviceNavTarget?.lon]);
 
   const applyTrimmedServiceRoute = useCallback(
@@ -1317,6 +1351,7 @@ export default function DriverGoGenfeb() {
   const fetchServiceRoadRoute = useCallback(async () => {
     const g = geoPosRef.current;
     if (!activeRideId || !g || !serviceNavTarget) return false;
+    if (serviceRouteFetchInFlightRef.current) return false;
     const targetKey = serviceNavTargetKey(serviceNavTarget);
     const url = `/api/maps/route?from=${g.lon},${g.lat}&to=${serviceNavTarget.lon},${serviceNavTarget.lat}`;
     const tryOnce = async (): Promise<boolean> => {
@@ -1340,14 +1375,22 @@ export default function DriverGoGenfeb() {
       serviceRouteTrimIndexRef.current = 0;
       applyTrimmedServiceRoute(stored, g);
       lastServiceRouteDeviationFetchRef.current = { at: Date.now(), targetKey };
+      lastServiceRouteFailureRef.current = null;
       return true;
     };
+    serviceRouteFetchInFlightRef.current = true;
     setServiceRouteLoading(true);
     try {
-      if (await tryOnce()) return true;
-      await new Promise((r) => window.setTimeout(r, 1200));
-      return tryOnce();
+      const ok = await tryOnce();
+      if (!ok) {
+        lastServiceRouteFailureRef.current = { at: Date.now(), targetKey };
+      }
+      return ok;
+    } catch {
+      lastServiceRouteFailureRef.current = { at: Date.now(), targetKey };
+      return false;
     } finally {
+      serviceRouteFetchInFlightRef.current = false;
       setServiceRouteLoading(false);
     }
   }, [activeRideId, serviceNavTarget, applyTrimmedServiceRoute]);
@@ -1359,6 +1402,12 @@ export default function DriverGoGenfeb() {
     const route = activeServiceRouteRef.current;
 
     if (!route || route.targetKey !== targetKey) {
+      if (
+        !route &&
+        isRouteFetchInFailureBackoff(lastServiceRouteFailureRef.current, targetKey)
+      ) {
+        return;
+      }
       serviceRouteTrimIndexRef.current = 0;
       void fetchServiceRoadRoute();
       return;
@@ -1832,7 +1881,8 @@ export default function DriverGoGenfeb() {
     <div
       className={cn(
         "flex min-h-0 flex-1 flex-col bg-gradient-to-b from-muted/25 to-background pb-6",
-        "max-lg:h-full max-lg:min-h-0 max-lg:overflow-hidden max-lg:pb-0"
+        "max-lg:h-full max-lg:min-h-0 max-lg:overflow-hidden max-lg:pb-0",
+        bubbleMinimized && "max-lg:hidden",
       )}
     >
       {/* Móvil: mapa llena el área de main (entre cabecera shell y barra inferior), sin scroll ni “doble capa”. */}
@@ -1849,6 +1899,10 @@ export default function DriverGoGenfeb() {
               fullscreen
               showRecenter
               hideLocationSearchingHint
+              driverPos={geoPos}
+              onRequestLocation={requestLocation}
+              geoLocating={geoLocating}
+              geoError={geoError}
               vehicleType={providerVehicle?.vehicle_type}
               receiving={receiving}
               searchingClient={searchingClient}
@@ -1866,6 +1920,24 @@ export default function DriverGoGenfeb() {
               )}
             >
               {driverNegotiationBubble}
+              {geoError === "denied" && !geoPos ? (
+                <div className="rounded-lg border border-destructive/40 bg-background/95 p-2.5 text-xs shadow-lg backdrop-blur-md">
+                  <p className="font-medium text-destructive">Ubicación desactivada</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Activa el permiso de ubicación para este sitio. Sin GPS no puedes recibir viajes en el mapa.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-2 h-8"
+                    onClick={requestLocation}
+                    disabled={geoLocating}
+                  >
+                    {geoLocating ? "Solicitando…" : "Activar ubicación"}
+                  </Button>
+                </div>
+              ) : null}
               {receiving && canReceive ? (
                 <div
                   className={cn(
@@ -2008,6 +2080,10 @@ export default function DriverGoGenfeb() {
               fullscreen
               showRecenter
               hideLocationSearchingHint
+              driverPos={geoPos}
+              onRequestLocation={requestLocation}
+              geoLocating={geoLocating}
+              geoError={geoError}
               vehicleType={providerVehicle?.vehicle_type}
               receiving={receiving}
               searchingClient={searchingClient}
@@ -2292,12 +2368,16 @@ export default function DriverGoGenfeb() {
 export function DriverGoGenfebWithGoChat() {
   return (
     <GoDriverSessionProvider>
-      <GoChatProvider>
-        <GoDriverUiProvider>
-          <DriverGoGenfeb />
-          <GoChatDrawer />
-        </GoDriverUiProvider>
-      </GoChatProvider>
+      <GoDriverBubbleProvider>
+        <GoChatProvider>
+          <GoDriverUiProvider>
+            <GoClientPresenceReporter path="/go/driver" />
+            <DriverFloatingBubble />
+            <DriverGoGenfeb />
+            <GoChatDrawer />
+          </GoDriverUiProvider>
+        </GoChatProvider>
+      </GoDriverBubbleProvider>
     </GoDriverSessionProvider>
   );
 }

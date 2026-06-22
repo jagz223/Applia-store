@@ -13,6 +13,8 @@ import { type CargoDriverTripLog } from "@/lib/cargo-driver-storage";
 import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
 import { historyToDriverTripLog } from "@/lib/mobility-ride-history-mappers";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
+import { DriverBubbleModeSettings } from "@/components/go/DriverBubbleModeSettings";
+import { useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { SubscriptionStatusButton } from "@/components/SubscriptionStatusButton";
 import { ProviderVehicleChangeRequestDialog } from "@/components/provider/ProviderVehicleChangeRequestDialog";
 
@@ -95,6 +97,7 @@ export default function CargoDriverSettings() {
     const k = resolveVehicleKind(vehicle?.vehicle_type as string | undefined);
     return VEHICLE_LABEL[k] ?? "Vehículo";
   })();
+  const isGoCompact = useGoCompactViewport();
 
   if (authLoading || !isAuthenticated || providerLoading || !provider) {
     return (
@@ -165,6 +168,8 @@ export default function CargoDriverSettings() {
         </Card>
 
         <ThemeAppearanceCard className="mb-4" />
+
+        {isGoCompact ? <DriverBubbleModeSettings className="mb-4" /> : null}
 
         <SubscriptionStatusButton className="mb-4 w-full" />
 
