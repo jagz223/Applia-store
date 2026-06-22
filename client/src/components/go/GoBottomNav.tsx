@@ -17,6 +17,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { DriverEarningsPanel } from "@/components/go/DriverEarningsPanel";
 import { DriverBubbleModeSettings } from "@/components/go/DriverBubbleModeSettings";
 import { useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
+import { useGoDriverSession } from "@/contexts/GoDriverSessionContext";
+import { isReceivingAnyGoMode } from "@/lib/go-driver-receive-mode";
 import { fetchMobilityRideHistoryForUser } from "@/lib/mobility-ride-history-api";
 import { historyToRiderTripLog } from "@/lib/mobility-ride-history-mappers";
 import { useSocket } from "@/hooks/use-socket";
@@ -67,6 +69,8 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   const { openNotifications } = useGoNotifications();
   const goDriverUi = useGoDriverUi();
   const driverBubble = useGoDriverBubbleOptional();
+  const { receiveMode } = useGoDriverSession();
+  const driverReceiving = isReceivingAnyGoMode(receiveMode);
   const { notifications } = useSocket();
   const { toast } = useToast();
   const { data: categories = [] } = useCategories();
@@ -431,6 +435,7 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
           <DriverBubbleModeSettings
             variant="menu"
             className="mb-1"
+            receiving={driverReceiving}
             onAfterAction={() => setDriverMoreMenuOpen(false)}
           />
           <div className="flex flex-col gap-2 py-2">

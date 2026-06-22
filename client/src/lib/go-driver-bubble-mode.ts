@@ -1,5 +1,9 @@
 import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
 import {
+  isDriverBubbleOverlaySupported,
+  shouldAutoMinimizeDriverBubbleOnHide,
+} from "@/lib/go-driver-bubble-capability";
+import {
   driverBubbleGlowAccent,
   driverBubblePiPGlowAnimation,
   driverBubblePiPGlowKeyframesCss,
@@ -26,8 +30,10 @@ export function isDriverBubbleModeSupported(): boolean {
 }
 
 export function isDriverDocumentPiPSupported(): boolean {
-  return typeof window !== "undefined" && "documentPictureInPicture" in window;
+  return isDriverBubbleOverlaySupported();
 }
+
+export { isDriverBubbleOverlaySupported, shouldAutoMinimizeDriverBubbleOnHide };
 
 /** Vista principal del conductor (no ajustes ni otras pantallas). */
 export function isDriverBubbleMainPath(pathname: string): boolean {

@@ -16,15 +16,18 @@ import {
   isDriverBubbleActive,
   isDriverBubbleMainPath,
   isDriverBubbleModeSupported,
+  isDriverBubbleOverlaySupported,
   isDriverDocumentPiPSupported,
   openDriverBubblePiP,
   readDriverBubblePinnedInSettings,
+  shouldAutoMinimizeDriverBubbleOnHide,
   updateDriverBubblePiPContent,
   writeDriverBubblePinnedInSettings,
 } from "@/lib/go-driver-bubble-mode";
 
 type GoDriverBubbleValue = {
   supported: boolean;
+  overlaySupported: boolean;
   pipSupported: boolean;
   active: boolean;
   enabled: boolean;
@@ -48,6 +51,7 @@ const GoDriverBubbleContext = createContext<GoDriverBubbleValue | null>(null);
 export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const supported = isDriverBubbleModeSupported();
+  const overlaySupported = isDriverBubbleOverlaySupported();
   const pipSupported = isDriverDocumentPiPSupported();
   const [pinnedInSettings, setPinnedInSettingsState] = useState(() => readDriverBubblePinnedInSettings());
   const [receiveMode, setReceiveModeState] = useState<GoDriverReceiveMode>("off");
@@ -67,7 +71,7 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
 
   const active = isDriverBubbleActive(receiving, pinnedInSettings);
   const activeRef = useRef(active);
-  const shellCollapsed = isMinimized && (pipActive || documentVisible);
+  const shellCollapsed = overlaySupported && isMinimized && (pipActive || documentVisible);
 
   isMinimizedRef.current = isMinimized;
   receivingRef.current = receiving;
@@ -138,7 +142,7 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
   }, [pipSupported]);
 
   const minimize = useCallback(async () => {
-    if (!activeRef.current || !supported) return;
+    if (!overlaySupported || !activeRef.current || !supported) return;
     if (!isDriverBubbleMainPath(locationRef.current)) return;
     if (minimizingRef.current) return;
     if (isMinimizedRef.current && pipWindowRef.current) return;
@@ -157,9 +161,10 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
     } finally {
       minimizingRef.current = false;
     }
-  }, [supported, requestPiP]);
+  }, [overlaySupported, supported, requestPiP]);
 
   const toggleMinimized = useCallback(async () => {
+    if (!overlaySupported) return;
     if (isMinimizedRef.current) {
       expand();
       return;
@@ -168,11 +173,12 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
   }, [expand, minimize]);
 
   const shouldAutoMinimize = useCallback(() => {
+    if (!overlaySupported || !shouldAutoMinimizeDriverBubbleOnHide()) return false;
     if (!activeRef.current || !supported) return false;
     if (!isDriverBubbleMainPath(locationRef.current)) return false;
     if (isMinimizedRef.current && pipWindowRef.current) return false;
     return isAppHiddenForBubble();
-  }, [supported]);
+  }, [overlaySupported, supported]);
 
   const restoreFromBackground = useCallback(() => {
     if (document.visibilityState !== "visible") return;
@@ -182,7 +188,7 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
   }, [expand]);
 
   useEffect(() => {
-    if (!active || !supported) return;
+    if (!active || !supported || !overlaySupported) return;
 
     const onHide = () => {
       if (!shouldAutoMinimize()) return;
@@ -209,7 +215,7 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("pageshow", onShow);
       window.removeEventListener("focus", onShow);
     };
-  }, [active, supported, minimize, restoreFromBackground, shouldAutoMinimize]);
+  }, [active, supported, overlaySupported, minimize, restoreFromBackground, shouldAutoMinimize]);
 
   useEffect(() => {
     if (isDriverBubbleMainPath(location)) return;
@@ -232,6 +238,7 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       supported,
+      overlaySupported,
       pipSupported,
       active,
       enabled: active,
@@ -250,6 +257,7 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
     }),
     [
       supported,
+      overlaySupported,
       pipSupported,
       active,
       pinnedInSettings,
