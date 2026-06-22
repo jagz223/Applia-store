@@ -27,6 +27,7 @@ import {
 import { LeafletMapMotionEnhancer } from "@/components/taxi/LeafletMapMotionEnhancer";
 import { MapRotateControls } from "@/components/taxi/MapPerspectiveControls";
 import { readLastKnownDriverGeo } from "@/lib/driver-geolocation";
+import { useEnsureMapGeolocation } from "@/lib/map-geolocation";
 
 const DEFAULT_CENTER: [number, number] = [-0.22, -78.5];
 const DEFAULT_ZOOM = 7;
@@ -495,6 +496,7 @@ export function DriverCargoMap({
   geoLocating = false,
   geoError = null,
 }: DriverCargoMapProps) {
+  useEnsureMapGeolocation();
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
   const tileBehavior = getLeafletTileLayerBehaviorProps();

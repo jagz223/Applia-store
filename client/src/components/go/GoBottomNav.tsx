@@ -435,7 +435,6 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
           <DriverBubbleModeSettings
             variant="menu"
             className="mb-1"
-            receiving={driverReceiving}
             onAfterAction={() => setDriverMoreMenuOpen(false)}
           />
           <div className="flex flex-col gap-2 py-2">

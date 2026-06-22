@@ -20,6 +20,7 @@ import { formatCentralFleetMapHint } from "@/lib/central-fleet-position";
 import { fleetMarkerSizeForZoom } from "@/lib/fleet-map-marker-size";
 import { fleetMapMarkerColorForUser } from "@/lib/fleet-map-marker-color";
 import { spreadFleetMapMarkerPositions } from "@/lib/fleet-map-marker-spread";
+import { useEnsureMapGeolocation } from "@/lib/map-geolocation";
 import { fleetWorkAccentForDriver, centralDriverReceivingModeLabel, fleetWorkAccentLabelClass, type FleetWorkAccent } from "@/lib/central-fleet-work-accent";
 import { bearingFromLatLon, smoothHeadingDeg } from "@/lib/vehicle-movement-heading";
 import { Button } from "@/components/ui/button";
@@ -400,6 +401,7 @@ export function CentralFleetMap({
   hideRefreshControl = false,
   hideAttribution = false,
 }: CentralFleetMapProps) {
+  useEnsureMapGeolocation();
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
   const tileBehavior = getLeafletTileLayerBehaviorProps();
