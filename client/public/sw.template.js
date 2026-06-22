@@ -116,7 +116,9 @@ function parseFcmPushPayload(raw) {
     String(Date.now());
   const tag = `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
   const isPanic = String((data && data.type) || "").toLowerCase() === "go_panic";
-  return { title, body, url, tag, isPanic };
+  const offerType = String((data && data.type) || "").toLowerCase();
+  const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+  return { title, body, url, tag, isPanic, isRideOffer };
 }
 
 self.addEventListener("push", (event) => {
@@ -127,7 +129,7 @@ self.addEventListener("push", (event) => {
   } catch (_) {
     return;
   }
-  const { title, body, url, tag, isPanic } = parseFcmPushPayload(payload);
+  const { title, body, url, tag, isPanic, isRideOffer } = parseFcmPushPayload(payload);
   event.waitUntil(
     self.registration
       .showNotification(title, {
@@ -143,7 +145,13 @@ self.addEventListener("push", (event) => {
               vibrate: [300, 200, 300, 200, 300, 200, 500],
               silent: false,
             }
-          : {}),
+          : isRideOffer
+            ? {
+                requireInteraction: true,
+                vibrate: [200, 120, 200, 120, 200, 120, 400],
+                silent: false,
+              }
+            : {}),
       })
       .catch(function () {})
   );

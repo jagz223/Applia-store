@@ -9,6 +9,7 @@
     "build": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production NODE_OPTIONS=--use-system-ca node dist/index.cjs",
     "check": "tsc",
+    "test:matching": "cross-env NODE_OPTIONS=--use-system-ca tsx script/simulate-classic-offer-matching.ts",
     "db:push": "drizzle-kit push",
     "seed:firestore": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-firestore.ts",
     "seed:categories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-categories.ts",

@@ -568,3 +568,76 @@
   animation: fleet-marker-fade-in 0.55s ease-out forwards;
   transform-origin: 50% 100%;
 }
+
+/** Burbuja flotante del conductor: brillo parpadeante según modo de trabajo. */
+@keyframes driver-bubble-glow-pulse-taxi {
+  0%,
+  100% {
+    box-shadow:
+      0 0 10px 3px rgb(14 165 233 / 0.45),
+      0 0 22px 6px rgb(14 165 233 / 0.28);
+  }
+  50% {
+    box-shadow:
+      0 0 18px 8px rgb(14 165 233 / 0.95),
+      0 0 36px 14px rgb(14 165 233 / 0.5);
+  }
+}
+
+@keyframes driver-bubble-glow-pulse-delivery {
+  0%,
+  100% {
+    box-shadow:
+      0 0 10px 3px rgb(139 92 246 / 0.45),
+      0 0 22px 6px rgb(139 92 246 / 0.28);
+  }
+  50% {
+    box-shadow:
+      0 0 18px 8px rgb(139 92 246 / 0.95),
+      0 0 36px 14px rgb(139 92 246 / 0.5);
+  }
+}
+
+@keyframes driver-bubble-glow-pulse-hybrid {
+  0%,
+  100% {
+    box-shadow:
+      0 0 12px 4px rgb(14 165 233 / 0.55),
+      0 0 24px 8px rgb(139 92 246 / 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 20px 10px rgb(52 211 153 / 0.75),
+      0 0 38px 14px rgb(167 139 250 / 0.55);
+  }
+}
+
+@keyframes driver-bubble-glow-pulse-off {
+  0%,
+  100% {
+    box-shadow: 0 0 8px 2px rgb(100 116 139 / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 14px 5px rgb(100 116 139 / 0.55);
+  }
+}
+
+.driver-bubble-glow {
+  border: 2px solid rgb(255 255 255 / 0.85);
+}
+
+.driver-bubble-glow--taxi {
+  animation: driver-bubble-glow-pulse-taxi 1.35s ease-in-out infinite;
+}
+
+.driver-bubble-glow--delivery {
+  animation: driver-bubble-glow-pulse-delivery 1.35s ease-in-out infinite;
+}
+
+.driver-bubble-glow--hybrid {
+  animation: driver-bubble-glow-pulse-hybrid 1.35s ease-in-out infinite;
+}
+
+.driver-bubble-glow--off {
+  animation: driver-bubble-glow-pulse-off 1.8s ease-in-out infinite;
+}

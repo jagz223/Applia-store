@@ -64,15 +64,15 @@ async function parseRoadRouteResponse(
   };
 }
 
-/**
- * Ruta en coche vía GET /api/maps/route (Geoapify), igual que TaxiRide / DriverGoGenfeb.
- * Reintenta una vez tras ~1.2s si la primera petición no devuelve geometría por calles.
- */
 export type FetchRoadDrivingRouteResult = {
   route: RoadDrivingRouteResult | null;
   errorMessage: string | null;
 };
 
+/**
+ * Ruta en coche vía GET /api/maps/route (Geoapify).
+ * Un solo intento por llamada; solo reintenta si falla la red (no en 502 de ruta inválida).
+ */
 export async function fetchRoadDrivingRoute(
   start: { lat: number; lon: number },
   end: { lat: number; lon: number },
@@ -81,10 +81,21 @@ export async function fetchRoadDrivingRoute(
   const to = `${end.lon},${end.lat}`;
   const url = `/api/maps/route?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
 
-  let parsed = await parseRoadRouteResponse(await fetch(url));
-  if (parsed.route) return parsed;
+  const tryFetch = () => parseRoadRouteResponse(fetch(url));
 
-  await new Promise((r) => window.setTimeout(r, 1200));
-  parsed = await parseRoadRouteResponse(await fetch(url));
-  return parsed;
+  try {
+    const parsed = await tryFetch();
+    if (parsed.route) return parsed;
+    return parsed;
+  } catch {
+    await new Promise((r) => window.setTimeout(r, 1200));
+    try {
+      return await tryFetch();
+    } catch {
+      return {
+        route: null,
+        errorMessage: "No se pudo conectar al servicio de rutas. Revisa tu red e intenta otra vez.",
+      };
+    }
+  }
 }

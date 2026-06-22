@@ -8,6 +8,7 @@ import type { GeoJsonObject } from "geojson";
 import { z } from "zod";
 import { authenticateJWT } from "./routes-auth";
 import { getIO, getUserActivePath, sendNotificationToUser } from "./socket";
+import { shouldSendDriverClassicOfferPush } from "./go-user-presence";
 import { genFebStorage } from "./storage-genfeb";
 import { catalogService } from "./services";
 import { notificationService } from "./services/notification.service";
@@ -28,6 +29,21 @@ import {
   RIDER_DRIVER_NOT_AVAILABLE_MESSAGE,
 } from "@shared/mobility-negotiation";
 import { driverIsBusyCrossModule, registerPackDriverBusy } from "./driver-busy-cross-module";
+import {
+  clearClassicOfferPending,
+  clearClassicOfferPendingForRide,
+  driverHasActiveClassicOffer,
+  getClassicOfferPending,
+  registerClassicOfferActiveScanner,
+  setClassicOfferPending,
+  type ActiveClassicOfferRow,
+  type ClassicOfferPending,
+} from "./go-driver-classic-offer-lock";
+import {
+  registerClassicSearchingReconciler,
+  scheduleReconcileSearchingClassicRides,
+  type StalledClassicSearchingRide,
+} from "./go-driver-classic-offer-reconcile";
 import { resolveGoRideRouteQuote } from "./go-ride-route-quote";
 import { applyDriverFareToRide } from "./ride-fare-apply";
 import { normalizeDispatchCompanyId } from "@shared/dispatch-company";
@@ -233,7 +249,7 @@ export function cancelStoreOrderPackSearch(storeOrderId: number): boolean {
     clearPendingOffersForRide(ride.id);
     anyCancelled = true;
 
-    if (prevOfferDriverId) pendingOfferByDriverId.delete(prevOfferDriverId);
+    if (prevOfferDriverId) clearClassicOfferPending(prevOfferDriverId);
 
     if (io) {
       const payload = { rideId: ride.id, cancelledBy: "rider" as const };
@@ -376,6 +392,23 @@ export async function createPackRideForStoreOrder(input: {
 }
 
 const rides = new Map<string, RideRecord>();
+
+registerClassicOfferActiveScanner(() => {
+  const rows: ActiveClassicOfferRow[] = [];
+  const now = Date.now();
+  for (const ride of rides.values()) {
+    if (ride.status !== "searching" || ride.isNegotiated || !ride.currentOfferDriverId) continue;
+    if (typeof ride.offerExpiresAt !== "number" || ride.offerExpiresAt <= now) continue;
+    rows.push({
+      driverId: ride.currentOfferDriverId,
+      rideId: ride.id,
+      expiresAt: ride.offerExpiresAt,
+      module: "pack",
+    });
+  }
+  return rows;
+});
+
 const rideTimers = new Map<string, { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }>();
 
 /** Participantes del envío para enlaces de notificación push del chat. */
@@ -387,12 +420,6 @@ export function getPackRideChatParticipants(rideId: string): {
   if (!ride) return null;
   return { riderUserId: ride.riderUserId, driverUserId: ride.driverUserId };
 }
-
-/** Oferta pendiente por driver (recovery al abrir /go/delivery/driver tras push). */
-const pendingOfferByDriverId = new Map<
-  string,
-  { rideId: string; expiresAt: number; module: "pack" }
->();
 
 function commitPackRide(ride: RideRecord): void {
   rides.set(ride.id, ride);
@@ -406,9 +433,7 @@ function dropPackActiveRide(rideId: string): void {
 }
 
 function clearPendingOffersForRide(rideId: string): void {
-  for (const [driverId, p] of pendingOfferByDriverId.entries()) {
-    if (p.rideId === rideId) pendingOfferByDriverId.delete(driverId);
-  }
+  clearClassicOfferPendingForRide(rideId);
 }
 
 function isTerminalRideStatus(status: RideStatus): boolean {
@@ -585,7 +610,7 @@ function clearStaleActiveOffer(ride: RideRecord): void {
   const expired = ride.offerExpiresAt != null && Date.now() > ride.offerExpiresAt;
   const offline = !isReceivingDeliveryForMatching(driverId);
   if (!expired && !offline) return;
-  pendingOfferByDriverId.delete(driverId);
+  clearClassicOfferPending(driverId);
   ride.currentOfferDriverId = null;
   ride.offerExpiresAt = null;
   const timers = rideTimers.get(ride.id);
@@ -593,6 +618,35 @@ function clearStaleActiveOffer(ride: RideRecord): void {
     clearTimeout(timers.offerTimeoutId);
     timers.offerTimeoutId = null;
   }
+}
+
+function isClassicSearchingPackRide(ride: RideRecord): boolean {
+  if (ride.status !== "searching" || ride.driverUserId != null) return false;
+  if (ride.isNegotiated) return false;
+  if (typeof ride.marketVisibleUntil === "number") return false;
+  return true;
+}
+
+function collectStalledClassicSearchingPackRides(): StalledClassicSearchingRide[] {
+  const out: StalledClassicSearchingRide[] = [];
+  for (const ride of rides.values()) {
+    if (!isClassicSearchingPackRide(ride)) continue;
+    clearStaleActiveOffer(ride);
+    if (!ride.currentOfferDriverId) {
+      out.push({ rideId: ride.id, module: "pack", createdAt: ride.createdAt });
+    }
+  }
+  return out;
+}
+
+async function reconcileClassicSearchingPackRide(io: SocketIOServer, rideId: string): Promise<void> {
+  let ride = rides.get(rideId);
+  if (!ride) ride = await ensurePackRideInMemory(rideId);
+  if (!ride || !isClassicSearchingPackRide(ride)) return;
+  clearStaleActiveOffer(ride);
+  if (ride.currentOfferDriverId) return;
+  const rider = await buildRiderPublic(ride.riderUserId);
+  await offerNextDriver(io, ride, rider);
 }
 
 async function reconcilePendingRidesForDriver(io: SocketIOServer, pres: DriverPresence): Promise<void> {
@@ -651,7 +705,7 @@ function clearRideTimers(rideId: string) {
 function driverCanDeclineClassicOffer(ride: RideRecord, driverUserId: string, rideId: string): boolean {
   if (ride.status !== "searching" || ride.isNegotiated) return false;
   if (ride.currentOfferDriverId === driverUserId) return true;
-  const pending = pendingOfferByDriverId.get(driverUserId);
+  const pending = getClassicOfferPending(driverUserId);
   if (pending?.rideId === rideId) return true;
   return ride.offeredDriverIds.includes(driverUserId);
 }
@@ -661,7 +715,7 @@ function releaseClassicOfferFromDriver(rideId: string, ride: RideRecord, driverU
   ride.declinedAtByDriverId[driverUserId] = Date.now();
   ride.currentOfferDriverId = null;
   ride.offerExpiresAt = null;
-  pendingOfferByDriverId.delete(driverUserId);
+  clearClassicOfferPending(driverUserId);
   const timers = rideTimers.get(rideId);
   if (timers?.offerTimeoutId) {
     clearTimeout(timers.offerTimeoutId);
@@ -774,8 +828,8 @@ function withdrawDriverPackNegotiationOffersElsewhere(
       rideId: ride.id,
       reason: NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN,
     });
-    const p = pendingOfferByDriverId.get(driverUserId);
-    if (p?.rideId === ride.id) pendingOfferByDriverId.delete(driverUserId);
+    const p = getClassicOfferPending(driverUserId);
+    if (p?.rideId === ride.id) clearClassicOfferPending(driverUserId);
   }
 }
 
@@ -805,6 +859,7 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
     const driverId = ride.offeredDriverIds[ride.offerIndex]!;
     ride.offerIndex += 1;
     if (driverIsBusyCrossModule(driverId)) continue;
+    if (driverHasActiveClassicOffer(driverId)) continue;
     const declinedAt = ride.declinedAtByDriverId?.[driverId];
     if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
     const driverPres = getPackPresenceRow(driverId);
@@ -830,7 +885,7 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
     };
     io.to(`user:${driverId}`).emit("pack:ride:offer", offerPayload);
 
-    pendingOfferByDriverId.set(driverId, { rideId: ride.id, expiresAt: ride.offerExpiresAt!, module: "pack" });
+    setClassicOfferPending(driverId, ride.id, ride.offerExpiresAt!, "pack");
 
     const offerTitle = isStoreOrderPackRide(ride) ? "Envío de tienda" : "Delivery";
     const offerBody = isStoreOrderPackRide(ride)
@@ -860,18 +915,13 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
       },
     });
 
-    // Push al driver si no está viendo la vista de driver.
+    // Push al driver si no tiene la app en primer plano en la vista conductor.
     try {
-      const pth = getUserActivePath(String(driverId));
-      if (
-        !pth ||
-        (!pth.startsWith("/go/driver") &&
-          !pth.startsWith("/go/delivery/driver") &&
-          !pth.startsWith("/go/pack/driver"))
-      ) {
+      if (shouldSendDriverClassicOfferPush(String(driverId))) {
         void notificationService.sendPushToUser(driverId, {
           title: offerTitle,
           body: offerBody,
+          urgent: true,
           data: { url: "/go/driver", type: "pack_ride_offer", rideId: ride.id },
         });
       }
@@ -885,11 +935,12 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
       live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
       live.declinedAtByDriverId[fixedDriverId] = Date.now();
       io.to(`user:${fixedDriverId}`).emit("pack:ride:offer_expired", { rideId: live.id });
-      pendingOfferByDriverId.delete(fixedDriverId);
+      clearClassicOfferPending(fixedDriverId);
       live.currentOfferDriverId = null;
       live.offerExpiresAt = null;
       commitPackRide(live);
       void offerNextDriver(io, live, rider);
+      scheduleReconcileSearchingClassicRides(io);
     }, ttlMs + 150);
     commitPackRide(ride);
     return;
@@ -897,6 +948,7 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
 
   // No finalizamos la búsqueda solo porque no hay drivers "en este instante".
   commitPackRide(ride);
+  scheduleReconcileSearchingClassicRides(io);
 }
 
 export function registerPackMobilitySocket(io: SocketIOServer) {
@@ -979,7 +1031,9 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
         receivingDelivery: true,
       });
 
-      void reconcilePendingRidesForDriver(io, pres).catch((e) => {
+      void reconcilePendingRidesForDriver(io, pres)
+        .then(() => scheduleReconcileSearchingClassicRides(io))
+        .catch((e) => {
         console.error("[pack] presence offer", e);
       });
       })();
@@ -1083,11 +1137,7 @@ export async function hydratePackMobilityRidesFromFirestore(): Promise<number> {
       ride.currentOfferDriverId &&
       typeof ride.offerExpiresAt === "number"
     ) {
-      pendingOfferByDriverId.set(ride.currentOfferDriverId, {
-        rideId: ride.id,
-        expiresAt: ride.offerExpiresAt,
-        module: "pack",
-      });
+      setClassicOfferPending(ride.currentOfferDriverId, ride.id, ride.offerExpiresAt, "pack");
     }
   }
 
@@ -1111,17 +1161,18 @@ export async function hydratePackMobilityRidesFromFirestore(): Promise<number> {
           live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
           live.declinedAtByDriverId[fixedDriverId] = Date.now();
           io.to(`user:${fixedDriverId}`).emit("pack:ride:offer_expired", { rideId: live.id });
-          pendingOfferByDriverId.delete(fixedDriverId);
+          clearClassicOfferPending(fixedDriverId);
           live.currentOfferDriverId = null;
           live.offerExpiresAt = null;
           commitPackRide(live);
           void offerNextDriver(io, live, rider);
+          scheduleReconcileSearchingClassicRides(io);
         }, remaining + 150);
         continue;
       }
       ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
       ride.declinedAtByDriverId[ride.currentOfferDriverId] = Date.now();
-      pendingOfferByDriverId.delete(ride.currentOfferDriverId);
+      clearClassicOfferPending(ride.currentOfferDriverId);
       ride.currentOfferDriverId = null;
       ride.offerExpiresAt = null;
       commitPackRide(ride);
@@ -1131,6 +1182,7 @@ export async function hydratePackMobilityRidesFromFirestore(): Promise<number> {
     }
   }
 
+  scheduleReconcileSearchingClassicRides(io);
   return count;
 }
 
@@ -1175,15 +1227,10 @@ async function syncClassicPollPackPresence(
 }
 
 async function buildClassicPackOfferResponse(driverUserId: string): Promise<{ offer: Record<string, unknown> | null }> {
-  let p = pendingOfferByDriverId.get(driverUserId);
+  let p: ClassicOfferPending | null = getClassicOfferPending(driverUserId);
   let ride: RideRecord | undefined;
   if (p) {
-    if (Date.now() > p.expiresAt) {
-      pendingOfferByDriverId.delete(driverUserId);
-      p = undefined;
-    } else {
-      ride = await ensurePackRideInMemory(p.rideId);
-    }
+    ride = await ensurePackRideInMemory(p.rideId);
   }
   if (!ride) {
     const fromStore = await findActiveClassicOfferForDriver("pack", driverUserId);
@@ -1195,14 +1242,14 @@ async function buildClassicPackOfferResponse(driverUserId: string): Promise<{ of
         ride = fromStore as RideRecord;
         rides.set(ride.id, ride);
         if (typeof ride.offerExpiresAt === "number") {
-          p = { rideId: ride.id, expiresAt: ride.offerExpiresAt, module: "pack" };
-          pendingOfferByDriverId.set(driverUserId, p);
+          setClassicOfferPending(driverUserId, ride.id, ride.offerExpiresAt, "pack");
+          p = getClassicOfferPending(driverUserId);
         }
       }
     }
   }
   if (!ride || ride.status !== "searching") {
-    if (p) pendingOfferByDriverId.delete(driverUserId);
+    if (p) clearClassicOfferPending(driverUserId);
     return { offer: null };
   }
   const classic = ride.currentOfferDriverId === driverUserId;
@@ -1211,7 +1258,7 @@ async function buildClassicPackOfferResponse(driverUserId: string): Promise<{ of
     ride.offeredDriverIds.includes(driverUserId) &&
     (ride.negotiationExpiresAt == null || Date.now() <= ride.negotiationExpiresAt);
   if (!classic && !neg) {
-    pendingOfferByDriverId.delete(driverUserId);
+    clearClassicOfferPending(driverUserId);
     return { offer: null };
   }
   const rider = await buildRiderPublic(ride.riderUserId);
@@ -1253,6 +1300,7 @@ async function runClassicPackOfferPoll(
       clearStaleActiveOffer(ride);
     }
     await reconcilePendingRidesForDriver(io, pres);
+    scheduleReconcileSearchingClassicRides(io);
   }
   return buildClassicPackOfferResponse(driverUserId);
 }
@@ -1576,8 +1624,8 @@ export function registerPackRideRoutes(app: Express) {
       }
 
       // El conductor ya "atendió" esta invitación: evitar que vuelva a aparecer como pendiente.
-      const p = pendingOfferByDriverId.get(driverUserId);
-      if (p?.rideId === ride.id) pendingOfferByDriverId.delete(driverUserId);
+      const p = getClassicOfferPending(driverUserId);
+      if (p?.rideId === ride.id) clearClassicOfferPending(driverUserId);
 
       const io = getIO();
       if (io) emitPackNegotiationOffersUpdated(io, ride);
@@ -1632,8 +1680,8 @@ export function registerPackRideRoutes(app: Express) {
       ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
       ride.declinedAtByDriverId[driverUserId] = Date.now();
       ride.offeredDriverIds = ride.offeredDriverIds.filter((id) => id !== driverUserId);
-      const p = pendingOfferByDriverId.get(driverUserId);
-      if (p?.rideId === ride.id) pendingOfferByDriverId.delete(driverUserId);
+      const p = getClassicOfferPending(driverUserId);
+      if (p?.rideId === ride.id) clearClassicOfferPending(driverUserId);
       commitPackRide(ride);
       res.json({ ok: true });
     } catch (e: any) {
@@ -1720,9 +1768,9 @@ export function registerPackRideRoutes(app: Express) {
       for (const uid of notifyTaken) {
         if (uid === driverId) continue;
         io.to(`user:${uid}`).emit("pack:ride:taken", { rideId });
-        pendingOfferByDriverId.delete(uid);
+        clearClassicOfferPending(uid);
       }
-      pendingOfferByDriverId.delete(driverId);
+      clearClassicOfferPending(driverId);
 
       void notifyStoreOrderPackEvent(ride, "matched").catch((e) =>
         console.error("[pack] store order matched", e),
@@ -1759,7 +1807,7 @@ export function registerPackRideRoutes(app: Express) {
       const ride = rides.get(rideId);
       if (!ride) {
         if (!accept) {
-          pendingOfferByDriverId.delete(driverUserId);
+          clearClassicOfferPending(driverUserId);
           return res.json({ ok: true, accepted: false, alreadyResolved: true });
         }
         return res.status(404).json({ message: "Viaje no encontrado" });
@@ -1773,7 +1821,7 @@ export function registerPackRideRoutes(app: Express) {
 
       if (!accept) {
         if (ride.status !== "searching" || ride.isNegotiated) {
-          pendingOfferByDriverId.delete(driverUserId);
+          clearClassicOfferPending(driverUserId);
           return res.json({ ok: true, accepted: false, alreadyResolved: true });
         }
         if (driverCanDeclineClassicOffer(ride, driverUserId, rideId)) {
@@ -1781,11 +1829,12 @@ export function registerPackRideRoutes(app: Express) {
           try {
             const rider = await buildRiderPublic(ride.riderUserId);
             void offerNextDriver(io, ride, rider);
+            scheduleReconcileSearchingClassicRides(io);
           } catch (declineErr) {
             console.error("[pack] decline offerNextDriver", declineErr);
           }
         } else {
-          pendingOfferByDriverId.delete(driverUserId);
+          clearClassicOfferPending(driverUserId);
         }
         return res.json({ ok: true, accepted: false });
       }
@@ -1801,6 +1850,7 @@ export function registerPackRideRoutes(app: Express) {
         ride.offerExpiresAt = null;
         const rider = await buildRiderPublic(ride.riderUserId);
         void offerNextDriver(io, ride, rider);
+        scheduleReconcileSearchingClassicRides(io);
         return res.status(409).json({ message: "Estás en servicio. No puedes aceptar otra oferta." });
       }
       ride.driverUserId = driverUserId;
@@ -1808,7 +1858,7 @@ export function registerPackRideRoutes(app: Express) {
       ride.currentOfferDriverId = null;
       ride.offerExpiresAt = null;
       clearRideTimers(ride.id);
-      pendingOfferByDriverId.delete(driverUserId);
+      clearClassicOfferPending(driverUserId);
       commitPackRide(ride);
 
       withdrawDriverNegotiationOffersEverywhere(io, driverUserId, rideId);
@@ -2367,7 +2417,9 @@ export function registerPackRideRoutes(app: Express) {
       // Si el driver se reporta tarde, intentar re-ofertar rides pendientes sin oferta activa.
       const io = getIO();
       if (io) {
-        void reconcilePendingRidesForDriver(io, pres).catch((e) => {
+        void reconcilePendingRidesForDriver(io, pres)
+          .then(() => scheduleReconcileSearchingClassicRides(io))
+          .catch((e) => {
           console.error("[pack] http presence offer", e);
         });
       }
@@ -2377,4 +2429,10 @@ export function registerPackRideRoutes(app: Express) {
     }
   });
 }
+
+registerClassicSearchingReconciler({
+  module: "pack",
+  collectStalled: collectStalledClassicSearchingPackRides,
+  reconcileRide: reconcileClassicSearchingPackRide,
+});
 

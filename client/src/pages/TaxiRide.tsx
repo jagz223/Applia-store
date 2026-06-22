@@ -62,6 +62,7 @@ import {
   trimRouteAtDriver,
   type StoredDrivingRoute,
 } from "@/lib/driving-route-geometry";
+import { isRouteFetchInFailureBackoff } from "@/lib/driving-route-fetch-backoff";
 import { bearingFromLatLon, smoothHeadingDeg } from "@/lib/vehicle-movement-heading";
 import {
   computeMobilitySuggestedByVehicle,
@@ -273,6 +274,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const driverRouteFetchInFlightRef = useRef(false);
   const pendingDriverTargetRef = useRef<Place | null>(null);
   const lastDriverRouteFetchRef = useRef<{ at: number; targetKey: string } | null>(null);
+  const lastDriverRouteFailureRef = useRef<{ at: number; targetKey: string } | null>(null);
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const activeRideIdRef = useRef<string | null>(null);
   const [rideIsNegotiated, setRideIsNegotiated] = useState(false);
@@ -576,6 +578,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     pendingDriverTargetRef.current = null;
     driverRouteTrimIndexRef.current = 0;
     lastDriverRouteFetchRef.current = null;
+    lastDriverRouteFailureRef.current = null;
     setRidePanelCollapsed(false);
     try {
       sessionStorage.removeItem(riderDraftKey);
@@ -621,6 +624,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     driverRouteFetchInFlightRef.current = false;
     pendingDriverTargetRef.current = null;
     lastDriverRouteFetchRef.current = null;
+    lastDriverRouteFailureRef.current = null;
     setActiveRideId(null);
     activeRideIdRef.current = null;
     riderTripInProgressRef.current = false;
@@ -733,11 +737,19 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         driverRouteTrimIndexRef.current = 0;
         applyTrimmedDriverRoute(stored, driverPos);
         lastDriverRouteFetchRef.current = { at: Date.now(), targetKey };
+        lastDriverRouteFailureRef.current = null;
         return true;
       };
-      if (await tryOnce()) return true;
-      await new Promise((r) => window.setTimeout(r, 1200));
-      return tryOnce();
+      try {
+        const ok = await tryOnce();
+        if (!ok) {
+          lastDriverRouteFailureRef.current = { at: Date.now(), targetKey };
+        }
+        return ok;
+      } catch {
+        lastDriverRouteFailureRef.current = { at: Date.now(), targetKey };
+        return false;
+      }
     },
     [applyTrimmedDriverRoute],
   );
@@ -800,6 +812,13 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       }
 
       if (force || !route || route.targetKey !== targetKey) {
+        if (
+          !force &&
+          !route &&
+          isRouteFetchInFailureBackoff(lastDriverRouteFailureRef.current, targetKey)
+        ) {
+          return;
+        }
         driverRouteTrimIndexRef.current = 0;
         if (route && route.targetKey !== targetKey) {
           setDriverToPickupGeometry(null);
@@ -844,6 +863,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     driverRouteFetchInFlightRef.current = false;
     pendingDriverTargetRef.current = null;
     lastDriverRouteFetchRef.current = null;
+    lastDriverRouteFailureRef.current = null;
     setMatchedFareUsd(null);
     clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
   }, [clearVehicleSearchTimers]);
@@ -1629,12 +1649,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     };
 
     try {
-      let res = await fetch(url);
-      let body = (await res.json().catch(() => null)) as Parameters<typeof applyRoadBody>[0];
-      if (applyRoadBody(body)) return;
-      await new Promise((r) => window.setTimeout(r, 1200));
-      res = await fetch(url);
-      body = (await res.json().catch(() => null)) as Parameters<typeof applyRoadBody>[0];
+      const res = await fetch(url);
+      const body = (await res.json().catch(() => null)) as Parameters<typeof applyRoadBody>[0];
       if (applyRoadBody(body)) return;
       setRouteGeometry(null);
       setRouteMeta(null);
