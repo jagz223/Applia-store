@@ -16,6 +16,7 @@ import { GoChatBadgeOnMessage } from "@/components/go/GoChatBadgeOnMessage";
 import { GoChatOpenFromQuery } from "@/components/go/GoChatOpenFromQuery";
 import { GoClientPresenceReporter } from "@/components/go/GoClientPresenceReporter";
 import { DriverFloatingBubble } from "@/components/go/DriverFloatingBubble";
+import { DriverBubbleScreenOverlay } from "@/components/go/DriverBubbleScreenOverlay";
 import { GoDriverBubbleProvider, useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
 import { ListingSubscriptionRibbon } from "@/components/ListingSubscriptionRibbon";
 import {
@@ -69,9 +70,11 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
     location === "/go/pack/driver";
   const pathname = location.split("?")[0] ?? location;
   const compactGoViewport = useGoCompactViewport();
-  const showCompactGoHomeFab = shouldShowCompactGoShellHomeFab(isGoMapView, pathname);
+  const showCompactGoHomeFab =
+    shouldShowCompactGoShellHomeFab(isGoMapView, pathname) &&
+    !(isUnifiedDriver && driverBubble?.shellCollapsed);
   const hideShellChromeForBubble =
-    isUnifiedDriver && driverBubble?.enabled === true && driverBubble.isMinimized;
+    isUnifiedDriver && driverBubble?.enabled === true && driverBubble.shellCollapsed;
 
   /** Evita scroll del documento en móvil: el mapa no debe “robar” el gesto de llegar a la barra inferior. */
   useEffect(() => {
@@ -95,6 +98,7 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
               <GoChatAutoCloseOnRideEnd />
               <GoClientPresenceReporter path={location} />
               <DriverFloatingBubble />
+              <DriverBubbleScreenOverlay />
           <GoChatBadgeOnMessage />
           <GoChatOpenFromQuery />
           <div className={cn(goViewportShellRootSurfaceClass(isGoMapView), goViewportShellRootClass(isGoMapView))}>

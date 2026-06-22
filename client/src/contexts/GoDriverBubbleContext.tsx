@@ -32,6 +32,9 @@ type GoDriverBubbleValue = {
   setPinnedInSettings: (next: boolean) => void;
   isMinimized: boolean;
   pipActive: boolean;
+  /** Ocultar chrome del shell: PiP activo o burbuja en pestaña visible. */
+  shellCollapsed: boolean;
+  documentVisible: boolean;
   receiveMode: GoDriverReceiveMode;
   receiving: boolean;
   setReceiveMode: (mode: GoDriverReceiveMode, canReceive: boolean) => void;
@@ -51,6 +54,9 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
   const [receiving, setReceivingState] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [pipActive, setPipActive] = useState(false);
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document !== "undefined" && document.visibilityState === "visible",
+  );
   const pipWindowRef = useRef<Window | null>(null);
   const minimizingRef = useRef(false);
   const isMinimizedRef = useRef(isMinimized);
@@ -61,6 +67,7 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
 
   const active = isDriverBubbleActive(receiving, pinnedInSettings);
   const activeRef = useRef(active);
+  const shellCollapsed = isMinimized && (pipActive || documentVisible);
 
   isMinimizedRef.current = isMinimized;
   receivingRef.current = receiving;
@@ -108,8 +115,8 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
     }
   }, [collapseBubble]);
 
-  const openPiPIfNeeded = useCallback(async () => {
-    if (!pipSupported || pipWindowRef.current || !isMinimizedRef.current) return;
+  const requestPiP = useCallback(async (): Promise<boolean> => {
+    if (!pipSupported || pipWindowRef.current) return false;
     const pip = await openDriverBubblePiP({
       receiveMode: receiveModeRef.current,
       receiving: receivingRef.current,
@@ -124,32 +131,33 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
         }
       },
     });
-    if (!pip || !isMinimizedRef.current) {
-      if (pip) {
-        try {
-          pip.close();
-        } catch {
-          /* ignore */
-        }
-      }
-      return;
-    }
+    if (!pip) return false;
     pipWindowRef.current = pip;
     setPipActive(true);
+    return true;
   }, [pipSupported]);
 
   const minimize = useCallback(async () => {
     if (!activeRef.current || !supported) return;
     if (!isDriverBubbleMainPath(locationRef.current)) return;
-    if (minimizingRef.current || isMinimizedRef.current) return;
+    if (minimizingRef.current) return;
+    if (isMinimizedRef.current && pipWindowRef.current) return;
+
     minimizingRef.current = true;
     try {
+      const pipOk = await requestPiP();
+      if (pipOk) {
+        setIsMinimized(true);
+        return;
+      }
+      // Sin PiP y pestaña en segundo plano: no vaciar la UI (evita pantalla blanca al volver).
+      if (isAppHiddenForBubble()) return;
+      if (isMinimizedRef.current) return;
       setIsMinimized(true);
-      await openPiPIfNeeded();
     } finally {
       minimizingRef.current = false;
     }
-  }, [supported, openPiPIfNeeded]);
+  }, [supported, requestPiP]);
 
   const toggleMinimized = useCallback(async () => {
     if (isMinimizedRef.current) {
@@ -162,9 +170,16 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
   const shouldAutoMinimize = useCallback(() => {
     if (!activeRef.current || !supported) return false;
     if (!isDriverBubbleMainPath(locationRef.current)) return false;
-    if (isMinimizedRef.current) return false;
+    if (isMinimizedRef.current && pipWindowRef.current) return false;
     return isAppHiddenForBubble();
   }, [supported]);
+
+  const restoreFromBackground = useCallback(() => {
+    if (document.visibilityState !== "visible") return;
+    if (isMinimizedRef.current || pipWindowRef.current) {
+      expand();
+    }
+  }, [expand]);
 
   useEffect(() => {
     if (!active || !supported) return;
@@ -174,27 +189,27 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
       void minimize();
     };
 
-    const onShow = () => {
-      if (document.visibilityState !== "visible") return;
-      if (!isMinimizedRef.current) return;
-      expand();
-    };
+    const onShow = () => restoreFromBackground();
 
     const onVisibilityChange = () => {
-      if (isAppHiddenForBubble()) onHide();
-      else onShow();
+      const visible = document.visibilityState === "visible";
+      setDocumentVisible(visible);
+      if (visible) onShow();
+      else onHide();
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pagehide", onHide);
     window.addEventListener("pageshow", onShow);
+    window.addEventListener("focus", onShow);
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", onHide);
       window.removeEventListener("pageshow", onShow);
+      window.removeEventListener("focus", onShow);
     };
-  }, [active, supported, minimize, expand, shouldAutoMinimize]);
+  }, [active, supported, minimize, restoreFromBackground, shouldAutoMinimize]);
 
   useEffect(() => {
     if (isDriverBubbleMainPath(location)) return;
@@ -224,6 +239,8 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
       setPinnedInSettings,
       isMinimized,
       pipActive,
+      shellCollapsed,
+      documentVisible,
       receiveMode,
       receiving,
       setReceiveMode,
@@ -239,6 +256,8 @@ export function GoDriverBubbleProvider({ children }: { children: ReactNode }) {
       setPinnedInSettings,
       isMinimized,
       pipActive,
+      shellCollapsed,
+      documentVisible,
       receiveMode,
       receiving,
       minimize,

@@ -290,7 +290,7 @@ export function GoBottomNav({ pinToViewportBottom = false }: GoBottomNavProps) {
   );
 
   const bubbleMinimized =
-    isDriverView && driverBubble?.enabled === true && driverBubble.isMinimized;
+    isDriverView && driverBubble?.enabled === true && driverBubble.shellCollapsed;
 
   if (bubbleMinimized) {
     return null;

@@ -67,6 +67,7 @@ import { notifyMobilityRideHistoryChanged } from "@/lib/mobility-ride-history-ev
 import { GoChatDrawer } from "@/components/go/GoChatDrawer";
 import { GoClientPresenceReporter } from "@/components/go/GoClientPresenceReporter";
 import { DriverFloatingBubble } from "@/components/go/DriverFloatingBubble";
+import { DriverBubbleScreenOverlay } from "@/components/go/DriverBubbleScreenOverlay";
 import { GoDriverBubbleProvider } from "@/contexts/GoDriverBubbleContext";
 import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
 import { pollClassicDriverOffer, GO_CLASSIC_OFFER_POLL_MS } from "@/lib/go-driver-classic-offer-poll";
@@ -397,7 +398,7 @@ export default function DriverGoGenfeb() {
     !!provider?.isVerified && (isCarGoDriver || isPackGoDriver) && hasVehicle;
   const canReceive = meetsDriverBasics && hasActiveSubscription;
   const bubbleMinimized =
-    !!driverBubble?.enabled && !!driverBubble.isMinimized && isGoCompact;
+    !!driverBubble?.enabled && !!driverBubble.shellCollapsed && isGoCompact;
   const canUseDriverNegotiation =
     (isAdmin || provider?.isVerified === true) && hasActiveSubscription;
   const slideDisabledHint =
@@ -1882,7 +1883,7 @@ export default function DriverGoGenfeb() {
       className={cn(
         "flex min-h-0 flex-1 flex-col bg-gradient-to-b from-muted/25 to-background pb-6",
         "max-lg:h-full max-lg:min-h-0 max-lg:overflow-hidden max-lg:pb-0",
-        bubbleMinimized && "max-lg:hidden",
+        bubbleMinimized && "max-lg:pointer-events-none max-lg:select-none max-lg:opacity-0 max-lg:invisible",
       )}
     >
       {/* Móvil: mapa llena el área de main (entre cabecera shell y barra inferior), sin scroll ni “doble capa”. */}
@@ -2373,6 +2374,7 @@ export function DriverGoGenfebWithGoChat() {
           <GoDriverUiProvider>
             <GoClientPresenceReporter path="/go/driver" />
             <DriverFloatingBubble />
+            <DriverBubbleScreenOverlay />
             <DriverGoGenfeb />
             <GoChatDrawer />
           </GoDriverUiProvider>
