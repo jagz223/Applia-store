@@ -22,6 +22,7 @@ import {
   type DriverGeolocationError,
   type DriverGeoPoint,
 } from "@/lib/driver-geolocation";
+import { bootstrapAppGeolocationPermission } from "@/lib/map-geolocation";
 import { isLeafletMobileMap } from "@/components/taxi/leaflet-config";
 import { useSocket } from "@/hooks/use-socket";
 
@@ -75,6 +76,7 @@ export function GoDriverSessionProvider({ children }: { children: ReactNode }) {
   }, [applyPosition]);
 
   useEffect(() => {
+    void bootstrapAppGeolocationPermission();
     const stop = startDriverGeolocationWatch({
       onPosition: applyPosition,
       onError: setGeoError,
@@ -115,6 +117,21 @@ export function GoDriverSessionProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       if (status) status.onchange = null;
     };
+  }, [requestLocation]);
+
+  /** Al volver de ajustes del sistema, reintentar GPS si el permiso fue concedido. */
+  useEffect(() => {
+    if (!isLeafletMobileMap()) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void bootstrapAppGeolocationPermission().then((state) => {
+        if (state === "granted") {
+          requestLocation();
+        }
+      });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [requestLocation]);
 
   const value = useMemo(

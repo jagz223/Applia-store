@@ -19,6 +19,7 @@ import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
 import { usePlatformPackFares } from "@/hooks/use-mango-data";
 import { fetchRoadDrivingRoute, ROAD_ROUTE_MAP_STYLE } from "@/lib/load-driving-route";
 import { mapBoundsFitKey, mapPointFitKey } from "@/lib/leaflet-map-camera";
+import { useEnsureMapGeolocation } from "@/lib/map-geolocation";
 import { isLeafletMapContainerLive, safeInvalidateSize } from "@/lib/safe-leaflet";
 import type { PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { Button } from "@/components/ui/button";
@@ -140,6 +141,7 @@ export function StoreCheckoutDeliverySection({
   onQuoteChange,
   disabled,
 }: StoreCheckoutDeliverySectionProps) {
+  useEnsureMapGeolocation();
   const { theme } = useTheme();
   const { data: packFaresDto } = usePlatformPackFares();
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: 220 });

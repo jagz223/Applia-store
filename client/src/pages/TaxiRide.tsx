@@ -64,6 +64,7 @@ import {
 } from "@/lib/driving-route-geometry";
 import { isRouteFetchInFailureBackoff } from "@/lib/driving-route-fetch-backoff";
 import { bearingFromLatLon, smoothHeadingDeg } from "@/lib/vehicle-movement-heading";
+import { useEnsureMapGeolocation } from "@/lib/map-geolocation";
 import {
   computeMobilitySuggestedByVehicle,
   computeMobilitySuggestedUsd,
@@ -195,6 +196,7 @@ function mapServerNegotiationOffer(raw: unknown): RiderNegotiationOfferRow | nul
 }
 
 export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pack" } = {}) {
+  useEnsureMapGeolocation();
   const queryClient = useQueryClient();
   const [rateDialogOpen, setRateDialogOpen] = useState(false);
   const [rateStars, setRateStars] = useState(5);

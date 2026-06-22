@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, MapPin, Navigation } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useEnsureMapGeolocation } from "@/lib/map-geolocation";
 
 export type PickedLocation = { lat: number; lon: number; label: string };
 
@@ -64,6 +65,7 @@ export function SingleLocationPicker({
   mapSize = "default",
   className,
 }: SingleLocationPickerProps) {
+  useEnsureMapGeolocation();
   const { theme } = useTheme();
   const raster = getTaxiRasterLayerProps(theme === "dark");
   const tileBehavior = getLeafletTileLayerBehaviorProps();

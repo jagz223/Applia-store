@@ -1,42 +1,46 @@
-import { BellRing, CircleDot, Minimize2, PictureInPicture2 } from "lucide-react";
+import { CircleDot, Minimize2, PictureInPicture2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { useLocation } from "wouter";
 import { useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
-import { isAndroidMobile } from "@/lib/go-driver-bubble-capability";
+import { requestAndroidOverlayPermissionForDriver } from "@/lib/android-driver-foreground";
+import { isAndroidInstalledWebApp, isAndroidMobile } from "@/lib/go-driver-bubble-capability";
 import { cn } from "@/lib/utils";
 
 type DriverBubbleModeSettingsProps = {
   className?: string;
   variant?: "card" | "menu";
   onAfterAction?: () => void;
-  receiving?: boolean;
 };
+
+function isUnifiedDriverRoute(location: string): boolean {
+  return location === "/go/driver" || location.startsWith("/go/driver/");
+}
 
 export function DriverBubbleModeSettings({
   className,
   variant = "card",
-  receiving = false,
+  onAfterAction,
 }: DriverBubbleModeSettingsProps) {
+  const [location] = useLocation();
   const bubble = useGoDriverBubbleOptional();
 
-  if (isAndroidMobile()) {
-    if (variant !== "menu") return null;
+  if (isAndroidMobile() && variant === "menu") {
+    if (!isUnifiedDriverRoute(location) || !isAndroidInstalledWebApp()) return null;
 
     return (
-      <div className={cn("rounded-xl border border-border/80 bg-muted/20 p-3", className)}>
-        <div className="flex items-start gap-2">
-          <BellRing className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">Segundo plano (app Android)</p>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {receiving
-                ? "Activo: al minimizar con Inicio verás la notificación «Conductor en línea» y seguirás recibiendo ofertas."
-                : "Se activa solo al poner «Recibir servicios»."}
-            </p>
-          </div>
-        </div>
-      </div>
+      <Button
+        type="button"
+        variant="outline"
+        className={cn("h-12 w-full justify-center font-medium", className)}
+        onClick={() => {
+          requestAndroidOverlayPermissionForDriver();
+          onAfterAction?.();
+        }}
+      >
+        Activar burbuja
+      </Button>
     );
   }
 

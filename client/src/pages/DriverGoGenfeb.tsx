@@ -54,6 +54,8 @@ import { extractUserPublicPhone } from "@/lib/user-public-phone";
 import { fetchGoRideConversationId } from "@/lib/go-active-ride-chat";
 import { useGoDriverSession } from "@/contexts/GoDriverSessionContext";
 import { notifyAndroidDriverReceiving } from "@/lib/android-driver-foreground";
+import { isAndroidInstalledWebApp } from "@/lib/go-driver-bubble-capability";
+import { bootstrapAppGeolocationPermission } from "@/lib/map-geolocation";
 import { Button } from "@/components/ui/button";
 import { GoChatProvider, useGoChat } from "@/contexts/GoChatContext";
 import { GoDriverUiProvider } from "@/contexts/GoDriverUiContext";
@@ -68,6 +70,7 @@ import { GoChatDrawer } from "@/components/go/GoChatDrawer";
 import { GoClientPresenceReporter } from "@/components/go/GoClientPresenceReporter";
 import { DriverFloatingBubble } from "@/components/go/DriverFloatingBubble";
 import { DriverBubbleScreenOverlay } from "@/components/go/DriverBubbleScreenOverlay";
+import { AndroidOverlayPermissionFeedback } from "@/components/go/AndroidOverlayPermissionFeedback";
 import { GoDriverBubbleProvider, useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
 import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/components/taxi/CargoIncomingRideDialog";
 import { pollClassicDriverOffer, GO_CLASSIC_OFFER_POLL_MS } from "@/lib/go-driver-classic-offer-poll";
@@ -410,6 +413,20 @@ export default function DriverGoGenfeb() {
     driverBubble?.setReceiveMode(receiveMode, canReceive);
     notifyAndroidDriverReceiving(receiveMode !== "off" && canReceive, receiveMode);
   }, [driverBubble, receiveMode, canReceive]);
+
+  /** Al volver a la app: refresca GPS y re-sincroniza overlay si sigue recibiendo. */
+  useEffect(() => {
+    if (!isAndroidInstalledWebApp()) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void bootstrapAppGeolocationPermission();
+      if (receiveMode !== "off" && canReceive) {
+        notifyAndroidDriverReceiving(true, receiveMode);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [receiveMode, canReceive]);
 
   const { data: serverTripHistory = [] } = useQuery({
     queryKey: ["mobility-ride-history", "driver", user?.id],
@@ -2376,6 +2393,7 @@ export function DriverGoGenfebWithGoChat() {
             <GoClientPresenceReporter path="/go/driver" />
             <DriverFloatingBubble />
             <DriverBubbleScreenOverlay />
+            <AndroidOverlayPermissionFeedback enabled />
             <DriverGoGenfeb />
             <GoChatDrawer />
           </GoDriverUiProvider>
