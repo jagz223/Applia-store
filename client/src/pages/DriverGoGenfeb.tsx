@@ -53,7 +53,7 @@ import {
 import { extractUserPublicPhone } from "@/lib/user-public-phone";
 import { fetchGoRideConversationId } from "@/lib/go-active-ride-chat";
 import { useGoDriverSession } from "@/contexts/GoDriverSessionContext";
-import { notifyAndroidDriverReceiving } from "@/lib/android-driver-foreground";
+import { notifyAndroidDriverReceiving, stopAndroidDriverOverlayAfterRide } from "@/lib/android-driver-foreground";
 import { isAndroidInstalledWebApp } from "@/lib/go-driver-bubble-capability";
 import { bootstrapAppGeolocationPermission } from "@/lib/map-geolocation";
 import { Button } from "@/components/ui/button";
@@ -76,7 +76,8 @@ import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/component
 import { pollClassicDriverOffer, GO_CLASSIC_OFFER_POLL_MS } from "@/lib/go-driver-classic-offer-poll";
 import { useSocket } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
-import { startCargoOfferBellLoop } from "@/lib/cargo-offer-bell";
+import { playCargoOfferBell, startCargoOfferBellLoop } from "@/lib/cargo-offer-bell";
+import { parseFcmNotificationPayload, showSystemNotification } from "@/lib/fcm-notification-payload";
 import { cn } from "@/lib/utils";
 import { addHiddenConversationId } from "@/lib/hidden-conversations";
 import { purgeConversationCache } from "@/hooks/use-chat";
@@ -256,6 +257,25 @@ export default function DriverGoGenfeb() {
       const entry: GoDriverQueuedOffer = { module, offer };
       setPinnedOfferEntry(entry);
       goDriverUi?.pushOffer(module, offer);
+
+      const appHidden = typeof document !== "undefined" && (document.hidden || !document.hasFocus());
+      if (appHidden) {
+        playCargoOfferBell();
+        const title = module === "pack" ? "Envío disponible" : "Viaje disponible";
+        const body =
+          offer.start?.label?.trim() ||
+          offer.end?.label?.trim() ||
+          "Tienes una nueva solicitud. Abre Genfeb para responder.";
+        void showSystemNotification(
+          parseFcmNotificationPayload({
+            notification: { title, body },
+            data: {
+              type: module === "pack" ? "pack_ride_offer" : "cargo_ride_offer",
+              url: "/go/driver",
+            },
+          }),
+        );
+      }
     },
     [goDriverUi, isClassicOfferDismissed],
   );
@@ -713,6 +733,7 @@ export default function DriverGoGenfeb() {
 
   useEffect(() => {
     if (!classicOfferModalOpen) return;
+    if (document.hidden || !document.hasFocus()) return;
     const loop = startCargoOfferBellLoop();
     return () => loop.stop();
   }, [classicOfferModalOpen]);
@@ -1245,6 +1266,7 @@ export default function DriverGoGenfeb() {
       lastServiceRouteFailureRef.current = null;
       void queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
       disconnectReceivingIfSubscriptionLapsed();
+      stopAndroidDriverOverlayAfterRide();
     } catch (e) {
       toast({
         title: "No se pudo completar el viaje",
@@ -1292,6 +1314,7 @@ export default function DriverGoGenfeb() {
       toast({ title: "Viaje cancelado", description: "El servicio quedó anulado." });
       setCancelServiceOpen(false);
       disconnectReceivingIfSubscriptionLapsed();
+      stopAndroidDriverOverlayAfterRide();
     } catch {
       toast({ title: "Error de red", variant: "destructive" });
     } finally {

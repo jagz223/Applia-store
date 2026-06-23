@@ -1,4 +1,5 @@
 import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
+import { hasGoDriverActiveRide } from "@/lib/cargo-driver-storage";
 import { isAndroidTwaApp } from "@/lib/go-driver-bubble-capability";
 
 const GENFEB_DRIVER_BRIDGE = "genfeb://driver";
@@ -26,7 +27,6 @@ function buildGenfebBridgeUrl(path: string, query?: Record<string, string>): str
   return url.toString();
 }
 
-/** Intent explícito al mismo APK: evita el diálogo «¿Continuar a Genfeb?». */
 function buildSameAppIntentUrl(path: string, query?: Record<string, string>): string {
   const genfebUrl = buildGenfebBridgeUrl(path, query);
   const withoutScheme = genfebUrl.replace(/^genfeb:\/\//, "");
@@ -36,29 +36,27 @@ function buildSameAppIntentUrl(path: string, query?: Record<string, string>): st
   return `intent://${withoutScheme}#Intent;scheme=genfeb;package=${GENFEB_TWA_PACKAGE};S.browser_fallback_url=${fallback};end`;
 }
 
-/** Un solo disparo silencioso (p. ej. apagar servicio). */
-function fireGenfebBridgeOnce(path: string, query?: Record<string, string>): void {
-  const url = buildSameAppIntentUrl(path, query);
+/** Puente sin navegar la pestaña (no recarga la TWA). */
+function fireGenfebBridgeSilent(path: string, query?: Record<string, string>): void {
+  const url = buildGenfebBridgeUrl(path, query);
   try {
-    const link = document.createElement("a");
-    link.href = url;
-    link.style.cssText = "display:none;position:absolute;width:0;height:0";
-    link.setAttribute("aria-hidden", "true");
-    document.body.appendChild(link);
-    link.click();
-    window.setTimeout(() => link.remove(), 400);
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "display:none;width:0;height:0;border:0;position:absolute";
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    window.setTimeout(() => iframe.remove(), 600);
   } catch {
     /* ignore */
   }
 }
 
-/** Gesto del usuario: intent directo al paquete TWA (sin recargar https). */
 function openBridgeFromUserGesture(path: string, query?: Record<string, string>): void {
   window.location.href = buildSameAppIntentUrl(path, query);
 }
 
 export function syncAndroidDriverForeground(_visible: boolean): void {
-  /* ciclo de vida nativo (TAB_HIDDEN / onTrimMemory) */
+  /* ciclo de vida nativo */
 }
 
 export function markAndroidOverlayGranted(granted: boolean): void {
@@ -99,17 +97,16 @@ type AndroidDriverReceivingOptions = {
   fromUserGesture?: boolean;
 };
 
-/**
- * Inicia o detiene el servicio nativo (notificación + burbuja).
- * Al activar «recibir», el APK restaura el servicio solo; aquí solo hace falta
- * el puente en gesto del usuario o al apagar.
- */
 export function notifyAndroidDriverReceiving(
   receiving: boolean,
   mode: GoDriverReceiveMode = "off",
   options?: AndroidDriverReceivingOptions,
 ): void {
   if (!isAndroidTwaApp()) return;
+
+  if (!receiving && hasGoDriverActiveRide()) {
+    return;
+  }
 
   const bridgeKey = receiving ? `1:${androidModeParam(mode)}` : "0";
   if (!options?.fromUserGesture && lastReceivingBridgeKey === bridgeKey) return;
@@ -124,8 +121,15 @@ export function notifyAndroidDriverReceiving(
   }
 
   if (!receiving) {
-    fireGenfebBridgeOnce("/receiving", { on: "0" });
+    fireGenfebBridgeSilent("/receiving", { on: "0" });
   }
+}
+
+/** Tras terminar/cancelar carrera: apaga burbuja nativa si ya no hay servicio activo. */
+export function stopAndroidDriverOverlayAfterRide(): void {
+  if (!isAndroidTwaApp() || hasGoDriverActiveRide()) return;
+  lastReceivingBridgeKey = "0";
+  fireGenfebBridgeSilent("/receiving", { on: "0" });
 }
 
 export function openAndroidOverlayPermissionSettings(): void {
@@ -152,7 +156,7 @@ export function checkAndroidOverlayPermissionAfterReturn(): void {
   }
 
   const returnUrl = window.location.href.split("#")[0];
-  fireGenfebBridgeOnce("/overlay-check", { return: returnUrl });
+  fireGenfebBridgeSilent("/overlay-check", { return: returnUrl });
 }
 
 export type AndroidOverlayPermissionResult = "granted" | "denied";

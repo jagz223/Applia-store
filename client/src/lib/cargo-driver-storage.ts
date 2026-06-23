@@ -144,6 +144,10 @@ export function clearGoDriverActiveRideId(goSlug: "cargo" | "pack"): void {
   }
 }
 
+export function hasGoDriverActiveRide(): boolean {
+  return !!(loadGoDriverActiveRideId("cargo") || loadGoDriverActiveRideId("pack"));
+}
+
 function normalizeAccountId(accountId: string | null | undefined): string | null {
   if (typeof accountId !== "string") return null;
   const t = accountId.trim();
