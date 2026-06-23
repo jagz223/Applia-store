@@ -79,3 +79,27 @@ export function driverServicePanelHeading(
   if (phase === "searching") return copy.panelSearching;
   return copy.panelPickup;
 }
+
+/** Avisos al cliente cuando el conductor/repartidor inicia la búsqueda o recogida. */
+export function riderDriverSearchStartedCopy(goSlug: MobilityGoSlug) {
+  if (goSlug === "pack") {
+    return {
+      pushTitle: MOBILITY_UI.delivery,
+      pushBody: "Tu repartidor inició la búsqueda hacia tu paquete.",
+      chatMessage:
+        "El repartidor inició la búsqueda para coordinar la recogida de tu paquete.",
+      toastTitle: "Tu repartidor va por tu paquete",
+      toastDescription:
+        "Verás su ubicación en el mapa mientras se acerca al punto de recogida.",
+    } as const;
+  }
+  return {
+    pushTitle: MOBILITY_UI.taxiService,
+    pushBody: "Tu conductor inició la búsqueda para llegar hasta ti.",
+    chatMessage:
+      "El conductor inició la búsqueda para coordinar contigo el punto de encuentro.",
+    toastTitle: "Tu conductor te está buscando",
+    toastDescription:
+      "Mantente atento: verás su ubicación en el mapa mientras se acerca.",
+  } as const;
+}

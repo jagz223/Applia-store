@@ -76,8 +76,7 @@ import { CargoIncomingRideDialog, type CargoRideOfferPayload } from "@/component
 import { pollClassicDriverOffer, GO_CLASSIC_OFFER_POLL_MS } from "@/lib/go-driver-classic-offer-poll";
 import { useSocket } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
-import { playCargoOfferBell, startCargoOfferBellLoop } from "@/lib/cargo-offer-bell";
-import { parseFcmNotificationPayload, showSystemNotification } from "@/lib/fcm-notification-payload";
+import { startCargoOfferBellLoop } from "@/lib/cargo-offer-bell";
 import { cn } from "@/lib/utils";
 import { addHiddenConversationId } from "@/lib/hidden-conversations";
 import { purgeConversationCache } from "@/hooks/use-chat";
@@ -243,8 +242,18 @@ export default function DriverGoGenfeb() {
   const dismissDriverOfferUi = useCallback(
     (rideId: string) => {
       dismissedClassicOfferUntilRef.current.set(rideId, Date.now() + 90_000);
-      setPinnedOfferEntry(null);
+      setPinnedOfferEntry((prev) => (prev?.offer.rideId === rideId ? null : prev));
       goDriverUi?.dismissOffer(rideId);
+    },
+    [goDriverUi],
+  );
+
+  /** Cierra modal/cola sin marcar rechazo (expiró, otro conductor, cancelación). */
+  const releaseDriverOfferUi = useCallback(
+    (rideId: string) => {
+      if (!rideId) return;
+      setPinnedOfferEntry((prev) => (prev?.offer.rideId === rideId ? null : prev));
+      goDriverUi?.resolveOfferAndShowNext(rideId);
     },
     [goDriverUi],
   );
@@ -255,30 +264,21 @@ export default function DriverGoGenfeb() {
       if (isClassicOfferDismissed(offer.rideId)) return;
       if (respondBusyRef.current) return;
       if (acceptingRideIdRef.current) return;
-      const entry: GoDriverQueuedOffer = { module, offer };
-      setPinnedOfferEntry(entry);
-      goDriverUi?.pushOffer(module, offer);
 
-      const appHidden = typeof document !== "undefined" && (document.hidden || !document.hasFocus());
-      if (appHidden) {
-        playCargoOfferBell();
-        const title = module === "pack" ? "Envío disponible" : "Viaje disponible";
-        const body =
-          offer.start?.label?.trim() ||
-          offer.end?.label?.trim() ||
-          "Tienes una nueva solicitud. Abre Genfeb para responder.";
-        void showSystemNotification(
-          parseFcmNotificationPayload({
-            notification: { title, body },
-            data: {
-              type: module === "pack" ? "pack_ride_offer" : "cargo_ride_offer",
-              url: "/go/driver",
-            },
-          }),
-        );
+      const rideId = offer.rideId;
+      const alreadyShowing =
+        pinnedOfferEntry?.offer.rideId === rideId ||
+        goDriverUi?.currentOffer?.offer.rideId === rideId;
+
+      const entry: GoDriverQueuedOffer = { module, offer };
+      if (!alreadyShowing) {
+        setPinnedOfferEntry(entry);
+        goDriverUi?.pushOffer(module, offer);
+      } else {
+        setPinnedOfferEntry((prev) => (prev?.offer.rideId === rideId ? entry : prev));
       }
     },
-    [goDriverUi, isClassicOfferDismissed],
+    [goDriverUi, isClassicOfferDismissed, pinnedOfferEntry],
   );
   const [negotiationBoardOpen, setNegotiationBoardOpen] = useState(false);
   const [negotiationViewModule, setNegotiationViewModule] = useState<"cargo" | "pack">("cargo");
@@ -515,22 +515,22 @@ export default function DriverGoGenfeb() {
       queueDriverOffer("pack", p);
     };
     const onCargoTaken = (p: { rideId: string }) => {
-      if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
+      if (p?.rideId) releaseDriverOfferUi(p.rideId);
     };
     const onPackTaken = (p: { rideId: string }) => {
-      if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
+      if (p?.rideId) releaseDriverOfferUi(p.rideId);
     };
     const onCargoExpired = (p: { rideId: string }) => {
-      if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
+      if (p?.rideId) releaseDriverOfferUi(p.rideId);
     };
     const onPackExpired = (p: { rideId: string }) => {
-      if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
+      if (p?.rideId) releaseDriverOfferUi(p.rideId);
     };
     const onCargoCancelled = (p: { rideId: string }) => {
-      if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
+      if (p?.rideId) releaseDriverOfferUi(p.rideId);
     };
     const onPackCancelled = (p: { rideId: string }) => {
-      if (p?.rideId) goDriverUi?.resolveOfferAndShowNext(p.rideId);
+      if (p?.rideId) releaseDriverOfferUi(p.rideId);
     };
 
     socket.on("cargo:ride:offer", onCargoOffer);
@@ -551,7 +551,7 @@ export default function DriverGoGenfeb() {
       socket.off("cargo:ride:cancelled", onCargoCancelled);
       socket.off("pack:ride:cancelled", onPackCancelled);
     };
-  }, [socket, goDriverUi, queueDriverOffer]);
+  }, [socket, goDriverUi, queueDriverOffer, releaseDriverOfferUi]);
 
   useEffect(() => {
     if (!socket || !user?.id) return;
@@ -736,7 +736,6 @@ export default function DriverGoGenfeb() {
 
   useEffect(() => {
     if (!classicOfferModalOpen) return;
-    if (document.hidden || !document.hasFocus()) return;
     const loop = startCargoOfferBellLoop();
     return () => loop.stop();
   }, [classicOfferModalOpen]);
@@ -2256,6 +2255,9 @@ export default function DriverGoGenfeb() {
         driverPos={geoPos}
         onAccept={() => void respondToOffer(true)}
         onDecline={() => void respondToOffer(false)}
+        onExpired={() => {
+          if (incomingOffer?.rideId) releaseDriverOfferUi(incomingOffer.rideId);
+        }}
       />
 
       <Sheet open={negotiationBoardOpen} onOpenChange={setNegotiationBoardOpen}>

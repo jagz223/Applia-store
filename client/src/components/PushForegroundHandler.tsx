@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 export function PushForegroundHandler() {
   const { isAuthenticated } = useAuth();
   const unsubRef = useRef<(() => void) | null>(null);
+  const lastRideOfferSoundRef = useRef<{ rideId: string; at: number } | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -29,7 +30,21 @@ export function PushForegroundHandler() {
             data: payload.data as Record<string, string | undefined> | undefined,
           });
 
-          if (parsed.isPanic || parsed.isRideOffer) {
+          const rideId = String((payload.data as Record<string, string | undefined> | undefined)?.rideId ?? "");
+          const offerType = String((payload.data as Record<string, string | undefined> | undefined)?.type ?? "").toLowerCase();
+          const isDriverIncomingOffer =
+            offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+          const skipRideOfferSound =
+            !isDriverIncomingOffer &&
+            parsed.isRideOffer &&
+            rideId &&
+            lastRideOfferSoundRef.current?.rideId === rideId &&
+            Date.now() - (lastRideOfferSoundRef.current?.at ?? 0) < 120_000;
+
+          if ((parsed.isPanic || parsed.isRideOffer) && !skipRideOfferSound && !isDriverIncomingOffer) {
+            if (parsed.isRideOffer && rideId) {
+              lastRideOfferSoundRef.current = { rideId, at: Date.now() };
+            }
             try {
               const Ctx =
                 window.AudioContext ||

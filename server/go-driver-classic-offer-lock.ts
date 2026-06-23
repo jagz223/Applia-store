@@ -21,6 +21,8 @@ type ActiveOfferScanner = () => ActiveClassicOfferRow[];
 
 const pendingByDriverId = new Map<string, ClassicOfferPending>();
 const activeOfferScanners: ActiveOfferScanner[] = [];
+/** Evita reenviar FCM de la misma oferta clásica en cada re-oferta/reconcile. */
+const lastClassicOfferPushRideId = new Map<string, string>();
 
 /** Registra viajes en búsqueda con oferta activa (mobility / pack). */
 export function registerClassicOfferActiveScanner(scan: ActiveOfferScanner): void {
@@ -48,6 +50,19 @@ export function getClassicOfferPending(driverUserId: string): ClassicOfferPendin
 
 export function clearClassicOfferPending(driverUserId: string): void {
   pendingByDriverId.delete(driverUserId);
+  lastClassicOfferPushRideId.delete(driverUserId);
+}
+
+export function shouldSendClassicOfferPushForRide(driverUserId: string, rideId: string): boolean {
+  const uid = String(driverUserId);
+  const rid = String(rideId);
+  if (lastClassicOfferPushRideId.get(uid) === rid) return false;
+  lastClassicOfferPushRideId.set(uid, rid);
+  return true;
+}
+
+export function clearClassicOfferPushDedup(driverUserId: string): void {
+  lastClassicOfferPushRideId.delete(String(driverUserId));
 }
 
 export function clearClassicOfferPendingForRide(rideId: string): void {
@@ -73,4 +88,5 @@ export function driverHasActiveClassicOffer(driverUserId: string): boolean {
 export function resetClassicOfferLockForTests(): void {
   pendingByDriverId.clear();
   activeOfferScanners.length = 0;
+  lastClassicOfferPushRideId.clear();
 }

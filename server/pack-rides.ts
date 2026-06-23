@@ -28,6 +28,7 @@ import {
   NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN,
   RIDER_DRIVER_NOT_AVAILABLE_MESSAGE,
 } from "@shared/mobility-negotiation";
+import { riderDriverSearchStartedCopy } from "@shared/mobility-ui-labels";
 import { driverIsBusyCrossModule, registerPackDriverBusy } from "./driver-busy-cross-module";
 import {
   clearClassicOfferPending,
@@ -36,6 +37,7 @@ import {
   getClassicOfferPending,
   registerClassicOfferActiveScanner,
   setClassicOfferPending,
+  shouldSendClassicOfferPushForRide,
   type ActiveClassicOfferRow,
   type ClassicOfferPending,
 } from "./go-driver-classic-offer-lock";
@@ -917,7 +919,10 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
 
     // Push al driver si no tiene la app en primer plano en la vista conductor.
     try {
-      if (shouldSendDriverClassicOfferPush(String(driverId))) {
+      if (
+        shouldSendDriverClassicOfferPush(String(driverId)) &&
+        shouldSendClassicOfferPushForRide(driverId, ride.id)
+      ) {
         void notificationService.sendPushToUser(driverId, {
           title: offerTitle,
           body: offerBody,
@@ -1258,6 +1263,15 @@ async function buildClassicPackOfferResponse(driverUserId: string): Promise<{ of
     ride.offeredDriverIds.includes(driverUserId) &&
     (ride.negotiationExpiresAt == null || Date.now() <= ride.negotiationExpiresAt);
   if (!classic && !neg) {
+    clearClassicOfferPending(driverUserId);
+    return { offer: null };
+  }
+  if (
+    classic &&
+    !ride.isNegotiated &&
+    typeof ride.offerExpiresAt === "number" &&
+    Date.now() > ride.offerExpiresAt
+  ) {
     clearClassicOfferPending(driverUserId);
     return { offer: null };
   }
@@ -2099,12 +2113,13 @@ export function registerPackRideRoutes(app: Express) {
       io?.to(`user:${driverUserId}`).emit("pack:ride:driver_searching", { rideId });
       void appendPackRideSystemMessage(
         ride.conversationId,
-        "El repartidor inició la búsqueda para coordinar contigo la recogida del paquete.",
+        riderDriverSearchStartedCopy("pack").chatMessage,
       );
       try {
+        const searchCopy = riderDriverSearchStartedCopy("pack");
         void notificationService.sendPushToUser(ride.riderUserId, {
-          title: "Delivery",
-          body: "Tu repartidor inició la búsqueda para llegar hasta ti.",
+          title: searchCopy.pushTitle,
+          body: searchCopy.pushBody,
           data: { url: "/go/delivery", type: "pack_driver_searching", rideId },
         });
       } catch {}
