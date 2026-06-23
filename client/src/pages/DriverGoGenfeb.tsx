@@ -1536,12 +1536,13 @@ export default function DriverGoGenfeb() {
   // Si no cumple requisitos (o venció la suscripción), no quedar en "recibiendo".
   // Excepción: con un viaje/envío activo puede terminar el servicio antes de desconectarse.
   useEffect(() => {
+    if (authLoading || providerLoading) return;
     if (canReceive) return;
     const cargoRide = loadGoDriverActiveRideId("cargo");
     const packRide = loadGoDriverActiveRideId("pack");
     if (activeRideId || cargoRide || packRide) return;
     if (receiving) stopReceiving();
-  }, [canReceive, receiving, activeRideId, stopReceiving]);
+  }, [authLoading, providerLoading, canReceive, receiving, activeRideId, stopReceiving]);
 
   if (authLoading || !isAuthenticated || (providerLoading && !isAdmin) || (!provider && !isAdmin)) {
     return (
