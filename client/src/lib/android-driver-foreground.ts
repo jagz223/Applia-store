@@ -7,7 +7,16 @@ const ANDROID_OVERLAY_CHECK_URL = "genfeb://driver/overlay-check";
 
 export const ANDROID_OVERLAY_PENDING_KEY = "genfeb.androidOverlay.pending";
 
-function openAndroidDriverDeepLink(url: string): void {
+function openAndroidDriverDeepLink(url: string, options?: { navigate?: boolean }): void {
+  if (options?.navigate) {
+    try {
+      window.location.assign(url);
+      return;
+    } catch {
+      /* fallback iframe */
+    }
+  }
+
   try {
     const frame = document.createElement("iframe");
     frame.style.display = "none";
@@ -17,7 +26,7 @@ function openAndroidDriverDeepLink(url: string): void {
     window.setTimeout(() => frame.remove(), 500);
   } catch {
     try {
-      window.location.href = url;
+      window.location.assign(url);
     } catch {
       /* ignore */
     }
@@ -43,7 +52,7 @@ export function notifyAndroidDriverReceiving(receiving: boolean, mode: GoDriverR
 /** Abre ajustes del sistema para permitir «mostrar encima de otras apps». */
 export function openAndroidOverlayPermissionSettings(): void {
   if (!isAndroidInstalledWebApp()) return;
-  openAndroidDriverDeepLink(ANDROID_OVERLAY_PERMISSION_URL);
+  openAndroidDriverDeepLink(ANDROID_OVERLAY_PERMISSION_URL, { navigate: true });
 }
 
 /**
