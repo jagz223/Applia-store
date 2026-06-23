@@ -53,7 +53,7 @@ import { extractUserPublicPhone } from "@/lib/user-public-phone";
 import { goOffsetAboveBottomNav, goViewportClasses, useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { clearGoRiderActiveRideId, loadGoRiderActiveRideId, saveGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
 import { notifyMobilityRideHistoryChanged } from "@/lib/mobility-ride-history-events";
-import { MOBILITY_UI } from "@shared/mobility-ui-labels";
+import { MOBILITY_UI, riderDriverSearchStartedCopy } from "@shared/mobility-ui-labels";
 import { RIDER_DRIVER_NOT_AVAILABLE_MESSAGE } from "@shared/mobility-negotiation";
 import {
   buildStoredDrivingRoute,
@@ -1249,9 +1249,10 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     };
     const onDriverSearching = (p: { rideId: string }) => {
       if (p.rideId !== activeRideIdRef.current) return;
+      const copy = riderDriverSearchStartedCopy(isPackGoClient ? "pack" : "cargo");
       toast({
-        title: isPackGoClient ? "Tu repartidor está en camino" : "Tu conductor te está buscando",
-        description: "Mantente atento: verás su ubicación en el mapa mientras se acerca.",
+        title: copy.toastTitle,
+        description: copy.toastDescription,
       });
     };
     const onCompleted = async (p: { rideId: string }) => {

@@ -39,6 +39,8 @@ type Props = {
   driverPos?: { lat: number; lon: number } | null;
   onAccept: () => void;
   onDecline: () => void;
+  /** Tiempo agotado sin aceptar/rechazar: solo cerrar UI (el servidor ya reasignó). */
+  onExpired?: () => void;
   /** Regateo: enviar monto (precio del cliente o propuesto). */
   onNegotiationPropose?: (amountUsd: number) => Promise<void>;
   /** Regateo: abrir editor de monto fuera del modal (debe cerrar este modal). */
@@ -83,6 +85,7 @@ export function CargoIncomingRideDialog({
   driverPos,
   onAccept,
   onDecline,
+  onExpired,
   onNegotiationPropose,
   onNegotiationChangeAmount,
   negotiationBusy = false,
@@ -93,12 +96,14 @@ export function CargoIncomingRideDialog({
   const isNego = !!offer.isNegotiated && !!onNegotiationPropose;
 
   const ttlMsRef = useRef<number>(18_000);
+  const expiredHandledRef = useRef(false);
   const [remainingMs, setRemainingMs] = useState<number>(() => {
     const exp = typeof offer.expiresAt === "number" ? offer.expiresAt : null;
     return exp ? Math.max(0, exp - Date.now()) : ttlMsRef.current;
   });
 
   useEffect(() => {
+    expiredHandledRef.current = false;
     const exp = typeof offer.expiresAt === "number" ? offer.expiresAt : null;
     const ttl = exp ? Math.max(1000, exp - Date.now()) : 18_000;
     ttlMsRef.current = ttl;
@@ -113,6 +118,13 @@ export function CargoIncomingRideDialog({
     return () => window.clearInterval(t);
     // al cambiar offer.rideId/expiresAt reiniciar el timer
   }, [offer.rideId, offer.expiresAt]);
+
+  useEffect(() => {
+    if (remainingMs > 0 || expiredHandledRef.current) return;
+    expiredHandledRef.current = true;
+    if (onExpired) onExpired();
+    else onDecline();
+  }, [remainingMs, onExpired, onDecline]);
 
   const progress = useMemo(() => {
     const ttl = Math.max(1, ttlMsRef.current);

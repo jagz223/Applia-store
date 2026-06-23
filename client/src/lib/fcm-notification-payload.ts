@@ -18,7 +18,13 @@ export function parseFcmNotificationPayload(payload: {
   const body = notification.body || data.body || "Tienes una nueva notificación";
   const url = data.url || "/";
   const tagType = data.type || data.withdrawalType || data.conversationId || data.transferId || "genfeb";
-  const tagId = data.bookingId || data.messageId || data.transferId || data.conversationId || String(Date.now());
+  const tagId =
+    data.rideId ||
+    data.bookingId ||
+    data.messageId ||
+    data.transferId ||
+    data.conversationId ||
+    String(Date.now());
   const tag = `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
   const isPanic = String(data.type || "").toLowerCase() === "go_panic";
   const offerType = String(data.type || "").toLowerCase();

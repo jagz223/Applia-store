@@ -32,6 +32,7 @@ import {
   NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN,
   RIDER_DRIVER_NOT_AVAILABLE_MESSAGE,
 } from "@shared/mobility-negotiation";
+import { riderDriverSearchStartedCopy } from "@shared/mobility-ui-labels";
 import { driverIsBusyCrossModule, registerMobilityDriverBusy } from "./driver-busy-cross-module";
 import {
   clearClassicOfferPending,
@@ -40,6 +41,7 @@ import {
   getClassicOfferPending,
   registerClassicOfferActiveScanner,
   setClassicOfferPending,
+  shouldSendClassicOfferPushForRide,
   type ActiveClassicOfferRow,
   type ClassicOfferPending,
 } from "./go-driver-classic-offer-lock";
@@ -595,7 +597,10 @@ async function offerNextDriver(
 
     // Push al driver si no tiene la app en primer plano en la vista conductor.
     try {
-      if (shouldSendDriverClassicOfferPush(String(driverId))) {
+      if (
+        shouldSendDriverClassicOfferPush(String(driverId)) &&
+        shouldSendClassicOfferPushForRide(driverId, ride.id)
+      ) {
         void notificationService.sendPushToUser(driverId, {
           title: "Servicio de taxi",
           body: "Tienes un servicio disponible. Abre para aceptar o rechazar.",
@@ -920,6 +925,15 @@ async function buildClassicCargoOfferResponse(driverUserId: string): Promise<{ o
     ride.offeredDriverIds.includes(driverUserId) &&
     (ride.negotiationExpiresAt == null || Date.now() <= ride.negotiationExpiresAt);
   if (!classic && !neg) {
+    clearClassicOfferPending(driverUserId);
+    return { offer: null };
+  }
+  if (
+    classic &&
+    !ride.isNegotiated &&
+    typeof ride.offerExpiresAt === "number" &&
+    Date.now() > ride.offerExpiresAt
+  ) {
     clearClassicOfferPending(driverUserId);
     return { offer: null };
   }
@@ -1935,12 +1949,13 @@ export function registerMobilityRideRoutes(app: Express) {
       io.to(`user:${driverUserId}`).emit("cargo:ride:driver_searching", { rideId });
       void appendMobilityRideSystemMessage(
         ride.conversationId,
-        "El conductor inició la búsqueda para coordinar contigo el punto de encuentro.",
+        riderDriverSearchStartedCopy("cargo").chatMessage,
       );
       try {
+        const searchCopy = riderDriverSearchStartedCopy("cargo");
         void notificationService.sendPushToUser(ride.riderUserId, {
-          title: "Servicio de taxi",
-          body: "Tu conductor inició la búsqueda para llegar hasta ti.",
+          title: searchCopy.pushTitle,
+          body: searchCopy.pushBody,
           data: { url: "/go/taxi", type: "cargo_driver_searching", rideId },
         });
       } catch {}
