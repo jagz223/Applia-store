@@ -411,7 +411,12 @@ export default function DriverGoGenfeb() {
 
   useEffect(() => {
     driverBubble?.setReceiveMode(receiveMode, canReceive);
-    notifyAndroidDriverReceiving(receiveMode !== "off" && canReceive, receiveMode);
+    if (receiveMode === "off") {
+      notifyAndroidDriverReceiving(false, receiveMode);
+      return;
+    }
+    if (!canReceive) return;
+    notifyAndroidDriverReceiving(true, receiveMode);
   }, [driverBubble, receiveMode, canReceive]);
 
   /** Al volver a la app: refresca GPS y re-sincroniza overlay si sigue recibiendo. */
