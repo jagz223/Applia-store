@@ -18,7 +18,6 @@ import { GoClientPresenceReporter } from "@/components/go/GoClientPresenceReport
 import { DriverFloatingBubble } from "@/components/go/DriverFloatingBubble";
 import { DriverBubbleScreenOverlay } from "@/components/go/DriverBubbleScreenOverlay";
 import { AndroidOverlayPermissionFeedback } from "@/components/go/AndroidOverlayPermissionFeedback";
-import { AndroidDriverForegroundSync } from "@/components/go/AndroidDriverForegroundSync";
 import { AndroidDriverResumePath, rememberAndroidDriverPath } from "@/components/go/AndroidDriverResumePath";
 import { GoDriverBubbleProvider, useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
 import { ListingSubscriptionRibbon } from "@/components/ListingSubscriptionRibbon";
@@ -109,7 +108,6 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
               <DriverFloatingBubble />
               <DriverBubbleScreenOverlay />
               <AndroidOverlayPermissionFeedback enabled={isUnifiedDriver} />
-              <AndroidDriverForegroundSync />
               <AndroidDriverResumePath />
           <GoChatBadgeOnMessage />
           <GoChatOpenFromQuery />

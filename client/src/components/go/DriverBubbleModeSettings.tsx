@@ -10,7 +10,7 @@ import {
   shouldShowAndroidBubbleActivateButton,
   unlockAndroidBubbleMenuFromUrl,
 } from "@/lib/android-driver-foreground";
-import { isAndroidInstalledWebApp, isAndroidMobile } from "@/lib/go-driver-bubble-capability";
+import { isAndroidTwaApp, isAndroidMobile } from "@/lib/go-driver-bubble-capability";
 import { cn } from "@/lib/utils";
 
 type DriverBubbleModeSettingsProps = {
@@ -35,7 +35,7 @@ export function DriverBubbleModeSettings({
   );
 
   useEffect(() => {
-    if (!isAndroidInstalledWebApp()) return;
+    if (!isAndroidTwaApp()) return;
 
     const refresh = () => {
       unlockAndroidBubbleMenuFromUrl();
@@ -48,7 +48,7 @@ export function DriverBubbleModeSettings({
   }, []);
 
   if (isAndroidMobile() && variant === "menu") {
-    if (!isUnifiedDriverRoute(location) || !isAndroidInstalledWebApp() || !androidBubbleButtonVisible) return null;
+    if (!isUnifiedDriverRoute(location) || !isAndroidTwaApp() || !androidBubbleButtonVisible) return null;
 
     return (
       <Button
