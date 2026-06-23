@@ -413,10 +413,8 @@ export default function DriverGoGenfeb() {
     driverBubble?.setReceiveMode(receiveMode, canReceive);
     if (receiveMode === "off") {
       notifyAndroidDriverReceiving(false, receiveMode);
-      return;
     }
-    if (!canReceive) return;
-    notifyAndroidDriverReceiving(true, receiveMode);
+    // «Recibir servicios» ON: puente en gesto del slider + restore nativo al abrir la app.
   }, [driverBubble, receiveMode, canReceive]);
 
   /** Al volver a la app: refresca GPS (sin tocar el overlay nativo). */

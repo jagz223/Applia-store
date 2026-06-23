@@ -26,57 +26,39 @@ function buildGenfebBridgeUrl(path: string, query?: Record<string, string>): str
   return url.toString();
 }
 
-function buildIntentBridgeUrl(path: string, query?: Record<string, string>): string {
+/** Intent explícito al mismo APK: evita el diálogo «¿Continuar a Genfeb?». */
+function buildSameAppIntentUrl(path: string, query?: Record<string, string>): string {
   const genfebUrl = buildGenfebBridgeUrl(path, query);
   const withoutScheme = genfebUrl.replace(/^genfeb:\/\//, "");
-  return `intent://${withoutScheme}#Intent;scheme=genfeb;package=${GENFEB_TWA_PACKAGE};end`;
+  const fallback = encodeURIComponent(
+    typeof window !== "undefined" ? window.location.href.split("#")[0] : "https://www.genfeb.com/go/driver",
+  );
+  return `intent://${withoutScheme}#Intent;scheme=genfeb;package=${GENFEB_TWA_PACKAGE};S.browser_fallback_url=${fallback};end`;
 }
 
-/**
- * Puente web → APK vía esquema genfeb:// (DriverBridgeActivity).
- * En TWA, iframe/enlace sintético suele bloquearse sin gesto del usuario.
- */
-function fireGenfebBridge(path: string, query?: Record<string, string>): void {
-  const urls = [buildGenfebBridgeUrl(path, query), buildIntentBridgeUrl(path, query)];
-  for (const url of urls) {
-    try {
-      const link = document.createElement("a");
-      link.href = url;
-      link.style.cssText = "display:none;position:absolute;width:0;height:0";
-      link.setAttribute("aria-hidden", "true");
-      document.body.appendChild(link);
-      link.click();
-      window.setTimeout(() => link.remove(), 400);
-    } catch {
-      /* try next */
-    }
-
-    try {
-      const frame = document.createElement("iframe");
-      frame.style.cssText = "display:none;width:0;height:0;border:0;position:absolute";
-      frame.setAttribute("aria-hidden", "true");
-      frame.src = url;
-      document.body.appendChild(frame);
-      window.setTimeout(() => frame.remove(), 800);
-    } catch {
-      /* try next */
-    }
+/** Un solo disparo silencioso (p. ej. apagar servicio). */
+function fireGenfebBridgeOnce(path: string, query?: Record<string, string>): void {
+  const url = buildSameAppIntentUrl(path, query);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.style.cssText = "display:none;position:absolute;width:0;height:0";
+    link.setAttribute("aria-hidden", "true");
+    document.body.appendChild(link);
+    link.click();
+    window.setTimeout(() => link.remove(), 400);
+  } catch {
+    /* ignore */
   }
 }
 
-function fireGenfebBridgeWithRetry(path: string, query?: Record<string, string>, attempts = 4): void {
-  for (let i = 0; i < attempts; i++) {
-    window.setTimeout(() => fireGenfebBridge(path, query), i * 500);
-  }
-}
-
-/** Gesto del usuario (slider, botón): navegación directa, más fiable en TWA. */
-function openGenfebBridgeFromUserGesture(path: string, query?: Record<string, string>): void {
-  window.location.href = buildGenfebBridgeUrl(path, query);
+/** Gesto del usuario: intent directo al paquete TWA (sin recargar https). */
+function openBridgeFromUserGesture(path: string, query?: Record<string, string>): void {
+  window.location.href = buildSameAppIntentUrl(path, query);
 }
 
 export function syncAndroidDriverForeground(_visible: boolean): void {
-  /* no-op: ciclo de vida nativo */
+  /* ciclo de vida nativo (TAB_HIDDEN / onTrimMemory) */
 }
 
 export function markAndroidOverlayGranted(granted: boolean): void {
@@ -114,11 +96,14 @@ export function shouldShowAndroidBubbleActivateButton(): boolean {
 }
 
 type AndroidDriverReceivingOptions = {
-  /** true al mover el slider o pulsar un botón (no en useEffect). */
   fromUserGesture?: boolean;
 };
 
-/** Inicia o detiene el servicio nativo (notificación + burbuja). */
+/**
+ * Inicia o detiene el servicio nativo (notificación + burbuja).
+ * Al activar «recibir», el APK restaura el servicio solo; aquí solo hace falta
+ * el puente en gesto del usuario o al apagar.
+ */
 export function notifyAndroidDriverReceiving(
   receiving: boolean,
   mode: GoDriverReceiveMode = "off",
@@ -131,25 +116,21 @@ export function notifyAndroidDriverReceiving(
   lastReceivingBridgeKey = bridgeKey;
 
   if (options?.fromUserGesture) {
-    openGenfebBridgeFromUserGesture("/receiving", {
+    openBridgeFromUserGesture("/receiving", {
       on: receiving ? "1" : "0",
       ...(receiving ? { mode: androidModeParam(mode) } : {}),
     });
     return;
   }
 
-  if (receiving) {
-    fireGenfebBridgeWithRetry("/receiving", { on: "1", mode: androidModeParam(mode) });
-    return;
+  if (!receiving) {
+    fireGenfebBridgeOnce("/receiving", { on: "0" });
   }
-
-  fireGenfebBridgeWithRetry("/receiving", { on: "0" });
 }
 
-/** Toque del usuario: abre ajustes «mostrar encima de otras apps». */
 export function openAndroidOverlayPermissionSettings(): void {
   if (!isAndroidTwaApp()) return;
-  openGenfebBridgeFromUserGesture("/overlay-permission");
+  openBridgeFromUserGesture("/overlay-permission");
 }
 
 export function requestAndroidOverlayPermissionForDriver(): void {
@@ -171,7 +152,7 @@ export function checkAndroidOverlayPermissionAfterReturn(): void {
   }
 
   const returnUrl = window.location.href.split("#")[0];
-  fireGenfebBridge("/overlay-check", { return: returnUrl });
+  fireGenfebBridgeOnce("/overlay-check", { return: returnUrl });
 }
 
 export type AndroidOverlayPermissionResult = "granted" | "denied";
