@@ -77,6 +77,7 @@ import { pollClassicDriverOffer, GO_CLASSIC_OFFER_POLL_MS } from "@/lib/go-drive
 import { useSocket } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
 import { startCargoOfferBellLoop } from "@/lib/cargo-offer-bell";
+import { stopDriverOfferSwAlarm } from "@/lib/stop-driver-offer-sw-alarm";
 import { cn } from "@/lib/utils";
 import { addHiddenConversationId } from "@/lib/hidden-conversations";
 import { purgeConversationCache } from "@/hooks/use-chat";
@@ -242,6 +243,7 @@ export default function DriverGoGenfeb() {
   const dismissDriverOfferUi = useCallback(
     (rideId: string) => {
       dismissedClassicOfferUntilRef.current.set(rideId, Date.now() + 90_000);
+      stopDriverOfferSwAlarm(rideId);
       setPinnedOfferEntry((prev) => (prev?.offer.rideId === rideId ? null : prev));
       goDriverUi?.dismissOffer(rideId);
     },
@@ -252,6 +254,7 @@ export default function DriverGoGenfeb() {
   const releaseDriverOfferUi = useCallback(
     (rideId: string) => {
       if (!rideId) return;
+      stopDriverOfferSwAlarm(rideId);
       setPinnedOfferEntry((prev) => (prev?.offer.rideId === rideId ? null : prev));
       goDriverUi?.resolveOfferAndShowNext(rideId);
     },
@@ -1134,6 +1137,7 @@ export default function DriverGoGenfeb() {
       }
       acceptingRideIdRef.current = null;
       setPinnedOfferEntry(null);
+      stopDriverOfferSwAlarm(snapOffer.rideId);
       if (accept) {
         goDriverUi?.resolveOfferAndShowNext(snapOffer.rideId);
         goDriverUi?.clearOffers?.();

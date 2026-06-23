@@ -82,7 +82,7 @@ export function PushForegroundHandler() {
             }
           }
 
-          if (document.hidden) {
+          if (document.hidden && !isDriverIncomingOffer) {
             void showSystemNotification(parsed);
           }
         });

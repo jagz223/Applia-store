@@ -927,7 +927,12 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
           title: offerTitle,
           body: offerBody,
           urgent: true,
-          data: { url: "/go/driver", type: "pack_ride_offer", rideId: ride.id },
+          data: {
+            url: "/go/driver",
+            type: "pack_ride_offer",
+            rideId: ride.id,
+            expiresAt: String(ride.offerExpiresAt ?? ""),
+          },
         });
       }
     } catch {}

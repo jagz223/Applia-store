@@ -56,7 +56,10 @@ class NotificationService {
     console.log("[push] Token registrado correctamente para usuario:", uid);
   }
 
-  private async getUserTokens(userId: string | number): Promise<string[]> {
+  private async getUserTokens(
+    userId: string | number,
+    opts?: { preferLatestWebToken?: boolean },
+  ): Promise<string[]> {
     const db = getFirestore();
     if (!db) return [];
 
@@ -66,12 +69,36 @@ class NotificationService {
       .where("userId", "==", uid)
       .get();
 
-    const tokens: string[] = [];
+    const rows: { token: string; platform: string; updatedAt: number }[] = [];
     snapshot.forEach((doc) => {
-      const data = doc.data() as { token?: string | null };
-      if (data.token) tokens.push(data.token);
+      const data = doc.data() as {
+        token?: string | null;
+        platform?: string | null;
+        updatedAt?: { toMillis?: () => number } | Date | null;
+      };
+      if (!data.token) return;
+      let updatedAt = 0;
+      const raw = data.updatedAt;
+      if (raw && typeof (raw as { toMillis?: () => number }).toMillis === "function") {
+        updatedAt = (raw as { toMillis: () => number }).toMillis();
+      } else if (raw instanceof Date) {
+        updatedAt = raw.getTime();
+      }
+      rows.push({
+        token: data.token,
+        platform: String(data.platform || "web"),
+        updatedAt,
+      });
     });
-    return tokens;
+
+    if (opts?.preferLatestWebToken) {
+      const web = rows
+        .filter((r) => r.platform === "web")
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+      if (web[0]) return [web[0].token];
+    }
+
+    return rows.map((r) => r.token);
   }
 
   /**
@@ -117,9 +144,15 @@ class NotificationService {
 
   async sendPushToUser(userId: string | number, payload: PushPayload): Promise<void> {
     const uid = this.normalizeUserId(userId);
+    const data = payload.data ?? {};
+    const offerType = String(data.type || "").toLowerCase();
+    const isDriverClassicOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
     let tokens: string[] = [];
     try {
-      tokens = await this.getUserTokens(uid);
+      tokens = await this.getUserTokens(
+        uid,
+        isDriverClassicOffer ? { preferLatestWebToken: true } : undefined,
+      );
     } catch (err) {
       console.error("[push] Error obteniendo tokens para usuario", uid, err);
       return;
@@ -129,8 +162,10 @@ class NotificationService {
       return;
     }
 
-    const data = payload.data ?? {};
-    const dataStr = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
+    const baseDataStr = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
+    const dataStr = isDriverClassicOffer
+      ? { ...baseDataStr, title: payload.title, body: payload.body }
+      : baseDataStr;
     const urgent = payload.urgent === true;
     const webNotif: admin.messaging.WebpushNotification = {
       title: payload.title,
@@ -144,36 +179,44 @@ class NotificationService {
           } as admin.messaging.WebpushNotification)
         : {}),
     };
-    const message: admin.messaging.MulticastMessage = {
-      tokens,
-      notification: {
-        title: payload.title,
-        body: payload.body,
-      },
-      data: dataStr,
-      webpush: {
-        notification: webNotif,
-        fcmOptions: data.url ? { link: String(data.url) } : undefined,
-      },
-      // Android / iOS: importante para que el mismo envío funcione con tokens de teléfono.
-      android: {
-        priority: urgent ? "high" : "high",
-        notification: {
-          title: payload.title,
-          body: payload.body,
-          icon: "ic_launcher",
-          ...(urgent ? { sound: "default" } : {}),
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            alert: { title: payload.title, body: payload.body },
-            sound: "default",
+    const message: admin.messaging.MulticastMessage = isDriverClassicOffer
+      ? {
+          tokens,
+          data: dataStr,
+          webpush: {
+            headers: { Urgency: "high" },
+            fcmOptions: data.url ? { link: String(data.url) } : undefined,
           },
-        },
-      },
-    };
+        }
+      : {
+          tokens,
+          notification: {
+            title: payload.title,
+            body: payload.body,
+          },
+          data: baseDataStr,
+          webpush: {
+            notification: webNotif,
+            fcmOptions: data.url ? { link: String(data.url) } : undefined,
+          },
+          android: {
+            priority: urgent ? "high" : "high",
+            notification: {
+              title: payload.title,
+              body: payload.body,
+              icon: "ic_launcher",
+              ...(urgent ? { sound: "default" } : {}),
+            },
+          },
+          apns: {
+            payload: {
+              aps: {
+                alert: { title: payload.title, body: payload.body },
+                sound: "default",
+              },
+            },
+          },
+        };
 
     let messaging: admin.messaging.Messaging;
     try {
@@ -215,11 +258,15 @@ class NotificationService {
         try {
           await messaging.send({
             token,
-            notification: { title: payload.title, body: payload.body },
-            data: dataStr,
-            webpush: message.webpush,
-            android: message.android,
-            apns: message.apns,
+            ...(isDriverClassicOffer
+              ? { data: dataStr, webpush: message.webpush }
+              : {
+                  notification: { title: payload.title, body: payload.body },
+                  data: baseDataStr,
+                  webpush: message.webpush,
+                  android: message.android,
+                  apns: message.apns,
+                }),
           });
           sent++;
         } catch (tokenErr) {

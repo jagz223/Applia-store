@@ -605,7 +605,12 @@ async function offerNextDriver(
           title: "Servicio de taxi",
           body: "Tienes un servicio disponible. Abre para aceptar o rechazar.",
           urgent: true,
-          data: { url: "/go/driver", type: "cargo_ride_offer", rideId: ride.id },
+          data: {
+            url: "/go/driver",
+            type: "cargo_ride_offer",
+            rideId: ride.id,
+            expiresAt: String(ride.offerExpiresAt ?? ""),
+          },
         });
       }
     } catch {}

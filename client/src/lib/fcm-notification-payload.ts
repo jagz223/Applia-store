@@ -17,18 +17,22 @@ export function parseFcmNotificationPayload(payload: {
   const title = notification.title || data.title || "Genfeb";
   const body = notification.body || data.body || "Tienes una nueva notificación";
   const url = data.url || "/";
+  const offerType = String(data.type || "").toLowerCase();
+  const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+  const rideId = data.rideId ? String(data.rideId) : "";
   const tagType = data.type || data.withdrawalType || data.conversationId || data.transferId || "genfeb";
   const tagId =
-    data.rideId ||
+    rideId ||
     data.bookingId ||
     data.messageId ||
     data.transferId ||
     data.conversationId ||
-    String(Date.now());
-  const tag = `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
-  const isPanic = String(data.type || "").toLowerCase() === "go_panic";
-  const offerType = String(data.type || "").toLowerCase();
-  const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+    "genfeb";
+  const tag =
+    isRideOffer && rideId
+      ? `genfeb-ride-offer-${rideId.replace(/[^a-zA-Z0-9-_]/g, "_")}`
+      : `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
+  const isPanic = offerType === "go_panic";
   return { title, body, url, tag, isPanic, isRideOffer };
 }
 
