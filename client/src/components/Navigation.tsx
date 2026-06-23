@@ -621,7 +621,11 @@ export function Navigation() {
                 <Menu className="h-5 w-5" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-[300px] bg-card border-l border-border">
+            <SheetContent
+              side="right"
+              className="flex h-full w-[300px] min-h-0 flex-col overflow-hidden bg-card border-l border-border p-0"
+            >
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-6 pt-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] [-webkit-overflow-scrolling:touch] touch-pan-y">
               {/* Saldo en menú móvil */}
               {isAuthenticated && FEATURE_WALLET_RECHARGE_UI_ENABLED && (
                 <div className="flex items-center gap-2 mt-6 mb-2 px-1 py-3 rounded-xl bg-primary/10 border border-primary/20">
@@ -820,6 +824,7 @@ export function Navigation() {
                     </div>
                   </a>
                 </motion.div>
+              </div>
               </div>
             </SheetContent>
           </Sheet>
