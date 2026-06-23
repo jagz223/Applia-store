@@ -25,9 +25,19 @@ export function isInstalledWebApp(): boolean {
   );
 }
 
+/** APK Bubblewrap / TWA en Android (referrer android-app:// o PWA instalada). */
+export function isAndroidTwaApp(): boolean {
+  if (!isAndroidMobile()) return false;
+  if (isInstalledWebApp()) return true;
+  if (typeof document !== "undefined" && document.referrer.startsWith("android-app://")) {
+    return true;
+  }
+  return false;
+}
+
 /** App instalada (PWA o TWA Bubblewrap) en Android. */
 export function isAndroidInstalledWebApp(): boolean {
-  return isAndroidMobile() && isInstalledWebApp();
+  return isAndroidTwaApp();
 }
 
 /**
