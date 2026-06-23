@@ -109,16 +109,65 @@ function parseFcmPushPayload(raw) {
   const title = notification.title || (data && data.title) || "Genfeb";
   const body = notification.body || (data && data.body) || "Tienes una nueva notificación";
   const url = (data && data.url) || "/";
+  const offerType = String((data && data.type) || "").toLowerCase();
+  const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+  const rideId = data && data.rideId ? String(data.rideId) : "";
   const tagType =
     (data && (data.type || data.withdrawalType || data.conversationId || data.transferId)) || "genfeb";
   const tagId =
+    rideId ||
     (data && (data.bookingId || data.messageId || data.transferId || data.conversationId)) ||
-    String(Date.now());
-  const tag = `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
+    "genfeb";
+  const tag = isRideOffer && rideId
+    ? `genfeb-ride-offer-${rideId.replace(/[^a-zA-Z0-9-_]/g, "_")}`
+    : `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
   const isPanic = String((data && data.type) || "").toLowerCase() === "go_panic";
-  const offerType = String((data && data.type) || "").toLowerCase();
-  const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
-  return { title, body, url, tag, isPanic, isRideOffer };
+  const expiresAt = data && data.expiresAt ? Number(data.expiresAt) : 0;
+  return { title, body, url, tag, isPanic, isRideOffer, rideId, expiresAt };
+}
+
+/** Recordatorio en APK/TWA: renotify + vibración mientras la oferta siga pendiente. */
+const OFFER_ALARM_MS = 2800;
+const offerAlarmTimers = new Map();
+
+function stopOfferAlarm(rideId) {
+  if (!rideId) return;
+  const key = String(rideId);
+  const t = offerAlarmTimers.get(key);
+  if (t) {
+    clearInterval(t);
+    offerAlarmTimers.delete(key);
+  }
+}
+
+function showRideOfferNotification(title, body, url, tag, renotify) {
+  return self.registration.showNotification(title, {
+    body,
+    icon: "/genfeb-logo-new.png",
+    badge: "/genfeb-logo-new.png",
+    tag,
+    renotify: !!renotify,
+    data: { url },
+    requireInteraction: true,
+    vibrate: [200, 120, 200, 120, 200, 120, 400],
+    silent: false,
+  });
+}
+
+function startOfferAlarm(rideId, title, body, url, tag, expiresAt) {
+  if (!rideId) return;
+  const key = String(rideId);
+  stopOfferAlarm(key);
+  const until = Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : Date.now() + 25_000;
+  const tick = () => {
+    if (Date.now() > until) {
+      stopOfferAlarm(key);
+      return;
+    }
+    void showRideOfferNotification(title, body, url, tag, true).catch(function () {});
+  };
+  const id = setInterval(tick, OFFER_ALARM_MS);
+  offerAlarmTimers.set(key, id);
 }
 
 self.addEventListener("push", (event) => {
@@ -129,35 +178,45 @@ self.addEventListener("push", (event) => {
   } catch (_) {
     return;
   }
-  const { title, body, url, tag, isPanic, isRideOffer } = parseFcmPushPayload(payload);
+  const { title, body, url, tag, isPanic, isRideOffer, rideId, expiresAt } = parseFcmPushPayload(payload);
+  if (isRideOffer && rideId) {
+    stopOfferAlarm(rideId);
+  }
   event.waitUntil(
-    self.registration
-      .showNotification(title, {
-        body,
-        icon: "/genfeb-logo-new.png",
-        badge: "/genfeb-logo-new.png",
-        tag,
-        renotify: true,
-        data: { url },
-        ...(isPanic
-          ? {
-              requireInteraction: true,
-              vibrate: [300, 200, 300, 200, 300, 200, 500],
-              silent: false,
-            }
-          : isRideOffer
-            ? {
-                requireInteraction: true,
-                vibrate: [200, 120, 200, 120, 200, 120, 400],
-                silent: false,
-              }
-            : {}),
-      })
-      .catch(function () {})
+    (isRideOffer && rideId
+      ? showRideOfferNotification(title, body, url, tag, false).then(function () {
+          startOfferAlarm(rideId, title, body, url, tag, expiresAt);
+        })
+      : self.registration
+          .showNotification(title, {
+            body,
+            icon: "/genfeb-logo-new.png",
+            badge: "/genfeb-logo-new.png",
+            tag,
+            renotify: true,
+            data: { url },
+            ...(isPanic
+              ? {
+                  requireInteraction: true,
+                  vibrate: [300, 200, 300, 200, 300, 200, 500],
+                  silent: false,
+                }
+              : {}),
+          })
+    ).catch(function () {})
   );
 });
 
+self.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || data.type !== "STOP_OFFER_ALARM") return;
+  stopOfferAlarm(data.rideId);
+});
+
 self.addEventListener("notificationclick", (event) => {
+  const rideTag = event.notification.tag || "";
+  const m = /^genfeb-ride-offer-(.+)$/.exec(rideTag);
+  if (m) stopOfferAlarm(m[1]);
   event.notification.close();
   const url = event.notification.data?.url || "/";
   event.waitUntil(
