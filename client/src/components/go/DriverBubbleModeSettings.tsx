@@ -1,15 +1,10 @@
-import { useEffect, useState } from "react";
 import { CircleDot, Minimize2, PictureInPicture2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 import { useGoDriverBubbleOptional } from "@/contexts/GoDriverBubbleContext";
-import {
-  requestAndroidOverlayPermissionForDriver,
-  shouldShowAndroidBubbleActivateButton,
-  unlockAndroidBubbleMenuFromUrl,
-} from "@/lib/android-driver-foreground";
+import { requestAndroidOverlayPermissionForDriver } from "@/lib/android-driver-foreground";
 import { isAndroidTwaApp, isAndroidMobile } from "@/lib/go-driver-bubble-capability";
 import { cn } from "@/lib/utils";
 
@@ -30,25 +25,9 @@ export function DriverBubbleModeSettings({
 }: DriverBubbleModeSettingsProps) {
   const [location] = useLocation();
   const bubble = useGoDriverBubbleOptional();
-  const [androidBubbleButtonVisible, setAndroidBubbleButtonVisible] = useState(() =>
-    shouldShowAndroidBubbleActivateButton(),
-  );
-
-  useEffect(() => {
-    if (!isAndroidTwaApp()) return;
-
-    const refresh = () => {
-      unlockAndroidBubbleMenuFromUrl();
-      setAndroidBubbleButtonVisible(shouldShowAndroidBubbleActivateButton());
-    };
-
-    refresh();
-    document.addEventListener("visibilitychange", refresh);
-    return () => document.removeEventListener("visibilitychange", refresh);
-  }, []);
 
   if (isAndroidMobile() && variant === "menu") {
-    if (!isUnifiedDriverRoute(location) || !isAndroidTwaApp() || !androidBubbleButtonVisible) return null;
+    if (!isUnifiedDriverRoute(location) || !isAndroidTwaApp()) return null;
 
     return (
       <Button
