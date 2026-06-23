@@ -419,6 +419,17 @@ export default function DriverGoGenfeb() {
     notifyAndroidDriverReceiving(true, receiveMode);
   }, [driverBubble, receiveMode, canReceive]);
 
+  /** Al volver a la app: refresca GPS (sin tocar el overlay nativo). */
+  useEffect(() => {
+    if (!isAndroidInstalledWebApp()) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void bootstrapAppGeolocationPermission();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
   const { data: serverTripHistory = [] } = useQuery({
     queryKey: ["mobility-ride-history", "driver", user?.id],
     queryFn: () => fetchMobilityRideHistoryForUser(50, "driver"),

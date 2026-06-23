@@ -1,68 +1,42 @@
 import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
 import { isAndroidTwaApp } from "@/lib/go-driver-bubble-capability";
 
-const NATIVE_RECEIVING_PARAM = "genfebNativeReceiving";
-const NATIVE_MODE_PARAM = "genfebNativeMode";
-const NATIVE_OVERLAY_PARAM = "genfebNativeOverlay";
-const NATIVE_RETURN_PARAM = "genfebNativeReturn";
-const NATIVE_FOREGROUND_PARAM = "genfebNativeForeground";
-const NATIVE_SYNC_STORAGE_KEY = "genfeb.android.nativeReceivingSync";
+const ANDROID_BRIDGE_ORIGIN = "https://www.genfeb.com/android-driver-bridge";
 
 export const ANDROID_OVERLAY_PENDING_KEY = "genfeb.androidOverlay.pending";
 export const ANDROID_BUBBLE_NOTIFY_KEY = "genfeb.androidBubble.notifyUnlocked";
 export const ANDROID_OVERLAY_GRANTED_KEY = "genfeb.androidOverlay.granted";
+
+let lastReceivingBridgeKey: string | null = null;
 
 function androidModeParam(mode: GoDriverReceiveMode): string {
   if (mode === "taxi" || mode === "delivery" || mode === "both") return mode;
   return "both";
 }
 
-function readNativeSyncKey(): string | null {
+/** Puente silencioso (iframe) sin recargar la página. */
+function postAndroidDriverBridge(path: string, query?: Record<string, string>): void {
   try {
-    return sessionStorage.getItem(NATIVE_SYNC_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeNativeSyncKey(key: string): void {
-  try {
-    sessionStorage.setItem(NATIVE_SYNC_STORAGE_KEY, key);
+    const url = new URL(`${ANDROID_BRIDGE_ORIGIN}${path}`);
+    if (query) {
+      for (const [key, value] of Object.entries(query)) {
+        url.searchParams.set(key, value);
+      }
+    }
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "display:none;width:0;height:0;border:0;position:absolute";
+    frame.setAttribute("aria-hidden", "true");
+    frame.src = url.toString();
+    document.body.appendChild(frame);
+    window.setTimeout(() => frame.remove(), 800);
   } catch {
     /* ignore */
   }
 }
 
-/**
- * Comando nativo vía query en la misma URL de la TWA (sin genfeb:// ni iframes).
- * LauncherActivity procesa los parámetros y recarga /go/driver limpio.
- */
-function navigateWithNativeParams(params: Record<string, string>): void {
-  const url = new URL(window.location.href);
-  url.searchParams.delete(NATIVE_RECEIVING_PARAM);
-  url.searchParams.delete(NATIVE_MODE_PARAM);
-  url.searchParams.delete(NATIVE_OVERLAY_PARAM);
-  url.searchParams.delete(NATIVE_RETURN_PARAM);
-  url.searchParams.delete(NATIVE_FOREGROUND_PARAM);
-
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-
-  window.location.replace(url.toString());
-}
-
-/** Sin web bridge: el ciclo de vida nativo oculta/muestra la burbuja. */
+/** El APK gestiona visibilidad de la burbuja con el ciclo de vida nativo. */
 export function syncAndroidDriverForeground(_visible: boolean): void {
   /* no-op */
-}
-
-function readAndroidOverlayGrantedFromStorage(): boolean {
-  try {
-    return localStorage.getItem(ANDROID_OVERLAY_GRANTED_KEY) === "1";
-  } catch {
-    return false;
-  }
 }
 
 export function markAndroidOverlayGranted(granted: boolean): void {
@@ -95,46 +69,30 @@ export function unlockAndroidBubbleMenuFromUrl(): boolean {
   return true;
 }
 
-export function isAndroidBubbleMenuUnlocked(): boolean {
-  try {
-    return localStorage.getItem(ANDROID_BUBBLE_NOTIFY_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-/** Menú ☰: «Activar burbuja» siempre visible en el APK (abre ajustes de overlay). */
+/** Menú ☰ del conductor en APK: botón «Activar burbuja». */
 export function shouldShowAndroidBubbleActivateButton(): boolean {
   return isAndroidTwaApp();
 }
 
-/** Avisa al APK que inicie o detenga el overlay nativo. */
+/** Avisa al APK que inicie o detenga el overlay nativo (sin recargar la web). */
 export function notifyAndroidDriverReceiving(receiving: boolean, mode: GoDriverReceiveMode = "off"): void {
   if (!isAndroidTwaApp()) return;
 
-  const syncKey = receiving ? `1:${androidModeParam(mode)}` : "0";
-  if (readNativeSyncKey() === syncKey) return;
-  writeNativeSyncKey(syncKey);
+  const bridgeKey = receiving ? `1:${androidModeParam(mode)}` : "0";
+  if (lastReceivingBridgeKey === bridgeKey) return;
+  lastReceivingBridgeKey = bridgeKey;
 
   if (receiving) {
-    try {
-      localStorage.setItem(ANDROID_BUBBLE_NOTIFY_KEY, "1");
-    } catch {
-      /* ignore */
-    }
-    navigateWithNativeParams({
-      [NATIVE_RECEIVING_PARAM]: "1",
-      [NATIVE_MODE_PARAM]: androidModeParam(mode),
-    });
+    postAndroidDriverBridge("/receiving", { on: "1", mode: androidModeParam(mode) });
     return;
   }
 
-  navigateWithNativeParams({ [NATIVE_RECEIVING_PARAM]: "0" });
+  postAndroidDriverBridge("/receiving", { on: "0" });
 }
 
 export function openAndroidOverlayPermissionSettings(): void {
   if (!isAndroidTwaApp()) return;
-  navigateWithNativeParams({ [NATIVE_OVERLAY_PARAM]: "permission" });
+  postAndroidDriverBridge("/overlay-permission");
 }
 
 export function requestAndroidOverlayPermissionForDriver(): void {
@@ -156,10 +114,7 @@ export function checkAndroidOverlayPermissionAfterReturn(): void {
   }
 
   const returnUrl = window.location.href.split("#")[0];
-  navigateWithNativeParams({
-    [NATIVE_OVERLAY_PARAM]: "check",
-    [NATIVE_RETURN_PARAM]: returnUrl,
-  });
+  postAndroidDriverBridge("/overlay-check", { return: returnUrl });
 }
 
 export type AndroidOverlayPermissionResult = "granted" | "denied";

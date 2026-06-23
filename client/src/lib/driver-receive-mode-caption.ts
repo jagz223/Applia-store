@@ -1,6 +1,5 @@
 import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
 import { MOBILITY_UI } from "@shared/mobility-ui-labels";
-import { isAndroidInstalledWebApp } from "@/lib/go-driver-bubble-capability";
 
 export type ReceiveModeCaptionTone = "off" | "taxi" | "delivery" | "both";
 
@@ -30,11 +29,6 @@ export function receiveModeHybridHintText(): string {
   return "Modo híbrido · toca el botón para apagar o desliza a taxi o delivery";
 }
 
-/** APK Android: aviso de burbuja flotante al recibir en cualquier modo. */
-export function receiveModeAndroidBubbleHintText(): string {
-  return "Minimiza la app para ver la burbuja flotante.";
-}
-
 /** @deprecated Usar receiveModeOffGuideText / receiveModeHybridHintText según el modo. */
 export function receiveModeCaptionText(
   mode: GoDriverReceiveMode,
@@ -48,12 +42,10 @@ export function receiveModeCaptionText(
 
 export function receiveModeShowsCaption(mode: GoDriverReceiveMode, disabled: boolean): boolean {
   if (disabled) return true;
-  if (isAndroidInstalledWebApp() && mode !== "off") return true;
   return mode === "off" || mode === "both";
 }
 
 export function receiveModeCaptionIsCompact(mode: GoDriverReceiveMode, disabled: boolean): boolean {
-  if (isAndroidInstalledWebApp() && !disabled && mode !== "off") return true;
   return !disabled && mode === "both";
 }
 
