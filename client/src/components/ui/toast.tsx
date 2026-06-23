@@ -7,6 +7,30 @@ import { cn } from "@/lib/utils"
 
 const ToastProvider = ToastPrimitives.Provider
 
+/** Evita crash «Invalid pointer id» al arrastrar toasts en Android/TWA. */
+function patchToastPointerCapture(node: HTMLElement | null) {
+  if (!node || (node as HTMLElement & { __genfebPtrPatch?: boolean }).__genfebPtrPatch) return
+  ;(node as HTMLElement & { __genfebPtrPatch?: boolean }).__genfebPtrPatch = true
+  const original = node.releasePointerCapture.bind(node)
+  node.releasePointerCapture = (pointerId: number) => {
+    try {
+      if (node.hasPointerCapture(pointerId)) original(pointerId)
+    } catch {
+      /* pointer ya liberado o id inválido */
+    }
+  }
+}
+
+function mergeRefs<T>(...refs: Array<React.Ref<T> | undefined>) {
+  return (node: T | null) => {
+    for (const ref of refs) {
+      if (!ref) continue
+      if (typeof ref === "function") ref(node)
+      else (ref as React.MutableRefObject<T | null>).current = node
+    }
+  }
+}
+
 const ToastViewport = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Viewport>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Viewport>
@@ -14,7 +38,7 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+      "fixed inset-x-0 bottom-[calc(var(--go-bottom-nav-height,0px)+env(safe-area-inset-bottom,0px)+0.75rem)] z-[100] flex max-h-screen w-full flex-col p-4 sm:inset-x-auto sm:bottom-4 sm:right-4 sm:max-w-[420px]",
       className
     )}
     {...props}
@@ -23,7 +47,7 @@ const ToastViewport = React.forwardRef<
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-bottom-full",
   {
     variants: {
       variant: {
@@ -43,10 +67,12 @@ const Toast = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> &
     VariantProps<typeof toastVariants>
 >(({ className, variant, ...props }, ref) => {
+  const localRef = React.useRef<React.ElementRef<typeof ToastPrimitives.Root>>(null)
   return (
     <ToastPrimitives.Root
-      ref={ref}
+      ref={mergeRefs(ref, localRef, (node) => patchToastPointerCapture(node))}
       className={cn(toastVariants({ variant }), className)}
+      swipeThreshold={10_000}
       {...props}
     />
   )

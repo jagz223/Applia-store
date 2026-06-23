@@ -23,7 +23,7 @@ import { useGoDriverUi, type GoDriverQueuedOffer } from "@/contexts/GoDriverUiCo
 import { useAuth } from "@/hooks/use-auth";
 import { useCategories, useCurrentProvider, useWallet } from "@/hooks/use-mango-data";
 import { useProviderSubscriptionMonthlyUsd } from "@/hooks/use-provider-subscription-monthly-usd";
-import { MOBILITY_UI } from "@shared/mobility-ui-labels";
+import { MOBILITY_UI, driverServiceCopy, driverServicePanelHeading } from "@shared/mobility-ui-labels";
 import {
   NEGOTIATION_OFFER_REMOVED_REASON_RIDER_REJECTED,
   NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN,
@@ -182,6 +182,7 @@ export default function DriverGoGenfeb() {
   } = useGoChat();
   const { socket } = useSocket();
   const rideApiBase = serviceModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+  const serviceCopy = useMemo(() => driverServiceCopy(goSlug), [goSlug]);
   const rideSocketPrefix = serviceModule === "pack" ? "pack:ride:" : "cargo:ride:";
   const presenceEvent = serviceModule === "pack" ? "pack:driver:presence" : "cargo:driver:presence";
   const locationEvent = serviceModule === "pack" ? "pack:ride:location" : "cargo:ride:location";
@@ -383,6 +384,8 @@ export default function DriverGoGenfeb() {
   const [cancelServiceBusy, setCancelServiceBusy] = useState(false);
   const [searchClientConfirmOpen, setSearchClientConfirmOpen] = useState(false);
   const [confirmPaymentOpen, setConfirmPaymentOpen] = useState(false);
+  const [completeServiceOpen, setCompleteServiceOpen] = useState(false);
+  const [completeServiceBusy, setCompleteServiceBusy] = useState(false);
   const [searchingClient, setSearchingClient] = useState(false);
   const [serviceRouteGeometry, setServiceRouteGeometry] = useState<GeoJsonObject | null>(null);
   const [serviceEtaSec, setServiceEtaSec] = useState<number | null>(null);
@@ -1245,13 +1248,15 @@ export default function DriverGoGenfeb() {
     if (!activeRideId) return;
     const token = localStorage.getItem("token");
     if (!token) return;
+    const serviceLabel = goSlug === "pack" ? "envío" : "viaje";
+    setCompleteServiceBusy(true);
     try {
       const res = await fetch(`${rideApiBase}/${activeRideId}/complete`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = (await res.json().catch(() => ({}))) as { message?: string };
-      if (!res.ok) throw new Error(data.message || "No se pudo completar el viaje");
+      if (!res.ok) throw new Error(data.message || `No se pudo completar el ${serviceLabel}`);
       clearGoDriverActiveRideId(goSlug === "pack" ? "pack" : "cargo");
       setActiveRideId(null);
       setActiveRideOffer(null);
@@ -1267,12 +1272,15 @@ export default function DriverGoGenfeb() {
       void queryClient.invalidateQueries({ queryKey: ["/api/wallet/me"] });
       disconnectReceivingIfSubscriptionLapsed();
       stopAndroidDriverOverlayAfterRide();
+      setCompleteServiceOpen(false);
     } catch (e) {
       toast({
-        title: "No se pudo completar el viaje",
+        title: goSlug === "pack" ? "No se pudo completar el envío" : "No se pudo completar el viaje",
         description: e instanceof Error ? e.message : "Intenta de nuevo.",
         variant: "destructive",
       });
+    } finally {
+      setCompleteServiceBusy(false);
     }
   };
 
@@ -1311,7 +1319,7 @@ export default function DriverGoGenfeb() {
       serviceRouteTrimIndexRef.current = 0;
       lastServiceRouteDeviationFetchRef.current = null;
       lastServiceRouteFailureRef.current = null;
-      toast({ title: "Viaje cancelado", description: "El servicio quedó anulado." });
+      toast({ title: serviceCopy.cancelledToastTitle, description: "El servicio quedó anulado." });
       setCancelServiceOpen(false);
       disconnectReceivingIfSubscriptionLapsed();
       stopAndroidDriverOverlayAfterRide();
@@ -1695,7 +1703,12 @@ export default function DriverGoGenfeb() {
         return (
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-semibold text-foreground">{activeRideStarted ? "Viaje en curso" : "En servicio"}</p>
+          <p className="font-semibold text-foreground">
+            {driverServicePanelHeading(
+              goSlug,
+              activeRideStarted ? "in_progress" : searchingClient ? "searching" : "pickup",
+            )}
+          </p>
           {serviceEtaSec != null ? (
             <p className="mt-0.5 text-muted-foreground">
               Llegas en <span className="font-medium text-foreground tabular-nums">{Math.max(1, Math.round(serviceEtaSec / 60))} min</span>
@@ -1748,7 +1761,7 @@ export default function DriverGoGenfeb() {
                 className="h-9 rounded-full px-3"
                 onClick={() => setSearchClientConfirmOpen(true)}
               >
-                Iniciar búsqueda
+                {serviceCopy.startSearchButton}
               </Button>
             ) : (
               <Button
@@ -1757,7 +1770,7 @@ export default function DriverGoGenfeb() {
                 className="h-9 rounded-full px-3"
                 onClick={() => setStartConfirmOpen(true)}
               >
-                Iniciar viaje
+                {serviceCopy.startRideButton}
               </Button>
             )
           ) : null}
@@ -1783,8 +1796,13 @@ export default function DriverGoGenfeb() {
           ) : null}
           {activeRideStarted &&
           ((activeRideOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || paymentConfirmed) ? (
-            <Button type="button" size="sm" className="h-9 rounded-full px-3 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void completeRide()}>
-              Terminar viaje
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 rounded-full px-3 bg-emerald-600 text-white hover:bg-emerald-700"
+              onClick={() => setCompleteServiceOpen(true)}
+            >
+              {goSlug === "pack" ? "Terminar envío" : "Terminar viaje"}
             </Button>
           ) : null}
         </div>
@@ -1834,7 +1852,7 @@ export default function DriverGoGenfeb() {
         className="mt-2 w-full border-destructive/40 text-destructive hover:bg-destructive/10"
         onClick={() => setCancelServiceOpen(true)}
       >
-        Cancelar viaje
+        {serviceCopy.cancelButton}
       </Button>
     </div>
   ) : null;
@@ -2302,10 +2320,10 @@ export default function DriverGoGenfeb() {
       <Dialog open={startConfirmOpen} onOpenChange={setStartConfirmOpen}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
-            <DialogTitle>¿Ya recogiste al usuario?</DialogTitle>
+            <DialogTitle>{serviceCopy.startRideTitle}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p>Cuando confirmes, el viaje iniciará oficialmente y se actualizará para ambos.</p>
+            <p>{serviceCopy.startRideDescription}</p>
           </div>
           <DialogFooter className="gap-2 sm:gap-2">
             <Button
@@ -2335,10 +2353,8 @@ export default function DriverGoGenfeb() {
       <Dialog open={searchClientConfirmOpen} onOpenChange={setSearchClientConfirmOpen}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
-            <DialogTitle>¿Iniciar búsqueda del cliente?</DialogTitle>
-            <DialogDescription>
-              Al confirmar, comenzaremos a coordinar la recogida. Luego podrás iniciar el viaje cuando ya estés con él.
-            </DialogDescription>
+            <DialogTitle>{serviceCopy.startSearchTitle}</DialogTitle>
+            <DialogDescription>{serviceCopy.startSearchDescription}</DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">
             <Button type="button" variant="outline" onClick={() => setSearchClientConfirmOpen(false)}>
@@ -2352,7 +2368,56 @@ export default function DriverGoGenfeb() {
                 void startSearchingClient();
               }}
             >
-              Sí, iniciar búsqueda
+              {serviceCopy.startSearchConfirm}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={completeServiceOpen}
+        onOpenChange={(open) => {
+          setCompleteServiceOpen(open);
+          if (open) setCompleteServiceBusy(false);
+        }}
+      >
+        <DialogContent className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>
+              {goSlug === "pack" ? "¿Terminar el envío?" : "¿Terminar el viaje?"}
+            </DialogTitle>
+            <DialogDescription>
+              {goSlug === "pack"
+                ? "El servicio quedará marcado como completado para ti y el cliente. Solo confirma si ya entregaste el paquete."
+                : "El servicio quedará marcado como completado para ti y el pasajero. Solo confirma si ya finalizaste el trayecto."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCompleteServiceOpen(false)}
+              disabled={completeServiceBusy}
+            >
+              No, volver
+            </Button>
+            <Button
+              type="button"
+              className="gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
+              disabled={completeServiceBusy}
+              onClick={() => void completeRide()}
+            >
+              {completeServiceBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  Terminando…
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4" aria-hidden />
+                  {goSlug === "pack" ? "Sí, terminar envío" : "Sí, terminar viaje"}
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2368,12 +2433,10 @@ export default function DriverGoGenfeb() {
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
             <DialogTitle>
-              {activeRideStarted ? "¿Cancelar el viaje en curso?" : "¿Cancelar este viaje?"}
+              {activeRideStarted ? serviceCopy.cancelTitleActive : serviceCopy.cancelTitlePending}
             </DialogTitle>
             <DialogDescription>
-              {activeRideStarted
-                ? "Si ya van en ruta, avisa al pasajero por teléfono o chat. El viaje quedará anulado para ambos."
-                : "El pasajero verá que cancelaste antes de iniciar. ¿Seguro que deseas continuar?"}
+              {activeRideStarted ? serviceCopy.cancelDescActive : serviceCopy.cancelDescPending}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">

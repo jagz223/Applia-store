@@ -4,9 +4,18 @@ export function normalizeHeadingDeg(deg: number): number {
 }
 
 export function bearingFromLatLon(
-  from: { lat: number; lon: number },
-  to: { lat: number; lon: number },
+  from: { lat: number; lon: number } | null | undefined,
+  to: { lat: number; lon: number } | null | undefined,
 ): number | null {
+  if (!from || !to) return null;
+  if (
+    !Number.isFinite(from.lat) ||
+    !Number.isFinite(from.lon) ||
+    !Number.isFinite(to.lat) ||
+    !Number.isFinite(to.lon)
+  ) {
+    return null;
+  }
   const dLat = to.lat - from.lat;
   const dLon = to.lon - from.lon;
   if (Math.hypot(dLat, dLon) < 1e-6) return null;

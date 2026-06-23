@@ -95,7 +95,7 @@ function TrackDriverHeadingFromPosition({
   useEffect(() => {
     if (!enabled || !position) return;
     const next = position;
-    let target = bearingFromLatLon(prevRef.current, next);
+    let target = prevRef.current ? bearingFromLatLon(prevRef.current, next) : null;
     if (target != null) {
       headingRef.current = smoothHeadingDeg(headingRef.current, target);
       onHeading(headingRef.current);

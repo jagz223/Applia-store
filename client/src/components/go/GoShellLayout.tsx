@@ -78,6 +78,19 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
   const hideShellChromeForBubble =
     isUnifiedDriver && driverBubble?.enabled === true && driverBubble.shellCollapsed;
 
+  /** Variables de layout Go en :root para toasts y overlays fuera del shell (p. ej. Toaster en App). */
+  useEffect(() => {
+    const root = document.documentElement;
+    for (const [key, value] of Object.entries(goViewportStyle)) {
+      root.style.setProperty(key, String(value));
+    }
+    return () => {
+      for (const key of Object.keys(goViewportStyle)) {
+        root.style.removeProperty(key);
+      }
+    };
+  }, []);
+
   /** Evita scroll del documento en móvil: el mapa no debe “robar” el gesto de llegar a la barra inferior. */
   useEffect(() => {
     if (!isGoMapView) return;
