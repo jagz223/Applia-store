@@ -1302,6 +1302,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
       toast({
         title: isPackGoClient ? "Envío finalizado" : "Viaje finalizado",
         description: isPackGoClient ? `Gracias por usar ${MOBILITY_UI.delivery}.` : `Gracias por usar ${MOBILITY_UI.taxiService.toLowerCase()}.`,
+        duration: 6000,
       });
     };
     const onCancelled = (p: { rideId: string; cancelledBy: "rider" | "driver" }) => {
