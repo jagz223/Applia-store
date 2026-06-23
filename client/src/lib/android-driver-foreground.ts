@@ -16,8 +16,21 @@ function openAndroidDriverDeepLink(url: string, options?: { navigate?: boolean }
       window.location.assign(url);
       return;
     } catch {
-      /* fallback iframe */
+      /* fallback */
     }
+  }
+
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.style.display = "none";
+    link.setAttribute("aria-hidden", "true");
+    document.body.appendChild(link);
+    link.click();
+    window.setTimeout(() => link.remove(), 300);
+    return;
+  } catch {
+    /* fallback iframe */
   }
 
   try {
@@ -49,7 +62,7 @@ export function syncAndroidDriverForeground(visible: boolean): void {
 
 function readAndroidOverlayGrantedFromStorage(): boolean {
   try {
-    return sessionStorage.getItem(ANDROID_OVERLAY_GRANTED_KEY) === "1";
+    return localStorage.getItem(ANDROID_OVERLAY_GRANTED_KEY) === "1";
   } catch {
     return false;
   }
@@ -58,9 +71,9 @@ function readAndroidOverlayGrantedFromStorage(): boolean {
 export function markAndroidOverlayGranted(granted: boolean): void {
   try {
     if (granted) {
-      sessionStorage.setItem(ANDROID_OVERLAY_GRANTED_KEY, "1");
+      localStorage.setItem(ANDROID_OVERLAY_GRANTED_KEY, "1");
     } else {
-      sessionStorage.removeItem(ANDROID_OVERLAY_GRANTED_KEY);
+      localStorage.removeItem(ANDROID_OVERLAY_GRANTED_KEY);
     }
   } catch {
     /* ignore */
@@ -79,7 +92,7 @@ export function unlockAndroidBubbleMenuFromUrl(): boolean {
   const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
   window.history.replaceState({}, "", next);
   try {
-    sessionStorage.setItem(ANDROID_BUBBLE_NOTIFY_KEY, "1");
+    localStorage.setItem(ANDROID_BUBBLE_NOTIFY_KEY, "1");
   } catch {
     /* ignore */
   }
@@ -88,7 +101,7 @@ export function unlockAndroidBubbleMenuFromUrl(): boolean {
 
 export function isAndroidBubbleMenuUnlocked(): boolean {
   try {
-    return sessionStorage.getItem(ANDROID_BUBBLE_NOTIFY_KEY) === "1";
+    return localStorage.getItem(ANDROID_BUBBLE_NOTIFY_KEY) === "1";
   } catch {
     return false;
   }

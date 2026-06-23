@@ -9,9 +9,11 @@ import {
   receiveModeCaptionIsCompact,
   receiveModeCaptionTone,
   receiveModeHybridHintText,
+  receiveModeAndroidBubbleHintText,
   receiveModeOffGuideText,
   receiveModeShowsCaption,
 } from "@/lib/driver-receive-mode-caption";
+import { isAndroidInstalledWebApp } from "@/lib/go-driver-bubble-capability";
 
 const KNOB = 52;
 const PAD = 6;
@@ -98,6 +100,9 @@ export function SlideToGoReceiveMode({
   const floatingCaption = useMemo(() => {
     if (disabled) {
       return disabledHint ?? "Completa verificación y registra tu vehículo para recibir servicios";
+    }
+    if (isAndroidInstalledWebApp() && mode !== "off") {
+      return receiveModeAndroidBubbleHintText();
     }
     if (mode === "both") return receiveModeHybridHintText();
     if (mode === "off") return receiveModeOffGuideText(canTaxi, canDelivery);
