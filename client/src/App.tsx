@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { PushForegroundHandler } from "@/components/PushForegroundHandler";
+import { TwaTouchGuard } from "@/components/TwaTouchGuard";
 import { PushAutoRegister } from "@/components/PushAutoRegister";
 import { AndroidGeolocationBootstrap } from "@/components/AndroidGeolocationBootstrap";
 import { PushPermissionReminder } from "@/components/PushPermissionReminder";
@@ -247,6 +248,7 @@ function App() {
           <ExploreCategoryProvider>
             <ServiceBookingChatListener />
             <PushForegroundHandler />
+            <TwaTouchGuard />
             <PushAutoRegister />
             <AndroidGeolocationBootstrap />
             {/* Recordatorio global para activar push si están apagadas */}
