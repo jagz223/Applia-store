@@ -1593,6 +1593,13 @@ export default function DriverGoGenfeb() {
       return;
     }
     setReceiveMode(next);
+    if (next === "off") {
+      notifyAndroidDriverReceiving(false, next, { fromUserGesture: true });
+      return;
+    }
+    if (canReceive) {
+      notifyAndroidDriverReceiving(true, next, { fromUserGesture: true });
+    }
   };
 
   const receiveModeSlider =
