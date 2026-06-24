@@ -65,6 +65,9 @@ export function TaxiVehicleSearchModal({
   onBackFromHaggle,
   onBackFromPriceMode,
   onBackToHaggleFromPayment,
+  hidePricing = false,
+  paymentContinueLabel,
+  canConfirmSearch = true,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -93,6 +96,12 @@ export function TaxiVehicleSearchModal({
   onBackFromHaggle?: () => void;
   onBackFromPriceMode?: () => void;
   onBackToHaggleFromPayment?: () => void;
+  /** Sin destino: ocultar referencias de precio y textos de tarifa. */
+  hidePricing?: boolean;
+  /** Etiqueta del botón tras elegir pago (p. ej. buscar directo). */
+  paymentContinueLabel?: string;
+  /** Permite confirmar búsqueda aunque la referencia local aún no cargó (el servidor recalcula). */
+  canConfirmSearch?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -206,7 +215,9 @@ export function TaxiVehicleSearchModal({
                     Tipo de vehículo
                   </h2>
                   <p className="text-xs leading-snug text-muted-foreground md:text-sm md:leading-normal">
-                    Calculamos una referencia sugerida basada en tarifas de la plataforma.
+                    {hidePricing
+                      ? "El monto se acordará con el conductor por chat o llamada."
+                      : "Calculamos una referencia sugerida basada en tarifas de la plataforma."}
                   </p>
                 </div>
 
@@ -245,9 +256,11 @@ export function TaxiVehicleSearchModal({
                             {description}
                           </span>
                         ) : null}
-                        <span className="text-[11px] sm:text-xs text-muted-foreground tabular-nums">
-                          {sug == null ? "—" : `Ref. ${formatUsd(sug)}`}
-                        </span>
+                        {!hidePricing ? (
+                          <span className="text-[11px] sm:text-xs text-muted-foreground tabular-nums">
+                            {sug == null ? "—" : `Ref. ${formatUsd(sug)}`}
+                          </span>
+                        ) : null}
                       </button>
                     </motion.div>
                   );
@@ -438,7 +451,7 @@ export function TaxiVehicleSearchModal({
                     disabled={!selectedPayment}
                     onClick={onPaymentContinue}
                   >
-                    Continuar
+                    {paymentContinueLabel ?? "Continuar"}
                   </Button>
                 </div>
               </motion.div>
@@ -497,7 +510,7 @@ export function TaxiVehicleSearchModal({
                     size="lg"
                     className="w-full sm:w-auto"
                     onClick={onConfirmSearch}
-                    disabled={suggestedUsd == null}
+                    disabled={!canConfirmSearch}
                   >
                     Buscar conductor
                   </Button>

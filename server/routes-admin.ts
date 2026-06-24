@@ -76,6 +76,10 @@ import {
   reviewStoreSubscriptionPayment,
 } from "./store-subscription-payments";
 import { storeSubscriptionPaymentReviewSchema } from "@shared/store-subscription-payment";
+import {
+  listGoCancellationFeedbackForAdmin,
+  reviewGoCancellationFeedback,
+} from "./go-cancellation-feedback-store";
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
@@ -3012,6 +3016,42 @@ export function registerAdminRoutes(app: Express): void {
       }
     },
   );
+
+  /** GET /api/admin/go-cancellations — Motivos de cancelación Go (solo admin completo). */
+  app.get("/api/admin/go-cancellations", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "20"), 10) || 20));
+      const payload = await listGoCancellationFeedbackForAdmin({ page, limit });
+      return res.json(payload);
+    } catch (e: unknown) {
+      console.error("[admin] go-cancellations list", e);
+      return res.status(500).json({ message: "No se pudieron cargar las cancelaciones" });
+    }
+  });
+
+  /** POST /api/admin/go-cancellations/:id/review — Penalizar o descartar penalización. */
+  app.post("/api/admin/go-cancellations/:id/review", authenticateJWT, requireFullAdmin, async (req: any, res) => {
+    try {
+      const adminUserId = String(req.user?.id ?? "");
+      const id = String(req.params.id ?? "");
+      const action = req.body?.action === "penalty" ? "penalty" : req.body?.action === "no_penalty" ? "no_penalty" : null;
+      if (!action) return res.status(400).json({ message: "Acción inválida" });
+      const row = await reviewGoCancellationFeedback({
+        id,
+        adminUserId,
+        action,
+        penaltyAmount: req.body?.penaltyAmount,
+      });
+      return res.json({ row });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Error";
+      if (msg === "Registro no encontrado") return res.status(404).json({ message: msg });
+      if (msg === "Este registro ya fue revisado") return res.status(409).json({ message: msg });
+      console.error("[admin] go-cancellations review", e);
+      return res.status(500).json({ message: msg });
+    }
+  });
 
   console.log("✅ Admin routes registered (incl. GET /api/admin/dashboard-stats)");
 }

@@ -71,6 +71,17 @@ export function clearClassicOfferPendingForRide(rideId: string): void {
   }
 }
 
+export function driverIdInOfferedList(offeredDriverIds: string[], driverUserId: string): boolean {
+  const uid = String(driverUserId);
+  return offeredDriverIds.some((id) => String(id) === uid);
+}
+
+/** True si el conductor tiene oferta clásica/regateo pendiente en memoria para ese viaje. */
+export function driverHasPendingOfferForRide(driverUserId: string, rideId: string): boolean {
+  const p = getClassicOfferPending(driverUserId);
+  return p != null && String(p.rideId) === String(rideId);
+}
+
 /** True si el conductor ya tiene una oferta clásica sin resolver (cualquier módulo). */
 export function driverHasActiveClassicOffer(driverUserId: string): boolean {
   if (getClassicOfferPending(driverUserId)) return true;

@@ -6,6 +6,10 @@ import { GoUserRideStatsBadges } from "@/components/go/GoUserRideStatsBadges";
 import { Button } from "@/components/ui/button";
 import { TaxiRouteMap } from "@/components/taxi/TaxiRouteMap";
 import { mobilityServiceLabel } from "@shared/mobility-ui-labels";
+
+export const GO_RIDE_NO_DESTINATION_DRIVER_HINT =
+  "Viaje sin ubicación destino, escribe o llama al cliente para establecer el destino y el monto a cancelar";
+
 export type CargoRideOfferPayload = {
   rideId: string;
   rider: {
@@ -18,7 +22,8 @@ export type CargoRideOfferPayload = {
     completedTrips?: number;
   };
   start: { lat: number; lon: number; label: string };
-  end: { lat: number; lon: number; label: string };
+  end?: { lat: number; lon: number; label: string } | null;
+  destinationPending?: boolean;
   routeGeometry: GeoJsonObject | null;
   distanceM: number;
   durationSec: number;
@@ -94,6 +99,7 @@ export function CargoIncomingRideDialog({
   if (typeof document === "undefined") return null;
   const title = mobilityServiceLabel(module === "pack" ? "pack" : "cargo");
   const isNego = !!offer.isNegotiated && !!onNegotiationPropose;
+  const noDestination = !!offer.destinationPending || !offer.end;
 
   const ttlMsRef = useRef<number>(18_000);
   const expiredHandledRef = useRef(false);
@@ -183,14 +189,18 @@ export function CargoIncomingRideDialog({
               completedTrips={offer.rider.completedTrips}
             />
             <p className="mt-1 truncate text-[11px] text-muted-foreground">
-              {twoWords(offer.start.label)} → {twoWords(offer.end.label)}
+              {noDestination
+                ? twoWords(offer.start.label)
+                : `${twoWords(offer.start.label)} → ${twoWords(offer.end!.label)}`}
             </p>
           </div>
-          <div className="ml-auto hidden flex-col items-end gap-0.5 sm:flex">
-            <span className="text-xs text-muted-foreground">
-              {formatKm(offer.distanceM)} · {formatDur(offer.durationSec)}
-            </span>
-          </div>
+          {!noDestination ? (
+            <div className="ml-auto hidden flex-col items-end gap-0.5 sm:flex">
+              <span className="text-xs text-muted-foreground">
+                {formatKm(offer.distanceM)} · {formatDur(offer.durationSec)}
+              </span>
+            </div>
+          ) : null}
         </div>
 
         <div className="h-[min(42vh,360px)] min-h-[200px] w-full border-b border-border">
@@ -201,8 +211,8 @@ export function CargoIncomingRideDialog({
             defaultCenter={[offer.start.lat, offer.start.lon]}
             defaultZoom={13}
             start={{ lat: offer.start.lat, lon: offer.start.lon, label: offer.start.label }}
-            end={{ lat: offer.end.lat, lon: offer.end.lon, label: offer.end.label }}
-            routeGeometry={offer.routeGeometry}
+            end={noDestination ? null : { lat: offer.end!.lat, lon: offer.end!.lon, label: offer.end!.label }}
+            routeGeometry={noDestination ? null : offer.routeGeometry}
             extraMarkers={
               driverPos
                 ? [
@@ -222,39 +232,49 @@ export function CargoIncomingRideDialog({
           />
         </div>
 
-        <div className="px-4 py-3 sm:hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">
-              {formatKm(offer.distanceM)} · {formatDur(offer.durationSec)}
-            </span>
+        {noDestination ? (
+          <div className="border-b border-border px-4 py-3">
+            <p className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-sm leading-snug text-foreground">
+              {GO_RIDE_NO_DESTINATION_DRIVER_HINT}
+            </p>
           </div>
-        </div>
-
-        {(() => {
-          const suggested = typeof offer.suggestedUsd === "number" ? offer.suggestedUsd : offer.estimatedUsd;
-          const standard = isStandardOffer(offer.estimatedUsd, suggested);
-          return (
-            <div className="px-4 pb-1">
-              {standard ? (
-                <div className="rounded-xl border border-border bg-card/95 px-3 py-2">
-                  <p className="text-xs text-muted-foreground">Referencia sugerida</p>
-                  <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(suggested)}</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div className="rounded-xl border border-border bg-card/95 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Referencia sugerida</p>
-                    <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(suggested)}</p>
-                  </div>
-                  <div className="rounded-xl border border-primary/25 bg-primary/5 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Oferta del Cliente</p>
-                    <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(offer.estimatedUsd)}</p>
-                  </div>
-                </div>
-              )}
+        ) : (
+          <>
+            <div className="px-4 py-3 sm:hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">
+                  {formatKm(offer.distanceM)} · {formatDur(offer.durationSec)}
+                </span>
+              </div>
             </div>
-          );
-        })()}
+
+            {(() => {
+              const suggested = typeof offer.suggestedUsd === "number" ? offer.suggestedUsd : offer.estimatedUsd;
+              const standard = isStandardOffer(offer.estimatedUsd, suggested);
+              return (
+                <div className="px-4 pb-1">
+                  {standard ? (
+                    <div className="rounded-xl border border-border bg-card/95 px-3 py-2">
+                      <p className="text-xs text-muted-foreground">Referencia sugerida</p>
+                      <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(suggested)}</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div className="rounded-xl border border-border bg-card/95 px-3 py-2">
+                        <p className="text-xs text-muted-foreground">Referencia sugerida</p>
+                        <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(suggested)}</p>
+                      </div>
+                      <div className="rounded-xl border border-primary/25 bg-primary/5 px-3 py-2">
+                        <p className="text-xs text-muted-foreground">Oferta del Cliente</p>
+                        <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">{formatUsd(offer.estimatedUsd)}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </>
+        )}
 
         <div className="flex flex-col gap-2 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div
@@ -282,7 +302,7 @@ export function CargoIncomingRideDialog({
               <Ban className="h-4 w-4" aria-hidden />
               Rechazar
             </Button>
-            {isNego ? (
+            {isNego && !noDestination ? (
               <>
                 <Button
                   type="button"
@@ -298,7 +318,7 @@ export function CargoIncomingRideDialog({
                   className="flex-1 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
                   disabled={negotiationBusy}
                   onClick={async () => {
-                    await onNegotiationPropose(offer.estimatedUsd);
+                    await onNegotiationPropose!(offer.estimatedUsd);
                   }}
                 >
                   {negotiationBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -310,7 +330,7 @@ export function CargoIncomingRideDialog({
               <Button
                 type="button"
                 className="flex-1 gap-2 bg-emerald-600 text-white hover:bg-emerald-700 sm:flex-initial sm:min-w-[140px]"
-                disabled={busy}
+                disabled={busy || negotiationBusy}
                 onClick={onAccept}
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -322,6 +342,6 @@ export function CargoIncomingRideDialog({
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 }

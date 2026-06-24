@@ -25,6 +25,7 @@ export type CargoDriverTripLog = {
   goSlug?: "cargo" | "pack";
   outcome?: "completed" | "cancelled" | "expired";
   statusLabel?: string;
+  destinationPending?: boolean;
 };
 
 export function loadReceiving(): boolean {

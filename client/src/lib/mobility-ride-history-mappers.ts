@@ -12,6 +12,7 @@ export function historyToDriverTripLog(row: MobilityRideHistoryListItem): CargoD
     goSlug: row.module === "pack" ? "pack" : "cargo",
     outcome: row.outcome,
     statusLabel: row.statusLabel,
+    destinationPending: row.destinationPending === true,
   };
 }
 

@@ -72,6 +72,10 @@ import {
   computePackSuggestedUsd,
   roundToCents,
 } from "@shared/mobility-fare-quote";
+import {
+  GoCancellationFeedbackDialog,
+  type GoCancellationFeedbackSubmit,
+} from "@/components/go/GoCancellationFeedbackDialog";
 
 type GeocodeHit = { lat: number; lon: number; label: string };
 
@@ -148,7 +152,8 @@ type MobilityRideHydration = {
   isNegotiated?: boolean;
   offers?: unknown[];
   start: Place;
-  end: Place;
+  end: Place | null;
+  destinationPending?: boolean;
   driver: {
     userId: string;
     name: string;
@@ -305,7 +310,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   }, [routeMeta, isPackGoClient, packFaresDto, mobilityFaresDto, petEnabled]);
 
   const suggestedUsd = useMemo(() => {
-    if (!routeMeta || !selectedVehicle) return null;
+    if (!routeMeta || !selectedVehicle || (start && !end)) return null;
     const distanceM = routeMeta.distanceM ?? 0;
     if (isPackGoClient) {
       const fares = (packFaresDto as any)?.fares;
@@ -321,7 +326,16 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     const fares = (mobilityFaresDto as any)?.fares;
     if (!fares) return null;
     return computeMobilitySuggestedUsd(fares, selectedVehicle, distanceM, { petEnabled });
-  }, [routeMeta, selectedVehicle, isPackGoClient, packFaresDto, mobilityFaresDto, petEnabled]);
+  }, [routeMeta, selectedVehicle, isPackGoClient, packFaresDto, mobilityFaresDto, petEnabled, start, end]);
+
+  /** Origen definido pero destino vacío: flujo alterno sin ruta ni precio. */
+  const destinationPendingFlow = !!(start && !end);
+
+  const canContinueToVehicles = useMemo(() => {
+    if (!start) return false;
+    if (destinationPendingFlow) return true;
+    return !!(routeMeta && !routeError && !routeLoading);
+  }, [start, destinationPendingFlow, routeMeta, routeError, routeLoading]);
 
   // Negociación (ajustar oferta +/-) desactivada por ahora: usamos siempre la referencia sugerida.
   const [riderTripInProgress, setRiderTripInProgress] = useState(false);
@@ -397,6 +411,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const [cancelServiceDialogOpen, setCancelServiceDialogOpen] = useState(false);
   const [cancelServiceBusy, setCancelServiceBusy] = useState(false);
+  const [cancelFeedbackOpen, setCancelFeedbackOpen] = useState(false);
   const [cancelServiceMode, setCancelServiceMode] = useState<"search" | "matched" | "progress">("search");
 
   const goBasePath = goSlug === "pack" ? "/go/delivery" : "/go/taxi";
@@ -661,43 +676,63 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     if (activeRideIdRef.current) setNegotiationOffersOpen(true);
   }, []);
 
-  const confirmCancelService = useCallback(async () => {
-    const rideId = activeRideIdRef.current;
-    if (!rideId) {
-      setCancelServiceDialogOpen(false);
-      return;
-    }
-    const token = localStorage.getItem("token");
-    if (!token) {
-      toast({ title: "Inicia sesión", variant: "destructive" });
-      setCancelServiceDialogOpen(false);
-      return;
-    }
-    setCancelServiceBusy(true);
-    try {
-      const res = await fetch(`${rideApiBase}/${encodeURIComponent(rideId)}/cancel`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = (await res.json().catch(() => ({}))) as { message?: string };
-      if (!res.ok) {
-        toast({
-          title: "No se pudo cancelar",
-          description: data.message ?? "Intenta de nuevo.",
-          variant: "destructive",
-        });
+  const confirmCancelService = useCallback(
+    async (feedback?: GoCancellationFeedbackSubmit) => {
+      const rideId = activeRideIdRef.current;
+      if (!rideId) {
+        setCancelServiceDialogOpen(false);
+        setCancelFeedbackOpen(false);
         return;
       }
-      applyCarGoRideEnded();
-      resetRiderPlanningView();
-      toast({ title: "Servicio cancelado", description: "Puedes pedir otro viaje cuando quieras." });
-      setCancelServiceDialogOpen(false);
-    } catch {
-      toast({ title: "Error de red", variant: "destructive" });
-    } finally {
-      setCancelServiceBusy(false);
+      const token = localStorage.getItem("token");
+      if (!token) {
+        toast({ title: "Inicia sesión", variant: "destructive" });
+        setCancelServiceDialogOpen(false);
+        setCancelFeedbackOpen(false);
+        return;
+      }
+      setCancelServiceBusy(true);
+      try {
+        const res = await fetch(`${rideApiBase}/${encodeURIComponent(rideId)}/cancel`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: feedback ? JSON.stringify(feedback) : undefined,
+        });
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        if (!res.ok) {
+          if (res.status === 403 || res.status === 404) {
+            applyCarGoRideEnded();
+            resetRiderPlanningView();
+          }
+          toast({
+            title: "No se pudo cancelar",
+            description: data.message ?? "Intenta de nuevo.",
+            variant: "destructive",
+          });
+          return;
+        }
+        applyCarGoRideEnded();
+        resetRiderPlanningView();
+        toast({ title: "Servicio cancelado", description: "Puedes pedir otro viaje cuando quieras." });
+        setCancelServiceDialogOpen(false);
+        setCancelFeedbackOpen(false);
+      } catch {
+        toast({ title: "Error de red", variant: "destructive" });
+      } finally {
+        setCancelServiceBusy(false);
+      }
+    },
+    [applyCarGoRideEnded, resetRiderPlanningView, toast, rideApiBase],
+  );
+
+  const handleConfirmCancelClick = useCallback(() => {
+    if (cancelServiceMode === "search") {
+      void confirmCancelService();
+      return;
     }
-  }, [applyCarGoRideEnded, resetRiderPlanningView, toast, rideApiBase]);
+    setCancelServiceDialogOpen(false);
+    setCancelFeedbackOpen(true);
+  }, [cancelServiceMode, confirmCancelService]);
 
   const applyTrimmedDriverRoute = useCallback(
     (route: StoredDrivingRoute, driverPos: { lat: number; lon: number }) => {
@@ -899,8 +934,8 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     setSelectedVehicle(t);
     setTaxiPaymentMethod(null);
     setRideIsNegotiated(false);
-    setVehicleModalStep("price_mode");
-  }, []);
+    setVehicleModalStep(start && !end ? "payment" : "price_mode");
+  }, [start, end]);
 
   const handleChooseStandardPrice = useCallback(() => {
     setRideIsNegotiated(false);
@@ -944,19 +979,132 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
     setVehicleModalStep("payment");
   }, []);
 
+  /** Busca conductor real (Socket + API). */
+  const beginVehicleSearch = useCallback(async () => {
+    const noDest = !!(start && !end);
+    if (!selectedVehicle || !start || !taxiPaymentMethod) return;
+    if (!noDest && (!end || !routeMeta)) return;
+    clearVehicleSearchTimers();
+    setNearbyDriverMarkers([]);
+    setMatchedDriverInfo(null);
+    setSearchRemainingSec(VEHICLE_SEARCH_TOTAL_SEC);
+    setVehicleModalStep("searching");
+    searchEndAtRef.current = Date.now() + VEHICLE_SEARCH_MAX_MS;
+
+    const tickRemaining = () => {
+      const left = Math.max(0, Math.ceil((searchEndAtRef.current - Date.now()) / 1000));
+      setSearchRemainingSec(left);
+    };
+    tickRemaining();
+    searchTickRef.current = window.setInterval(tickRemaining, 1000);
+
+    searchDoneTimeoutRef.current = window.setTimeout(() => {
+      setSearchRemainingSec(0);
+      clearVehicleSearchTimers();
+      setVehicleModalStep((step) => {
+        if (step !== "searching") return step;
+        toast({
+          title: "Sin respuesta a tiempo",
+          description: `Ningún ${uiWords.driver} aceptó. Puedes intentar de nuevo.`,
+          variant: "destructive",
+        });
+        setActiveRideId(null);
+        activeRideIdRef.current = null;
+        setNegotiationOffersOpen(false);
+        setNegotiationOffers([]);
+        clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
+        return noDest ? "payment" : "ready";
+      });
+    }, VEHICLE_SEARCH_MAX_MS);
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+      toast({
+        title: isPackGoClient ? "Inicia sesión para pedir un envío" : "Inicia sesión para pedir un viaje",
+        variant: "destructive",
+      });
+      clearVehicleSearchTimers();
+      setVehicleModalStep(noDest ? "payment" : "ready");
+      return;
+    }
+
+    try {
+      const res = await fetch(rideApiRequestPath, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start,
+          ...(noDest
+            ? { destinationPending: true, distanceM: 0, durationSec: 0, routeGeometry: null }
+            : { end, routeGeometry, distanceM: routeMeta!.distanceM, durationSec: routeMeta!.durationSec }),
+          vehicleType: selectedVehicle,
+          paymentMethod: taxiPaymentMethod,
+          suggestedUsd: noDest ? 0 : suggestedUsd ?? 0,
+          estimatedUsd: noDest ? 0 : rideIsNegotiated ? clientHaggleUsd : suggestedUsd ?? 0,
+          isNegotiated: noDest ? false : rideIsNegotiated,
+          offerEdited: noDest ? false : rideIsNegotiated,
+          petEnabled,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { rideId?: string; message?: string; code?: string };
+      if (!res.ok) {
+        toast({
+          title: isPackGoClient ? "No se pudo buscar repartidor" : "No se pudo buscar conductor",
+          description: data.message ?? "Intenta más tarde.",
+          variant: "destructive",
+        });
+        clearVehicleSearchTimers();
+        setVehicleModalStep(noDest ? "payment" : "ready");
+        return;
+      }
+      if (data.rideId) {
+        setActiveRideId(data.rideId);
+        activeRideIdRef.current = data.rideId;
+        saveGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo", data.rideId);
+        if (!noDest && rideIsNegotiated) {
+          setNegotiationOffers([]);
+          setNegotiationOffersOpen(true);
+        } else {
+          setNegotiationOffersOpen(false);
+          setNegotiationOffers([]);
+        }
+      }
+    } catch {
+      toast({ title: "Error de red", variant: "destructive" });
+      clearVehicleSearchTimers();
+      setVehicleModalStep(noDest ? "payment" : "ready");
+    }
+  }, [
+    selectedVehicle,
+    taxiPaymentMethod,
+    start,
+    end,
+    routeMeta,
+    routeGeometry,
+    petEnabled,
+    clearVehicleSearchTimers,
+    toast,
+    rideIsNegotiated,
+    clientHaggleUsd,
+    goSlug,
+    rideApiRequestPath,
+    suggestedUsd,
+    isPackGoClient,
+    uiWords.driver,
+  ]);
+
+  const handleConfirmVehicleSearch = useCallback(() => {
+    void beginVehicleSearch();
+  }, [beginVehicleSearch]);
+
   const handlePaymentContinue = useCallback(() => {
     if (!taxiPaymentMethod) return;
+    if (start && !end) {
+      void beginVehicleSearch();
+      return;
+    }
     setVehicleModalStep("ready");
-  }, [taxiPaymentMethod]);
-
-  useEffect(() => {
-    if (!showMapFullscreen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [showMapFullscreen]);
+  }, [taxiPaymentMethod, start, end, beginVehicleSearch]);
 
   useEffect(() => {
     if (!showMapFullscreen) return;
@@ -1002,124 +1150,12 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
   /** Car Go / Delivery: no cambiar vehículo durante búsqueda o servicio activo. */
   const showVehicleSelectionActions = useMemo(() => {
-    if (!start || !end) return false;
+    if (!start) return false;
     if (matchedDriverInfo) return false;
     if (activeRideId) return false;
     if (vehicleModalStep === "searching") return false;
     return true;
-  }, [start, end, matchedDriverInfo, activeRideId, vehicleModalStep]);
-
-  /** Busca conductor real (Socket + API). */
-  const handleConfirmVehicleSearch = useCallback(async () => {
-    if (!selectedVehicle || !start || !end || !taxiPaymentMethod || !routeMeta) return;
-    if (suggestedUsd == null) return;
-    clearVehicleSearchTimers();
-    setNearbyDriverMarkers([]);
-    setMatchedDriverInfo(null);
-    setSearchRemainingSec(VEHICLE_SEARCH_TOTAL_SEC);
-    setVehicleModalStep("searching");
-    searchEndAtRef.current = Date.now() + VEHICLE_SEARCH_MAX_MS;
-
-    const tickRemaining = () => {
-      const left = Math.max(0, Math.ceil((searchEndAtRef.current - Date.now()) / 1000));
-      setSearchRemainingSec(left);
-    };
-    tickRemaining();
-    searchTickRef.current = window.setInterval(tickRemaining, 1000);
-
-    searchDoneTimeoutRef.current = window.setTimeout(() => {
-      setSearchRemainingSec(0);
-      clearVehicleSearchTimers();
-      setVehicleModalStep((step) => {
-        if (step !== "searching") return step;
-        toast({
-          title: "Sin respuesta a tiempo",
-          description: `Ningún ${uiWords.driver} aceptó. Puedes intentar de nuevo.`,
-          variant: "destructive",
-        });
-        setActiveRideId(null);
-        activeRideIdRef.current = null;
-        setNegotiationOffersOpen(false);
-        setNegotiationOffers([]);
-        clearGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo");
-        return "ready";
-      });
-    }, VEHICLE_SEARCH_MAX_MS);
-
-    const token = localStorage.getItem("token");
-    if (!token) {
-      toast({
-        title: isPackGoClient ? "Inicia sesión para pedir un envío" : "Inicia sesión para pedir un viaje",
-        variant: "destructive",
-      });
-      clearVehicleSearchTimers();
-      setVehicleModalStep("ready");
-      return;
-    }
-
-    try {
-      const res = await fetch(rideApiRequestPath, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          start,
-          end,
-          routeGeometry,
-          distanceM: routeMeta.distanceM,
-          durationSec: routeMeta.durationSec,
-          vehicleType: selectedVehicle,
-          paymentMethod: taxiPaymentMethod,
-          suggestedUsd,
-          estimatedUsd: rideIsNegotiated ? clientHaggleUsd : suggestedUsd,
-          isNegotiated: rideIsNegotiated,
-          /** Permite al servidor tratar regateo aunque el flag venga desincronizado si el monto difiere de la referencia. */
-          offerEdited: rideIsNegotiated,
-          petEnabled,
-        }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { rideId?: string; message?: string; code?: string };
-      if (!res.ok) {
-        toast({
-          title: isPackGoClient ? "No se pudo buscar repartidor" : "No se pudo buscar conductor",
-          description: data.message ?? "Intenta más tarde.",
-          variant: "destructive",
-        });
-        clearVehicleSearchTimers();
-        setVehicleModalStep("ready");
-        return;
-      }
-      if (data.rideId) {
-        setActiveRideId(data.rideId);
-        activeRideIdRef.current = data.rideId;
-        saveGoRiderActiveRideId(goSlug === "pack" ? "pack" : "cargo", data.rideId);
-        if (rideIsNegotiated) {
-          setNegotiationOffers([]);
-          setNegotiationOffersOpen(true);
-        } else {
-          setNegotiationOffersOpen(false);
-          setNegotiationOffers([]);
-        }
-      }
-    } catch {
-      toast({ title: "Error de red", variant: "destructive" });
-      clearVehicleSearchTimers();
-      setVehicleModalStep("ready");
-    }
-  }, [
-    selectedVehicle,
-    taxiPaymentMethod,
-    start,
-    end,
-    routeMeta,
-    routeGeometry,
-    petEnabled,
-    clearVehicleSearchTimers,
-    toast,
-    rideIsNegotiated,
-    clientHaggleUsd,
-    goSlug,
-    rideApiRequestPath,
-  ]);
+  }, [start, matchedDriverInfo, activeRideId, vehicleModalStep]);
 
   const dismissNegotiationOffer = useCallback(
     async (driverUserId: string) => {
@@ -1452,9 +1488,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           setActiveRideId(ride.id);
           activeRideIdRef.current = ride.id;
           setStart(ride.start);
-          setEnd(ride.end);
           setStartInput(ride.start.label);
-          setEndInput(ride.end.label);
+          if (ride.end) {
+            setEnd(ride.end);
+            setEndInput(ride.end.label);
+          } else {
+            setEnd(null);
+            setEndInput("");
+          }
           setMatchedDriverInfo(null);
           setAssignedDriverPos(null);
           setRiderTripInProgress(false);
@@ -1509,9 +1550,14 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         setActiveRideId(ride.id);
         activeRideIdRef.current = ride.id;
         setStart(ride.start);
-        setEnd(ride.end);
         setStartInput(ride.start.label);
-        setEndInput(ride.end.label);
+        if (ride.end) {
+          setEnd(ride.end);
+          setEndInput(ride.end.label);
+        } else {
+          setEnd(null);
+          setEndInput("");
+        }
         const enCurso = ride.status === "in_progress";
         riderTripInProgressRef.current = enCurso;
         setRiderTripInProgress(enCurso);
@@ -2186,7 +2232,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                             exit={{ opacity: 0, y: -8, scale: 0.98 }}
                             transition={{ type: "spring", damping: 22, stiffness: 280, mass: 0.9 }}
                           >
-                            {routeLoading || !routeMeta ? (
+                            {!destinationPendingFlow && (routeLoading || !routeMeta) ? (
                               <div className="flex items-center justify-center gap-2 rounded-full border border-border/60 bg-background/85 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
                                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                                 Calculando ruta…
@@ -2196,7 +2242,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                               type="button"
                               size="lg"
                               className="h-11 w-full rounded-full text-base shadow-lg"
-                              disabled={routeLoading || !routeMeta || !!routeError}
+                              disabled={!canContinueToVehicles}
                               onClick={() => {
                                 setVehicleModalStep("pick");
                                 setVehiclePickerOpen(true);
@@ -2612,7 +2658,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                       exit={{ opacity: 0, y: -8, scale: 0.98 }}
                       transition={{ type: "spring", damping: 22, stiffness: 280, mass: 0.9 }}
                     >
-                      {routeLoading || !routeMeta ? (
+                      {!destinationPendingFlow && (routeLoading || !routeMeta) ? (
                         <div className="mb-2 flex items-center justify-center gap-2 rounded-full border border-border/60 bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm">
                           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                           Calculando ruta…
@@ -2622,7 +2668,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
                         type="button"
                         size="lg"
                         className="w-full sm:w-auto shadow-md"
-                        disabled={routeLoading || !routeMeta || !!routeError}
+                        disabled={!canContinueToVehicles}
                         onClick={() => {
                           setVehicleModalStep("pick");
                           setVehiclePickerOpen(true);
@@ -2827,6 +2873,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
         onBackFromHaggle={handleBackFromHaggle}
         onBackFromPriceMode={handleBackFromPriceMode}
         onBackToHaggleFromPayment={handleBackToHaggleFromPayment}
+        hidePricing={destinationPendingFlow}
+        paymentContinueLabel={
+          destinationPendingFlow
+            ? isPackGoClient
+              ? "Buscar repartidor"
+              : "Buscar conductor"
+            : undefined
+        }
+        canConfirmSearch={destinationPendingFlow || rideIsNegotiated || suggestedUsd != null || !!routeMeta}
       />
 
       <RiderNegotiationOffersModal
@@ -2901,7 +2956,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
               type="button"
               variant="destructive"
               disabled={cancelServiceBusy}
-              onClick={() => void confirmCancelService()}
+              onClick={() => void handleConfirmCancelClick()}
             >
               {cancelServiceBusy ? (
                 <>
@@ -2915,6 +2970,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <GoCancellationFeedbackDialog
+        open={cancelFeedbackOpen}
+        onOpenChange={setCancelFeedbackOpen}
+        party="rider"
+        module={goSlug === "pack" ? "pack" : "cargo"}
+        busy={cancelServiceBusy}
+        onSubmit={(payload) => void confirmCancelService(payload)}
+      />
 
       <GoRideRatingDialog
         open={rateDialogOpen}

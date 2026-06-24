@@ -34,6 +34,8 @@ import {
   clearClassicOfferPending,
   clearClassicOfferPendingForRide,
   driverHasActiveClassicOffer,
+  driverHasPendingOfferForRide,
+  driverIdInOfferedList,
   getClassicOfferPending,
   registerClassicOfferActiveScanner,
   setClassicOfferPending,
@@ -85,6 +87,11 @@ import {
   runMobilityRideChatStartupSweep,
 } from "./mobility-ride-chat";
 import { bumpGoUserCompletedTrips, resolveGoPublicUserStats } from "./go-public-user-enrich";
+import {
+  createGoCancellationFeedback,
+  goCancellationFeedbackBodySchema,
+} from "./go-cancellation-feedback-store";
+import { goCancellationFeedbackRequired } from "@shared/go-cancellation-feedback";
 import crypto from "crypto";
 
 export type PackVehicleKind = "moto" | "auto" | "camioneta";
@@ -151,7 +158,8 @@ type RideRecord = {
   distanceM: number;
   durationSec: number;
   start: { lat: number; lon: number; label: string };
-  end: { lat: number; lon: number; label: string };
+  end: { lat: number; lon: number; label: string } | null;
+  destinationPending?: boolean;
   routeGeometry: GeoJsonObject | null;
   createdAt: number;
   conversationId: number | null;
@@ -506,6 +514,7 @@ export async function getPackActiveRideForCentral(driverUserId: string) {
       durationSec: r.durationSec,
       start: r.start,
       end: r.end,
+      destinationPending: r.destinationPending,
       driverSearchingClient: r.driverSearchingClient ?? false,
       isNegotiated: r.isNegotiated ?? false,
     });
@@ -837,10 +846,86 @@ function withdrawDriverPackNegotiationOffersElsewhere(
 
 registerPackNegotiationWithdraw(withdrawDriverPackNegotiationOffersElsewhere);
 
-/** Regateo Delivery: ventana + aviso al cliente. Conductores usan GET /negotiation-board (no modal / no marketplace). */
-function broadcastPackNegotiationInvites(io: SocketIOServer, ride: RideRecord, _rider: Awaited<ReturnType<typeof buildRiderPublic>>) {
+/** Regateo Delivery: ventana + popup a conductores elegibles + aviso al cliente. */
+async function broadcastPackNegotiationInvites(
+  io: SocketIOServer,
+  ride: RideRecord,
+  rider: Awaited<ReturnType<typeof buildRiderPublic>>,
+) {
   ride.negotiationExpiresAt = Date.now() + GO_NEGOTIATION_OFFER_WINDOW_MS;
-  commitPackRide(ride);
+  const expiresAt = ride.negotiationExpiresAt;
+  const pres = await freshDriversForRide(ride);
+  const ranked = rankDriversByNearest(ride.start, pres);
+  ride.offeredDriverIds = ride.offeredDriverIds ?? [];
+
+  for (const d of ranked) {
+    const driverId = String(d.userId);
+    if (driverIsBusyCrossModule(driverId)) continue;
+    if (driverHasActiveClassicOffer(driverId)) continue;
+    const declinedAt = ride.declinedAtByDriverId?.[driverId];
+    if (typeof declinedAt === "number" && Date.now() - declinedAt < REOFFER_COOLDOWN_MS) continue;
+    const driverPres = getPackPresenceRow(driverId);
+    if (!driverPres || !driverMatchesPackRideVehicle(ride, driverPres) || !isReceivingDeliveryForMatching(driverId))
+      continue;
+    if (!driverIdInOfferedList(ride.offeredDriverIds, driverId)) {
+      ride.offeredDriverIds.push(driverId);
+    }
+    commitPackRide(ride);
+    const offerPayload = {
+      rideId: ride.id,
+      rider,
+      start: ride.start,
+      end: ride.end,
+      destinationPending: !!ride.destinationPending,
+      routeGeometry: ride.routeGeometry,
+      distanceM: ride.distanceM,
+      durationSec: ride.durationSec,
+      vehicleType: ride.vehicleType,
+      paymentMethod: ride.paymentMethod,
+      estimatedUsd: ride.estimatedUsd,
+      suggestedUsd: ride.suggestedUsd ?? ride.estimatedUsd,
+      expiresAt,
+      isNegotiated: true,
+      storeOrderId: ride.storeOrderId ?? null,
+      storeId: ride.storeId ?? null,
+    };
+    io.to(`user:${driverId}`).emit("pack:ride:offer", offerPayload);
+    setClassicOfferPending(driverId, ride.id, expiresAt, "pack");
+    const offerTitle = isStoreOrderPackRide(ride) ? "Envío de tienda (regateo)" : "Delivery (regateo)";
+    const offerBody = isStoreOrderPackRide(ride)
+      ? `Orden #${ride.storeOrderId}: envío con monto a negociar.`
+      : "Tienes un envío con monto a negociar. Abre para ofertar.";
+    if (shouldSendDriverClassicOfferPush(String(driverId)) && shouldSendClassicOfferPushForRide(driverId, ride.id)) {
+      void genFebStorage
+        .createNotification({
+          userId: driverId,
+          type: "pack_ride_offer",
+          data: {
+            rideId: ride.id,
+            storeOrderId: ride.storeOrderId ?? null,
+            storeId: ride.storeId ?? null,
+            url: "/go/driver",
+          },
+        })
+        .catch((err) => console.error("[pack] negotiation offer notification", err));
+      void notificationService.sendPushToUser(driverId, {
+        title: offerTitle,
+        body: offerBody,
+        urgent: true,
+        data: { url: "/go/driver", type: "pack_ride_offer", rideId: ride.id, expiresAt: String(expiresAt) },
+      });
+    }
+    sendNotificationToUser(io, driverId, {
+      type: "pack_ride_offer",
+      data: {
+        rideId: ride.id,
+        storeOrderId: ride.storeOrderId ?? null,
+        title: offerTitle,
+        body: offerBody,
+      },
+    });
+  }
+
   emitPackNegotiationOffersUpdated(io, ride);
 }
 
@@ -874,6 +959,7 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
       rider,
       start: ride.start,
       end: ride.end,
+      destinationPending: !!ride.destinationPending,
       routeGeometry: ride.routeGeometry,
       distanceM: ride.distanceM,
       durationSec: ride.durationSec,
@@ -1265,7 +1351,8 @@ async function buildClassicPackOfferResponse(driverUserId: string): Promise<{ of
   const classic = ride.currentOfferDriverId === driverUserId;
   const neg =
     !!ride.isNegotiated &&
-    ride.offeredDriverIds.includes(driverUserId) &&
+    (driverIdInOfferedList(ride.offeredDriverIds, driverUserId) ||
+      driverHasPendingOfferForRide(driverUserId, ride.id)) &&
     (ride.negotiationExpiresAt == null || Date.now() <= ride.negotiationExpiresAt);
   if (!classic && !neg) {
     clearClassicOfferPending(driverUserId);
@@ -1290,6 +1377,7 @@ async function buildClassicPackOfferResponse(driverUserId: string): Promise<{ of
       rider,
       start: ride.start,
       end: ride.end,
+      destinationPending: !!ride.destinationPending,
       routeGeometry: ride.routeGeometry,
       distanceM: ride.distanceM,
       durationSec: ride.durationSec,
@@ -1487,19 +1575,28 @@ export function registerPackRideRoutes(app: Express) {
     await genFebStorage.updateUser(userId, { rating: nextAvg, ratingCount: nextCount });
   };
 
-  const requestSchema = z.object({
-    start: z.object({ lat: z.number(), lon: z.number(), label: z.string().min(2) }),
-    end: z.object({ lat: z.number(), lon: z.number(), label: z.string().min(2) }),
-    routeGeometry: z.any().nullable(),
-    distanceM: z.number().nonnegative(),
-    durationSec: z.number().nonnegative(),
-    vehicleType: z.enum(["moto", "auto", "camioneta"]),
-    paymentMethod: z.enum(["cash", "bank_transfer"]),
-    estimatedUsd: z.number().nonnegative(),
-    suggestedUsd: z.number().nonnegative().optional(),
-    offerEdited: z.boolean().optional(),
-    isNegotiated: z.boolean().optional(),
-  });
+  const requestSchema = z
+    .object({
+      start: z.object({ lat: z.number(), lon: z.number(), label: z.string().min(2) }),
+      end: z.object({ lat: z.number(), lon: z.number(), label: z.string().min(2) }).optional().nullable(),
+      destinationPending: z.boolean().optional(),
+      routeGeometry: z.any().nullable().optional(),
+      distanceM: z.number().nonnegative().optional(),
+      durationSec: z.number().nonnegative().optional(),
+      vehicleType: z.enum(["moto", "auto", "camioneta"]),
+      paymentMethod: z.enum(["cash", "bank_transfer"]),
+      estimatedUsd: z.number().nonnegative(),
+      suggestedUsd: z.number().nonnegative().optional(),
+      offerEdited: z.boolean().optional(),
+      isNegotiated: z.boolean().optional(),
+    })
+    .superRefine((data, ctx) => {
+      const destinationPending = !!data.destinationPending || !data.end;
+      if (destinationPending) return;
+      if (!data.end) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Destino requerido" });
+      if (data.distanceM == null) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "distanceM requerido" });
+      if (data.durationSec == null) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "durationSec requerido" });
+    });
 
   app.post("/api/pack/rides/request", authenticateJWT, async (req: any, res) => {
     try {
@@ -1513,23 +1610,46 @@ export function registerPackRideRoutes(app: Express) {
 
       const id = crypto.randomUUID();
       const body = parsed.data;
+      const destinationPending = !!body.destinationPending || !body.end;
 
-      const routeQuote = await resolveGoRideRouteQuote({
-        start: body.start,
-        end: body.end,
-        vehicleType: body.vehicleType,
-        module: "delivery",
-      });
-
-      const suggestedUsd = roundToCents(routeQuote.suggestedUsd);
-      const clientOfferUsd = roundToCents(Math.max(0, safeNumber(body.estimatedUsd, 0)));
-      const priceDiffers = Math.abs(clientOfferUsd - suggestedUsd) > 0.01;
-      const negotiated = !!body.isNegotiated || !!body.offerEdited || priceDiffers;
-      const offerUsd = negotiated ? clientOfferUsd : suggestedUsd;
+      if (!destinationPending && !body.end) {
+        return res.status(400).json({ message: "Destino requerido" });
+      }
 
       let candidates = await freshDriversForVehicle(body.vehicleType);
       candidates = rankDriversByNearest(body.start, candidates);
       const candidateIds = candidates.map((c) => c.userId);
+
+      let suggestedUsd = 0;
+      let offerUsd = 0;
+      let negotiated = false;
+      let distanceM = 0;
+      let durationSec = 0;
+      let routeGeometry: GeoJsonObject | null = null;
+
+      if (destinationPending) {
+        distanceM = 0;
+        durationSec = 0;
+        routeGeometry = null;
+        suggestedUsd = 0;
+        offerUsd = 0;
+        negotiated = false;
+      } else {
+        const routeQuote = await resolveGoRideRouteQuote({
+          start: body.start,
+          end: body.end!,
+          vehicleType: body.vehicleType,
+          module: "delivery",
+        });
+        distanceM = routeQuote.distanceM;
+        durationSec = routeQuote.durationSec;
+        routeGeometry = (routeQuote.geometry ?? body.routeGeometry ?? null) as GeoJsonObject | null;
+        suggestedUsd = roundToCents(routeQuote.suggestedUsd);
+        const clientOfferUsd = roundToCents(Math.max(0, safeNumber(body.estimatedUsd, 0)));
+        const priceDiffers = Math.abs(clientOfferUsd - suggestedUsd) > 0.01;
+        negotiated = !!body.isNegotiated || !!body.offerEdited || priceDiffers;
+        offerUsd = negotiated ? clientOfferUsd : suggestedUsd;
+      }
 
       const ride: RideRecord = {
         id,
@@ -1538,7 +1658,7 @@ export function registerPackRideRoutes(app: Express) {
         status: "searching",
         vehicleType: body.vehicleType,
         paymentMethod: body.paymentMethod,
-        paymentConfirmed: negotiated ? false : true,
+        paymentConfirmed: destinationPending ? true : negotiated ? false : true,
         estimatedUsd: offerUsd,
         suggestedUsd,
         isNegotiated: negotiated,
@@ -1548,11 +1668,12 @@ export function registerPackRideRoutes(app: Express) {
         // El TTL 60s aplica a contraofertas, no al “market” del ride.
         marketVisibleUntil: undefined,
         counterOffers: undefined,
-        distanceM: routeQuote.distanceM,
-        durationSec: routeQuote.durationSec,
+        distanceM,
+        durationSec,
         start: body.start,
-        end: body.end,
-        routeGeometry: (routeQuote.geometry ?? body.routeGeometry ?? null) as GeoJsonObject | null,
+        end: destinationPending ? null : body.end!,
+        destinationPending,
+        routeGeometry,
         createdAt: Date.now(),
         conversationId: null,
         offeredDriverIds: negotiated ? [] : candidateIds,
@@ -1575,7 +1696,7 @@ export function registerPackRideRoutes(app: Express) {
         isNegotiated: negotiated,
       });
       if (negotiated) {
-        broadcastPackNegotiationInvites(io, ride, rider);
+        void broadcastPackNegotiationInvites(io, ride, rider);
       } else {
         void offerNextDriver(io, ride, rider);
       }
@@ -1690,17 +1811,23 @@ export function registerPackRideRoutes(app: Express) {
       const rideId = String(req.params.rideId);
       const ride = rides.get(rideId);
       if (!ride) return res.status(404).json({ message: "Envío no encontrado" });
+      const pendingThisRide = driverHasPendingOfferForRide(driverUserId, rideId);
       if (!ride.isNegotiated || ride.status !== "searching" || ride.driverUserId != null) {
+        if (pendingThisRide) clearClassicOfferPending(driverUserId);
+        if (ride.status === "cancelled" || ride.status === "expired" || pendingThisRide) {
+          return res.json({ ok: true, dismissed: true });
+        }
         return res.status(409).json({ message: "Este envío no acepta esta acción ahora" });
       }
-      if (!ride.offeredDriverIds.includes(driverUserId)) {
+      const invited =
+        driverIdInOfferedList(ride.offeredDriverIds, driverUserId) || pendingThisRide;
+      if (!invited) {
         return res.status(403).json({ message: "No estás invitado a este servicio" });
       }
       ride.declinedAtByDriverId = ride.declinedAtByDriverId ?? {};
       ride.declinedAtByDriverId[driverUserId] = Date.now();
-      ride.offeredDriverIds = ride.offeredDriverIds.filter((id) => id !== driverUserId);
-      const p = getClassicOfferPending(driverUserId);
-      if (p?.rideId === ride.id) clearClassicOfferPending(driverUserId);
+      ride.offeredDriverIds = ride.offeredDriverIds.filter((id) => String(id) !== String(driverUserId));
+      clearClassicOfferPending(driverUserId);
       commitPackRide(ride);
       res.json({ ok: true });
     } catch (e: any) {
@@ -2288,6 +2415,15 @@ export function registerPackRideRoutes(app: Express) {
       if (ride.status === "cancelled" || ride.status === "expired") return res.json({ ok: true });
 
       const prevStatus = ride.status;
+      const needsFeedback = goCancellationFeedbackRequired(prevStatus);
+      let feedbackParsed: ReturnType<typeof goCancellationFeedbackBodySchema.safeParse> | null = null;
+      if (needsFeedback) {
+        feedbackParsed = goCancellationFeedbackBodySchema.safeParse(req.body ?? {});
+        if (!feedbackParsed.success) {
+          return res.status(400).json({ message: "Debes indicar el motivo y explicar la situación" });
+        }
+      }
+
       const prevOfferDriverId = ride.currentOfferDriverId;
       clearRideTimers(ride.id);
       ride.status = "cancelled";
@@ -2313,6 +2449,25 @@ export function registerPackRideRoutes(app: Express) {
       }
       dropPackActiveRide(ride.id);
 
+      const cancelledBy: "rider" | "driver" = isDriver ? "driver" : "rider";
+      if (needsFeedback && feedbackParsed?.success) {
+        const fb = feedbackParsed.data;
+        const inferredDriverPhase =
+          fb.driverPhase ??
+          (prevStatus === "in_progress" || ride.driverSearchingClient ? "at_pickup" : "en_route");
+        void createGoCancellationFeedback({
+          rideId,
+          module: "pack",
+          cancelledBy,
+          cancellerUserId: uid,
+          otherPartyUserId: isDriver ? ride.riderUserId : ride.driverUserId ?? null,
+          rideStatusAtCancel: prevStatus,
+          driverPhase: isDriver ? inferredDriverPhase : null,
+          reasonCode: fb.reasonCode,
+          explanation: fb.explanation,
+        }).catch((err) => console.error("[pack] cancellation feedback", err));
+      }
+
       if (ride.conversationId != null && ride.driverUserId != null) {
         try {
           await onMobilityRideChatCancelled(genFebStorage, {
@@ -2329,7 +2484,7 @@ export function registerPackRideRoutes(app: Express) {
           console.error("[pack] store order cancel", err),
         );
       }
-      res.json({ ok: true, rideId, cancelledBy: isDriver ? "driver" : "rider" });
+      res.json({ ok: true, rideId, cancelledBy });
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
     }
@@ -2398,6 +2553,7 @@ export function registerPackRideRoutes(app: Express) {
         vehicleType: ride.vehicleType,
         start: ride.start,
         end: ride.end,
+        destinationPending: !!ride.destinationPending,
         routeGeometry: ride.routeGeometry,
         driverSearchingClient: !!ride.driverSearchingClient,
         rider,

@@ -13,7 +13,8 @@ export type CentralActiveServiceInternal = {
   distanceM: number;
   durationSec: number;
   start: { lat: number; lon: number; label: string };
-  end: { lat: number; lon: number; label: string };
+  end: { lat: number; lon: number; label: string } | null;
+  destinationPending?: boolean;
   routeGeometry?: unknown;
   driverSearchingClient: boolean;
   isNegotiated: boolean;
@@ -34,7 +35,9 @@ export function toCentralActiveServiceForPanel(raw: CentralActiveServiceInternal
     distanceM: raw.distanceM,
     durationSec: raw.durationSec,
     start: { label: String(raw.start.label ?? "").trim() || "Punto A" },
-    end: { label: String(raw.end.label ?? "").trim() || "Punto B" },
+    end: raw.destinationPending || !raw.end
+      ? { label: "Sin destino" }
+      : { label: String(raw.end.label ?? "").trim() || "Punto B" },
     driverSearchingClient: raw.driverSearchingClient,
     isNegotiated: raw.isNegotiated,
     ...(raw.mode === "taxi" && raw.petEnabled ? { petEnabled: true } : {}),

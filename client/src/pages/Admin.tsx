@@ -79,6 +79,7 @@ import { AdminStoreSubscriptionPaymentsPanel } from "@/components/admin/AdminSto
 import { AdminRolesPanel } from "@/components/admin/AdminRolesPanel";
 import { AdminRegisterUserForm } from "@/components/admin/AdminRegisterUserForm";
 import { AdminCargoGoRidesPanel } from "@/components/admin/AdminCargoGoRidesPanel";
+import { AdminGoCancellationsPanel } from "@/components/admin/AdminGoCancellationsPanel";
 import { AdminEditUserDialog } from "@/components/admin/AdminEditUserDialog";
 import { fetchAdminJson } from "@/lib/admin-api";
 import {
@@ -1395,6 +1396,7 @@ export default function AdminPanel() {
       if (tab === "services") return "services";
       if (tab === "promotional-codes") return "promotional-codes";
       if (tab === "store-payments") return "store-payments";
+      if (tab === "go-cancellations") return "go-cancellations";
       if (tab === "users" || tab === "roles") return tab;
     }
     return "overview";
@@ -1457,6 +1459,7 @@ export default function AdminPanel() {
     }
     if (tab === "services") setActiveTab("services");
     if (tab === "promotional-codes") setActiveTab("promotional-codes");
+    if (tab === "go-cancellations") setActiveTab("go-cancellations");
     if (tab === "users") setActiveTab("users");
     if (tab === "roles") setActiveTab("roles");
     if (tab === "users" && q.get("register") === "1") {
@@ -2240,6 +2243,11 @@ export default function AdminPanel() {
                     Pagos tiendas
                   </TabsTrigger>
                 )}
+                {fullAdmin && (
+                  <TabsTrigger value="go-cancellations" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">
+                    Cancelaciones Go
+                  </TabsTrigger>
+                )}
                 {canUsers && (
                   <TabsTrigger value="users" className="shrink-0 text-xs sm:text-sm px-2.5 sm:px-3">Usuarios</TabsTrigger>
                 )}
@@ -2291,6 +2299,10 @@ export default function AdminPanel() {
 
           <TabsContent value="store-payments" className="min-w-0">
             <AdminStoreSubscriptionPaymentsPanel enabled={fullAdmin && activeTab === "store-payments"} />
+          </TabsContent>
+
+          <TabsContent value="go-cancellations" className="min-w-0">
+            <AdminGoCancellationsPanel enabled={fullAdmin && activeTab === "go-cancellations"} />
           </TabsContent>
 
           <TabsContent value="overview">

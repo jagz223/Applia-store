@@ -27,6 +27,8 @@ export type MobilityRideHistoryRecord = {
   startLon: number;
   endLat: number;
   endLon: number;
+  /** Viaje solicitado sin destino (monto y ruta por acordar). */
+  destinationPending?: boolean;
   riderName: string;
   driverName: string | null;
   createdAt: string;
@@ -49,6 +51,7 @@ export type MobilityRideHistoryListItem = {
   amountUsd: number;
   payment: "genfeb" | "cash" | "bank_transfer";
   cancelledBy?: "rider" | "driver" | null;
+  destinationPending?: boolean;
 };
 
 export function mobilityHistoryStatusLabel(

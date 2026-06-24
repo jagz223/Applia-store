@@ -102,13 +102,15 @@ export function DriverTripHistorySheet({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span className="font-medium text-foreground">{formatEnded(t.endedAt)}</span>
-                    <span className="tabular-nums font-semibold text-foreground">{formatMoney(t.amountUsd)}</span>
+                    <span className="tabular-nums font-semibold text-foreground">
+                      {t.destinationPending ? "Por acordar" : formatMoney(t.amountUsd)}
+                    </span>
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground text-xs">
                     <span>
                       Servicio: <span className="font-medium text-foreground">{moduleLabel(t)}</span>
                     </span>
-                    <span>Duración: {t.durationMin} min</span>
+                    <span>{t.destinationPending ? "Sin destino" : `Duración: ${t.durationMin} min`}</span>
                     <span>
                       Pago:{" "}
                       <span className="font-medium text-foreground">

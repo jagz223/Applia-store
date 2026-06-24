@@ -16,7 +16,8 @@ export type RideArchiveSource = {
   distanceM: number;
   durationSec: number;
   start: { lat: number; lon: number; label: string };
-  end: { lat: number; lon: number; label: string };
+  end: { lat: number; lon: number; label: string } | null;
+  destinationPending?: boolean;
   createdAt: number;
 };
 
@@ -48,6 +49,7 @@ export async function persistMobilityRideToHistory(
       durationSec: ride.durationSec,
       start: ride.start,
       end: ride.end,
+      destinationPending: !!ride.destinationPending,
       createdAt: ride.createdAt,
     });
   } catch (e) {

@@ -107,6 +107,11 @@ import {
   GO_DRIVER_SUBSCRIPTION_INACTIVE_SLIDE_HINT,
   isGoDriverSubscriptionActive,
 } from "@shared/go-driver-subscription";
+import {
+  GoCancellationFeedbackDialog,
+  type GoCancellationFeedbackSubmit,
+} from "@/components/go/GoCancellationFeedbackDialog";
+import type { GoDriverCancelPhase } from "@shared/go-cancellation-feedback";
 
 const DRIVER_ROUTE_DEVIATION_M = 80;
 const DRIVER_ROUTE_DEVIATION_REFETCH_MS = 25_000;
@@ -133,6 +138,7 @@ type MobilityRideHydration = {
   durationSec: number;
   start: CargoRideOfferPayload["start"];
   end: CargoRideOfferPayload["end"];
+  destinationPending?: boolean;
   routeGeometry: GeoJsonObject | null;
   rider: CargoRideOfferPayload["rider"];
 };
@@ -143,6 +149,7 @@ function mapApiRideToOffer(ride: MobilityRideHydration): CargoRideOfferPayload {
     rider: ride.rider,
     start: ride.start,
     end: ride.end,
+    destinationPending: !!ride.destinationPending || !ride.end,
     routeGeometry: ride.routeGeometry,
     distanceM: ride.distanceM,
     durationSec: ride.durationSec,
@@ -226,6 +233,7 @@ export default function DriverGoGenfeb() {
   const incomingModule = modalOfferEntry?.module ?? null;
   const incomingOpen = incomingOffer != null;
   const [respondBusy, setRespondBusy] = useState(false);
+  const [negotiationProposeBusy, setNegotiationProposeBusy] = useState(false);
   useEffect(() => {
     respondBusyRef.current = respondBusy;
   }, [respondBusy]);
@@ -263,7 +271,7 @@ export default function DriverGoGenfeb() {
 
   const queueDriverOffer = useCallback(
     (module: "cargo" | "pack", offer: CargoRideOfferPayload) => {
-      if (!offer?.rideId || offer.isNegotiated) return;
+      if (!offer?.rideId) return;
       if (isClassicOfferDismissed(offer.rideId)) return;
       if (respondBusyRef.current) return;
       if (acceptingRideIdRef.current) return;
@@ -377,14 +385,14 @@ export default function DriverGoGenfeb() {
   const [rateStars, setRateStars] = useState(5);
   const [rateBusy, setRateBusy] = useState(false);
   const rateTargetRef = useRef<{ rideId: string; targetName: string; module: "cargo" | "pack" } | null>(null);
-  /** Modal grande solo para ofertas clásicas (precio estándar / cola). El regateo va al tablero (sheet). */
-  const classicOfferModalOpen =
-    incomingOpen && !!incomingOffer && !incomingOffer.isNegotiated && !rateDialogOpen;
+  /** Modal de oferta entrante (clásica y regateo). */
+  const classicOfferModalOpen = incomingOpen && !!incomingOffer && !rateDialogOpen;
   const [activeRideStarted, setActiveRideStarted] = useState(false);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [cancelServiceOpen, setCancelServiceOpen] = useState(false);
   const [cancelServiceBusy, setCancelServiceBusy] = useState(false);
+  const [cancelFeedbackOpen, setCancelFeedbackOpen] = useState(false);
   const [searchClientConfirmOpen, setSearchClientConfirmOpen] = useState(false);
   const [confirmPaymentOpen, setConfirmPaymentOpen] = useState(false);
   const [completeServiceOpen, setCompleteServiceOpen] = useState(false);
@@ -507,14 +515,12 @@ export default function DriverGoGenfeb() {
       if (activeRideIdRef.current) return;
       if (acceptingRideIdRef.current) return;
       if (!isReceivingTaxiMode(receiveModeRef.current)) return;
-      if (p?.isNegotiated) return;
       queueDriverOffer("cargo", p);
     };
     const onPackOffer = (p: CargoRideOfferPayload) => {
       if (activeRideIdRef.current) return;
       if (acceptingRideIdRef.current) return;
       if (!isReceivingDeliveryMode(receiveModeRef.current)) return;
-      if (p?.isNegotiated) return;
       queueDriverOffer("pack", p);
     };
     const onCargoTaken = (p: { rideId: string }) => {
@@ -1084,7 +1090,14 @@ export default function DriverGoGenfeb() {
           }
         );
         const data = (await res.json().catch(() => ({}))) as { message?: string };
-        if (!res.ok) throw new Error(data.message || "No se pudo rechazar la invitación");
+        if (!res.ok) {
+          if (res.status === 403 || res.status === 409 || res.status === 404) {
+            dismissDriverOfferUi(snapOffer.rideId);
+            return;
+          }
+          throw new Error(data.message || "No se pudo rechazar la invitación");
+        }
+        dismissDriverOfferUi(snapOffer.rideId);
       } catch (e) {
         toast({
           title: "No se pudo rechazar",
@@ -1198,6 +1211,53 @@ export default function DriverGoGenfeb() {
     }
   };
 
+  const proposeNegotiationFromModal = async (amountUsd: number) => {
+    const entry = pinnedOfferEntry ?? goDriverUi?.currentOffer ?? null;
+    const snapOffer = entry?.offer;
+    const snapModule = entry?.module;
+    if (!snapOffer?.rideId || !snapOffer.isNegotiated || !snapModule) return;
+    if (!canUseDriverNegotiation) {
+      toast({
+        title: provider?.isVerified === true && !hasActiveSubscription ? "Suscripción vencida" : "Perfil no verificado",
+        description:
+          provider?.isVerified === true && !hasActiveSubscription
+            ? GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT
+            : "Verifica tu perfil profesional para enviar ofertas de regateo.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const token = localStorage.getItem("token");
+    if (!token) {
+      toast({ title: "Sesión", description: "Inicia sesión de nuevo.", variant: "destructive" });
+      return;
+    }
+    const rounded = Math.round(Math.max(0.01, amountUsd) * 100) / 100;
+    setNegotiationProposeBusy(true);
+    try {
+      const base = snapModule === "pack" ? "/api/pack/rides" : "/api/mobility/rides";
+      const res = await fetch(`${base}/${encodeURIComponent(snapOffer.rideId)}/negotiation/driver-offer`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ amountUsd: rounded }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { message?: string };
+      if (!res.ok) throw new Error(data.message || "No se pudo enviar la oferta");
+      setDriverNegotiationSent({ rideId: snapOffer.rideId, module: snapModule, amountUsd: rounded });
+      releaseDriverOfferUi(snapOffer.rideId);
+      stopReceiving();
+      toast({ title: "Oferta enviada", description: "El cliente verá tu propuesta en su lista." });
+    } catch (e) {
+      toast({
+        title: "No se pudo enviar",
+        description: e instanceof Error ? e.message : "Intenta de nuevo.",
+        variant: "destructive",
+      });
+    } finally {
+      setNegotiationProposeBusy(false);
+    }
+  };
+
   const startRide = async () => {
     if (!activeRideId) return;
     const token = localStorage.getItem("token");
@@ -1287,10 +1347,14 @@ export default function DriverGoGenfeb() {
     }
   };
 
-  const confirmCancelDriverService = async () => {
+  const driverCancelPhase: GoDriverCancelPhase =
+    activeRideStarted || searchingClient ? "at_pickup" : "en_route";
+
+  const confirmCancelDriverService = async (feedback: GoCancellationFeedbackSubmit) => {
     const rideId = activeRideIdRef.current;
     if (!rideId) {
       setCancelServiceOpen(false);
+      setCancelFeedbackOpen(false);
       return;
     }
     const token = localStorage.getItem("token");
@@ -1299,7 +1363,8 @@ export default function DriverGoGenfeb() {
     try {
       const res = await fetch(`${rideApiBase}/${encodeURIComponent(rideId)}/cancel`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(feedback),
       });
       const data = (await res.json().catch(() => ({}))) as { message?: string };
       if (!res.ok) {
@@ -1324,6 +1389,7 @@ export default function DriverGoGenfeb() {
       lastServiceRouteFailureRef.current = null;
       toast({ title: serviceCopy.cancelledToastTitle, description: "El servicio quedó anulado." });
       setCancelServiceOpen(false);
+      setCancelFeedbackOpen(false);
       disconnectReceivingIfSubscriptionLapsed();
       stopAndroidDriverOverlayAfterRide();
     } catch {
@@ -1333,10 +1399,14 @@ export default function DriverGoGenfeb() {
     }
   };
 
-  /** Punto de navegación: recogida antes de iniciar viaje; destino una vez en curso. */
+  /** Punto de navegación: recogida antes de iniciar viaje; destino una vez en curso (si hay destino). */
   const serviceNavTarget = useMemo(() => {
     if (!activeRideOffer) return null;
-    if (activeRideStarted) return { lat: activeRideOffer.end.lat, lon: activeRideOffer.end.lon };
+    const noDest = !!activeRideOffer.destinationPending || !activeRideOffer.end;
+    if (activeRideStarted) {
+      if (noDest) return null;
+      return { lat: activeRideOffer.end!.lat, lon: activeRideOffer.end!.lon };
+    }
     return { lat: activeRideOffer.start.lat, lon: activeRideOffer.start.lon };
   }, [activeRideOffer, activeRideStarted]);
 
@@ -2256,9 +2326,16 @@ export default function DriverGoGenfeb() {
         offer={incomingOffer}
         module={incomingModule ?? undefined}
         busy={respondBusy}
+        negotiationBusy={negotiationProposeBusy}
         driverPos={geoPos}
         onAccept={() => void respondToOffer(true)}
         onDecline={() => void respondToOffer(false)}
+        onNegotiationPropose={proposeNegotiationFromModal}
+        onNegotiationChangeAmount={() => {
+          if (incomingModule) setNegotiationViewModule(incomingModule);
+          if (incomingOffer?.rideId) releaseDriverOfferUi(incomingOffer.rideId);
+          setNegotiationBoardOpen(true);
+        }}
         onExpired={() => {
           if (incomingOffer?.rideId) releaseDriverOfferUi(incomingOffer.rideId);
         }}
@@ -2453,7 +2530,10 @@ export default function DriverGoGenfeb() {
               type="button"
               variant="destructive"
               disabled={cancelServiceBusy}
-              onClick={() => void confirmCancelDriverService()}
+              onClick={() => {
+                setCancelServiceOpen(false);
+                setCancelFeedbackOpen(true);
+              }}
             >
               {cancelServiceBusy ? (
                 <>
@@ -2467,6 +2547,21 @@ export default function DriverGoGenfeb() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <GoCancellationFeedbackDialog
+        open={cancelFeedbackOpen}
+        onOpenChange={setCancelFeedbackOpen}
+        party="driver"
+        module={goSlug === "pack" ? "pack" : "cargo"}
+        driverPhase={driverCancelPhase}
+        busy={cancelServiceBusy}
+        onSubmit={(payload) =>
+          void confirmCancelDriverService({
+            ...payload,
+            driverPhase: driverCancelPhase,
+          })
+        }
+      />
 
       <GoRideRatingDialog
         open={rateDialogOpen}

@@ -193,6 +193,8 @@ export const FIRESTORE_COLLECTIONS = {
   STATS_SUBCATEGORY_BOOKINGS_MONTHLY: "stats_subcategory_bookings_monthly",
   /** Historial persistente de viajes Car Go / Pack Go (completados, cancelados, expirados). */
   MOBILITY_RIDE_HISTORY: "mobility_ride_history",
+  /** Motivos de cancelación Go (taxi + delivery) para revisión admin. */
+  GO_CANCELLATION_FEEDBACK: "go_cancellation_feedback",
   /** Viajes Go en curso (searching / matched / in_progress); se borran al terminar. */
   MOBILITY_ACTIVE_RIDES: "mobility_active_rides",
   /** Conductores Go recibiendo pedidos (taxi/delivery); TTL lógico ~45s. */

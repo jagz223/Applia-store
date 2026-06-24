@@ -61,6 +61,7 @@ function docToRecord(id: string, data: Record<string, unknown>): MobilityRideHis
     startLon: Number(data.startLon) || 0,
     endLat: Number(data.endLat) || 0,
     endLon: Number(data.endLon) || 0,
+    destinationPending: data.destinationPending === true,
     riderName: String(data.riderName ?? "Pasajero"),
     driverName: data.driverName != null ? String(data.driverName) : null,
     createdAt: toIso(data.createdAt),
@@ -93,14 +94,15 @@ function toListItem(r: MobilityRideHistoryRecord): MobilityRideHistoryListItem {
     riderName: r.riderName,
     driverName: r.driverName,
     vehicleLabel: vehicleLabels[r.vehicleType] ?? r.vehicleType,
-    startLabel: r.startLabel,
-    endLabel: r.endLabel,
+    startLabel: r.destinationPending ? r.startLabel : r.startLabel,
+    endLabel: r.destinationPending ? "Sin destino" : r.endLabel,
     createdAt: r.createdAt,
     endedAt: r.endedAt,
-    durationMin: Math.max(1, Math.round(r.durationSec / 60)),
-    amountUsd: r.estimatedUsd,
+    durationMin: r.destinationPending ? 0 : Math.max(1, Math.round(r.durationSec / 60)),
+    amountUsd: r.destinationPending ? 0 : r.estimatedUsd,
     payment: mapPayment(r.paymentMethod),
     cancelledBy: r.cancelledBy ?? undefined,
+    destinationPending: r.destinationPending === true,
   };
 }
 
@@ -129,7 +131,8 @@ export type ArchiveMobilityRideInput = {
   distanceM: number;
   durationSec: number;
   start: { lat: number; lon: number; label: string };
-  end: { lat: number; lon: number; label: string };
+  end: { lat: number; lon: number; label: string } | null;
+  destinationPending?: boolean;
   createdAt: number;
 };
 
@@ -145,6 +148,9 @@ export async function archiveMobilityRideHistory(input: ArchiveMobilityRideInput
     input.driverUserId ? resolveDisplayName(input.driverUserId) : Promise.resolve(null),
   ]);
 
+  const destinationPending = !!input.destinationPending;
+  const endPoint = input.end ?? input.start;
+
   const record: MobilityRideHistoryRecord = {
     id: input.id,
     module: input.module,
@@ -157,16 +163,17 @@ export async function archiveMobilityRideHistory(input: ArchiveMobilityRideInput
     failReason: input.failReason ?? null,
     vehicleType: input.vehicleType,
     paymentMethod: input.paymentMethod,
-    estimatedUsd: input.estimatedUsd,
-    suggestedUsd: input.suggestedUsd ?? null,
-    distanceM: input.distanceM,
-    durationSec: input.durationSec,
+    estimatedUsd: destinationPending ? 0 : input.estimatedUsd,
+    suggestedUsd: destinationPending ? null : (input.suggestedUsd ?? null),
+    distanceM: destinationPending ? 0 : input.distanceM,
+    durationSec: destinationPending ? 0 : input.durationSec,
     startLabel: input.start.label,
-    endLabel: input.end.label,
+    endLabel: destinationPending ? "Sin destino" : endPoint.label,
     startLat: input.start.lat,
     startLon: input.start.lon,
-    endLat: input.end.lat,
-    endLon: input.end.lon,
+    endLat: destinationPending ? 0 : endPoint.lat,
+    endLon: destinationPending ? 0 : endPoint.lon,
+    destinationPending,
     riderName,
     driverName,
     createdAt: new Date(input.createdAt).toISOString(),
