@@ -59,8 +59,7 @@ const effectiveSecret = JWT_SECRET || devSecret;
 // ============== ESQUEMAS DE VALIDACIÓN ==============
 
 // Schema para registro de usuario
-// avatar puede venir como URL (opcional). Si el cliente sube archivo a Storage,
-// en el registro enviará solo la downloadURL.
+// avatar: URL de foto subida a Storage (obligatoria en registro público).
 const DUPLICATE_EMAIL_MESSAGE =
   "Este correo electrónico ya está registrado. Inicia sesión si ya tienes cuenta.";
 const DUPLICATE_PHONE_MESSAGE =
@@ -77,7 +76,7 @@ const registerSchema = z.object({
   lastName: z.string().min(2, "El apellido debe tener al menos 2 caracteres"),
   phone: z.string().min(1, "El teléfono es obligatorio").transform((s) => normalizePhone(s)),
   role: z.enum(PUBLIC_REGISTER_ROLES).default("client"),
-  avatar: z.string().url("La foto de perfil debe ser una URL válida").optional().or(z.literal("")),
+  avatar: z.string().url("La foto de perfil debe ser una URL válida"),
 });
 
 // Schema para login
@@ -218,7 +217,7 @@ export async function registerAuthRoutes(
         role: data.role,
         rating: 5,
         ratingCount: 0,
-        avatar: data.avatar ? data.avatar : undefined,
+        avatar: data.avatar,
       })) as any;
 
       // Generar token

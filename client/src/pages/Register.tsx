@@ -35,7 +35,6 @@ const registerSchema = z.object({
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
   confirmPassword: z.string(),
   role: z.enum(["client", "professional"]),
-  avatar: z.string().url("La URL de la imagen debe ser válida").optional().or(z.literal("")),
 })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Las contraseñas no coinciden",
@@ -50,6 +49,7 @@ export default function Register() {
   const [isLoading, setIsLoading] = useState(false);
   const [profileImage, setProfileImage] = useState<File | null>(null);
   const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [, setLocation] = useLocation();
@@ -66,26 +66,23 @@ export default function Register() {
       password: "",
       confirmPassword: "",
       role: "client",
-      avatar: "",
     },
   });
 
   const onSubmit = async (data: RegisterForm) => {
-    const hasFile = profileImage != null;
-    const hasUrl = typeof data.avatar === "string" && data.avatar.trim().length > 0;
-    if (!hasFile && !hasUrl) {
+    if (!profileImage) {
+      setPhotoError("Debes subir o tomar una foto de perfil.");
       toast({
         variant: "destructive",
-        title: "Avatar requerido",
-        description: "Debes subir una foto o pegar una URL de imagen de perfil.",
+        title: "Foto requerida",
+        description: "Debes subir o tomar una foto de perfil para registrarte.",
       });
       return;
     }
+    setPhotoError(null);
     setIsLoading(true);
     try {
-      const avatarUrl = hasFile
-        ? await uploadProfileImage(profileImage!)
-        : (data.avatar || "").trim();
+      const avatarUrl = await uploadProfileImage(profileImage);
 
       const response = await fetch(api.auth.register.path, {
         method: api.auth.register.method,
@@ -156,6 +153,7 @@ export default function Register() {
       return;
     }
     setProfileImage(file);
+    setPhotoError(null);
     const reader = new FileReader();
     reader.onload = () => setProfileImagePreview(reader.result as string);
     reader.readAsDataURL(file);
@@ -164,6 +162,7 @@ export default function Register() {
   
   const handleCameraCapture = (file: File) => {
     setProfileImage(file);
+    setPhotoError(null);
     const reader = new FileReader();
     reader.onload = () => setProfileImagePreview(reader.result as string);
     reader.readAsDataURL(file);
@@ -204,9 +203,11 @@ export default function Register() {
           <form onSubmit={form.handleSubmit(onSubmit)}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <FormLabel className="text-base">Foto de perfil (opcional)</FormLabel>
+                <FormLabel className="text-base">
+                  Foto de perfil <span className="text-destructive">*</span>
+                </FormLabel>
                 <p className="text-sm text-muted-foreground">
-                  Puedes subir una foto desde tu dispositivo o tomar una con la cámara. Si no lo haces, puedes pegar una URL.
+                  Sube una foto desde tu dispositivo o tómala con la cámara.
                 </p>
                 <input
                   ref={fileInputRef}
@@ -262,20 +263,10 @@ export default function Register() {
                     Máximo 5 MB. Formatos: JPG, PNG, WebP, GIF.
                   </p>
                 )}
-              </div>
-              <FormField
-                control={form.control}
-                name="avatar"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>URL de la imagen de perfil (opcional)</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://ejemplo.com/imagen.jpg" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+                {photoError && (
+                  <p className="text-sm text-destructive">{photoError}</p>
                 )}
-              />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
@@ -411,7 +402,7 @@ export default function Register() {
               />
             </CardContent>
             <CardFooter className="flex flex-col space-y-4">
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button type="submit" className="w-full" disabled={isLoading || !profileImage}>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
