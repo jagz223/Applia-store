@@ -74,13 +74,18 @@ export function ProviderTermsGate() {
       }}
     >
       <DialogContent
+        layer="elevated"
         hideClose
+        shellClassName={cn(
+          "items-start justify-center overflow-y-auto overscroll-y-contain touch-pan-y",
+          "px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))]",
+          "[-webkit-overflow-scrolling:touch]",
+        )}
         className={cn(
-          /* Sobrescribe grid + centrado vertical (recorta modales altos) */
-          "!flex !flex-col !gap-0 !p-0",
-          "left-[50%] top-[4vh] max-h-[min(92vh,720px)] w-[calc(100vw-1.5rem)] max-w-xl sm:max-w-2xl",
-          "-translate-x-1/2 !translate-y-0",
-          "overflow-hidden rounded-xl border bg-card shadow-2xl ring-1 ring-border/40",
+          "!flex !max-w-none !flex-col !gap-0 !p-0",
+          "my-2 w-[calc(100vw-1.5rem)] max-w-2xl",
+          "max-h-[min(92dvh,calc(100dvh-1.5rem))] overflow-hidden",
+          "rounded-xl border bg-card shadow-2xl ring-1 ring-border/40",
         )}
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
@@ -90,16 +95,16 @@ export function ProviderTermsGate() {
             Condiciones de uso para prestadores
           </DialogTitle>
           <p className="text-left text-xs text-muted-foreground sm:text-sm">
-            Lee el documento completo y desplázate con la barra lateral. Debes aceptar para continuar.
+            Lee el documento completo. Puedes desplazarte dentro del texto o mover todo el modal en pantallas
+            pequeñas.
           </p>
         </DialogHeader>
 
-        {/* Cuerpo con altura acotada y scroll nativo (más fiable que flex-1 en grid) */}
         <div
           className={cn(
-            "w-full overflow-y-auto overflow-x-hidden overscroll-contain",
-            "max-h-[min(calc(92vh-10.5rem),600px)] min-h-[200px]",
+            "min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y",
             "px-5 py-5 sm:px-6",
+            "[-webkit-overflow-scrolling:touch]",
             "[scrollbar-width:thin] [scrollbar-color:hsl(var(--border))_transparent]",
             "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border/70",
           )}
@@ -110,7 +115,7 @@ export function ProviderTermsGate() {
           <ProviderTermsOfUseContent />
         </div>
 
-        <DialogFooter className="shrink-0 flex-col gap-2 border-t bg-muted/20 px-5 py-4 sm:flex-row sm:justify-center sm:px-6">
+        <DialogFooter className="shrink-0 flex-col gap-2 border-t bg-card px-5 py-4 sm:flex-row sm:justify-center sm:px-6">
           <Button
             type="button"
             size="lg"
