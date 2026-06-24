@@ -1,10 +1,10 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useNoIndex } from "@/hooks/use-no-index";
 import { Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, UserPlus, Loader2, Camera, Upload, X } from "lucide-react";
+import { Eye, EyeOff, UserPlus, Loader2, Camera, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,7 +51,6 @@ export default function Register() {
   const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user, isLoading: authLoading, setUser } = useAuth();
@@ -71,11 +70,11 @@ export default function Register() {
 
   const onSubmit = async (data: RegisterForm) => {
     if (!profileImage) {
-      setPhotoError("Debes subir o tomar una foto de perfil.");
+      setPhotoError("Debes tomar una foto de perfil.");
       toast({
         variant: "destructive",
         title: "Foto requerida",
-        description: "Debes subir o tomar una foto de perfil para registrarte.",
+        description: "Debes tomar una foto de perfil con la cámara para registrarte.",
       });
       return;
     }
@@ -141,25 +140,6 @@ export default function Register() {
     }
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast({ variant: "destructive", title: "Formato inválido", description: "Solo se permiten imágenes (JPG, PNG, WebP, GIF)." });
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ variant: "destructive", title: "Archivo muy grande", description: "La imagen no debe superar 5 MB." });
-      return;
-    }
-    setProfileImage(file);
-    setPhotoError(null);
-    const reader = new FileReader();
-    reader.onload = () => setProfileImagePreview(reader.result as string);
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  };
-  
   const handleCameraCapture = (file: File) => {
     setProfileImage(file);
     setPhotoError(null);
@@ -207,16 +187,8 @@ export default function Register() {
                   Foto de perfil <span className="text-destructive">*</span>
                 </FormLabel>
                 <p className="text-sm text-muted-foreground">
-                  Sube una foto desde tu dispositivo o tómala con la cámara.
+                  Toma una foto con la cámara de tu dispositivo.
                 </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
-                  capture="user"
-                  className="hidden"
-                  onChange={handleImageChange}
-                />
                 {profileImagePreview ? (
                   <div className="flex items-center gap-4 p-3 rounded-lg border bg-muted/30">
                     <Avatar className="h-16 w-16 ring-2 ring-mango-orange/50">
@@ -234,33 +206,19 @@ export default function Register() {
                     </Button>
                   </div>
                 ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        fileInputRef.current?.removeAttribute("capture");
-                        fileInputRef.current?.click();
-                      }}
-                    >
-                      <Upload className="h-4 w-4 mr-2" />
-                      Subir imagen
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => setIsCameraOpen(true)}
-                    >
-                      <Camera className="h-4 w-4 mr-2" />
-                      Tomar foto
-                    </Button>
-                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setIsCameraOpen(true)}
+                  >
+                    <Camera className="h-4 w-4 mr-2" />
+                    Tomar foto
+                  </Button>
                 )}
                 {!profileImagePreview && (
                   <p className="text-xs text-amber-600 dark:text-amber-500">
-                    Máximo 5 MB. Formatos: JPG, PNG, WebP, GIF.
+                    Usa la cámara de tu dispositivo para capturar la foto.
                   </p>
                 )}
                 {photoError && (
