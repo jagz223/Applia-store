@@ -158,7 +158,8 @@ export function registerMapRoutes(app: Express): void {
     const to = parseLonLatPair(String(req.query.to ?? ""));
     if (!from || !to) return res.status(400).json({ message: "Usa from=lon,lat y to=lon,lat" });
     try {
-      const payload = await computeDrivingRoute(from, to);
+      const live = req.query.live === "1" || req.query.live === "true";
+      const payload = await computeDrivingRoute(from, to, { live });
       if (payload.source === "fallback") {
         return res.status(502).json({
           message: "No se pudo trazar la ruta por calles. Intenta de nuevo.",

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useCategories, useCategoryVisibility, useSubcategories } from "@/hooks/use-mango-data";
-import { effectiveHiddenCategorySlugs, getCategoryDisplayName, MAN_GO_CATEGORY_SLUG } from "@shared/default-categories";
+import { effectiveHiddenCategorySlugs, getCategoryDisplayName, MAN_GO_CATEGORY_SLUG, MARKETPLACE_CATEGORY_SLUG } from "@shared/default-categories";
 import { DEFAULT_SUBCATEGORIES } from "@shared/default-subcategories";
 import { CategoryVisual } from "@/components/CategoryVisual";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +25,7 @@ export default function Categories() {
   const manGoCat = getCat(MAN_GO_CATEGORY_SLUG);
   const professionalCat = getCat("professional");
   const transportCat = getCat("transport");
+  const shopGoCat = getCat(MARKETPLACE_CATEGORY_SLUG);
 
   const { data: manGoSubs = [] } = useSubcategories((manGoCat as any)?.id ?? null);
   const { data: professionalSubs = [] } = useSubcategories((professionalCat as any)?.id ?? null);
@@ -85,9 +86,20 @@ export default function Categories() {
       });
     }
 
+    if (shopGoCat && !hiddenSlugs.has(MARKETPLACE_CATEGORY_SLUG)) {
+      items.push({
+        key: "shopgo",
+        name: getCategoryDisplayName({ slug: MARKETPLACE_CATEGORY_SLUG }),
+        icon: (shopGoCat as any).icon ?? "Store",
+        imageUrl: (shopGoCat as any).imageUrl ?? null,
+        parentName: "Todas las tiendas",
+        href: "/tiendas",
+      });
+    }
+
     return items;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manGoSubs, professionalSubs, manGoCat, professionalCat, transportCat, hiddenSlugs]);
+  }, [manGoSubs, professionalSubs, manGoCat, professionalCat, transportCat, shopGoCat, hiddenSlugs]);
 
   const displayItems = useMemo(() => {
     const subs = allItems.filter((i) => i.key.startsWith("sub-"));

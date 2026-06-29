@@ -22,6 +22,7 @@ import {
   effectiveHiddenCategorySlugs,
   getCategoryDisplayName,
   MAN_GO_CATEGORY_SLUG,
+  MARKETPLACE_CATEGORY_SLUG,
 } from "@shared/default-categories";
 import { cn } from "@/lib/utils";
 import { UI_Z_GO_FLOATING } from "@/lib/modal-layer-z";
@@ -133,9 +134,20 @@ export default function HomePage() {
         href: "/go/taxi",
       });
     }
+    if (mobilityAllowed.marketplace) {
+      const cat = categories.find((c: any) => c.slug === MARKETPLACE_CATEGORY_SLUG);
+      items.push({
+        key: "shopgo",
+        name: getCategoryDisplayName({ slug: MARKETPLACE_CATEGORY_SLUG }),
+        icon: (cat as any)?.icon ?? "Store",
+        imageUrl: (cat as any)?.imageUrl ?? null,
+        parentName: "Todas las tiendas",
+        href: "/tiendas",
+      });
+    }
     return items;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manGoSubs, professionalSubs, categories, mobilityAllowed.transport]);
+  }, [manGoSubs, professionalSubs, categories, mobilityAllowed.transport, mobilityAllowed.marketplace]);
 
   const homePopularSubcategoriesLimit = 12;
   const { data: monthlyPopularSubcategories } = useQuery({
@@ -305,7 +317,7 @@ export default function HomePage() {
         icon: Store,
         countKey: "shopGo",
         color: "text-secondary",
-        href: "/marketplace",
+        href: "/tiendas",
       });
     }
 
@@ -864,7 +876,7 @@ export default function HomePage() {
                           variant="secondary"
                           onClick={() => {
                             setGoQuickOpen(false);
-                            setLocation("/marketplace");
+                            setLocation("/tiendas");
                           }}
                         >
                           <Store className="h-4 w-4" /> Pedidos

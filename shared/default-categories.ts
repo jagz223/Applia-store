@@ -95,7 +95,7 @@ export const CATEGORY_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   technical: "Man Go",
   professional: "Pro Go",
   delivery: "Delivery",
-  marketplace: "Marketplace",
+  marketplace: "Shop Go",
   transport: "Car Go",
 } as const;
 

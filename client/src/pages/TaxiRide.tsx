@@ -63,6 +63,7 @@ import {
   type StoredDrivingRoute,
 } from "@/lib/driving-route-geometry";
 import { isRouteFetchInFailureBackoff } from "@/lib/driving-route-fetch-backoff";
+import { buildLiveMapsRouteUrl, shouldRecalcLiveRoute } from "@/lib/live-navigation-route";
 import { bearingFromLatLon, smoothHeadingDeg } from "@/lib/vehicle-movement-heading";
 import { useEnsureMapGeolocation } from "@/lib/map-geolocation";
 import {
@@ -104,11 +105,6 @@ function formatUsd(n: number): string {
 /** Búsqueda máxima si no hay conductor (5 min). */
 const VEHICLE_SEARCH_MAX_MS = 5 * 60 * 1000;
 const VEHICLE_SEARCH_TOTAL_SEC = Math.max(1, Math.round(VEHICLE_SEARCH_MAX_MS / 1000));
-
-/** Metros fuera de la polyline para recalcular ruta por calles (desvío). */
-const DRIVER_ROUTE_DEVIATION_M = 80;
-/** Evita ráfagas de Geoapify si el GPS salta lejos de la ruta. */
-const DRIVER_ROUTE_DEVIATION_REFETCH_MS = 25_000;
 
 function driverRouteTargetKey(target: Place): string {
   return `${target.lat.toFixed(5)},${target.lon.toFixed(5)}`;
@@ -752,7 +748,10 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   const fetchDriverRoadRoute = useCallback(
     async (driverPos: { lat: number; lon: number }, target: Place): Promise<boolean> => {
       const targetKey = driverRouteTargetKey(target);
-      const url = `/api/maps/route?from=${driverPos.lon},${driverPos.lat}&to=${target.lon},${target.lat}`;
+      const url = buildLiveMapsRouteUrl(
+        { lon: driverPos.lon, lat: driverPos.lat },
+        { lon: target.lon, lat: target.lat },
+      );
       const tryOnce = async (): Promise<boolean> => {
         const res = await fetch(url);
         const data = (await res.json().catch(() => null)) as {
@@ -831,24 +830,15 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
   }, [start]);
 
   /**
-   * GPS del conductor: recorta la polyline guardada (sin API).
-   * Geoapify solo al asignar, cambiar etapa o desvío fuerte de la ruta.
+   * GPS del conductor: recorta en cada tick y recalcula por desvío o periódicamente.
    */
   const handleDriverRoutePosition = useCallback(
     (driverPos: { lat: number; lon: number }, target: Place, force = false) => {
       const targetKey = driverRouteTargetKey(target);
       const route = activeDriverRouteRef.current;
+      const targetChanged = !!route && route.targetKey !== targetKey;
 
-      if (driverRouteFetchInFlightRef.current) {
-        if (route?.targetKey === targetKey) {
-          applyTrimmedDriverRoute(route, driverPos);
-        } else {
-          pendingDriverTargetRef.current = target;
-        }
-        return;
-      }
-
-      if (force || !route || route.targetKey !== targetKey) {
+      if (force || !route || targetChanged) {
         if (
           !force &&
           !route &&
@@ -857,22 +847,36 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
           return;
         }
         driverRouteTrimIndexRef.current = 0;
-        if (route && route.targetKey !== targetKey) {
+        if (targetChanged) {
           setDriverToPickupGeometry(null);
           setDriverToPickupMeta(null);
+        }
+        if (driverRouteFetchInFlightRef.current) {
+          pendingDriverTargetRef.current = target;
+          if (route && !targetChanged) applyTrimmedDriverRoute(route, driverPos);
+          return;
         }
         void fetchAndSetDriverRoadRoute(driverPos, target);
         return;
       }
 
       const trimmed = applyTrimmedDriverRoute(route, driverPos);
-      if (trimmed.deviationM < DRIVER_ROUTE_DEVIATION_M) return;
 
-      const now = Date.now();
-      const last = lastDriverRouteFetchRef.current;
-      if (last?.targetKey === targetKey && now - last.at < DRIVER_ROUTE_DEVIATION_REFETCH_MS) {
+      if (driverRouteFetchInFlightRef.current) return;
+
+      if (
+        !shouldRecalcLiveRoute({
+          force,
+          routeMissing: false,
+          targetChanged: false,
+          deviationM: trimmed.deviationM,
+          lastFetch: lastDriverRouteFetchRef.current,
+          targetKey,
+        })
+      ) {
         return;
       }
+
       void fetchAndSetDriverRoadRoute(driverPos, target);
     },
     [applyTrimmedDriverRoute, fetchAndSetDriverRoadRoute],

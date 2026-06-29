@@ -12,6 +12,8 @@ function authHeaders(): HeadersInit {
   };
 }
 
+export type AdminCentralView = "centrales" | "all-drivers";
+
 export type DispatchCompanyOption = { id: string; name: string };
 
 export type CentralFleetDriver = {
@@ -42,6 +44,9 @@ export type CentralFleetDriver = {
   receivingStoppedAt: number | null;
   /** Viaje taxi o delivery en curso (solo si `inService`). */
   activeService: CentralActiveService | null;
+  /** Central despachadora (vista admin global). */
+  dispatchCompanyId?: string | null;
+  dispatchCompanyName?: string | null;
 };
 
 /** Payload de `central:fleet:update` (Socket.IO) — solo posición/vehículo; el resto se fusiona con la fila del GET. */
@@ -62,6 +67,26 @@ export type CentralFleetSocketPatch = {
 };
 
 export const CENTRAL_FLEET_QUERY_KEY = (companyId: string) => ["central", "fleet", companyId] as const;
+export const CENTRAL_FLEET_ALL_QUERY_KEY = ["central", "fleet", "__all__"] as const;
+
+function normalizeCentralFleetDriver(d: CentralFleetDriver): CentralFleetDriver {
+  const inService = Boolean(d.inService);
+  const receivingTaxi = inService ? false : Boolean(d.receivingTaxi);
+  const receivingDelivery = inService ? false : Boolean(d.receivingDelivery);
+  return {
+    ...d,
+    phone: d.phone ?? null,
+    licensePlate: d.licensePlate ?? null,
+    receivingTaxi,
+    receivingDelivery,
+    receiving: inService ? false : Boolean(receivingTaxi || receivingDelivery || d.receiving),
+    positionLive: Boolean((d as { positionLive?: boolean }).positionLive ?? true),
+    receivingStoppedAt: (d as { receivingStoppedAt?: number | null }).receivingStoppedAt ?? null,
+    activeService: (d as { activeService?: CentralActiveService | null }).activeService ?? null,
+    dispatchCompanyId: (d as { dispatchCompanyId?: string | null }).dispatchCompanyId ?? null,
+    dispatchCompanyName: (d as { dispatchCompanyName?: string | null }).dispatchCompanyName ?? null,
+  };
+}
 
 /** Actualiza una fila de flota en caché sin refetch HTTP (escala con muchos conductores). */
 /** Actualiza flags de recepción sin que ticks parciales (taxi vs delivery) apaguen el otro en modo híbrido. */
@@ -291,24 +316,27 @@ export function useCentralFleet(companyId: string | null) {
       const res = await fetch(`/api/central/fleet${q}`, { headers: authHeaders() });
       if (!res.ok) throw new Error("No se pudo cargar la flota");
       const data = (await res.json()) as { drivers: CentralFleetDriver[] };
-      return data.drivers.map((d) => {
-        const inService = Boolean(d.inService);
-        const receivingTaxi = inService ? false : Boolean(d.receivingTaxi);
-        const receivingDelivery = inService ? false : Boolean(d.receivingDelivery);
-        return {
-        ...d,
-        phone: d.phone ?? null,
-        licensePlate: d.licensePlate ?? null,
-        receivingTaxi,
-        receivingDelivery,
-        receiving: inService ? false : Boolean(receivingTaxi || receivingDelivery || d.receiving),
-        positionLive: Boolean((d as { positionLive?: boolean }).positionLive ?? true),
-        receivingStoppedAt: (d as { receivingStoppedAt?: number | null }).receivingStoppedAt ?? null,
-        activeService: (d as { activeService?: CentralActiveService | null }).activeService ?? null,
-      };
-      });
+      return data.drivers.map(normalizeCentralFleetDriver);
     },
     enabled: !!localStorage.getItem("token") && !!companyId,
+    staleTime: 0,
+    refetchInterval: 8_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+  });
+}
+
+export function useCentralFleetAll(enabled: boolean) {
+  return useQuery({
+    queryKey: CENTRAL_FLEET_ALL_QUERY_KEY,
+    queryFn: async () => {
+      const res = await fetch("/api/central/fleet/all", { headers: authHeaders() });
+      if (!res.ok) throw new Error("No se pudo cargar la flota global");
+      const data = (await res.json()) as { drivers: CentralFleetDriver[] };
+      return data.drivers.map(normalizeCentralFleetDriver);
+    },
+    enabled: !!localStorage.getItem("token") && enabled,
     staleTime: 0,
     refetchInterval: 8_000,
     refetchIntervalInBackground: true,

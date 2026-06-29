@@ -24,6 +24,8 @@ import {
 import { CENTRAL_APP_SETTINGS_HREF } from "@/lib/central-dashboard-hrefs";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/NotificationBell";
+import { CentralAdminScopeTabs } from "@/components/central/CentralAdminScopeTabs";
+import type { AdminCentralView } from "@/hooks/use-central";
 
 function CentralMobileHeaderActions({
   onRefreshFleet,
@@ -96,6 +98,9 @@ export type CentralDashboardMobileProps = {
   companyId: string;
   companyName: string;
   isAdmin: boolean;
+  adminAllDriversMode?: boolean;
+  adminView?: AdminCentralView;
+  onAdminViewChange?: (view: AdminCentralView) => void;
   companies: { id: string; name: string }[];
   companySearch: string;
   onCompanySearchChange: (s: string) => void;
@@ -130,6 +135,9 @@ export function CentralDashboardMobile({
   companyId,
   companyName,
   isAdmin,
+  adminAllDriversMode = false,
+  adminView = "centrales",
+  onAdminViewChange,
   companies,
   companySearch,
   onCompanySearchChange,
@@ -160,6 +168,10 @@ export function CentralDashboardMobile({
 }: CentralDashboardMobileProps) {
   const [tab, setTab] = useState<CentralMobileTab>("map");
   const [fleetListOpen, setFleetListOpen] = useState(false);
+
+  useEffect(() => {
+    if (adminAllDriversMode) setTab("map");
+  }, [adminAllDriversMode]);
 
   useEffect(() => {
     if (highlightAffiliationRequestId) setTab("requests");
@@ -218,7 +230,12 @@ export function CentralDashboardMobile({
                 {activeFleet.length} activos
               </span>
             </div>
-            {isAdmin ? (
+            {isAdmin && onAdminViewChange ? (
+              <div className="pointer-events-auto">
+                <CentralAdminScopeTabs value={adminView} onChange={onAdminViewChange} />
+              </div>
+            ) : null}
+            {isAdmin && !adminAllDriversMode ? (
               <div className="pointer-events-auto">
                 <CompanyCombobox
                   compact
@@ -239,8 +256,8 @@ export function CentralDashboardMobile({
             drivers={driversOnMap}
             onSelectDriver={(d) => onSelectDriver(d)}
             serviceMapView={serviceMapView}
-            showMapToolbar
-            onPersistServiceMap={onPersistServiceMap}
+            showMapToolbar={!adminAllDriversMode}
+            onPersistServiceMap={adminAllDriversMode ? undefined : onPersistServiceMap}
             persistServiceMapPending={persistServiceMapPending}
             followDriver={selectedDriver}
             focusNonce={mapFocusNonce}
@@ -276,6 +293,7 @@ export function CentralDashboardMobile({
                       setFleetListOpen(false);
                     }}
                     maxHeightClass="max-h-[min(38vh,320px)]"
+                    showDispatchCompany={adminAllDriversMode}
                   />
                 </div>
               ) : null}
@@ -350,13 +368,15 @@ export function CentralDashboardMobile({
         />
       ) : null}
 
-      <CentralBottomNav
-        active={tab}
-        onChange={setTab}
-        teamCount={membersCount}
-        fleetOnMap={driversOnMap.length}
-        pendingAffiliationCount={pendingAffiliationCount}
-      />
+      {!adminAllDriversMode ? (
+        <CentralBottomNav
+          active={tab}
+          onChange={setTab}
+          teamCount={membersCount}
+          fleetOnMap={driversOnMap.length}
+          pendingAffiliationCount={pendingAffiliationCount}
+        />
+      ) : null}
     </div>
   );
 }

@@ -22,6 +22,8 @@ import { CentralActiveServicePanel } from "@/components/central/CentralActiveSer
 import { CentralCargoGoHistoryPanel } from "@/components/central/CentralCargoGoHistoryPanel";
 import { NotificationBell } from "@/components/NotificationBell";
 import { CENTRAL_APP_SETTINGS_HREF } from "@/lib/central-dashboard-hrefs";
+import { CentralAdminScopeTabs } from "@/components/central/CentralAdminScopeTabs";
+import type { AdminCentralView } from "@/hooks/use-central";
 
 function StatPill({
   icon: Icon,
@@ -45,7 +47,7 @@ function StatPill({
   );
 }
 
-function DriverCard({ driver }: { driver: CentralFleetDriver }) {
+function DriverCard({ driver, showDispatchCompany = false }: { driver: CentralFleetDriver; showDispatchCompany?: boolean }) {
   const phone = driver.phone?.trim() || null;
   const plate = driver.licensePlate?.trim() || null;
   const mapHint = formatCentralFleetMapHint(driver);
@@ -78,6 +80,11 @@ function DriverCard({ driver }: { driver: CentralFleetDriver }) {
           <p className="font-semibold">
             {driver.name} {driver.lastName}
           </p>
+          {showDispatchCompany ? (
+            <p className="text-xs text-muted-foreground">
+              {driver.dispatchCompanyName?.trim() || "Sin central"}
+            </p>
+          ) : null}
           <p className="text-sm text-muted-foreground flex items-center gap-1">
             <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
             {driver.rating.toFixed(1)}
@@ -135,6 +142,9 @@ export type CentralDashboardDesktopProps = {
   companyId: string;
   companyName: string;
   isAdmin: boolean;
+  adminAllDriversMode?: boolean;
+  adminView?: AdminCentralView;
+  onAdminViewChange?: (view: AdminCentralView) => void;
   companies: { id: string; name: string }[];
   companySearch: string;
   onCompanySearchChange: (s: string) => void;
@@ -170,6 +180,9 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
     companyId,
     companyName,
     isAdmin,
+    adminAllDriversMode = false,
+    adminView = "centrales",
+    onAdminViewChange,
     companies,
     companySearch,
     onCompanySearchChange,
@@ -209,15 +222,22 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
     <div className="max-lg:hidden min-h-screen bg-gradient-to-b from-muted/25 via-background to-background">
       <div className="mx-auto w-full max-w-[min(1760px,calc(100vw-1.5rem))] space-y-6 px-4 py-6 sm:px-6 xl:px-8">
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-1 lg:max-w-[min(36rem,48%)]">
+          <div className="space-y-3 lg:max-w-[min(36rem,48%)]">
+            {isAdmin && onAdminViewChange ? (
+              <CentralAdminScopeTabs value={adminView} onChange={onAdminViewChange} />
+            ) : null}
+            <div className="space-y-1">
             <p className="text-xs font-medium uppercase tracking-widest text-primary">Centrales de taxis</p>
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{companyName}</h1>
             <p className="max-w-xl text-sm text-muted-foreground">
-              Monitorea conductores en tiempo real, gestiona tu equipo y configura tarifas de taxi y delivery.
+              {adminAllDriversMode
+                ? "Conductores activos en toda la plataforma, con o sin central asignada."
+                : "Monitorea conductores en tiempo real, gestiona tu equipo y configura tarifas de taxi y delivery."}
             </p>
+            </div>
           </div>
           <div className="flex flex-wrap items-end justify-start gap-2 lg:ml-auto lg:justify-end">
-            {isAdmin ? (
+            {isAdmin && !adminAllDriversMode ? (
               <CompanyCombobox
                 companies={companies}
                 value={selectedCompanyId}
@@ -246,7 +266,7 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
         </header>
 
         <div className="flex flex-wrap gap-3 lg:justify-center">
-          <StatPill icon={Users} label="Usuarios" value={membersCount} />
+          {!adminAllDriversMode ? <StatPill icon={Users} label="Usuarios" value={membersCount} /> : null}
           <StatPill icon={MapPin} label="En mapa" value={driversOnMap.length} />
           <StatPill icon={Car} label="En servicio" value={inServiceCount} />
           <StatPill icon={Radio} label="Activos" value={activeFleet.length} />
@@ -268,8 +288,8 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                   drivers={driversOnMap}
                   onSelectDriver={(d) => onSelectDriver(d)}
                   serviceMapView={serviceMapView}
-                  showMapToolbar
-                  onPersistServiceMap={onPersistServiceMap}
+                  showMapToolbar={!adminAllDriversMode}
+                  onPersistServiceMap={adminAllDriversMode ? undefined : onPersistServiceMap}
                   persistServiceMapPending={persistServiceMapPending}
                   followDriver={selectedDriver}
                   focusNonce={mapFocusNonce}
@@ -279,6 +299,7 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
               </CardContent>
             </Card>
 
+            {!adminAllDriversMode ? (
             <Tabs value={lowerTab} onValueChange={(v) => setLowerTab(v as typeof lowerTab)} className="space-y-4">
               <TabsList className="mx-auto grid w-full max-w-4xl grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
                 <TabsTrigger value="fares">Tarifas</TabsTrigger>
@@ -327,6 +348,7 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                 <CentralMembersPanel companyId={companyId} variant="embedded" />
               </TabsContent>
             </Tabs>
+            ) : null}
           </div>
 
           <div className="flex min-w-0 flex-col">
@@ -340,6 +362,7 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
                   selectedUserId={selectedDriver?.userId ?? null}
                   onSelectDriver={(d) => onSelectDriver(d)}
                   maxHeightClass="max-h-[min(72vh,640px)]"
+                  showDispatchCompany={adminAllDriversMode}
                 />
               </CardContent>
             </Card>
@@ -356,7 +379,7 @@ export function CentralDashboardDesktop(props: CentralDashboardDesktopProps) {
               </CardHeader>
               <CardContent>
                 {selectedDriver ? (
-                  <DriverCard driver={selectedDriver} />
+                  <DriverCard driver={selectedDriver} showDispatchCompany={adminAllDriversMode} />
                 ) : (
                   <p className="rounded-lg border border-dashed border-border/80 bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
                     Elige un conductor del listado o del mapa para ver sus datos.

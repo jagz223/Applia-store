@@ -1,5 +1,5 @@
-/** Tras un fallo de /api/maps/route, no volver a llamar hasta pasado este tiempo (misma ventana que caché servidor). */
-export const ROUTE_FETCH_FAILURE_BACKOFF_MS = 30_000;
+/** Tras un fallo de /api/maps/route, reintento breve para no congelar la navegación. */
+export const ROUTE_FETCH_FAILURE_BACKOFF_MS = 5_000;
 
 export type RouteFetchFailureStamp = {
   at: number;

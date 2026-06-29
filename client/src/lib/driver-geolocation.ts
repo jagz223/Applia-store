@@ -119,7 +119,7 @@ export function startDriverGeolocationWatch({
       () => {
         /* errores transitorios del GPS */
       },
-      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 60_000 },
+      { enableHighAccuracy: true, maximumAge: 5_000, timeout: 60_000 },
     );
   };
 

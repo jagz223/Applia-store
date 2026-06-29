@@ -10,6 +10,7 @@ import { CENTRAL_SETUP_PATH } from "@shared/role-change-notification";
 import {
   useCentralCompaniesForAdmin,
   useCentralFleet,
+  useCentralFleetAll,
   useCentralFares,
   useCentralMe,
   useCentralMembers,
@@ -17,14 +18,17 @@ import {
   usePatchCentralFares,
   usePatchCentralServiceMap,
   CENTRAL_FLEET_QUERY_KEY,
+  CENTRAL_FLEET_ALL_QUERY_KEY,
   mergeCentralFleetDriverPatch,
   type CentralFleetDriver,
   type CentralFleetSocketPatch,
+  type AdminCentralView,
 } from "@/hooks/use-central";
 import { useSocket } from "@/hooks/use-socket";
 import { debouncedRefetch } from "@/lib/refetch-utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { CentralDashboardDesktop } from "@/components/central/CentralDashboardDesktop";
 import { CentralDashboardMobile } from "@/components/central/CentralDashboardMobile";
@@ -32,6 +36,8 @@ import { useCentralWideLayout } from "@/hooks/use-central-wide-layout";
 import { CompanyCombobox } from "@/components/central/CompanyCombobox";
 import type { DispatchMobilityFares, DispatchPackFares } from "@shared/dispatch-company";
 import { isCentralFleetVisibleOnMap } from "@/lib/central-fleet-position";
+
+export type { AdminCentralView } from "@/hooks/use-central";
 
 export default function CentralDashboard() {
   const isWideCentralLayout = useCentralWideLayout();
@@ -55,6 +61,12 @@ export default function CentralDashboard() {
   );
   const [selectedDriver, setSelectedDriver] = useState<CentralFleetDriver | null>(null);
   const [mapFocusNonce, setMapFocusNonce] = useState(0);
+  const [adminView, setAdminView] = useState<AdminCentralView>("centrales");
+  const adminAllDriversMode = isAdmin && adminView === "all-drivers";
+
+  useEffect(() => {
+    setSelectedDriver(null);
+  }, [adminView]);
 
   const handleSelectDriver = useCallback((driver: CentralFleetDriver | null) => {
     setSelectedDriver(driver);
@@ -67,7 +79,13 @@ export default function CentralDashboard() {
     : ((user as { dispatchCompanyId?: string })?.dispatchCompanyId ?? null);
 
   const { data: me } = useCentralMe(effectiveCompanyId);
-  const { data: fleet = [], refetch: refetchFleet, isFetching: fleetRefreshing } = useCentralFleet(effectiveCompanyId);
+  const { data: fleetCompany = [], refetch: refetchFleetCompany, isFetching: fleetCompanyRefreshing } =
+    useCentralFleet(adminAllDriversMode ? null : effectiveCompanyId);
+  const { data: fleetAll = [], refetch: refetchFleetAll, isFetching: fleetAllRefreshing } =
+    useCentralFleetAll(adminAllDriversMode);
+  const fleet = adminAllDriversMode ? fleetAll : fleetCompany;
+  const refetchFleet = adminAllDriversMode ? refetchFleetAll : refetchFleetCompany;
+  const fleetRefreshing = adminAllDriversMode ? fleetAllRefreshing : fleetCompanyRefreshing;
   const { data: members = [] } = useCentralMembers(effectiveCompanyId);
   const { data: faresData } = useCentralFares(effectiveCompanyId);
   const patchFares = usePatchCentralFares(effectiveCompanyId);
@@ -88,7 +106,30 @@ export default function CentralDashboard() {
   }, [faresData]);
 
   useEffect(() => {
-    if (!socket || !effectiveCompanyId) return;
+    if (!socket) return;
+    if (adminAllDriversMode) {
+      socket.emit("central:fleet:subscribe-all");
+      const onUpdate = (raw: unknown) => {
+        const patch = raw as CentralFleetSocketPatch;
+        if (!patch?.userId) return;
+        const key = CENTRAL_FLEET_ALL_QUERY_KEY;
+        let needsFullRow = false;
+        queryClient.setQueryData<CentralFleetDriver[]>(key, (prev) => {
+          const list = prev ?? [];
+          if (!patch.offline && !list.some((d) => d.userId === patch.userId)) {
+            needsFullRow = true;
+          }
+          return mergeCentralFleetDriverPatch(prev, patch);
+        });
+        if (needsFullRow) debouncedRefetch(queryClient, key);
+      };
+      socket.on("central:fleet:update", onUpdate);
+      return () => {
+        socket.emit("central:fleet:unsubscribe-all");
+        socket.off("central:fleet:update", onUpdate);
+      };
+    }
+    if (!effectiveCompanyId) return;
     socket.emit("central:fleet:subscribe", { companyId: effectiveCompanyId });
     const onUpdate = (raw: unknown) => {
       const patch = raw as CentralFleetSocketPatch;
@@ -109,7 +150,7 @@ export default function CentralDashboard() {
       socket.emit("central:fleet:unsubscribe", { companyId: effectiveCompanyId });
       socket.off("central:fleet:update", onUpdate);
     };
-  }, [socket, effectiveCompanyId, queryClient]);
+  }, [socket, effectiveCompanyId, adminAllDriversMode, queryClient]);
 
   useEffect(() => {
     if (!isAdmin && (user as { dispatchCompanyId?: string })?.dispatchCompanyId) {
@@ -141,8 +182,13 @@ export default function CentralDashboard() {
     return fleet.find((d) => d.userId === selectedDriver.userId) ?? selectedDriver;
   }, [fleet, selectedDriver]);
 
-  const companyName = me?.company?.name ?? "Empresa";
-  const serviceMapView = useMemo(() => resolveCentralServiceMapView(me?.company), [me?.company]);
+  const companyName = adminAllDriversMode
+    ? "Todos los conductores"
+    : (me?.company?.name ?? "Empresa");
+  const serviceMapView = useMemo(
+    () => (adminAllDriversMode ? resolveCentralServiceMapView(null) : resolveCentralServiceMapView(me?.company)),
+    [adminAllDriversMode, me?.company],
+  );
 
   const handlePersistServiceMap = async (lat: number, lon: number, zoom: number) => {
     const cityZoom = Math.min(14, Math.max(9, Math.round(zoom)));
@@ -173,9 +219,12 @@ export default function CentralDashboard() {
   };
 
   const sharedProps = {
-    companyId: effectiveCompanyId!,
+    companyId: adminAllDriversMode ? "__all__" : effectiveCompanyId!,
     companyName,
     isAdmin,
+    adminAllDriversMode,
+    adminView,
+    onAdminViewChange: setAdminView,
     companies: companies ?? [],
     companySearch,
     onCompanySearchChange: setCompanySearch,
@@ -228,9 +277,19 @@ export default function CentralDashboard() {
     return <Redirect to={CENTRAL_SETUP_PATH} />;
   }
 
-  if (isAdmin && !effectiveCompanyId) {
+  if (isAdmin && !adminAllDriversMode && !effectiveCompanyId) {
     return (
-      <div className="container max-w-lg py-12">
+      <div className="container max-w-lg space-y-4 py-12">
+        <Tabs
+          value={adminView}
+          onValueChange={(v) => setAdminView(v as AdminCentralView)}
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="centrales">Centrales</TabsTrigger>
+            <TabsTrigger value="all-drivers">Todos los conductores</TabsTrigger>
+          </TabsList>
+        </Tabs>
         <Card className="border-primary/20 shadow-md">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

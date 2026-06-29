@@ -101,6 +101,8 @@ import {
   type StoredDrivingRoute,
 } from "@/lib/driving-route-geometry";
 import { isRouteFetchInFailureBackoff } from "@/lib/driving-route-fetch-backoff";
+import { buildLiveMapsRouteUrl, shouldRecalcLiveRoute } from "@/lib/live-navigation-route";
+import { useEmitRideLocation } from "@/lib/ride-location-emit";
 import {
   GO_DRIVER_SUBSCRIPTION_INACTIVE_DRIVER_BANNER,
   GO_DRIVER_SUBSCRIPTION_INACTIVE_NEGOTIATION_HINT,
@@ -112,9 +114,6 @@ import {
   type GoCancellationFeedbackSubmit,
 } from "@/components/go/GoCancellationFeedbackDialog";
 import type { GoDriverCancelPhase } from "@shared/go-cancellation-feedback";
-
-const DRIVER_ROUTE_DEVIATION_M = 80;
-const DRIVER_ROUTE_DEVIATION_REFETCH_MS = 25_000;
 
 function serviceNavTargetKey(target: { lat: number; lon: number }): string {
   return `${target.lat.toFixed(5)},${target.lon.toFixed(5)}`;
@@ -1044,19 +1043,13 @@ export default function DriverGoGenfeb() {
     activeServiceModule,
   ]);
 
-  useEffect(() => {
-    if (!socket || !activeRideId || !geoPos) return;
-    const send = () => {
-      socket.emit(locationEvent, {
-        rideId: activeRideId,
-        lat: geoPos.lat,
-        lon: geoPos.lon,
-      });
-    };
-    send();
-    const t = window.setInterval(send, 5000);
-    return () => window.clearInterval(t);
-  }, [socket, activeRideId, geoPos, locationEvent]);
+  useEmitRideLocation({
+    socket,
+    rideId: activeRideId,
+    geoPos,
+    geoPosRef,
+    eventName: locationEvent,
+  });
 
   const respondToOffer = async (accept: boolean) => {
     const entry = pinnedOfferEntry ?? goDriverUi?.currentOffer ?? null;
@@ -1476,7 +1469,10 @@ export default function DriverGoGenfeb() {
     if (!activeRideId || !g || !serviceNavTarget) return false;
     if (serviceRouteFetchInFlightRef.current) return false;
     const targetKey = serviceNavTargetKey(serviceNavTarget);
-    const url = `/api/maps/route?from=${g.lon},${g.lat}&to=${serviceNavTarget.lon},${serviceNavTarget.lat}`;
+    const url = buildLiveMapsRouteUrl(
+      { lon: g.lon, lat: g.lat },
+      { lon: serviceNavTarget.lon, lat: serviceNavTarget.lat },
+    );
     const tryOnce = async (): Promise<boolean> => {
       const res = await fetch(url);
       const data = (await res.json().catch(() => null)) as {
@@ -1523,8 +1519,9 @@ export default function DriverGoGenfeb() {
     if (!activeRideId || !g || !serviceNavTarget) return;
     const targetKey = serviceNavTargetKey(serviceNavTarget);
     const route = activeServiceRouteRef.current;
+    const targetChanged = !!route && route.targetKey !== targetKey;
 
-    if (!route || route.targetKey !== targetKey) {
+    if (!route || targetChanged) {
       if (
         !route &&
         isRouteFetchInFailureBackoff(lastServiceRouteFailureRef.current, targetKey)
@@ -1532,16 +1529,29 @@ export default function DriverGoGenfeb() {
         return;
       }
       serviceRouteTrimIndexRef.current = 0;
+      if (serviceRouteFetchInFlightRef.current) {
+        if (route && !targetChanged) applyTrimmedServiceRoute(route, g);
+        return;
+      }
       void fetchServiceRoadRoute();
       return;
     }
 
     const trimmed = applyTrimmedServiceRoute(route, g);
-    if (trimmed.deviationM < DRIVER_ROUTE_DEVIATION_M) return;
+    if (serviceRouteFetchInFlightRef.current) return;
 
-    const now = Date.now();
-    const last = lastServiceRouteDeviationFetchRef.current;
-    if (last?.targetKey === targetKey && now - last.at < DRIVER_ROUTE_DEVIATION_REFETCH_MS) return;
+    if (
+      !shouldRecalcLiveRoute({
+        routeMissing: false,
+        targetChanged: false,
+        deviationM: trimmed.deviationM,
+        lastFetch: lastServiceRouteDeviationFetchRef.current,
+        targetKey,
+      })
+    ) {
+      return;
+    }
+
     void fetchServiceRoadRoute();
   }, [activeRideId, serviceNavTarget, applyTrimmedServiceRoute, fetchServiceRoadRoute]);
 

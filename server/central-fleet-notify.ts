@@ -40,13 +40,16 @@ export function centralFleetRoom(companyId: string): string {
   return `central:${companyId}`;
 }
 
+/** Sala global: admins ven todos los conductores activos (con o sin central). */
+export const CENTRAL_FLEET_ALL_ROOM = "central:fleet:all";
+
 export function emitCentralFleetUpdate(
   io: SocketIOServer | null | undefined,
   pres: CentralFleetPresencePayload,
   options: boolean | CentralFleetEmitOptions = {},
 ): void {
   const sock = io ?? getIO();
-  if (!sock || !pres.dispatchCompanyId) return;
+  if (!sock) return;
 
   const opts: CentralFleetEmitOptions = typeof options === "boolean" ? { offline: options } : options;
   const offline = !!opts.offline;
@@ -68,7 +71,7 @@ export function emitCentralFleetUpdate(
     Number.isFinite(pres.updatedAt) &&
     Date.now() - pres.updatedAt <= CENTRAL_FLEET_POSITION_LIVE_MS;
 
-  sock.to(centralFleetRoom(pres.dispatchCompanyId)).emit("central:fleet:update", {
+  const payload = {
     ...pres,
     offline,
     positionLive,
@@ -76,5 +79,10 @@ export function emitCentralFleetUpdate(
     ...(opts.receiving !== undefined ? { receiving: opts.receiving } : {}),
     ...(opts.receivingTaxi !== undefined ? { receivingTaxi: opts.receivingTaxi } : {}),
     ...(opts.receivingDelivery !== undefined ? { receivingDelivery: opts.receivingDelivery } : {}),
-  });
+  };
+
+  if (pres.dispatchCompanyId) {
+    sock.to(centralFleetRoom(pres.dispatchCompanyId)).emit("central:fleet:update", payload);
+  }
+  sock.to(CENTRAL_FLEET_ALL_ROOM).emit("central:fleet:update", payload);
 }

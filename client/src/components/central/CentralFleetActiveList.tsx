@@ -28,6 +28,8 @@ type CentralFleetActiveListProps = {
   /** Altura máxima del scroll interno. */
   maxHeightClass?: string;
   emptyMessage?: string;
+  /** Vista admin global: muestra la central de cada conductor. */
+  showDispatchCompany?: boolean;
 };
 
 export function CentralFleetActiveList({
@@ -36,6 +38,7 @@ export function CentralFleetActiveList({
   onSelectDriver,
   maxHeightClass = "max-h-72",
   emptyMessage = "No hay conductores recibiendo servicios ni en viaje en este momento.",
+  showDispatchCompany = false,
 }: CentralFleetActiveListProps) {
   return (
     <div className={cn("relative min-h-[4.5rem]", maxHeightClass, "overflow-y-auto overflow-x-hidden pr-0.5")}>
@@ -94,6 +97,11 @@ export function CentralFleetActiveList({
                         <p className="truncate text-sm font-semibold">
                           {driver.name} {driver.lastName}
                         </p>
+                        {showDispatchCompany ? (
+                          <p className="truncate text-[10px] text-muted-foreground">
+                            {driver.dispatchCompanyName?.trim() || "Sin central"}
+                          </p>
+                        ) : null}
                         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                           <Badge
                             variant={driver.inService ? "default" : "secondary"}

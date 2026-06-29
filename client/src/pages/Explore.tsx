@@ -119,7 +119,7 @@ export default function Explore() {
     if (slug && hiddenSlugs.has(slug)) return;
     const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
     if (slug === "transport") return setLocation(`/go/taxi${fromQs}`);
-    if (slug === "marketplace") return setLocation(`/marketplace${fromQs}`);
+    if (slug === "marketplace") return setLocation(`/tiendas${fromQs}`);
     if (slug === "delivery") return setLocation(`/go/taxi${fromQs}`);
   }, [categories, providerCategoryFromUrl, exploreFrom, setLocation, hiddenSlugs]);
 
@@ -149,7 +149,7 @@ export default function Explore() {
     }
     if (slug === "marketplace") {
       const fromQs = exploreFrom === "categories" ? "?from=categories" : "";
-      setLocation(`/marketplace${fromQs}`);
+      setLocation(`/tiendas${fromQs}`);
       return;
     }
     if (slug === "delivery") {

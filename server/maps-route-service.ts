@@ -12,6 +12,7 @@ const MAPS_USER_AGENT =
 const MAPS_ROUTE_FETCH_TIMEOUT_MS = Number(process.env.MAPS_ROUTE_FETCH_TIMEOUT_MS || 22_000);
 
 const ROUTE_CACHE_TTL_MS = 5 * 60_000;
+const LIVE_ROUTE_CACHE_TTL_MS = 45_000;
 
 type CacheEntry<T> = { expiresAt: number; value: T };
 const routeCache = new Map<string, CacheEntry<DrivingRouteResult>>();
@@ -81,9 +82,14 @@ function cacheSet(key: string, value: DrivingRouteResult, ttlMs: number) {
 export async function computeDrivingRoute(
   from: { lon: number; lat: number },
   to: { lon: number; lat: number },
+  opts?: { live?: boolean },
 ): Promise<DrivingRouteResult> {
-  // Origen más grueso (~11 m): ahorra cuota cuando el conductor se mueve en servicio activo.
-  const cacheKey = `ga|from=${from.lon.toFixed(4)},${from.lat.toFixed(4)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
+  const live = !!opts?.live;
+  // Planificación: origen grueso (~11 m). Navegación en vivo: precisión fina y TTL corto.
+  const cacheKey = live
+    ? `ga|live|from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`
+    : `ga|from=${from.lon.toFixed(4)},${from.lat.toFixed(4)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
+  const cacheTtlMs = live ? LIVE_ROUTE_CACHE_TTL_MS : ROUTE_CACHE_TTL_MS;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
 
@@ -129,7 +135,7 @@ export async function computeDrivingRoute(
       geometry,
       source: "geoapify",
     };
-    cacheSet(cacheKey, payload, ROUTE_CACHE_TTL_MS);
+    cacheSet(cacheKey, payload, cacheTtlMs);
     return payload;
   } catch (e) {
     console.error("[maps-route-service] route failed", e);

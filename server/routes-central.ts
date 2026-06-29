@@ -29,7 +29,11 @@ import {
   packDriverInActiveRide,
   refreshPackPresenceDispatchCompany,
 } from "./pack-rides";
-import { centralFleetRoom, CENTRAL_FLEET_POSITION_LIVE_MS } from "./central-fleet-notify";
+import {
+  centralFleetRoom,
+  CENTRAL_FLEET_ALL_ROOM,
+  CENTRAL_FLEET_POSITION_LIVE_MS,
+} from "./central-fleet-notify";
 import { getCentralFleetLastKnown } from "./central-fleet-last-known";
 import {
   getReceivingStopped,
@@ -164,6 +168,70 @@ function resolveFleetPosition(
     packFresh,
     taxiAny,
     packAny,
+  };
+}
+
+async function buildCentralFleetDriver(userId: string): Promise<Record<string, unknown> | null> {
+  const inService = mobilityDriverInActiveRide(userId) || packDriverInActiveRide(userId);
+  const taxiPres = freshMobilityPresence(userId, inService);
+  const packPres = freshPackPresence(userId, inService);
+  const receivingTaxiRaw = !!(taxiPres && !taxiPres.idleOnMapDuringRide);
+  const receivingDeliveryRaw = !!(packPres && !packPres.idleOnMapDuringRide);
+  const receiving = inService ? false : !!(receivingTaxiRaw || receivingDeliveryRaw);
+  const pos = resolveFleetPosition(userId, inService, receiving, taxiPres, packPres);
+  if (!pos) return null;
+
+  const activeService = inService
+    ? (await getMobilityActiveRideForCentral(userId)) ?? (await getPackActiveRideForCentral(userId))
+    : null;
+
+  const user = (await genFebStorage.getUserById(userId)) as {
+    name?: string;
+    lastName?: string;
+    avatar?: string;
+    rating?: number;
+    phone?: string | null;
+    dispatchCompanyId?: string | null;
+  } | null;
+  const vehicle = await genFebStorage.getPrimaryVehicleByUserId(userId);
+  const provider = await catalogService.getProviderByUserId(userId);
+  const dispatchCompanyId =
+    String(
+      (provider as { dispatchCompanyId?: string } | null)?.dispatchCompanyId ??
+        user?.dispatchCompanyId ??
+        "",
+    ).trim() || null;
+  let dispatchCompanyName: string | null = null;
+  if (dispatchCompanyId) {
+    const company = await getDispatchCompany(dispatchCompanyId);
+    dispatchCompanyName = company?.name ?? null;
+  }
+
+  return {
+    userId,
+    name: user?.name ?? "",
+    lastName: user?.lastName ?? "",
+    avatar: user?.avatar ?? null,
+    phone: user?.phone != null && String(user.phone).trim() ? String(user.phone).trim() : null,
+    licensePlate:
+      vehicle?.license_plate != null && String(vehicle.license_plate).trim()
+        ? String(vehicle.license_plate).trim().toUpperCase()
+        : null,
+    rating: Number(user?.rating ?? 5),
+    vehicleType: pos.pres?.vehicleType ?? vehicle?.vehicle_type ?? "car",
+    isPetFriendly: pos.taxiAny?.isPetFriendly ?? pos.taxiFresh?.isPetFriendly ?? false,
+    lat: pos.lat,
+    lon: pos.lon,
+    receivingTaxi: inService ? false : receivingTaxiRaw,
+    receivingDelivery: inService ? false : receivingDeliveryRaw,
+    receiving,
+    inService,
+    updatedAt: pos.updatedAt,
+    positionLive: pos.positionLive,
+    receivingStoppedAt: pos.receivingStoppedAt,
+    activeService,
+    dispatchCompanyId,
+    dispatchCompanyName,
   };
 }
 
@@ -318,52 +386,26 @@ export function registerCentralRoutes(app: Express): void {
     for (const p of fleet) {
       const userId = String((p as { userId?: string }).userId ?? "");
       if (!userId) continue;
-      const inService = mobilityDriverInActiveRide(userId) || packDriverInActiveRide(userId);
-      const taxiPres = freshMobilityPresence(userId, inService);
-      const packPres = freshPackPresence(userId, inService);
-      const receivingTaxiRaw = !!(taxiPres && !taxiPres.idleOnMapDuringRide);
-      const receivingDeliveryRaw = !!(packPres && !packPres.idleOnMapDuringRide);
-      const receiving = inService ? false : !!(receivingTaxiRaw || receivingDeliveryRaw);
-      const pos = resolveFleetPosition(userId, inService, receiving, taxiPres, packPres);
-      if (!pos) continue;
+      const row = await buildCentralFleetDriver(userId);
+      if (row) drivers.push(row);
+    }
+    res.json({ drivers });
+  });
 
-      const activeService = inService
-        ? (await getMobilityActiveRideForCentral(userId)) ?? (await getPackActiveRideForCentral(userId))
-        : null;
-
-      const user = (await genFebStorage.getUserById(userId)) as {
-        name?: string;
-        lastName?: string;
-        avatar?: string;
-        rating?: number;
-        phone?: string | null;
-      } | null;
-      const vehicle = await genFebStorage.getPrimaryVehicleByUserId(userId);
-
-      drivers.push({
-        userId,
-        name: user?.name ?? "",
-        lastName: user?.lastName ?? "",
-        avatar: user?.avatar ?? null,
-        phone: user?.phone != null && String(user.phone).trim() ? String(user.phone).trim() : null,
-        licensePlate:
-          vehicle?.license_plate != null && String(vehicle.license_plate).trim()
-            ? String(vehicle.license_plate).trim().toUpperCase()
-            : null,
-        rating: Number(user?.rating ?? 5),
-        vehicleType: pos.pres?.vehicleType ?? vehicle?.vehicle_type ?? "car",
-        isPetFriendly: pos.taxiAny?.isPetFriendly ?? pos.taxiFresh?.isPetFriendly ?? false,
-        lat: pos.lat,
-        lon: pos.lon,
-        receivingTaxi: inService ? false : receivingTaxiRaw,
-        receivingDelivery: inService ? false : receivingDeliveryRaw,
-        receiving,
-        inService,
-        updatedAt: pos.updatedAt,
-        positionLive: pos.positionLive,
-        receivingStoppedAt: pos.receivingStoppedAt,
-        activeService,
-      });
+  /** Admin: todos los conductores activos (con o sin central). */
+  app.get("/api/central/fleet/all", authenticateJWT, async (req: any, res) => {
+    if (!hasAdminPrivileges(req.user?.role)) {
+      return res.status(403).json({ message: "Sin acceso" });
+    }
+    const providers = await genFebStorage.getAllProviders();
+    const seen = new Set<string>();
+    const drivers: unknown[] = [];
+    for (const p of providers) {
+      const userId = String((p as { userId?: string }).userId ?? "");
+      if (!userId || seen.has(userId)) continue;
+      seen.add(userId);
+      const row = await buildCentralFleetDriver(userId);
+      if (row) drivers.push(row);
     }
     res.json({ drivers });
   });
@@ -699,6 +741,15 @@ export function registerCentralSocket(io: import("socket.io").Server): void {
 
     socket.on("central:fleet:unsubscribe", (data: { companyId?: string }) => {
       if (data?.companyId) socket.leave(centralFleetRoom(data.companyId));
+    });
+
+    socket.on("central:fleet:subscribe-all", () => {
+      if (!hasAdminPrivileges(user.role)) return;
+      socket.join(CENTRAL_FLEET_ALL_ROOM);
+    });
+
+    socket.on("central:fleet:unsubscribe-all", () => {
+      socket.leave(CENTRAL_FLEET_ALL_ROOM);
     });
   });
 }
