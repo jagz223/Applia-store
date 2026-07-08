@@ -41,18 +41,30 @@ export async function fetchModelsForMake(makeName: string): Promise<string[]> {
 }
 
 /** Año modelo más antiguo que permitimos consultar (inclusive). */
-export const NHTSA_YEAR_MIN = 1995;
+export const NHTSA_YEAR_MIN = 1980;
 const YEAR_CHECK_CONCURRENCY = 6;
 const FETCH_RETRIES = 0;
 const RETRY_MS = 120;
 
 function modelMatchesSelection(apiName: string, selectedNorm: string): boolean {
-  const n = apiName.trim().toLowerCase();
-  const s = selectedNorm.trim().toLowerCase();
+  const normalize = (v: string) =>
+    v
+      .trim()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "") // acentos
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ") // puntuacion -> espacios
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const n = normalize(apiName);
+  const s = normalize(selectedNorm);
   if (!s || !n) return false;
   if (n === s) return true;
+
   // Variantes vPIC: "Corolla" vs "Corolla LE", "Camry" vs "Camry Hybrid", etc.
-  if (s.length >= 4 && n.includes(s)) return true;
+  if (s.length >= 3 && n.includes(s)) return true;
   if (n.startsWith(`${s} `) || n.startsWith(`${s}(`)) return true;
   return false;
 }
@@ -63,7 +75,7 @@ export async function fetchYearsForMakeAndModel(make: string, model: string): Pr
   const modelNorm = model.trim().toLowerCase();
   const maxY = new Date().getFullYear() + 1;
   const startedAt = Date.now();
-  const overallTimeoutMs = 25000;
+  const overallTimeoutMs = 35000;
   const COARSE_STEP_YEARS = 5;
 
   const modelInResults = (results: { Model_Name?: string }[]) => {

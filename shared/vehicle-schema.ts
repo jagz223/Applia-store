@@ -21,7 +21,7 @@ export const insertProviderVehicleSchema = z
     model_year: z.coerce
       .number()
       .int()
-      .min(1995)
+      .min(1980)
       .max(new Date().getFullYear() + 1, { message: "Año no válido." }),
     brand: z.string().trim().min(1).max(80),
     model: z.string().trim().min(1).max(80),
