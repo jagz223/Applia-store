@@ -57,6 +57,15 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   }
 }
 
+async function readResponseBodySafe(r: Response): Promise<string> {
+  try {
+    const text = await r.text();
+    return text?.trim() ? text.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 type CacheEntry = { years: number[]; cachedAt: number };
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 días
 
@@ -101,7 +110,9 @@ class ApiNinjasVehicleYearsService {
         throw new Error("API Ninjas rechazó la autenticación (revisa API_NINJAS_KEY/plan)");
       }
       if (!r.ok) {
-        throw new Error(`API Ninjas error (${r.status})`);
+        const body = await readResponseBodySafe(r);
+        const suffix = body ? `: ${body.slice(0, 600)}` : "";
+        throw new Error(`API Ninjas error (${r.status})${suffix}`);
       }
 
       const rows = (await r.json()) as unknown;
