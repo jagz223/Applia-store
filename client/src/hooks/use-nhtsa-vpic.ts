@@ -20,6 +20,7 @@ export function useNhtsaModelsForMake(makeName: string | undefined | null) {
     enabled: Boolean(name),
     staleTime: DAY,
     gcTime: DAY * 7,
+    retry: 1,
   });
 }
 
@@ -35,5 +36,6 @@ export function useNhtsaYearsForMakeModel(
     enabled: Boolean(make && model),
     staleTime: DAY,
     gcTime: DAY * 7,
+    retry: 0,
   });
 }
