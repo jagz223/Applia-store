@@ -12,7 +12,7 @@ import { serviceListingCategorySlug } from "@shared/service-belongs-to-brand";
 import { buildGoDriverEnrollmentCategoryPatch } from "@shared/provider-category-membership";
 import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
-import { catalogService, bookingService, vehiclesDbService, apiNinjasVehicleYearsService } from "./services";
+import { catalogService, bookingService, vehiclesDbService, nhtsaVehicleYearsService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
 import { getDispatchCompany } from "./dispatch-companies";
 import {
@@ -88,13 +88,13 @@ export async function registerRoutes(
     res.json(models);
   });
 
-  // Años por marca+modelo (rápido): API Ninjas. Evita vPIC año-por-año.
+  // Años por marca+modelo (gratis): NHTSA vPIC, con caché server-side.
   app.get("/api/vehicle-years", async (req, res) => {
     try {
       const make = String(req.query.make ?? "");
       const model = String(req.query.model ?? "");
       if (!make.trim() || !model.trim()) return res.json([]);
-      const years = await apiNinjasVehicleYearsService.getYearsForMakeModel(make, model);
+      const years = await nhtsaVehicleYearsService.getYearsForMakeModel(make, model);
       res.json(years);
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "No se pudieron cargar los años" });

@@ -11,7 +11,7 @@ import { BookingService } from "./booking.service";
 import { PromotionalCodeService } from "./promotional-code.service";
 import { AdminUserRegistrationService } from "./admin-user-registration.service";
 import { vehiclesDbService } from "./vehiclesdb.service";
-import { apiNinjasVehicleYearsService } from "./api-ninjas-vehicle-years.service";
+import { nhtsaVehicleYearsService } from "./nhtsa-vehicle-years.service";
 
 export const userService = new UserService(genFebStorage);
 export const adminUserRegistrationService = new AdminUserRegistrationService(
@@ -23,7 +23,7 @@ export const catalogService = new CatalogService(genFebStorage);
 export const bookingService = new BookingService(genFebStorage);
 export const promotionalCodeService = new PromotionalCodeService(genFebStorage);
 export { vehiclesDbService };
-export { apiNinjasVehicleYearsService };
+export { nhtsaVehicleYearsService };
 
 export {
   UserService,
