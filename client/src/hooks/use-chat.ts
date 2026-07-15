@@ -17,7 +17,7 @@ import type { ConversationEnriched, Message } from "@/types/chat";
 /** Mensajes por página (alineado con backend). Balance UX / carga servidor. */
 export const CHAT_MESSAGES_PAGE_SIZE = 25;
 
-const QUERY_KEYS = {
+export const QUERY_KEYS = {
   conversations: ["chat", "conversations"] as const,
   messages: (conversationId: number) => ["chat", "messages", conversationId] as const,
 };

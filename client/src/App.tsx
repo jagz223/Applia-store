@@ -77,6 +77,7 @@ import { GoShellLayout } from "@/components/go/GoShellLayout";
 import { useGoCompactViewport } from "@/lib/go-viewport-layout";
 import { GoCategoryGate } from "@/components/go/GoCategoryGate";
 import { GoActiveRideResume } from "@/components/go/GoActiveRideResume";
+import { HelpAiChatWidget } from "@/components/help/HelpAiChatWidget";
 import Marketplace from "@/pages/Marketplace";
 import GoPack from "@/pages/go/GoPack";
 import PackRide from "@/pages/PackRide";
@@ -256,6 +257,7 @@ function App() {
               <PushPermissionReminder />
             </div>
             <GoActiveRideResume />
+            <HelpAiChatWidget />
             <RatingGate />
             <AccountRecoveryGate />
             <ProviderTermsGate />

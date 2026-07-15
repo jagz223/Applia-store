@@ -7,6 +7,9 @@
 /** Botón/popover flotante hacia módulos Go (Home). Debajo del menú móvil (Sheet z-50). */
 export const UI_Z_GO_FLOATING = "z-40";
 
+/** Asistente de ayuda IA (escritorio). Por encima de FAB Go y nav sticky. */
+export const UI_Z_HELP_CHAT = "z-[100]";
+
 /** Dialog legacy: overlay (hermano anterior al contenido). */
 export const MODAL_Z_DIALOG_OVERLAY = "z-[2147482000]";
 
