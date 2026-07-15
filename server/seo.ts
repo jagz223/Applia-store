@@ -40,33 +40,39 @@ function escapeXml(s: string): string {
 const DEFAULT_TWA_PACKAGE_NAME = "com.genfeb.www.twa";
 
 /**
- * Huellas SHA-256 del certificado de firma (Play App Signing + upload key).
- * Play Console → asociación de dominio / Digital Asset Links.
- * Sobrescribible con TWA_SHA256_FINGERPRINTS (coma-separado).
+ * Huellas SHA-256 exigidas por Play Console para Digital Asset Links
+ * (App Signing + upload key). Deben coincidir exactamente con el JSON de
+ * «Agregar dominio» o Google rechaza la asociación.
  */
-const DEFAULT_TWA_SHA256_FINGERPRINTS = [
+const REQUIRED_PLAY_SHA256_FINGERPRINTS = [
   "0E:7E:FB:C9:7B:22:24:84:A6:6F:A1:A6:E7:D2:23:B6:91:9B:28:57:1C:C6:5F:A1:C6:82:29:43:C4:4B:AB:A1",
   "4B:90:DF:7B:23:C6:12:F9:AD:B5:EF:73:35:FD:FE:A1:65:6D:FE:40:64:3E:65:D8:17:0B:01:B5:36:0D:B2:06",
 ] as const;
 
+function resolveTwaSha256Fingerprints(): string[] {
+  const fromEnv = (process.env.TWA_SHA256_FINGERPRINTS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Unión: nunca omitir los fingerprints oficiales de Play (el env a veces trae solo uno).
+  const merged = new Set<string>([...REQUIRED_PLAY_SHA256_FINGERPRINTS, ...fromEnv]);
+  return Array.from(merged);
+}
+
 /**
- * Digital Asset Links para la app TWA (Bubblewrap) + compartir credenciales con el sitio.
- * Debe responder en el mismo origen que abre la app (genfeb.com y/o www.genfeb.com).
- * Comprobar: https://genfeb.com/.well-known/assetlinks.json (200 + JSON).
+ * Digital Asset Links para la app TWA + compartir credenciales con el sitio.
+ * Debe responder 200 + JSON en https://genfeb.com/.well-known/assetlinks.json
+ * (mismo origen que pide Play; un 301 solo hacia www puede romper la verificación).
  */
 export function registerAssetLinksRoute(app: Express): void {
   app.get("/.well-known/assetlinks.json", (_req, res) => {
     const packageName = process.env.TWA_PACKAGE_NAME?.trim() || DEFAULT_TWA_PACKAGE_NAME;
-    const raw = process.env.TWA_SHA256_FINGERPRINTS?.trim();
-    const sha256_cert_fingerprints = raw
-      ? raw
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [...DEFAULT_TWA_SHA256_FINGERPRINTS];
+    const sha256_cert_fingerprints = resolveTwaSha256Fingerprints();
 
     res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=300");
+    // Play revalida; evitar CDN/proxy con JSON viejo incompleto.
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.json([
       {
         relation: [
