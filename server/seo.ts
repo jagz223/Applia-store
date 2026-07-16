@@ -1,7 +1,7 @@
 import type { Express } from "express";
 
-/** Dominio canónico (sitemap / robots). Usar www: es la URL que Google rastrea. Sobrescribible con PUBLIC_SITE_URL en Render. */
-const CANONICAL_SITE_ORIGIN = "https://www.genfeb.com";
+/** Dominio canónico (sitemap / robots / TWA). Apex sin www (coincide con Play + bubblewrap). Sobrescribible con PUBLIC_SITE_URL. */
+const CANONICAL_SITE_ORIGIN = "https://genfeb.com";
 
 /** Entradas del sitemap: sin /login ni /register (no suelen indexarse). */
 const SITEMAP_ENTRIES: readonly { path: string; changefreq: string; priority: string }[] = [
@@ -14,7 +14,7 @@ const SITEMAP_ENTRIES: readonly { path: string; changefreq: string; priority: st
 /**
  * Origen canónico del sitio (sin barra final).
  * - Definí PUBLIC_SITE_URL si usás otro dominio o staging (p. ej. https://xxx.onrender.com).
- * - En producción sin env, se usa CANONICAL_SITE_ORIGIN (www.genfeb.com).
+ * - En producción sin env, se usa CANONICAL_SITE_ORIGIN (https://genfeb.com).
  * - En desarrollo: RENDER_EXTERNAL_URL si existe, si no localhost.
  */
 function getPublicOrigin(): string {

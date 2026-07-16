@@ -31,7 +31,7 @@ function buildSameAppIntentUrl(path: string, query?: Record<string, string>): st
   const genfebUrl = buildGenfebBridgeUrl(path, query);
   const withoutScheme = genfebUrl.replace(/^genfeb:\/\//, "");
   const fallback = encodeURIComponent(
-    typeof window !== "undefined" ? window.location.href.split("#")[0] : "https://www.genfeb.com/go/driver",
+    typeof window !== "undefined" ? window.location.href.split("#")[0] : "https://genfeb.com/go/driver",
   );
   return `intent://${withoutScheme}#Intent;scheme=genfeb;package=${GENFEB_TWA_PACKAGE};S.browser_fallback_url=${fallback};end`;
 }
