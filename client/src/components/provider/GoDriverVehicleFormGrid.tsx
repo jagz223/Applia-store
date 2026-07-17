@@ -188,34 +188,49 @@ export function GoDriverVehicleFormGrid({
             <FormItem>
               <FormLabel>Año del vehículo</FormLabel>
               <FormDescription className="text-xs">
-                Depende de la marca y el modelo que elijas. Escribe para filtrar entre los años disponibles.
+                Puedes escribirlo manualmente. Si el catálogo responde, verás sugerencias automáticas.
               </FormDescription>
               <FormControl>
-                <VehicleSearchCombobox
-                  value={field.value ? String(field.value) : ""}
-                  onChange={(s) =>
-                    field.onChange(s ? parseInt(s, 10) : (nhtsaYears[0] ?? new Date().getFullYear()))
-                  }
-                  options={yearOptionsStrings}
-                  isLoading={nhtsaYearsLoading}
-                  disabled={!String(vehicleBrand ?? "").trim() || !String(vehicleModelWatch ?? "").trim()}
-                  placeholder={
-                    !String(vehicleBrand ?? "").trim() || !String(vehicleModelWatch ?? "").trim()
-                      ? "Elige marca y modelo primero"
-                      : nhtsaYearsLoading
-                        ? "Cargando años…"
-                        : "Buscar año…"
-                  }
-                  searchPlaceholder="Escribe el año…"
-                  emptyMessage={
-                    nhtsaYearsLoading
-                      ? "Cargando…"
-                      : yearOptionsStrings.length === 0
-                        ? "Sin años en catálogo para esta marca y modelo."
-                        : "Sin coincidencias."
-                  }
-                />
+                <>
+                  <Input
+                    type="number"
+                    min={1980}
+                    max={new Date().getFullYear() + 1}
+                    inputMode="numeric"
+                    list={yearOptionsStrings.length > 0 ? "vehicle-model-year-options" : undefined}
+                    placeholder={
+                      !String(vehicleBrand ?? "").trim() || !String(vehicleModelWatch ?? "").trim()
+                        ? "Escribe el año manualmente"
+                        : nhtsaYearsLoading
+                          ? "Cargando sugerencias…"
+                          : "Ej. 2018"
+                    }
+                    value={field.value == null ? "" : String(field.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value.trim();
+                      field.onChange(raw === "" ? "" : parseInt(raw, 10));
+                    }}
+                  />
+                  {yearOptionsStrings.length > 0 ? (
+                    <datalist id="vehicle-model-year-options">
+                      {yearOptionsStrings.map((year) => (
+                        <option key={year} value={year} />
+                      ))}
+                    </datalist>
+                  ) : null}
+                </>
               </FormControl>
+              {nhtsaYearsLoading ? (
+                <p className="text-xs text-muted-foreground">Cargando sugerencias de años…</p>
+              ) : null}
+              {!nhtsaYearsLoading &&
+              String(vehicleBrand ?? "").trim() &&
+              String(vehicleModelWatch ?? "").trim() &&
+              yearOptionsStrings.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No se encontraron años sugeridos para esta marca y modelo. Puedes escribir el año manualmente.
+                </p>
+              ) : null}
               <FormMessage />
             </FormItem>
           )}

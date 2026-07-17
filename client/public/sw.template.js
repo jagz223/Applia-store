@@ -16,7 +16,7 @@ firebase.initializeApp({
 
 firebase.messaging();
 
-const CACHE_NAME = "genfeb-v18";
+const CACHE_NAME = "genfeb-v19";
 const OFFLINE_URL = "/offline.html";
 
 const PRECACHE_ASSETS = [

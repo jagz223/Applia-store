@@ -6,4 +6,4 @@ Disallow: /login
 Disallow: /register
 
 # Indicamos la ruta de tu sitemap oficial
-Sitemap: https://www.genfeb.com/sitemap.xml
+Sitemap: https://genfeb.com/sitemap.xml

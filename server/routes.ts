@@ -12,7 +12,7 @@ import { serviceListingCategorySlug } from "@shared/service-belongs-to-brand";
 import { buildGoDriverEnrollmentCategoryPatch } from "@shared/provider-category-membership";
 import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
-import { catalogService, bookingService } from "./services";
+import { catalogService, bookingService, vehiclesDbService, nhtsaVehicleYearsService } from "./services";
 import { genFebStorage } from "./storage-genfeb";
 import { getDispatchCompany } from "./dispatch-companies";
 import {
@@ -45,6 +45,7 @@ import { registerMobilityRideRoutes, mobilityPanicResolveContext } from "./mobil
 import { registerPackRideRoutes, packPanicResolveContext } from "./pack-rides";
 import { registerSeoRoutes } from "./seo";
 import { registerStoreRoutes } from "./routes-stores";
+import { registerHelpChatRoutes } from "./routes-help-chat";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
@@ -73,6 +74,34 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   registerSeoRoutes(app);
+  registerHelpChatRoutes(app);
+
+  // VehiclesDB (open catalogue) - marcas/modelos globales.
+  // Usamos un proxy desde el backend para evitar CORS y para cachear la carga del catálogo.
+  app.get("/api/vehiclesdb/makes", async (_req, res) => {
+    const makeNames = await vehiclesDbService.getMakeNames();
+    res.json(makeNames);
+  });
+
+  app.get("/api/vehiclesdb/models", async (req, res) => {
+    const make = String(req.query.make ?? "");
+    if (!make.trim()) return res.json([]);
+    const models = await vehiclesDbService.getModelNamesForMake(make);
+    res.json(models);
+  });
+
+  // Años por marca+modelo (gratis): NHTSA vPIC, con caché server-side.
+  app.get("/api/vehicle-years", async (req, res) => {
+    try {
+      const make = String(req.query.make ?? "");
+      const model = String(req.query.model ?? "");
+      if (!make.trim() || !model.trim()) return res.json([]);
+      const years = await nhtsaVehicleYearsService.getYearsForMakeModel(make, model);
+      res.json(years);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message ?? "No se pudieron cargar los años" });
+    }
+  });
 
   // Registrar PRIMERO las rutas /api (admin, roles, health) para que tengan prioridad
   // y no sean interceptadas por session/passport ni por Vite

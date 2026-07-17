@@ -1,0 +1,334 @@
+
+================================================================================
+                    INFORME DE CAMBIOS EN LA PÁGINA WEB
+                              PLATAFORMA GENFEB
+================================================================================
+
+Período cubierto : 1 de junio de 2026 al 1 de julio de 2026
+Elaborado        : Informe basado en trabajo diario del período
+
+================================================================================
+1. INTRODUCCIÓN
+================================================================================
+
+GENFEB es una plataforma en línea que conecta a clientes con profesionales y
+servicios (citas, transporte, tiendas, entre otros). Este documento resume los
+cambios y mejoras realizados en la página web y en la aplicación móvil
+(versión Android) durante el período del 1 de junio al 1 de julio de 2026.
+
+El informe tiene dos niveles:
+  - Secciones 2 a 4: lenguaje sencillo (qué ve y usa la persona final).
+  - Sección 5 y subsecciones "Detalle técnico": archivos, APIs y módulos tocados
+    en el repositorio (monorepo React/Vite + Express + Firestore).
+
+Stack principal del proyecto:
+  - Frontend: React, TypeScript, Vite, Wouter (rutas), TanStack Query, Leaflet.
+  - Backend: Node.js, Express, Socket.IO, Firebase Admin (Firestore + Storage).
+  - Shared: esquemas Zod y tipos en /shared (validación cliente/servidor).
+  - Android: TWA/APK con modo burbuja y servicio en segundo plano.
+
+
+================================================================================
+2. CALENDARIO DE TRABAJO
+================================================================================
+
+Todo el trabajo descrito en este informe se realizó en el período comprendido
+entre el **1 de junio y el 1 de julio de 2026**.
+
+Se trabajó todos los días del período **excepto los domingos** (día de descanso).
+Las jornadas incluyeron desarrollo, pruebas, correcciones, integración de ramas,
+consolidación de cambios y despliegue en producción.
+
+Actividades transversales durante el mes:
+  - Planificación y arquitectura del marketplace (tienda, pedidos, entregas).
+  - Desarrollo e integración continua de módulos Go (taxi y delivery).
+  - Pruebas de QA, estabilización y preparación del release final.
+  - Redespliegue de la aplicación en Render al cierre del período.
+
+
+================================================================================
+3. RESUMEN EJECUTIVO
+================================================================================
+
+Durante el período se realizaron mejoras importantes en siete áreas principales:
+
+  1. TIENDA EN LÍNEA (Marketplace / Shop Go)
+     Módulo completo de vitrina, carrito, checkout, pedidos, entrega y admin
+     de tienda (API REST + Firestore + notificaciones).
+
+  2. SERVICIO DE TAXI Y DELIVERY (Go — Car Go / Pack Go)
+     Correcciones en TaxiRide, DriverGoGenfeb, negociación, cancelaciones con
+     feedback y APIs mobility-rides / pack-rides.
+
+  3. NOTIFICACIONES
+     Push FCM, campana in-app, alertas de pedidos tienda y alertas conductor.
+
+  4. APLICACIÓN ANDROID PARA CONDUCTORES
+     Modo burbuja (overlay), APK actualizado, TWA y permisos de superposición.
+
+  5. MAPAS Y NAVEGACIÓN
+     Geoapify, rutas en vivo, iconos de vehículos, rotación de mapa y recorte
+     de polilínea según GPS.
+
+  6. REGISTRO, LOGIN Y TÉRMINOS PROFESIONALES
+     Auth JWT, foto obligatoria por cámara, ProviderTermsGate desplazable.
+
+  7. PANEL CENTRAL (ADMIN)
+     Pestañas Centrales / Todos los conductores, flota global en tiempo real.
+
+
+================================================================================
+4. CAMBIOS DETALLADOS POR ÁREA
+================================================================================
+
+--------------------------------------------------------------------------------
+4.1. TIENDA EN LÍNEA (MARKETPLACE / SHOP GO)
+--------------------------------------------------------------------------------
+
+¿Qué es?
+  Sección donde negocios registrados venden productos; clientes compran desde
+  /tienda/:slug y administran pedidos en /pedidos-tienda.
+
+Cambios para el CLIENTE:
+  - Vitrina, carrito, checkout, entrega a domicilio, seguimiento de pedidos,
+    mapa de ruta de entrega y notificaciones de estado.
+
+Cambios para el DUEÑO DE TIENDA:
+  - Panel admin (órdenes, promociones, pagos, ubicación, fulfillment, chat
+    de entrega, tarifas de envío).
+
+Integración en categorías:
+  - Carta Shop Go en Home y Categorías, con enlace a /tiendas (catálogo de
+    todas las tiendas).
+
+Detalle técnico (código) — commit "market place" (~60 archivos, +8544 líneas):
+  Cliente:
+    - Rutas App.tsx: /tiendas, /tienda/:slug, /pedidos-tienda, admin tienda.
+    - Páginas: StorePage.tsx, MyStoreOrders.tsx, StoreAdmin.tsx,
+      StoreAdminOrderDelivery.tsx.
+    - Componentes store/*: StoreCartPanel, StoreCheckoutDeliverySection,
+      StoreOrderDeliveryRouteMap, StoreAdminOrdersPanel, etc.
+    - Hooks: use-store-orders.ts, use-store-cart.ts, use-store-payment-methods.ts,
+      load-driving-route.ts (rutas Geoapify para envíos).
+  Servidor:
+    - routes-stores.ts ampliado (CRUD tienda, pedidos, showcase, categorías).
+    - store-order-schema.ts, store-cart-schema.ts, store-fulfillment.ts (shared).
+    - store-order-delivery.ts, store-delivery-quote.ts, store-order-notifications.ts.
+    - storage-firestore.ts / storage-genfeb.ts: persistencia pedidos y tiendas.
+    - pack-rides.ts: integración reparto delivery tienda.
+  Shared:
+    - Esquemas Zod de pedido, pago y fulfillment para validación end-to-end.
+
+
+--------------------------------------------------------------------------------
+4.2. INICIO DE SESIÓN Y REGISTRO
+--------------------------------------------------------------------------------
+
+  - Corrección del flujo de inicio de sesión (JWT en routes-auth.ts).
+  - Registro: foto de perfil obligatoria solo por cámara (sin URL ni galería);
+    validación en Register.tsx + routes-auth.ts (avatar requerido).
+  - ProviderTermsGate.tsx: modal de normas con scroll en móvil (92dvh, safe areas).
+  - Become Pro y diálogo de contacto/soporte mejorados.
+
+Detalle técnico:
+  - client/src/pages/Register.tsx — PhotoCapture, uploadProfileImage (Firebase Storage).
+  - server/routes-auth.ts — registerSchema con avatar URL obligatorio.
+  - client/src/components/ProviderTermsGate.tsx — capas elevated + overflow-y-auto.
+
+
+--------------------------------------------------------------------------------
+4.3. SERVICIO DE TAXI Y TRANSPORTE (GO)
+--------------------------------------------------------------------------------
+
+Para el PASAJERO:
+  - TaxiRide.tsx: mapa, ruta, calificación, cancelación con motivo.
+  - Rotación de mapa (bearing) e iconos car/moto/camioneta en TaxiRouteMap.
+
+Para el CONDUCTOR:
+  - DriverGoGenfeb.tsx: ofertas, negociación, historial, alertas sonoras.
+  - Corrección recepción ofertas negociadas (CargoIncomingRideDialog).
+
+Para el ADMINISTRADOR:
+  - AdminGoCancellationsPanel + pestaña "Cancelaciones Go" en Admin.tsx.
+  - API GET/POST /api/admin/go-cancellations con penalización en rating.
+
+Detalle técnico — cancelaciones Go (23 archivos, +1601 líneas):
+  Shared:
+    - shared/go-cancellation-feedback.ts — catálogo motivos cliente/conductor.
+  Servidor:
+    - server/go-cancellation-feedback-store.ts — colección go_cancellation_feedback.
+    - server/mobility-rides.ts, server/pack-rides.ts — cancel extendido + feedback.
+    - server/routes-admin.ts — endpoints admin cancelaciones Go.
+    - server/go-driver-classic-offer-lock.ts — decline-invite en regateo.
+  Cliente:
+    - GoCancellationFeedbackDialog.tsx integrado en TaxiRide y DriverGoGenfeb.
+    - TaxiVehicleSearchModal / CargoIncomingRideDialog — validación búsqueda y
+      ofertas negociadas vía Socket.IO (cargo:ride:* / pack:ride:*).
+
+Iteraciones Fix Taxi 1.0–1.4:
+  - Ajustes en TaxiRide.tsx, mobility-rides.ts, mapas y flujo de match.
+
+
+--------------------------------------------------------------------------------
+4.4. MODO BURBUJA PARA CONDUCTORES (ANDROID)
+--------------------------------------------------------------------------------
+
+  - Burbuja flotante sobre otras apps, swipe para recibir, servicio background.
+  - Más de 10 iteraciones de estabilización (Fix bubble App 1.0 – 1.10).
+  - APK actualizado con las últimas mejoras.
+
+Detalle técnico:
+  - Código Android / Capacitor / TWA en repo (switch functions and bubble app).
+  - Sincronización con GoDriverSessionContext y socket cargo:ride:location.
+  - Permiso SYSTEM_ALERT_WINDOW (overlay) documentado en flujo conductor.
+
+
+--------------------------------------------------------------------------------
+4.5. NOTIFICACIONES PUSH
+--------------------------------------------------------------------------------
+
+  - Corrección del sistema de notificaciones push (Fix Noti Push).
+  - store-order-notifications.ts + NotificationBell.tsx para pedidos tienda.
+  - Alertas conductor (Fix driver alert).
+
+Detalle técnico:
+  - server: notificationService, registro FCM en firebase-admin.
+  - client: hooks de permisos push, deep links en Notifications.tsx.
+
+
+--------------------------------------------------------------------------------
+4.6. APLICACIÓN ANDROID (APK) Y TWA
+--------------------------------------------------------------------------------
+
+  - Fix Twa: Trusted Web Activity para instalar PWA como app nativa.
+  - New APK Update: Genfeb.apk con burbuja y alertas.
+
+Detalle técnico:
+  - assetlinks.json / manifest TWA, protección táctil en shell móvil.
+
+
+--------------------------------------------------------------------------------
+4.7. MAPAS, RUTAS EN VIVO Y PANEL CENTRAL
+--------------------------------------------------------------------------------
+
+  - Geoapify: server/maps-route-service.ts, GET /api/maps/route (?live=1).
+  - Rotación mapa pasajero/conductor; iconos vehículo en mapas.
+  - Navegación en vivo: recorte de ruta + recálculo por desvío y GPS.
+  - Panel central admin: pestañas "Centrales" | "Todos los conductores".
+
+Detalle técnico — Map fixes:
+  Cliente:
+    - live-navigation-route.ts — umbrales desvío (30 m) y recálculo periódico (8 s).
+    - ride-location-emit.ts — emisión GPS conductor ~800 ms / 5 m (socket).
+    - TaxiRide.tsx, DriverGoGenfeb.tsx — handleDriverRoutePosition refactorizado.
+    - CentralDashboard.tsx + CentralAdminScopeTabs.tsx — vista flota global admin.
+    - use-central.ts — useCentralFleetAll(), CENTRAL_FLEET_ALL_QUERY_KEY.
+    - Home.tsx / Categories.tsx — carta Shop Go → /tiendas.
+  Servidor:
+    - maps-route-service.ts — caché live 45 s vs planificación 5 min.
+    - routes-central.ts — GET /api/central/fleet/all, buildCentralFleetDriver().
+    - central-fleet-notify.ts — sala central:fleet:all (Socket.IO).
+  Shared:
+    - default-categories.ts — display name "Shop Go" (slug marketplace).
+
+
+--------------------------------------------------------------------------------
+4.8. MENÚ DE NAVEGACIÓN
+--------------------------------------------------------------------------------
+
+  - Navigation.tsx: overflow-y-auto en menú lateral móvil (commit "scroll menu").
+
+
+================================================================================
+5. ORDEN LÓGICO DE ENTREGAS
+================================================================================
+
+  1. Diseño y esquemas del marketplace (pedido, tienda, APIs).
+  2. Base del módulo tienda (rama marketplace / develop).
+  3. QA tienda, checkout, mapas de entrega, hooks use-store-*.
+  4. Merge marketplace + corrección de login (routes-auth, JWT).
+  5. Iteraciones Fix Taxi — mobility-rides, TaxiRide, conductor.
+  6. Push, TWA, rotación de mapa, calificación de viaje.
+  7. Iconos de vehículo en mapas (TaxiRouteMap, assets).
+  8. Estabilización pre-burbuja, pruebas de ofertas conductor.
+  9. Modo burbuja, alertas conductor, scroll menú, APK.
+ 10. Cancelaciones Go + admin, registro/cámara, ProviderTermsGate.
+ 11. Pruebas de integración, rutas en vivo, Shop Go en categorías.
+ 12. Map fixes — Geoapify live, panel central todos los conductores.
+ 13. Consolidación y pruebas pre-producción.
+ 14. Redespliegue en Render (producción).
+
+
+================================================================================
+6. ANEXO TÉCNICO — ARCHIVOS Y MÓDULOS CLAVE
+================================================================================
+
+  AUTENTICACIÓN
+    server/routes-auth.ts, client/src/pages/Login.tsx, Register.tsx
+
+  GO TAXI / DELIVERY
+    server/mobility-rides.ts, server/pack-rides.ts
+    client/src/pages/TaxiRide.tsx, DriverGoGenfeb.tsx
+
+  TIENDAS
+    server/routes-stores.ts, shared/store-order-schema.ts
+    client/src/pages/StorePage.tsx, MyStoreOrders.tsx
+
+  MAPAS
+    server/routes-maps.ts, server/maps-route-service.ts
+    client/src/lib/load-driving-route.ts, components/taxi/TaxiRouteMap.tsx
+
+  CENTRAL / FLOTA
+    server/routes-central.ts, client/src/pages/CentralDashboard.tsx
+
+  ADMIN
+    server/routes-admin.ts, client/src/pages/Admin.tsx
+
+  REALTIME
+    Socket.IO: cargo:ride:*, pack:ride:*, central:fleet:update
+
+  BASE DE DATOS
+    Firestore (firebase-admin.ts): usuarios, pedidos tienda, viajes Go,
+    go_cancellation_feedback, presencia conductores.
+
+
+================================================================================
+7. BENEFICIOS PARA LOS USUARIOS
+================================================================================
+
+  CLIENTES / COMPRADORES:
+    - Comprar en tiendas locales, seguir pedidos y envíos en mapa.
+    - Taxi/delivery más estable; rutas que se actualizan con el GPS.
+
+  DUEÑOS DE TIENDA:
+    - Admin de pedidos, pagos, promociones y chat de entrega.
+
+  CONDUCTORES:
+    - Modo burbuja Android, alertas fiables, mapas y ETA en vivo.
+
+  ADMINISTRADORES:
+    - Cancelaciones Go con feedback, flota por central o global.
+
+  TODOS:
+    - Notificaciones mejoradas, menú móvil usable, registro con foto real.
+
+
+================================================================================
+8. DESPLIEGUE EN PRODUCCIÓN (RENDER)
+================================================================================
+
+Al cierre del período (del 1 de junio al 1 de julio de 2026) se realizó el
+redespliegue de la aplicación en Render (plataforma de hosting en la nube):
+
+  - Servicio web unificado (frontend Vite + backend Express en un solo deploy).
+  - Variables de entorno de producción (Firebase, Geoapify, JWT, FRONTEND_URL).
+  - Verificación post-deploy: health check /api/health, rutas Go, tiendas y login.
+  - Objetivo: publicar en producción todos los cambios del período (marketplace,
+    burbuja, cancelaciones Go, mapas en vivo, panel central y Shop Go).
+
+Documentación de referencia en repo: docs/SERVIDORES_GRATUITOS_DEMO.md (Render).
+
+
+================================================================================
+                              FIN DEL INFORME
+================================================================================
