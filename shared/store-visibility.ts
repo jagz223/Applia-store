@@ -1,23 +1,12 @@
-import {
-  isVisibilitySubscriptionWindowActive,
-  parseVisibilitySubscriptionEndMs,
-} from "./professional-listing-subscription";
-
 /**
- * Política de publicación de tiendas:
- * - Sin `visibilitySubscriptionEndsAt` (null / vacío) → NO publicada en catálogo.
- * - Con fecha de fin en el pasado → inactiva.
- * - Con fecha vigente → visible en listado y accesible al público.
- *
- * A diferencia del listing profesional legacy, null no implica “sigue publicada”.
+ * Política de publicación de tiendas.
+ * La tienda única del sistema está siempre activa (sin mensualidad / sin estado inactivo).
  */
-export const STORE_VISIBILITY_REQUIRES_PAID_SUBSCRIPTION = true;
+export const STORE_VISIBILITY_REQUIRES_PAID_SUBSCRIPTION = false;
 
 export function isStoreVisibilityActive(
-  store: { visibilitySubscriptionEndsAt?: unknown },
-  nowMs: number = Date.now(),
+  _store?: { visibilitySubscriptionEndsAt?: unknown },
+  _nowMs: number = Date.now(),
 ): boolean {
-  const endMs = parseVisibilitySubscriptionEndMs(store.visibilitySubscriptionEndsAt);
-  if (endMs == null) return false;
-  return isVisibilitySubscriptionWindowActive(store.visibilitySubscriptionEndsAt, nowMs);
+  return true;
 }

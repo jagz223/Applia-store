@@ -8,6 +8,9 @@ export type StoreProductSummary = {
   name: string;
   description: string | null;
   price: number;
+  pricesByCurrency?: Record<string, number>;
+  displayCurrencyId?: string;
+  displayCurrencyLabel?: string;
   categoryIds: number[];
   ingredientMaterialIds: number[];
   imageUrls: string[];

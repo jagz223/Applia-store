@@ -8,8 +8,12 @@ import { StoreShowcaseCardImage } from "@/components/store/StoreShowcaseCardImag
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-function formatPrice(value: number) {
-  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
+function formatPrice(value: number, currencyLabel?: string) {
+  const amount = new Intl.NumberFormat("es-VE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+  return currencyLabel ? `${amount} ${currencyLabel}` : amount;
 }
 
 function ShowcaseProductCard({
@@ -38,7 +42,9 @@ function ShowcaseProductCard({
               <p className="text-xs text-muted-foreground line-clamp-2">{product.description}</p>
             ) : null}
             <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-sm font-bold text-primary">{formatPrice(product.price)}</span>
+              <span className="text-sm font-bold text-primary">
+                {formatPrice(product.price, product.displayCurrencyLabel)}
+              </span>
               {onAddToCart ? (
                 <StoreShowcaseAddToCartButton
                   variant="footer"
@@ -69,7 +75,9 @@ function ShowcaseProductCard({
         </div>
         <div className="p-3 flex flex-col gap-1">
           <p className="text-sm font-semibold leading-snug line-clamp-2 text-foreground">{product.name}</p>
-          <p className="text-sm font-medium text-primary">{formatPrice(product.price)}</p>
+          <p className="text-sm font-medium text-primary">
+            {formatPrice(product.price, product.displayCurrencyLabel)}
+          </p>
           {product.description ? (
             <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
           ) : null}

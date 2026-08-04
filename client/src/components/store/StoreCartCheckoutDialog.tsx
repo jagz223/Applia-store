@@ -104,6 +104,49 @@ type FormFeedback = {
 
 
 
+
+function PaymentMethodDetails({
+  method,
+}: {
+  method: StoreCartSummary["paymentMethods"][number];
+}) {
+  const extras = Array.isArray(method.extraFields) ? method.extraFields : [];
+  const legacyAccount =
+    typeof method.accountNumber === "string" ? method.accountNumber.trim() : "";
+  const hasExtras = extras.length > 0;
+  return (
+    <div className="rounded-lg border border-border p-4 space-y-3 min-h-[8rem]">
+      {hasExtras ? (
+        <div className="space-y-2">
+          {extras.map((field, index) => (
+            <div key={`${field.name}-${index}`}>
+              <p className="text-xs text-muted-foreground">{field.name}</p>
+              <p className="text-sm font-medium break-all">{field.value}</p>
+            </div>
+          ))}
+        </div>
+      ) : legacyAccount ? (
+        <div>
+          <p className="text-xs text-muted-foreground">Número de cuenta</p>
+          <p className="text-sm font-medium break-all">{legacyAccount}</p>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">Sin datos de pago adicionales.</p>
+      )}
+      {method.imageUrl ? (
+        <img
+          src={method.imageUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          className="max-h-44 w-full rounded-md border border-border object-contain bg-muted/30"
+        />
+      ) : (
+        <p className="text-xs text-muted-foreground">Sin imagen de referencia.</p>
+      )}
+    </div>
+  );
+}
+
 export function StoreCartCheckoutDialog({
 
   storeId,
@@ -616,32 +659,9 @@ export function StoreCartCheckoutDialog({
 
               ) : cart.paymentMethods.length === 1 ? (
 
-                <div className="rounded-lg border border-border p-4 space-y-3">
-
+                <div className="space-y-2">
                   <p className="font-medium">{selectedPaymentMethod?.name ?? cart.paymentMethods[0].name}</p>
-
-                  <p className="text-sm text-muted-foreground break-all">
-
-                    {selectedPaymentMethod?.accountNumber ?? cart.paymentMethods[0].accountNumber}
-
-                  </p>
-
-                  {(selectedPaymentMethod?.imageUrl ?? cart.paymentMethods[0].imageUrl) ? (
-
-                    <img
-
-                      src={(selectedPaymentMethod?.imageUrl ?? cart.paymentMethods[0].imageUrl)!}
-
-                      alt=""
-
-                      referrerPolicy="no-referrer"
-
-                      className="max-h-40 rounded-md border border-border object-contain bg-muted/30"
-
-                    />
-
-                  ) : null}
-
+                  <PaymentMethodDetails method={selectedPaymentMethod ?? cart.paymentMethods[0]} />
                 </div>
 
               ) : (
@@ -688,37 +708,7 @@ export function StoreCartCheckoutDialog({
 
                     <TabsContent key={method.id} value={String(method.id)} className="mt-4">
 
-                      <div className="rounded-lg border border-border p-4 space-y-3 min-h-[8rem]">
-
-                        <div>
-
-                          <p className="text-xs text-muted-foreground">Número de cuenta</p>
-
-                          <p className="text-sm font-medium break-all">{method.accountNumber}</p>
-
-                        </div>
-
-                        {method.imageUrl ? (
-
-                          <img
-
-                            src={method.imageUrl}
-
-                            alt=""
-
-                            referrerPolicy="no-referrer"
-
-                            className="max-h-44 w-full rounded-md border border-border object-contain bg-muted/30"
-
-                          />
-
-                        ) : (
-
-                          <p className="text-xs text-muted-foreground">Sin imagen de referencia.</p>
-
-                        )}
-
-                      </div>
+                      <PaymentMethodDetails method={method} />
 
                     </TabsContent>
 

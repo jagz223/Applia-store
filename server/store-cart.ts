@@ -127,6 +127,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     id: m.id,
     name: m.name,
     accountNumber: m.accountNumber,
+    extraFields: m.extraFields ?? [],
     imageUrl: m.imageUrl ?? null,
   }));
 

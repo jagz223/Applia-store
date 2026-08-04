@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aplify Store — Planificación y orden de desarrollo</title>
+    <style>
+      :root{
+        --bg: #0b1020;
+        --card: rgba(255,255,255,.06);
+        --card2: rgba(255,255,255,.08);
+        --text: rgba(255,255,255,.92);
+        --muted: rgba(255,255,255,.72);
+        --muted2: rgba(255,255,255,.58);
+        --line: rgba(255,255,255,.14);
+        --accent: #7c5cff;
+        --accent2: #22c55e;
+        --warn: #f59e0b;
+        --danger: #ef4444;
+        --shadow: 0 18px 50px rgba(0,0,0,.45);
+        --radius: 16px;
+        --radius2: 12px;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      }
+      *{ box-sizing: border-box; }
+      html,body{ height:100%; }
+      body{
+        margin:0;
+        font-family: var(--sans);
+        color: var(--text);
+        background:
+          radial-gradient(900px 500px at 15% 20%, rgba(124,92,255,.35), transparent 60%),
+          radial-gradient(900px 500px at 85% 10%, rgba(34,197,94,.22), transparent 55%),
+          radial-gradient(900px 500px at 65% 85%, rgba(245,158,11,.18), transparent 60%),
+          linear-gradient(180deg, var(--bg), #060814);
+      }
+      a{ color: inherit; }
+      .wrap{ max-width: 1080px; margin: 0 auto; padding: 42px 20px 80px; }
+      header{
+        display:flex; flex-wrap:wrap; gap:14px 18px; align-items:flex-end; justify-content:space-between;
+        padding: 18px 18px 22px;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+      .title{ display:flex; flex-direction:column; gap:6px; }
+      .title h1{ margin:0; font-size: 22px; letter-spacing: .2px; }
+      .title p{ margin:0; color: var(--muted); font-size: 13px; }
+      .meta{
+        display:flex; flex-wrap:wrap; gap:10px;
+        align-items:center; justify-content:flex-end;
+      }
+      .pill{
+        display:inline-flex; gap:8px; align-items:center;
+        padding: 8px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,.05);
+        color: var(--muted);
+        font-size: 12px;
+        white-space:nowrap;
+      }
+      .dot{ width:8px; height:8px; border-radius:50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(124,92,255,.15); }
+      .grid{ display:grid; grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }
+      @media (min-width: 920px){ .grid{ grid-template-columns: 1.15fr .85fr; } }
+      section{
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255,255,255,.04);
+        box-shadow: 0 12px 40px rgba(0,0,0,.28);
+        overflow:hidden;
+      }
+      .sec-h{
+        padding: 14px 16px;
+        display:flex; align-items:center; justify-content:space-between; gap:10px;
+        background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+        border-bottom: 1px solid var(--line);
+      }
+      .sec-h h2{ margin:0; font-size: 14px; letter-spacing: .25px; }
+      .sec-h .tag{
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted2);
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,.04);
+        border-radius: 999px;
+      }
+      .sec-b{ padding: 14px 16px 16px; }
+      p{ margin: 10px 0; color: var(--muted); line-height: 1.5; font-size: 13px; }
+      ul{ margin: 10px 0 0; padding: 0 0 0 18px; color: var(--muted); }
+      li{ margin: 6px 0; line-height: 1.45; font-size: 13px; }
+      .k{
+        display:inline-block;
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 2px 6px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,.04);
+        color: rgba(255,255,255,.86);
+      }
+      .callout{
+        border: 1px solid var(--line);
+        border-radius: var(--radius2);
+        background: rgba(255,255,255,.04);
+        padding: 12px 12px;
+        margin-top: 12px;
+      }
+      .callout strong{ color: rgba(255,255,255,.92); }
+      .callout .small{ color: var(--muted2); font-size: 12px; margin: 6px 0 0; }
+      .phase{
+        display:grid;
+        gap: 10px;
+        padding: 12px 12px;
+        border-radius: var(--radius2);
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,.04);
+        margin-top: 12px;
+      }
+      .phase-h{
+        display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px;
+      }
+      .phase-h .name{ display:flex; align-items:center; gap:10px; }
+      .badge{
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 6px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,.03);
+        color: var(--muted2);
+      }
+      .badge.mvp{ border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.08); color: rgba(255,255,255,.86); }
+      .badge.core{ border-color: rgba(124,92,255,.35); background: rgba(124,92,255,.10); color: rgba(255,255,255,.86); }
+      .badge.opt{ border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.10); color: rgba(255,255,255,.86); }
+      .badge.risk{ border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.10); color: rgba(255,255,255,.90); }
+      .phase h3{ margin:0; font-size: 13px; }
+      .phase p{ margin:0; color: var(--muted2); font-size: 12px; }
+      .cols{ display:grid; grid-template-columns: 1fr; gap:12px; margin-top:12px; }
+      @media (min-width: 920px){ .cols{ grid-template-columns: 1fr 1fr; } }
+      .box{
+        border: 1px solid var(--line);
+        border-radius: var(--radius2);
+        background: rgba(255,255,255,.03);
+        padding: 12px 12px;
+      }
+      .box h4{ margin:0 0 8px; font-size: 13px; }
+      .box .hint{ margin:0; color: var(--muted2); font-size: 12px; }
+      footer{
+        margin-top: 16px;
+        padding: 14px 16px;
+        color: var(--muted2);
+        font-size: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255,255,255,.03);
+      }
+      .hr{ height:1px; background: var(--line); margin: 12px 0; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="title">
+          <h1>Aplify Store — Planificación y orden de desarrollo</h1>
+          <p>Documento vivo para construir una página de venta de ítems con admin, pedidos, delivery, promociones y descuentos.</p>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="dot"></span>Enfoque: MVP → iteraciones</span>
+          <span class="pill">Término clave: <span class="k">Pedido</span> (no “carrito”)</span>
+          <span class="pill">Delivery con <span class="k">Leaflet</span></span>
+        </div>
+      </header>
+
+      <div class="grid">
+        <section>
+          <div class="sec-h">
+            <h2>Objetivo y alcance</h2>
+            <span class="tag">Visión</span>
+          </div>
+          <div class="sec-b">
+            <p>
+              Construir una plataforma para vender ítems donde los administradores puedan crear productos con precios y
+              adicionales, armar promociones (grupos con precio menor), aplicar códigos de descuento, y permitir al
+              cliente crear un <span class="k">Pedido</span> con opción de <strong>Delivery</strong>, <strong>Para llevar</strong> o
+              <strong>Comer en sitio</strong> (configurable).
+            </p>
+            <div class="callout">
+              <strong>Principio de planificación</strong>
+              <p class="small">
+                Primero se construye un núcleo estable: catálogo + pedido + cálculo de precio. Luego se añaden descuentos/promos,
+                logística (delivery), y finalmente mejoras “enterprise” (roles avanzados, auditoría, analíticas, etc.).
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="sec-h">
+            <h2>Roles, datos mínimos y decisiones</h2>
+            <span class="tag">Base</span>
+          </div>
+          <div class="sec-b">
+            <ul>
+              <li><strong>Cliente</strong>: correo, teléfono, y dirección opcional guardable (para delivery).</li>
+              <li><strong>Admin</strong>: crea ítems, adicionales, promociones, códigos de descuento, y tasa de cambio diaria.</li>
+              <li><strong>Pedido</strong>: lista de ítems + adicionales + promos + descuentos + tipo (delivery / para llevar / sitio).</li>
+              <li><strong>Monedas</strong>: precios en $ o €; conversión a Bs con valores diarios configurados por admin.</li>
+            </ul>
+            <div class="hr"></div>
+            <p><strong>Decisiones a fijar temprano (para no re-trabajar)</strong></p>
+            <ul>
+              <li>Regla de “precio final”: orden de aplicación de promos, descuentos y delivery.</li>
+              <li>Compatibilidades: un ítem puede estar en promo y además tener código de descuento, ¿sí/no?</li>
+              <li>Modo multi-negocio: ¿una sola tienda o múltiples tiendas? (afecta el modelo de datos).</li>
+            </ul>
+          </div>
+        </section>
+      </div>
+
+      <section style="margin-top:14px;">
+        <div class="sec-h">
+          <h2>Orden recomendado de desarrollo (por fases)</h2>
+          <span class="tag">Ruta crítica</span>
+        </div>
+        <div class="sec-b">
+          <p>
+            Cada fase se implementa con entregables claros. Si una fase no está completa, la siguiente se vuelve cara de mantener.
+            Prioridad: cálculo de precio consistente y datos bien modelados.
+          </p>
+
+          <div class="phase">
+            <div class="phase-h">
+              <div class="name">
+                <span class="badge mvp">Fase 0</span>
+                <h3>Fundación del proyecto</h3>
+              </div>
+              <span class="badge risk">Bloquea todo</span>
+            </div>
+            <p>Definir base técnica y decisiones que afectan el modelo (evita refactors grandes).</p>
+            <div class="cols">
+              <div class="box">
+                <h4>Entregables</h4>
+                <ul>
+                  <li>Modelo de datos (Ítem, Adicional, Promo, Descuento, Pedido, Usuario, Dirección, Configuración).</li>
+                  <li>Reglas del cálculo de precio documentadas y testeables.</li>
+                  <li>Navegación de pantallas “esqueleto” (Home/Catálogo, Detalle, Pedido, Checkout, Admin).</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Riesgos a controlar</h4>
+                <ul>
+                  <li>Reglas ambiguas de descuentos/promos.</li>
+                  <li>Moneda/conversión mezclada con lógica de UI (debe quedar en un “motor” de precios).</li>
+                </ul>
+                <p class="hint">Meta: que el “motor de precios” sea independiente y tenga pruebas.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-h">
+              <div class="name">
+                <span class="badge mvp">Fase 1</span>
+                <h3>MVP de venta: catálogo + pedido + checkout básico</h3>
+              </div>
+              <span class="badge core">Core</span>
+            </div>
+            <p>Que un cliente pueda armar un pedido y ver un total correcto (sin delivery aún).</p>
+            <div class="cols">
+              <div class="box">
+                <h4>Frontend (cliente)</h4>
+                <ul>
+                  <li>Listado de ítems + búsqueda/filtros simples.</li>
+                  <li>Detalle del ítem con selección de adicionales.</li>
+                  <li>Pantalla “Pedido”: editar cantidades, remover ítems, ver subtotal.</li>
+                  <li>Checkout: correo + teléfono; opción “guardar dirección” (si aplica luego).</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Backend / datos</h4>
+                <ul>
+                  <li>CRUD de ítems y adicionales (mínimo vía admin o seed temporal).</li>
+                  <li>Crear pedido y persistirlo.</li>
+                  <li>Motor de precios: subtotal por ítem + adicionales + total del pedido.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-h">
+              <div class="name">
+                <span class="badge mvp">Fase 2</span>
+                <h3>Admin real: gestión de ítems y tasas de cambio</h3>
+              </div>
+              <span class="badge core">Core</span>
+            </div>
+            <p>Que el negocio opere sin tocar código: inventario básico y conversión a Bs administrable.</p>
+            <div class="cols">
+              <div class="box">
+                <h4>Admin</h4>
+                <ul>
+                  <li>CRUD de ítems: nombre, descripción, imágenes, moneda, precio base, estado (activo/inactivo).</li>
+                  <li>CRUD de adicionales: precio incremental, compatibilidad con ítems.</li>
+                  <li>Configuración: $→Bs y €→Bs (actualización diaria manual).</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Precio y moneda</h4>
+                <ul>
+                  <li>Mostrar precios en $/€ según ítem y su equivalente en Bs (si se requiere en UI).</li>
+                  <li>Guardar valores “congelados” en el pedido (para que no cambie si la tasa se actualiza después).</li>
+                </ul>
+                <p class="hint">Recomendación: almacenar montos en “minor units” (centavos) para evitar errores de redondeo.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-h">
+              <div class="name">
+                <span class="badge mvp">Fase 3</span>
+                <h3>Promociones y códigos de descuento</h3>
+              </div>
+              <span class="badge opt">Valor comercial</span>
+            </div>
+            <p>Implementar precio inteligente: bundles más baratos y cupones por ítem/pedido/grupo.</p>
+            <div class="cols">
+              <div class="box">
+                <h4>Promociones (grupos)</h4>
+                <ul>
+                  <li>Definir “bundle”: ítems requeridos + precio promo.</li>
+                  <li>Reglas de aplicación: mejor precio automático vs selección manual.</li>
+                  <li>Vista en el cliente: “Ahorra X con esta promo”.</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Códigos de descuento</h4>
+                <ul>
+                  <li>Tipos: porcentaje o monto fijo.</li>
+                  <li>Alcance: ítem / pedido / promoción (grupo).</li>
+                  <li>Restricciones: vigencia, usos máximos, mínimo de compra.</li>
+                </ul>
+                <p class="hint">Meta: el motor de precios debe calcular “total” y “desglose” (por transparencia).</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-h">
+              <div class="name">
+                <span class="badge mvp">Fase 4</span>
+                <h3>Delivery + Leaflet + cálculo de costo</h3>
+              </div>
+              <span class="badge opt">Logística</span>
+            </div>
+            <p>Habilitar mapa, selección/guardado de dirección y costo de delivery sumado al total.</p>
+            <div class="cols">
+              <div class="box">
+                <h4>Cliente</h4>
+                <ul>
+                  <li>Selector de tipo de pedido: delivery / para llevar / comer en sitio.</li>
+                  <li>Mapa (Leaflet): pin de ubicación + dirección textual.</li>
+                  <li>Opción “guardar dirección” para usos futuros.</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Reglas de delivery</h4>
+                <ul>
+                  <li>Cálculo por distancia (o zonas) + mínimo/máximo configurable.</li>
+                  <li>Configuración para habilitar/deshabilitar cada modo (delivery / llevar / sitio).</li>
+                  <li>Guardar el costo final del delivery en el pedido (auditabilidad).</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-h">
+              <div class="name">
+                <span class="badge">Fase 5</span>
+                <h3>Operación: estados del pedido, panel, notificaciones</h3>
+              </div>
+              <span class="badge core">Escalamiento</span>
+            </div>
+            <p>Pasar de “crear pedido” a “operar pedidos” (workflow real).</p>
+            <div class="cols">
+              <div class="box">
+                <h4>Flujo</h4>
+                <ul>
+                  <li>Estados: creado → confirmado → en preparación → listo/en ruta → entregado/cancelado.</li>
+                  <li>Panel admin para ver pedidos y filtrar por estado.</li>
+                  <li>Historial del cliente (pedidos anteriores).</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Notificaciones</h4>
+                <ul>
+                  <li>Correo o WhatsApp/SMS (según disponibilidad) para confirmación.</li>
+                  <li>Mensajes en pantalla con tracking del pedido.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-h">
+              <div class="name">
+                <span class="badge">Fase 6</span>
+                <h3>Mejoras futuras (backlog)</h3>
+              </div>
+              <span class="badge">Roadmap</span>
+            </div>
+            <p>Capas opcionales para robustez y crecimiento.</p>
+            <div class="cols">
+              <div class="box">
+                <h4>Producto</h4>
+                <ul>
+                  <li>Variantes (talla/color), categorías avanzadas, inventario/stock.</li>
+                  <li>Recomendaciones, favoritos, reseñas.</li>
+                  <li>Multi-tienda/multi-sucursal.</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Plataforma</h4>
+                <ul>
+                  <li>Roles/permiso granular (admin, operador, repartidor).</li>
+                  <li>Auditoría de cambios, logs y analíticas.</li>
+                  <li>Pagos online, facturación, integraciones.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <section style="margin-top:14px;">
+        <div class="sec-h">
+          <h2>Checklist técnico recomendado (para evitar dolores)</h2>
+          <span class="tag">Calidad</span>
+        </div>
+        <div class="sec-b">
+          <div class="cols">
+            <div class="box">
+              <h4>Motor de precios</h4>
+              <ul>
+                <li>Debe retornar <strong>total</strong> + <strong>desglose</strong> (subtotales, descuentos, delivery).</li>
+                <li>Pruebas: combos de ítems + adicionales + promo + cupón + delivery.</li>
+                <li>Guardar “snapshot” de precios/tasa de cambio dentro del pedido.</li>
+              </ul>
+            </div>
+            <div class="box">
+              <h4>Seguridad y consistencia</h4>
+              <ul>
+                <li>Validaciones del lado servidor (no confiar en totales del cliente).</li>
+                <li>Permisos para endpoints admin.</li>
+                <li>Integridad: no permitir promos inválidas o cupones fuera de vigencia.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="callout">
+            <strong>Sugerencia práctica</strong>
+            <p class="small">
+              Si hay dudas sobre reglas (promos vs cupones), implementar primero “modo simple”:
+              <span class="k">1 promo</span> + <span class="k">1 cupón</span> por pedido, con prioridad fija. Luego se expande.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <strong>Uso</strong>: abre este archivo en el navegador o publícalo como parte de la documentación del proyecto.
+        Mantén la sección “Decisiones a fijar temprano” actualizada: es la que más evita re-trabajo.
+      </footer>
+    </div>
+  </body>
+</html>

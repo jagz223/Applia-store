@@ -5,6 +5,9 @@ export type StoreShowcaseProduct = {
   name: string;
   description: string | null;
   price: number;
+  pricesByCurrency?: Record<string, number>;
+  displayCurrencyId?: string;
+  displayCurrencyLabel?: string;
   imageUrls: string[];
   categoryIds: number[];
 };

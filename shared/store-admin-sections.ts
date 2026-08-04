@@ -4,6 +4,7 @@ export const STORE_ADMIN_SECTIONS = [
   { id: "promociones", label: "Promociones", path: "promociones" },
   { id: "codigos", label: "Códigos de descuento", path: "codigos" },
   { id: "ordenes", label: "Órdenes", path: "ordenes" },
+  { id: "moneda", label: "Moneda", path: "moneda" },
   { id: "configuracion", label: "Configuraciones de tienda", path: "configuracion" },
 ] as const;
 

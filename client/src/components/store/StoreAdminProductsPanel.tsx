@@ -32,9 +32,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import {
+  STORE_CURRENCY_USD_ID,
+  currencyLabelForId,
+  type StoreCurrencyExtra,
+} from "@shared/store-currency-schema";
 
-function formatPrice(value: number) {
-  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
+function formatPrice(value: number, currencyLabel?: string) {
+  const amount = new Intl.NumberFormat("es-VE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+  return currencyLabel ? `${amount} ${currencyLabel}` : amount;
 }
 
 function ProductThumbnail({ imageUrls }: { imageUrls: string[] }) {
@@ -117,10 +126,27 @@ function ShowcaseToggle({
   );
 }
 
-export function StoreAdminProductsPanel({ storeId }: { storeId: number }) {
+export function StoreAdminProductsPanel({
+  storeId,
+  currencyAcceptedPaymentIds,
+  currencyExtras,
+  currencyVisualId,
+}: {
+  storeId: number;
+  currencyAcceptedPaymentIds?: string[];
+  currencyExtras?: StoreCurrencyExtra[];
+  currencyVisualId?: string;
+}) {
   const { toast } = useToast();
   const { data: products = [], isLoading, error } = useStoreProducts(storeId);
   const deleteMutation = useDeleteStoreProduct(storeId);
+
+  const acceptedIds =
+    currencyAcceptedPaymentIds && currencyAcceptedPaymentIds.length > 0
+      ? currencyAcceptedPaymentIds
+      : [STORE_CURRENCY_USD_ID];
+  const extras = currencyExtras ?? [];
+  const visualId = currencyVisualId || STORE_CURRENCY_USD_ID;
 
   const [formOpen, setFormOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<StoreProductSummary | null>(null);
@@ -198,7 +224,13 @@ export function StoreAdminProductsPanel({ storeId }: { storeId: number }) {
                           <ProductThumbnail imageUrls={product.imageUrls ?? []} />
                         </TableCell>
                         <TableCell className="font-medium">{product.name}</TableCell>
-                        <TableCell>{formatPrice(product.price)}</TableCell>
+                        <TableCell>
+                          {formatPrice(
+                            product.price,
+                            product.displayCurrencyLabel ??
+                              currencyLabelForId(visualId, extras),
+                          )}
+                        </TableCell>
                         <TableCell>
                           <ShowcaseToggle storeId={storeId} product={product} />
                         </TableCell>
@@ -251,6 +283,9 @@ export function StoreAdminProductsPanel({ storeId }: { storeId: number }) {
         open={formOpen}
         onOpenChange={setFormOpen}
         product={editProduct}
+        acceptedPaymentIds={acceptedIds}
+        currencyExtras={extras}
+        visualCurrencyId={visualId}
       />
 
       <StoreProductDetailDialog

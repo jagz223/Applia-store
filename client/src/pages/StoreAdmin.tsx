@@ -15,27 +15,38 @@ import { StoreAdminProductsPanel } from "@/components/store/StoreAdminProductsPa
 import { StoreAdminCategoriesPanel } from "@/components/store/StoreAdminCategoriesPanel";
 import { StoreAdminPromotionsPanel } from "@/components/store/StoreAdminPromotionsPanel";
 import { StoreAdminConfigPanel } from "@/components/store/StoreAdminConfigPanel";
+import { StoreAdminCurrencyPanel } from "@/components/store/StoreAdminCurrencyPanel";
 import { StoreAdminOrdersPanel } from "@/components/store/StoreAdminOrdersPanel";
 import { StoreAdminComingSoon } from "@/components/store/StoreAdminComingSoon";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
+import type { StoreCurrencyExtra } from "@shared/store-currency-schema";
 import type { StoreLocation } from "@shared/store-schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { hasAdminRole } from "@/lib/auth-utils";
 
 function sectionPanel(
   section: StoreAdminSectionId,
   store: {
     id: number;
     slug: string;
-    name: string;
-    description?: string | null;
-    rubro?: string | null;
-    coverImageUrl?: string | null;
     fulfillmentOptions?: StoreFulfillmentMode[];
     location?: StoreLocation | null;
+    currencyExtras?: StoreCurrencyExtra[];
+    currencyVisualId?: string;
+    currencyAcceptedPaymentIds?: string[];
   },
 ) {
-  if (section === "productos") return <StoreAdminProductsPanel storeId={store.id} />;
+  if (section === "productos") {
+    return (
+      <StoreAdminProductsPanel
+        storeId={store.id}
+        currencyAcceptedPaymentIds={store.currencyAcceptedPaymentIds}
+        currencyExtras={store.currencyExtras}
+        currencyVisualId={store.currencyVisualId}
+      />
+    );
+  }
   if (section === "categorias") return <StoreAdminCategoriesPanel storeId={store.id} />;
   if (section === "promociones") return <StoreAdminPromotionsPanel storeId={store.id} />;
   if (section === "ordenes") {
@@ -47,15 +58,22 @@ function sectionPanel(
       />
     );
   }
+  if (section === "moneda") {
+    return (
+      <StoreAdminCurrencyPanel
+        storeId={store.id}
+        slug={store.slug}
+        initialExtras={store.currencyExtras ?? []}
+        initialVisualCurrencyId={store.currencyVisualId}
+        initialAcceptedPaymentIds={store.currencyAcceptedPaymentIds}
+      />
+    );
+  }
   if (section === "configuracion") {
     return (
       <StoreAdminConfigPanel
         storeId={store.id}
         slug={store.slug}
-        initialName={store.name}
-        initialDescription={store.description ?? null}
-        initialRubro={store.rubro ?? null}
-        initialCoverImageUrl={store.coverImageUrl ?? null}
         initialFulfillmentOptions={store.fulfillmentOptions ?? []}
         initialLocation={store.location ?? null}
       />
@@ -66,7 +84,8 @@ function sectionPanel(
 }
 
 export default function StoreAdmin() {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const isAdmin = hasAdminRole(user);
   const [, params] = useRoute("/tienda/:slug/admin/:section?");
   const slug = params?.slug ?? "";
   const sectionParam = params?.section;
@@ -96,7 +115,7 @@ export default function StoreAdmin() {
         <Card>
           <CardHeader>
             <CardTitle>Acceso restringido</CardTitle>
-            <CardDescription>Inicia sesión para administrar tu tienda.</CardDescription>
+            <CardDescription>Inicia sesión para administrar la tienda.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild className="w-full">
@@ -129,64 +148,19 @@ export default function StoreAdmin() {
     );
   }
 
-  const { store, isOwner, visibilityActive } = data;
+  const { store, isOwner } = data;
+  const canManage = isOwner || isAdmin;
 
-  if (!isOwner) {
+  if (!canManage) {
     return (
       <div className="container max-w-md py-16 px-4">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5" />
-              Solo el dueño
+              Acceso restringido
             </CardTitle>
             <CardDescription>No tienes permiso para administrar esta tienda.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button variant="outline" asChild>
-              <Link href={`/tienda/${encodeURIComponent(slug)}`}>Volver a la tienda</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!visibilityActive) {
-    return (
-      <div className="container max-w-md py-16 px-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Lock className="h-5 w-5" />
-              Tienda inactiva
-            </CardTitle>
-            <CardDescription>
-              Activa la mensualidad de tu tienda para acceder al panel de administración.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button asChild>
-              <Link href={`/tienda/${encodeURIComponent(slug)}/pago`}>Ir a pago</Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href={`/tienda/${encodeURIComponent(slug)}`}>Volver</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (store.hasPendingSubscriptionPayment && !visibilityActive) {
-    return (
-      <div className="container max-w-md py-16 px-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Comprobante en revisión</CardTitle>
-            <CardDescription>
-              El panel se habilitará cuando el equipo valide tu pago de mensualidad.
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <Button variant="outline" asChild>

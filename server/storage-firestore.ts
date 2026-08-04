@@ -59,6 +59,8 @@ import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import {
   INGREDIENTS_MATERIALS_PAGE_SIZE,
   normalizeStoreLocation,
+  normalizeStoreCurrencyFields,
+  resolveStoreProductPriceFields,
   type Store,
   type IngredientMaterial,
   type InsertStore,
@@ -75,11 +77,13 @@ import {
   type UpdateStorePromotion,
   type StorePromotionLineItem,
 } from "@shared/store-schema";
+import { STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
 import type {
   InsertStorePaymentMethod,
   StorePaymentMethod,
   UpdateStorePaymentMethod,
 } from "@shared/store-payment-method-schema";
+import { normalizeStorePaymentMethodExtraFields } from "@shared/store-payment-method-schema";
 import type { StoreOrder, StoreOrderListFilters } from "@shared/store-order-schema";
 import { filterStoreOrders, storeOrderStatusSchema } from "@shared/store-order-schema";
 import type { StoreCart, StoreCartItem } from "@shared/store-cart-schema";
@@ -4299,6 +4303,9 @@ class FirestoreStorageImpl implements IStorage {
       coverImageUrl: null,
       location: null,
       fulfillmentOptions: [],
+      currencyExtras: [],
+      currencyVisualId: STORE_CURRENCY_USD_ID,
+      currencyAcceptedPaymentIds: [STORE_CURRENCY_USD_ID],
       visibilitySubscriptionEndsAt: null,
       createdAt: now,
       updatedAt: now,
@@ -4329,6 +4336,21 @@ class FirestoreStorageImpl implements IStorage {
         input.location === null
           ? null
           : normalizeStoreLocation(input.location) ?? input.location;
+    }
+    if (
+      input.currencyExtras !== undefined ||
+      input.currencyVisualId !== undefined ||
+      input.currencyAcceptedPaymentIds !== undefined
+    ) {
+      const nextCurrency = normalizeStoreCurrencyFields({
+        currencyExtras: input.currencyExtras ?? store.currencyExtras,
+        currencyVisualId: input.currencyVisualId ?? store.currencyVisualId,
+        currencyAcceptedPaymentIds:
+          input.currencyAcceptedPaymentIds ?? store.currencyAcceptedPaymentIds,
+      });
+      patch.currencyExtras = nextCurrency.currencyExtras;
+      patch.currencyVisualId = nextCurrency.currencyVisualId;
+      patch.currencyAcceptedPaymentIds = nextCurrency.currencyAcceptedPaymentIds;
     }
     await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(storeId)).set(patch, { merge: true });
     const refreshed = await this.getStoreById(storeId);
@@ -4382,6 +4404,20 @@ class FirestoreStorageImpl implements IStorage {
       .filter((store): store is Store => store != null && isStoreVisibilityActive(store));
     stores.sort((a, b) => String(a.name).localeCompare(String(b.name), "es"));
     return stores.slice(0, limit);
+  }
+
+  async getOldestStore(): Promise<Store | undefined> {
+    if (!this.db) return undefined;
+    const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.STORES).limit(500).get();
+    const stores = snapshot.docs
+      .map((doc) => this.mapStoreDoc(doc.id, doc.data()))
+      .filter((store): store is Store => store != null);
+    if (stores.length === 0) return undefined;
+    stores.sort(
+      (a, b) =>
+        this.timestampToMs(a.createdAt) - this.timestampToMs(b.createdAt) || a.id - b.id,
+    );
+    return stores[0];
   }
 
   async listIngredientsMaterials(options: {
@@ -4559,12 +4595,18 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("store_products");
     const now = new Date();
+    const store = await this.getStoreById(storeId);
+    const { price, pricesByCurrency } = resolveStoreProductPriceFields(
+      input,
+      store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+    );
     const payload: StoreProduct = {
       id,
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ?? null,
-      price: Number(input.price),
+      price,
+      pricesByCurrency,
       categoryIds: input.categoryIds ?? [],
       ingredientMaterialIds: input.ingredientMaterialIds ?? [],
       imageUrls: input.imageUrls ?? [],
@@ -4588,7 +4630,18 @@ class FirestoreStorageImpl implements IStorage {
     const patch: Record<string, unknown> = { updatedAt: now };
     if (input.name !== undefined) patch.name = input.name.trim();
     if (input.description !== undefined) patch.description = input.description?.trim() ?? null;
-    if (input.price !== undefined) patch.price = Number(input.price);
+    if (input.price !== undefined || input.pricesByCurrency !== undefined) {
+      const store = await this.getStoreById(storeId);
+      const priceFields = resolveStoreProductPriceFields(
+        {
+          price: input.price ?? existing.price,
+          pricesByCurrency: input.pricesByCurrency ?? existing.pricesByCurrency,
+        },
+        store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+      );
+      patch.price = priceFields.price;
+      patch.pricesByCurrency = priceFields.pricesByCurrency;
+    }
     if (input.categoryIds !== undefined) patch.categoryIds = input.categoryIds;
     if (input.ingredientMaterialIds !== undefined) patch.ingredientMaterialIds = input.ingredientMaterialIds;
     if (input.imageUrls !== undefined) patch.imageUrls = input.imageUrls;
@@ -4779,7 +4832,8 @@ class FirestoreStorageImpl implements IStorage {
       id,
       storeId,
       name: input.name.trim(),
-      accountNumber: input.accountNumber.trim(),
+      accountNumber: (input.accountNumber ?? "").trim(),
+      extraFields: normalizeStorePaymentMethodExtraFields(input.extraFields),
       imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
       createdAt: now,
       updatedAt: now,
@@ -4800,6 +4854,9 @@ class FirestoreStorageImpl implements IStorage {
     const patch: Record<string, unknown> = { updatedAt: now };
     if (input.name !== undefined) patch.name = input.name.trim();
     if (input.accountNumber !== undefined) patch.accountNumber = input.accountNumber.trim();
+    if (input.extraFields !== undefined) {
+      patch.extraFields = normalizeStorePaymentMethodExtraFields(input.extraFields);
+    }
     if (input.imageUrl !== undefined) {
       patch.imageUrl = input.imageUrl?.trim() ? input.imageUrl.trim() : null;
     }
@@ -5137,6 +5194,7 @@ class FirestoreStorageImpl implements IStorage {
       storeId,
       name: String(data.name ?? "").trim(),
       accountNumber: String(data.accountNumber ?? "").trim(),
+      extraFields: normalizeStorePaymentMethodExtraFields(data.extraFields),
       imageUrl:
         data.imageUrl != null && String(data.imageUrl).trim()
           ? String(data.imageUrl).trim()
@@ -5172,12 +5230,17 @@ class FirestoreStorageImpl implements IStorage {
     if (!data) return undefined;
     const id = Number(data.id ?? docId);
     if (!Number.isFinite(id)) return undefined;
+    const { price, pricesByCurrency } = resolveStoreProductPriceFields({
+      price: Number(data.price ?? 0),
+      pricesByCurrency: data.pricesByCurrency,
+    });
     return {
       id,
       storeId: Number(data.storeId),
       name: String(data.name ?? ""),
       description: data.description != null ? String(data.description) : null,
-      price: Number(data.price ?? 0),
+      price,
+      pricesByCurrency,
       categoryIds: Array.isArray(data.categoryIds)
         ? data.categoryIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
         : [],
@@ -5197,6 +5260,11 @@ class FirestoreStorageImpl implements IStorage {
     if (!data) return undefined;
     const id = Number(data.id ?? docId);
     if (!Number.isFinite(id)) return undefined;
+    const currency = normalizeStoreCurrencyFields({
+      currencyExtras: data.currencyExtras,
+      currencyVisualId: data.currencyVisualId,
+      currencyAcceptedPaymentIds: data.currencyAcceptedPaymentIds,
+    });
     return {
       id,
       ownerUserId: String(data.ownerUserId ?? ""),
@@ -5213,6 +5281,9 @@ class FirestoreStorageImpl implements IStorage {
         : null,
       location: normalizeStoreLocation(data.location),
       fulfillmentOptions: normalizeStoreFulfillmentOptions(data.fulfillmentOptions),
+      currencyExtras: currency.currencyExtras,
+      currencyVisualId: currency.currencyVisualId,
+      currencyAcceptedPaymentIds: currency.currencyAcceptedPaymentIds,
       visibilitySubscriptionEndsAt: this.readFirestoreDate(data.visibilitySubscriptionEndsAt),
       createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
       updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),

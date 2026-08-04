@@ -73,11 +73,20 @@ import {
   canEnableStoreFulfillmentOptions,
   STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE,
   normalizeStoreLocation,
+  normalizeStoreCurrencyFields,
 } from "@shared/store-schema";
+import {
+  DOLARAPI_VE_BASE,
+  currencyLabelForId,
+  parseDolarApiRate,
+  resolveProductDisplayPrice,
+  STORE_CURRENCY_USD_ID,
+} from "@shared/store-currency-schema";
 import { storeSubscriptionPaymentBodySchema } from "@shared/store-subscription-payment";
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { filterStoresByCatalogQuery, getStoreRubroLabel } from "@shared/store-rubros";
-import { parsePositiveIntParam, requireStoreOwner } from "./store-product-auth";
+import { parsePositiveIntParam, requireStoreOwner, viewerCanManageStore } from "./store-product-auth";
+import { hasAdminPrivileges } from "@shared/roles";
 import {
   addStoreCartItemSchema,
   updateStoreCartItemSchema,
@@ -88,6 +97,7 @@ import { submitStoreCheckoutSchema, updateStoreOrderStatusSchema, canTransitionS
 import {
   insertStorePaymentMethodSchema,
   updateStorePaymentMethodSchema,
+  formatStorePaymentMethodExtraFieldsAsText,
   type StorePaymentMethod,
 } from "@shared/store-payment-method-schema";
 import { normalizeStoreFulfillmentOptions } from "@shared/store-fulfillment";
@@ -111,13 +121,24 @@ function serializeDate(value: Date | string | null | undefined): string | null {
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
 
-function serializeStoreProduct(product: StoreProduct) {
+function serializeStoreProduct(
+  product: StoreProduct,
+  storeCurrency?: { visualCurrencyId?: string; currencyExtras?: { id: string; name: string; value: string }[] },
+) {
+  const visualCurrencyId = storeCurrency?.visualCurrencyId ?? STORE_CURRENCY_USD_ID;
+  const displayPrice = resolveProductDisplayPrice(product, visualCurrencyId);
   return {
     id: product.id,
     storeId: product.storeId,
     name: product.name,
     description: product.description,
-    price: product.price,
+    price: displayPrice,
+    pricesByCurrency: product.pricesByCurrency ?? {},
+    displayCurrencyId: visualCurrencyId,
+    displayCurrencyLabel: currencyLabelForId(
+      visualCurrencyId,
+      storeCurrency?.currencyExtras ?? [],
+    ),
     categoryIds: product.categoryIds,
     ingredientMaterialIds: product.ingredientMaterialIds,
     imageUrls: product.imageUrls ?? [],
@@ -182,15 +203,39 @@ async function assertStorePromotionItems(
   );
 }
 
-function serializeStoreShowcaseProduct(product: StoreProduct) {
+function serializeStoreShowcaseProduct(
+  product: StoreProduct,
+  store: Store,
+) {
+  const currency = normalizeStoreCurrencyFields(store);
+  const displayPrice = resolveProductDisplayPrice(product, currency.currencyVisualId);
   return {
     id: product.id,
     name: product.name,
     description: product.description,
-    price: product.price,
+    price: displayPrice,
+    pricesByCurrency: product.pricesByCurrency ?? {},
+    displayCurrencyId: currency.currencyVisualId,
+    displayCurrencyLabel: currencyLabelForId(currency.currencyVisualId, currency.currencyExtras),
     imageUrls: product.imageUrls ?? [],
     categoryIds: product.categoryIds ?? [],
   };
+}
+
+function assertProductPricesForAcceptedCurrencies(
+  store: Store,
+  pricesByCurrency: Record<string, number> | undefined,
+): string | null {
+  const currency = normalizeStoreCurrencyFields(store);
+  const map = pricesByCurrency ?? {};
+  for (const id of currency.currencyAcceptedPaymentIds) {
+    const value = map[id];
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      const label = currencyLabelForId(id, currency.currencyExtras);
+      return `Falta el precio en ${label}.`;
+    }
+  }
+  return null;
 }
 
 function serializeShowcaseCategory(category: StoreCategory) {
@@ -239,6 +284,7 @@ function serializeStorePaymentMethod(method: StorePaymentMethod) {
     storeId: method.storeId,
     name: method.name,
     accountNumber: method.accountNumber,
+    extraFields: method.extraFields ?? [],
     imageUrl: method.imageUrl ?? null,
     createdAt: serializeDate(method.createdAt),
     updatedAt: serializeDate(method.updatedAt),
@@ -313,6 +359,14 @@ function serializeStore(
     coverImageUrl: store.coverImageUrl ?? null,
     location: store.location ?? null,
     fulfillmentOptions: normalizeStoreFulfillmentOptions(store.fulfillmentOptions),
+    ...(() => {
+      const currency = normalizeStoreCurrencyFields(store);
+      return {
+        currencyExtras: currency.currencyExtras,
+        currencyVisualId: currency.currencyVisualId,
+        currencyAcceptedPaymentIds: currency.currencyAcceptedPaymentIds,
+      };
+    })(),
     visibilitySubscriptionEndsAt: serializeDate(store.visibilitySubscriptionEndsAt),
     visibilityActive: isStoreVisibilityActive(store),
     hasPendingSubscriptionPayment: extra?.hasPendingSubscriptionPayment ?? false,
@@ -333,6 +387,33 @@ const storesCatalogQuerySchema = z.object({
 });
 
 export function registerStoreRoutes(app: Express): void {
+  app.get("/api/currency/bcv", async (_req, res) => {
+    try {
+      const [usdRes, eurRes] = await Promise.all([
+        fetch(`${DOLARAPI_VE_BASE}/v1/dolares/oficial`),
+        fetch(`${DOLARAPI_VE_BASE}/v1/euros/oficial`),
+      ]);
+      if (!usdRes.ok || !eurRes.ok) {
+        return res.status(502).json({ message: "No se pudieron obtener las tasas BCV." });
+      }
+      const [usdJson, eurJson] = await Promise.all([usdRes.json(), eurRes.json()]);
+      const dollar = parseDolarApiRate(usdJson, "USD", "Dollar");
+      const euro = parseDolarApiRate(eurJson, "EUR", "Euro");
+      if (!dollar || !euro) {
+        return res.status(502).json({ message: "Respuesta inválida de DolarApi." });
+      }
+      return res.json({
+        source: "dolarapi",
+        provider: DOLARAPI_VE_BASE,
+        dollar,
+        euro,
+      });
+    } catch (e) {
+      console.error("[currency] bcv", e);
+      return res.status(502).json({ message: "No se pudieron obtener las tasas BCV." });
+    }
+  });
+
   app.get("/api/stores/subscription-quote", async (_req, res) => {
     try {
       const quote = await getStoreSubscriptionQuote();
@@ -355,6 +436,24 @@ export function registerStoreRoutes(app: Express): void {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
+      const role = String(req.user?.role ?? "");
+      let isAdmin = hasAdminPrivileges(role);
+      if (!isAdmin) {
+        const dbUser = await genFebStorage.getUserById(userId);
+        isAdmin = hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
+      }
+      if (!isAdmin) {
+        return res.status(403).json({ message: "Solo un administrador puede crear la tienda." });
+      }
+
+      const existing = await genFebStorage.getOldestStore();
+      if (existing) {
+        return res.status(409).json({
+          message: "Ya existe una tienda en el sistema.",
+          store: serializeStoreCatalogItem(existing),
+        });
+      }
+
       const store = await genFebStorage.createStore({
         ownerUserId: userId,
         name: parsed.data.name,
@@ -374,7 +473,16 @@ export function registerStoreRoutes(app: Express): void {
     try {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      const store = await genFebStorage.getStoreByOwnerUserId(userId);
+      let store = await genFebStorage.getStoreByOwnerUserId(userId);
+      if (!store) {
+        const dbUser = await genFebStorage.getUserById(userId);
+        const admin =
+          hasAdminPrivileges(req.user?.role) ||
+          hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
+        if (admin) {
+          store = (await genFebStorage.getOldestStore()) ?? undefined;
+        }
+      }
       if (!store) return res.status(404).json({ message: "Aún no tienes una tienda." });
       const repaired = await repairStoreSubscriptionVisibilityIfNeeded(store);
       const hasPending = await storeHasPendingSubscriptionPayment(repaired.id);
@@ -391,8 +499,19 @@ export function registerStoreRoutes(app: Express): void {
     try {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      const store = await genFebStorage.getStoreByOwnerUserId(userId);
+      let store = await genFebStorage.getStoreByOwnerUserId(userId);
+      if (!store) {
+        const dbUser = await genFebStorage.getUserById(userId);
+        const admin =
+          hasAdminPrivileges(req.user?.role) ||
+          hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
+        if (admin) {
+          store = (await genFebStorage.getOldestStore()) ?? undefined;
+        }
+      }
       if (!store) return res.status(404).json({ message: "Aún no tienes una tienda." });
+      const canManage = await viewerCanManageStore(userId, store, req.user?.role);
+      if (!canManage) return res.status(403).json({ message: "No tienes permiso para editar esta tienda." });
       const parsed = updateStoreSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return res.status(400).json({
@@ -440,6 +559,18 @@ export function registerStoreRoutes(app: Express): void {
     }
   });
 
+  /** Tienda única del sistema: la más antigua en BD (o null si no hay ninguna). */
+  app.get("/api/stores/primary", async (_req, res) => {
+    try {
+      const store = await genFebStorage.getOldestStore();
+      if (!store) return res.json({ store: null });
+      return res.json({ store: serializeStoreCatalogItem(store) });
+    } catch (e) {
+      console.error("[stores] primary", e);
+      return res.status(500).json({ message: "No se pudo resolver la tienda principal." });
+    }
+  });
+
   app.patch("/api/stores/:storeId", authenticateJWT, async (req: any, res) => {
     try {
       const userId = String(req.user?.id ?? "");
@@ -471,7 +602,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] update", e);
       return res.status(500).json({ message: "No se pudo actualizar la tienda." });
     }
@@ -504,7 +635,7 @@ export function registerStoreRoutes(app: Express): void {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PAYMENT_ALREADY_PENDING") {
         return res.status(409).json({ message: "Ya hay un comprobante en revisión. Espera la validación del equipo." });
       }
@@ -528,7 +659,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] list categories", e);
       return res.status(500).json({ message: "No se pudieron cargar las categorías." });
     }
@@ -560,7 +691,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PRODUCT_INVALID") {
         return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
       }
@@ -584,7 +715,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] get category", e);
       return res.status(500).json({ message: "No se pudo cargar la categoría." });
     }
@@ -620,7 +751,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_CATEGORY_NOT_FOUND") return res.status(404).json({ message: "Categoría no encontrada." });
       if (msg === "STORE_PRODUCT_INVALID") {
         return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
@@ -644,7 +775,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_CATEGORY_NOT_FOUND") return res.status(404).json({ message: "Categoría no encontrada." });
       console.error("[stores] delete category", e);
       return res.status(500).json({ message: "No se pudo eliminar la categoría." });
@@ -666,7 +797,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] list promotions", e);
       return res.status(500).json({ message: "No se pudieron cargar las promociones." });
     }
@@ -693,7 +824,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PRODUCT_INVALID") {
         return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
       }
@@ -717,7 +848,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] get promotion", e);
       return res.status(500).json({ message: "No se pudo cargar la promoción." });
     }
@@ -747,7 +878,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PROMOTION_NOT_FOUND") return res.status(404).json({ message: "Promoción no encontrada." });
       if (msg === "STORE_PRODUCT_INVALID") {
         return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
@@ -770,7 +901,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PROMOTION_NOT_FOUND") return res.status(404).json({ message: "Promoción no encontrada." });
       console.error("[stores] delete promotion", e);
       return res.status(500).json({ message: "No se pudo eliminar la promoción." });
@@ -789,7 +920,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] list payment methods", e);
       return res.status(500).json({ message: "No se pudieron cargar los métodos de pago." });
     }
@@ -814,7 +945,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] create payment method", e);
       return res.status(500).json({ message: "No se pudo crear el método de pago." });
     }
@@ -840,7 +971,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PAYMENT_METHOD_NOT_FOUND") {
         return res.status(404).json({ message: "Método de pago no encontrado." });
       }
@@ -862,7 +993,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PAYMENT_METHOD_NOT_FOUND") {
         return res.status(404).json({ message: "Método de pago no encontrado." });
       }
@@ -1100,7 +1231,10 @@ export function registerStoreRoutes(app: Express): void {
         userId,
         paymentMethodId: parsed.data.paymentMethodId,
         paymentMethodName: paymentMethod.name,
-        paymentMethodAccountNumber: paymentMethod.accountNumber,
+        paymentMethodAccountNumber:
+          formatStorePaymentMethodExtraFieldsAsText(paymentMethod.extraFields ?? []) ||
+          paymentMethod.accountNumber ||
+          "",
         fulfillmentMode,
         reference: parsed.data.reference.trim(),
         proofImageUrl: parsed.data.proofImageUrl.trim(),
@@ -1422,13 +1556,23 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
       const products = await genFebStorage.listStoreProducts(storeId);
-      return res.json({ products: products.map(serializeStoreProduct) });
+      const currency = normalizeStoreCurrencyFields(store);
+      return res.json({
+        products: products.map((p) =>
+          serializeStoreProduct(p, {
+            visualCurrencyId: currency.currencyVisualId,
+            currencyExtras: currency.currencyExtras,
+          }),
+        ),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] list products", e);
       return res.status(500).json({ message: "No se pudieron cargar los productos." });
     }
@@ -1440,6 +1584,8 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
       const parsed = insertStoreProductSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return res.status(400).json({
@@ -1447,14 +1593,22 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
+      const priceError = assertProductPricesForAcceptedCurrencies(store, parsed.data.pricesByCurrency);
+      if (priceError) return res.status(400).json({ message: priceError });
       await assertStoreCategoryIds(storeId, parsed.data.categoryIds ?? []);
       const product = await genFebStorage.createStoreProduct(storeId, parsed.data);
-      return res.status(201).json({ product: serializeStoreProduct(product) });
+      const currency = normalizeStoreCurrencyFields(store);
+      return res.status(201).json({
+        product: serializeStoreProduct(product, {
+          visualCurrencyId: currency.currencyVisualId,
+          currencyExtras: currency.currencyExtras,
+        }),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_CATEGORY_INVALID") {
         return res.status(400).json({ message: "Una o más categorías no son válidas para esta tienda." });
       }
@@ -1470,14 +1624,22 @@ export function registerStoreRoutes(app: Express): void {
       const productId = parsePositiveIntParam(req.params.productId);
       if (!storeId || !productId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
       const product = await genFebStorage.getStoreProduct(storeId, productId);
       if (!product) return res.status(404).json({ message: "Producto no encontrado." });
-      return res.json({ product: serializeStoreProduct(product) });
+      const currency = normalizeStoreCurrencyFields(store);
+      return res.json({
+        product: serializeStoreProduct(product, {
+          visualCurrencyId: currency.currencyVisualId,
+          currencyExtras: currency.currencyExtras,
+        }),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] get product", e);
       return res.status(500).json({ message: "No se pudo cargar el producto." });
     }
@@ -1490,6 +1652,8 @@ export function registerStoreRoutes(app: Express): void {
       const productId = parsePositiveIntParam(req.params.productId);
       if (!storeId || !productId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
+      const store = await genFebStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
       const parsed = updateStoreProductSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return res.status(400).json({
@@ -1497,16 +1661,36 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
+      if (parsed.data.pricesByCurrency !== undefined || parsed.data.price !== undefined) {
+        const existing = await genFebStorage.getStoreProduct(storeId, productId);
+        if (!existing) return res.status(404).json({ message: "Producto no encontrado." });
+        const mergedPrices = {
+          ...(existing.pricesByCurrency ?? {}),
+          ...(parsed.data.pricesByCurrency ?? {}),
+        };
+        if (parsed.data.price !== undefined && parsed.data.pricesByCurrency === undefined) {
+          const currency = normalizeStoreCurrencyFields(store);
+          mergedPrices[currency.currencyVisualId] = parsed.data.price;
+        }
+        const priceError = assertProductPricesForAcceptedCurrencies(store, mergedPrices);
+        if (priceError) return res.status(400).json({ message: priceError });
+      }
       if (parsed.data.categoryIds != null) {
         await assertStoreCategoryIds(storeId, parsed.data.categoryIds);
       }
       const product = await genFebStorage.updateStoreProduct(storeId, productId, parsed.data);
-      return res.json({ product: serializeStoreProduct(product) });
+      const currency = normalizeStoreCurrencyFields(store);
+      return res.json({
+        product: serializeStoreProduct(product, {
+          visualCurrencyId: currency.currencyVisualId,
+          currencyExtras: currency.currencyExtras,
+        }),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PRODUCT_NOT_FOUND") return res.status(404).json({ message: "Producto no encontrado." });
       if (msg === "STORE_CATEGORY_INVALID") {
         return res.status(400).json({ message: "Una o más categorías no son válidas para esta tienda." });
@@ -1529,7 +1713,7 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
-      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No eres dueño de esta tienda." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PRODUCT_NOT_FOUND") return res.status(404).json({ message: "Producto no encontrado." });
       console.error("[stores] delete product", e);
       return res.status(500).json({ message: "No se pudo eliminar el producto." });
@@ -1545,18 +1729,15 @@ export function registerStoreRoutes(app: Express): void {
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const viewerId = req.user?.id != null ? String(req.user.id) : null;
-      const isOwner = viewerId != null && viewerId === store.ownerUserId;
+      const isOwner = await viewerCanManageStore(viewerId, store, req.user?.role);
       const storeForView =
         isOwner ? await repairStoreSubscriptionVisibilityIfNeeded(store) : store;
       const visibilityActive = isStoreVisibilityActive(storeForView);
 
-      if (!visibilityActive && !isOwner) {
-        return res.json({ products: [], categories: [], promotions: [], visibilityActive: false, inactive: true });
-      }
-
+      // Vitrina pública: clientes e invitados siempre ven productos (tienda única).
       const all = await genFebStorage.listStoreProducts(storeForView.id);
       const showcaseList = all.filter((p) => p.showOnShowcase !== false);
-      const products = showcaseList.map(serializeStoreShowcaseProduct);
+      const products = showcaseList.map((p) => serializeStoreShowcaseProduct(p, storeForView));
 
       const allCategories = await genFebStorage.listStoreCategories(storeForView.id);
       const categories = allCategories
@@ -1588,26 +1769,21 @@ export function registerStoreRoutes(app: Express): void {
       if (slug === "mine") {
         return res.status(404).json({ message: "Usa GET /api/stores/mine con autenticación." });
       }
+      if (slug === "primary" || slug === "subscription-quote") {
+        return res.status(404).json({ message: "Ruta no válida." });
+      }
 
       const store = await genFebStorage.getStoreBySlug(slug);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const viewerId = req.user?.id != null ? String(req.user.id) : null;
-      const isOwner = viewerId != null && viewerId === store.ownerUserId;
+      const isOwner = await viewerCanManageStore(viewerId, store, req.user?.role);
       const storeForView =
         isOwner ? await repairStoreSubscriptionVisibilityIfNeeded(store) : store;
       const visibilityActive = isStoreVisibilityActive(storeForView);
       const hasPending = isOwner ? await storeHasPendingSubscriptionPayment(storeForView.id) : false;
 
-      if (!visibilityActive && !isOwner) {
-        return res.json({
-          store: serializeStore(storeForView, { isOwner: false }),
-          isOwner: false,
-          visibilityActive: false,
-          inactive: true,
-        });
-      }
-
+      // Público siempre puede abrir la vitrina (sin marcar inactive).
       return res.json({
         store: serializeStore(storeForView, {
           hasPendingSubscriptionPayment: hasPending,

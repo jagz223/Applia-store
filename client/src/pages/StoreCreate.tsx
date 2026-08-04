@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { ArrowLeft, Loader2, Store } from "lucide-react";
@@ -19,7 +19,8 @@ import {
 } from "@/components/ui/form";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { MY_STORE_QUERY_KEY, useMyStore, useStoreSubscriptionQuote } from "@/hooks/use-my-store";
+import { hasAdminRole } from "@/lib/auth-utils";
+import { MY_STORE_QUERY_KEY } from "@/hooks/use-my-store";
 
 const createStoreFormSchema = z.object({
   name: storeNameSchema,
@@ -27,13 +28,20 @@ const createStoreFormSchema = z.object({
 
 type CreateStoreForm = z.infer<typeof createStoreFormSchema>;
 
+async function fetchPrimaryStoreSlug(): Promise<string | null> {
+  const res = await fetch("/api/stores/primary");
+  if (!res.ok) return null;
+  const data = (await res.json()) as { store: { slug?: string } | null };
+  return data.store?.slug ?? null;
+}
+
 export default function StoreCreate() {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const isAdmin = hasAdminRole(user);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: myStore, isLoading: mineLoading } = useMyStore(isAuthenticated);
-  const { data: quote, isLoading: quoteLoading } = useStoreSubscriptionQuote();
+  const [checkingPrimary, setCheckingPrimary] = useState(true);
 
   const form = useForm<CreateStoreForm>({
     resolver: zodResolver(createStoreFormSchema),
@@ -41,10 +49,24 @@ export default function StoreCreate() {
   });
 
   useEffect(() => {
-    if (myStore?.slug) {
-      setLocation(`/tienda/${encodeURIComponent(myStore.slug)}`);
+    if (authLoading || !isAuthenticated || !isAdmin) {
+      setCheckingPrimary(false);
+      return;
     }
-  }, [myStore?.slug, setLocation]);
+    let cancelled = false;
+    (async () => {
+      const slug = await fetchPrimaryStoreSlug();
+      if (cancelled) return;
+      if (slug) {
+        setLocation(`/tienda/${encodeURIComponent(slug)}`);
+        return;
+      }
+      setCheckingPrimary(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, isAuthenticated, isAdmin, setLocation]);
 
   const createMutation = useMutation({
     mutationFn: async (values: CreateStoreForm) => {
@@ -67,7 +89,7 @@ export default function StoreCreate() {
       await queryClient.invalidateQueries({ queryKey: MY_STORE_QUERY_KEY });
       toast({
         title: "Tienda creada",
-        description: `«${data.store.name}» está lista. Puedes activarla cuando quieras con la mensualidad.`,
+        description: `«${data.store.name}» está lista.`,
       });
       setLocation(`/tienda/${encodeURIComponent(data.store.slug)}`);
     },
@@ -76,13 +98,21 @@ export default function StoreCreate() {
     },
   });
 
+  if (authLoading || checkingPrimary) {
+    return (
+      <div className="container py-16 flex justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="container max-w-lg py-12 px-4">
         <Card>
           <CardHeader>
             <CardTitle>Crear tienda</CardTitle>
-            <CardDescription>Inicia sesión para abrir tu tienda en GenFeb.</CardDescription>
+            <CardDescription>Inicia sesión como administrador para crear la tienda.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild className="w-full">
@@ -94,22 +124,29 @@ export default function StoreCreate() {
     );
   }
 
-  if (mineLoading || myStore) {
+  if (!isAdmin) {
     return (
-      <div className="container py-16 flex justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="container max-w-lg py-12 px-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Acceso restringido</CardTitle>
+            <CardDescription>Solo un administrador puede crear la tienda.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" asChild className="w-full">
+              <Link href="/dashboard">Volver al dashboard</Link>
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  const monthlyUsd = quote?.monthlyUsd ?? 15;
-  const monthlyLabel = quote?.label ?? `USD ${monthlyUsd}`;
-
   return (
     <div className="container max-w-lg py-8 sm:py-12 px-4">
       <Button variant="ghost" size="sm" className="mb-6 gap-2" asChild>
-        <Link href="/settings">
-          <ArrowLeft className="h-4 w-4" /> Configuración
+        <Link href="/dashboard">
+          <ArrowLeft className="h-4 w-4" /> Dashboard
         </Link>
       </Button>
 
@@ -120,13 +157,10 @@ export default function StoreCreate() {
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15 text-primary">
               <Store className="h-5 w-5" />
             </div>
-            <CardTitle className="text-xl">Crear tu tienda</CardTitle>
+            <CardTitle className="text-xl">Información de la tienda</CardTitle>
           </div>
           <CardDescription>
-            Tener una tienda con objetos publicados cuesta{" "}
-            <strong className="text-foreground">{monthlyLabel}/mes</strong>
-            {quoteLoading ? " (cargando tarifa…)" : ""}. Puedes crear la tienda ahora y pagar la mensualidad cuando
-            quieras activar la visibilidad pública.
+            Completa los datos de la tienda del sistema. Solo puede existir una.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -142,7 +176,7 @@ export default function StoreCreate() {
                   <FormItem>
                     <FormLabel>Nombre de la tienda</FormLabel>
                     <FormControl>
-                      <Input placeholder="Ej: Panadería La Esquina" {...field} />
+                      <Input placeholder="Ej: Mi Tienda" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

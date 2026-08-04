@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { isFullAdmin } from "./roles";
 
-/** Roles permitidos en el registro público (sin central ni staff). */
-export const PUBLIC_REGISTER_ROLES = ["client", "professional"] as const;
+/** Roles permitidos en el registro público (solo cliente; asociados ya no se registran aquí). */
+export const PUBLIC_REGISTER_ROLES = ["client"] as const;
 export type PublicRegisterRole = (typeof PUBLIC_REGISTER_ROLES)[number];
 
 /** Roles base que staff (admin o Soporte TI) puede asignar al crear usuarios. */

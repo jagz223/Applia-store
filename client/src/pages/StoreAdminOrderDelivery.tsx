@@ -2,6 +2,7 @@ import { Link, useRoute } from "wouter";
 import { ArrowLeft, Loader2, Phone, Truck, User } from "lucide-react";
 import { STORE_ORDER_STATUS_LABELS } from "@shared/store-order-schema";
 import { useAuth } from "@/hooks/use-auth";
+import { hasAdminRole } from "@/lib/auth-utils";
 import { useStoreBySlug } from "@/hooks/use-my-store";
 import { useStoreOrderDeliveryDetail } from "@/hooks/use-store-orders";
 import { StoreAdminLayout } from "@/components/store/StoreAdminLayout";
@@ -25,7 +26,8 @@ function formatPrice(value: number) {
 }
 
 export default function StoreAdminOrderDelivery() {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const isAdmin = hasAdminRole(user);
   const [, params] = useRoute("/tienda/:slug/admin/ordenes/delivery/:orderId");
   const slug = params?.slug ?? "";
   const orderId = Number.parseInt(params?.orderId ?? "", 10);
@@ -35,11 +37,12 @@ export default function StoreAdminOrderDelivery() {
     isAuthenticated && Boolean(slug),
   );
 
+  const canManage = Boolean(storeData?.isOwner || isAdmin);
   const storeId = storeData?.store?.id ?? 0;
   const { data, isLoading, error, refetch } = useStoreOrderDeliveryDetail(
     storeId,
     orderId,
-    Boolean(storeData?.isOwner && storeData?.visibilityActive && orderId > 0),
+    Boolean(canManage && orderId > 0),
   );
 
   if (!isAuthenticated) {
@@ -58,7 +61,7 @@ export default function StoreAdminOrderDelivery() {
     );
   }
 
-  if (storeError || !storeData?.store || !storeData.isOwner) {
+  if (storeError || !storeData?.store || !canManage) {
     return (
       <div className="container max-w-md py-16 px-4">
         <p className="text-sm text-destructive">No tienes permiso para ver este delivery.</p>

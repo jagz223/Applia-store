@@ -1,4 +1,14 @@
 import { z } from "zod";
+import {
+  STORE_CURRENCY_USD_ID,
+  normalizeProductPricesByCurrency,
+  normalizeStoreCurrencyAcceptedPaymentIds,
+  normalizeStoreCurrencyExtras,
+  normalizeStoreCurrencyVisualId,
+  listKnownStoreCurrencyIds,
+  storeCurrencyExtrasSchema,
+  type StoreCurrencyExtra,
+} from "./store-currency-schema";
 import { storeFulfillmentOptionsSchema, type StoreFulfillmentMode } from "./store-fulfillment";
 import { storeRubroIdSchema } from "./store-rubros";
 
@@ -81,6 +91,12 @@ export type Store = {
   location: StoreLocation | null;
   /** Modalidades habilitadas para el carrito (delivery, pickup, in_site). */
   fulfillmentOptions: StoreFulfillmentMode[];
+  /** Tasas manuales extra (nombre + valor en Bs), p. ej. Binance. */
+  currencyExtras: StoreCurrencyExtra[];
+  /** Moneda única mostrada en la vitrina (debe estar en currencyAcceptedPaymentIds). */
+  currencyVisualId: string;
+  /** Monedas aceptadas como pago; cada una exige precio en productos. */
+  currencyAcceptedPaymentIds: string[];
   /** Vigencia de visibilidad pública (null = sin pago / inactiva). */
   visibilitySubscriptionEndsAt: Date | string | null;
   createdAt: Date | string;
@@ -94,9 +110,34 @@ export const updateStoreSchema = z.object({
   coverImageUrl: z.string().trim().min(1).max(2000).nullable().optional(),
   location: storeLocationSchema.nullable().optional(),
   fulfillmentOptions: storeFulfillmentOptionsSchema.optional(),
+  currencyExtras: storeCurrencyExtrasSchema.optional(),
+  currencyVisualId: z.string().trim().min(1).max(64).optional(),
+  currencyAcceptedPaymentIds: z.array(z.string().trim().min(1).max(64)).max(40).optional(),
 });
 
 export type UpdateStore = z.infer<typeof updateStoreSchema>;
+
+export function normalizeStoreCurrencyFields(input: {
+  currencyExtras?: unknown;
+  currencyVisualId?: unknown;
+  currencyAcceptedPaymentIds?: unknown;
+}): {
+  currencyExtras: StoreCurrencyExtra[];
+  currencyVisualId: string;
+  currencyAcceptedPaymentIds: string[];
+} {
+  const currencyExtras = normalizeStoreCurrencyExtras(input.currencyExtras);
+  const knownIds = listKnownStoreCurrencyIds(currencyExtras);
+  const currencyAcceptedPaymentIds = normalizeStoreCurrencyAcceptedPaymentIds(
+    input.currencyAcceptedPaymentIds,
+    knownIds,
+  );
+  const currencyVisualId = normalizeStoreCurrencyVisualId(
+    input.currencyVisualId,
+    currencyAcceptedPaymentIds,
+  );
+  return { currencyExtras, currencyVisualId, currencyAcceptedPaymentIds };
+}
 
 export const STORE_PRODUCT_MAX_IMAGES = 4;
 
@@ -104,6 +145,10 @@ export const insertStoreProductSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(5000).optional().nullable(),
   price: z.number().positive(),
+  pricesByCurrency: z
+    .record(z.string().trim().min(1).max(64), z.number().positive())
+    .optional()
+    .default({}),
   categoryIds: z.array(z.number().int().positive()).optional().default([]),
   ingredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
   imageUrls: z
@@ -127,6 +172,8 @@ export type StoreProduct = {
   name: string;
   description: string | null;
   price: number;
+  /** Precio por moneda aceptada como pago (id → monto). */
+  pricesByCurrency: Record<string, number>;
   categoryIds: number[];
   ingredientMaterialIds: number[];
   imageUrls: string[];
@@ -134,6 +181,27 @@ export type StoreProduct = {
   createdAt: Date | string;
   updatedAt: Date | string;
 };
+
+export function resolveStoreProductPriceFields(
+  input: { price?: number; pricesByCurrency?: unknown },
+  visualCurrencyId: string = STORE_CURRENCY_USD_ID,
+): { price: number; pricesByCurrency: Record<string, number> } {
+  const pricesByCurrency = normalizeProductPricesByCurrency(input.pricesByCurrency);
+  const visualPrice = pricesByCurrency[visualCurrencyId];
+  const price =
+    typeof visualPrice === "number" && visualPrice > 0
+      ? visualPrice
+      : typeof input.price === "number" && input.price > 0
+        ? input.price
+        : pricesByCurrency[STORE_CURRENCY_USD_ID] ?? 0;
+  if (price > 0 && pricesByCurrency[visualCurrencyId] == null) {
+    pricesByCurrency[visualCurrencyId] = price;
+  }
+  if (price > 0 && pricesByCurrency[STORE_CURRENCY_USD_ID] == null && visualCurrencyId === STORE_CURRENCY_USD_ID) {
+    pricesByCurrency[STORE_CURRENCY_USD_ID] = price;
+  }
+  return { price, pricesByCurrency };
+}
 
 export const ingredientMaterialNameSchema = z
   .string()

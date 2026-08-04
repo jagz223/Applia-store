@@ -29,6 +29,7 @@ export type StoreCartPaymentMethodOption = {
   id: number;
   name: string;
   accountNumber: string;
+  extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
 };
 

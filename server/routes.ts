@@ -45,7 +45,6 @@ import { registerMobilityRideRoutes, mobilityPanicResolveContext } from "./mobil
 import { registerPackRideRoutes, packPanicResolveContext } from "./pack-rides";
 import { registerSeoRoutes } from "./seo";
 import { registerStoreRoutes } from "./routes-stores";
-import { registerHelpChatRoutes } from "./routes-help-chat";
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
@@ -74,7 +73,6 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   registerSeoRoutes(app);
-  registerHelpChatRoutes(app);
 
   // VehiclesDB (open catalogue) - marcas/modelos globales.
   // Usamos un proxy desde el backend para evitar CORS y para cachear la carga del catálogo.

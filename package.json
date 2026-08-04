@@ -29,7 +29,6 @@
   },
   "dependencies": {
     "@google-cloud/firestore": "^8.3.0",
-    "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@paypal/checkout-server-sdk": "^1.0.3",

@@ -13,19 +13,21 @@ export type MyStoreSummary = {
   coverImageUrl?: string | null;
   location?: StoreLocation | null;
   fulfillmentOptions?: StoreFulfillmentMode[];
+  currencyExtras?: import("@shared/store-currency-schema").StoreCurrencyExtra[];
+  currencyVisualId?: string;
+  currencyAcceptedPaymentIds?: string[];
   visibilityActive: boolean;
   hasPendingSubscriptionPayment?: boolean;
 };
 
 export const MY_STORE_QUERY_KEY = ["/api/stores/mine"] as const;
 
-/** Misma ruta que «Mi tienda» en el menú de cuenta: panel si está activa, vitrina si no. */
+/** Ruta de administración de la tienda (siempre activa). */
 export function getMyStoreNavHref(
   store: Pick<MyStoreSummary, "slug" | "visibilityActive"> | null | undefined,
 ): string | null {
   if (!store?.slug) return null;
-  const slugEnc = encodeURIComponent(store.slug);
-  return store.visibilityActive ? `/tienda/${slugEnc}/admin` : `/tienda/${slugEnc}`;
+  return `/tienda/${encodeURIComponent(store.slug)}/admin`;
 }
 
 export function useMyStore(enabled = true) {

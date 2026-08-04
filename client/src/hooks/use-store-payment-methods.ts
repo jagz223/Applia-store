@@ -9,6 +9,7 @@ export type StorePaymentMethodSummary = {
   storeId: number;
   name: string;
   accountNumber: string;
+  extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
   createdAt: string;
   updatedAt: string;

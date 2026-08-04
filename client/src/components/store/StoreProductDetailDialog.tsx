@@ -1,5 +1,6 @@
 import type { StoreProductSummary } from "@/hooks/use-store-products";
 import { categoriesFromIds, useStoreCategories } from "@/hooks/use-store-categories";
+import { currencyLabelForId } from "@shared/store-currency-schema";
 import {
   Dialog,
   DialogContent,
@@ -8,8 +9,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-function formatPrice(value: number) {
-  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
+function formatPrice(value: number, currencyLabel?: string) {
+  const amount = new Intl.NumberFormat("es-VE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+  return currencyLabel ? `${amount} ${currencyLabel}` : amount;
 }
 
 export function StoreProductDetailDialog({
@@ -52,8 +57,20 @@ export function StoreProductDetailDialog({
             </div>
           ) : null}
           <div>
-            <dt className="font-medium text-muted-foreground">Precio</dt>
-            <dd className="text-base font-semibold">{formatPrice(product.price)}</dd>
+            <dt className="font-medium text-muted-foreground">Precios</dt>
+            <dd className="space-y-1">
+              {product.pricesByCurrency && Object.keys(product.pricesByCurrency).length > 0 ? (
+                Object.entries(product.pricesByCurrency).map(([id, value]) => (
+                  <p key={id} className="text-base font-semibold">
+                    {formatPrice(value, currencyLabelForId(id, []))}
+                  </p>
+                ))
+              ) : (
+                <p className="text-base font-semibold">
+                  {formatPrice(product.price, product.displayCurrencyLabel)}
+                </p>
+              )}
+            </dd>
           </div>
           {product.description ? (
             <div>

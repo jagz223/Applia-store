@@ -11,8 +11,6 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
 import { api } from "@shared/routes";
 import { isGuest } from "@/lib/auth-utils";
 import { AlreadyAuthenticatedView } from "@/components/AlreadyAuthenticatedView";
@@ -34,7 +32,7 @@ const registerSchema = z.object({
     .transform((s) => s.trim()),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
   confirmPassword: z.string(),
-  role: z.enum(["client", "professional"]),
+  role: z.literal("client"),
 })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Las contraseñas no coinciden",
@@ -127,8 +125,7 @@ export default function Register() {
         description: `Bienvenido ${result.user.name}, tu cuenta ha sido creada correctamente.`,
       });
 
-      const next = data.role === "professional" ? "/become-pro" : "/";
-      setLocation(`/account-recovery/setup?next=${encodeURIComponent(next)}`);
+      setLocation(`/account-recovery/setup?next=${encodeURIComponent("/")}`);
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -323,36 +320,6 @@ export default function Register() {
                         placeholder="••••••••"
                         {...field}
                       />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="role"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tipo de cuenta</FormLabel>
-                    <FormControl>
-                      <RadioGroup
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                        className="flex gap-4"
-                      >
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="client" id="client" />
-                          <Label htmlFor="client" className="cursor-pointer">
-                            Cliente
-                          </Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="professional" id="professional" />
-                          <Label htmlFor="professional" className="cursor-pointer">
-                            Asociado/Driver
-                          </Label>
-                        </div>
-                      </RadioGroup>
                     </FormControl>
                     <FormMessage />
                   </FormItem>

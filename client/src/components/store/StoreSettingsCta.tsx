@@ -30,10 +30,8 @@ export function StoreSettingsCta({ onNavigate, className }: StoreSettingsCtaProp
   const href = myStore ? getMyStoreNavHref(myStore) ?? "/tienda/crear" : "/tienda/crear";
   const title = myStore ? "Mi tienda" : "Crear Tienda";
   const description = myStore
-    ? myStore.visibilityActive
-      ? `Administra «${myStore.name}» desde el panel de productos.`
-      : `Gestiona «${myStore.name}» — activa la mensualidad para publicar.`
-    : "Abre tu tienda online en GenFeb. Publica productos con una mensualidad aparte.";
+    ? `Administra «${myStore.name}» desde el panel de productos.`
+    : "Abre tu tienda online y publica productos.";
 
   return (
     <Link href={href} onClick={onNavigate} className={cn("block group", className)}>

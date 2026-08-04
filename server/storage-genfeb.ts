@@ -42,6 +42,8 @@ import { DEFAULT_CATEGORIES } from "@shared/default-categories";
 import {
   INGREDIENTS_MATERIALS_PAGE_SIZE,
   normalizeStoreLocation,
+  normalizeStoreCurrencyFields,
+  resolveStoreProductPriceFields,
   type Store,
   type IngredientMaterial,
   type InsertStore,
@@ -57,10 +59,14 @@ import {
   type InsertStorePromotion,
   type UpdateStorePromotion,
 } from "@shared/store-schema";
+import { STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
 import type {
   InsertStorePaymentMethod,
   StorePaymentMethod,
   UpdateStorePaymentMethod,
+} from "@shared/store-payment-method-schema";
+import {
+  normalizeStorePaymentMethodExtraFields,
 } from "@shared/store-payment-method-schema";
 import type { StoreOrder, StoreOrderListFilters } from "@shared/store-order-schema";
 import { filterStoreOrders } from "@shared/store-order-schema";
@@ -442,6 +448,8 @@ export interface IStorage
   getStoreByOwnerUserId(ownerUserId: string): Promise<Store | undefined>;
   storeSlugExists(slug: string): Promise<boolean>;
   listActiveStores(options?: { limit?: number }): Promise<Store[]>;
+  /** Tienda más antigua del sistema (cualquier estado). Null si no hay ninguna. */
+  getOldestStore(): Promise<Store | undefined>;
   listIngredientsMaterials(options: {
     q?: string;
     page: number;
@@ -3201,6 +3209,9 @@ export class InMemoryStorage implements IStorage {
       coverImageUrl: null,
       location: null,
       fulfillmentOptions: [],
+      currencyExtras: [],
+      currencyVisualId: STORE_CURRENCY_USD_ID,
+      currencyAcceptedPaymentIds: [STORE_CURRENCY_USD_ID],
       visibilitySubscriptionEndsAt: null,
       createdAt: now,
       updatedAt: now,
@@ -3214,6 +3225,17 @@ export class InMemoryStorage implements IStorage {
     if (index < 0) throw new Error("STORE_NOT_FOUND");
     const now = new Date();
     const current = this.stores[index];
+    const nextCurrency =
+      input.currencyExtras !== undefined ||
+      input.currencyVisualId !== undefined ||
+      input.currencyAcceptedPaymentIds !== undefined
+        ? normalizeStoreCurrencyFields({
+            currencyExtras: input.currencyExtras ?? current.currencyExtras,
+            currencyVisualId: input.currencyVisualId ?? current.currencyVisualId,
+            currencyAcceptedPaymentIds:
+              input.currencyAcceptedPaymentIds ?? current.currencyAcceptedPaymentIds,
+          })
+        : null;
     const updated: Store = {
       ...current,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -3230,6 +3252,7 @@ export class InMemoryStorage implements IStorage {
       ...(input.location !== undefined
         ? { location: input.location === null ? null : normalizeStoreLocation(input.location) ?? input.location }
         : {}),
+      ...(nextCurrency ?? {}),
       updatedAt: now,
     };
     this.stores[index] = updated;
@@ -3260,6 +3283,16 @@ export class InMemoryStorage implements IStorage {
       .filter((s) => isStoreVisibilityActive(s))
       .sort((a, b) => a.name.localeCompare(b.name, "es"))
       .slice(0, limit);
+  }
+
+  async getOldestStore(): Promise<Store | undefined> {
+    if (this.stores.length === 0) return undefined;
+    const toMs = (d: unknown) => {
+      if (d instanceof Date) return d.getTime();
+      const t = new Date(String(d ?? 0)).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
+    return [...this.stores].sort((a, b) => toMs(a.createdAt) - toMs(b.createdAt) || a.id - b.id)[0];
   }
 
   async listIngredientsMaterials(options: {
@@ -3325,12 +3358,18 @@ export class InMemoryStorage implements IStorage {
 
   async createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct> {
     const now = new Date();
+    const store = await this.getStoreById(storeId);
+    const { price, pricesByCurrency } = resolveStoreProductPriceFields(
+      input,
+      store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+    );
     const product: StoreProduct = {
       id: this.storeProductIdCounter++,
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ?? null,
-      price: Number(input.price),
+      price,
+      pricesByCurrency,
       categoryIds: input.categoryIds ?? [],
       ingredientMaterialIds: input.ingredientMaterialIds ?? [],
       imageUrls: input.imageUrls ?? [],
@@ -3350,13 +3389,24 @@ export class InMemoryStorage implements IStorage {
     const idx = this.storeProducts.findIndex((p) => p.storeId === storeId && p.id === productId);
     if (idx === -1) throw new Error("STORE_PRODUCT_NOT_FOUND");
     const cur = this.storeProducts[idx];
+    const store = await this.getStoreById(storeId);
+    const priceFields =
+      input.price !== undefined || input.pricesByCurrency !== undefined
+        ? resolveStoreProductPriceFields(
+            {
+              price: input.price ?? cur.price,
+              pricesByCurrency: input.pricesByCurrency ?? cur.pricesByCurrency,
+            },
+            store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+          )
+        : null;
     const next: StoreProduct = {
       ...cur,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.description !== undefined
         ? { description: input.description?.trim() ?? null }
         : {}),
-      ...(input.price !== undefined ? { price: Number(input.price) } : {}),
+      ...(priceFields ?? {}),
       ...(input.categoryIds !== undefined ? { categoryIds: input.categoryIds } : {}),
       ...(input.ingredientMaterialIds !== undefined
         ? { ingredientMaterialIds: input.ingredientMaterialIds }
@@ -3531,7 +3581,8 @@ export class InMemoryStorage implements IStorage {
       id: this.storePaymentMethodIdCounter++,
       storeId,
       name: input.name.trim(),
-      accountNumber: input.accountNumber.trim(),
+      accountNumber: (input.accountNumber ?? "").trim(),
+      extraFields: normalizeStorePaymentMethodExtraFields(input.extraFields),
       imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
       createdAt: now,
       updatedAt: now,
@@ -3554,6 +3605,9 @@ export class InMemoryStorage implements IStorage {
       ...cur,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.accountNumber !== undefined ? { accountNumber: input.accountNumber.trim() } : {}),
+      ...(input.extraFields !== undefined
+        ? { extraFields: normalizeStorePaymentMethodExtraFields(input.extraFields) }
+        : {}),
       ...(input.imageUrl !== undefined
         ? { imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null }
         : {}),

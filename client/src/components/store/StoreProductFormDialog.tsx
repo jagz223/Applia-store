@@ -6,6 +6,11 @@ import {
   type StoreProductSummary,
 } from "@/hooks/use-store-products";
 import {
+  STORE_CURRENCY_USD_ID,
+  currencyLabelForId,
+  type StoreCurrencyExtra,
+} from "@shared/store-currency-schema";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -62,23 +67,35 @@ async function resolveIngredientNames(ids: number[]): Promise<SelectedIngredient
   return ids.map((id) => ({ id, name: nameById.get(id) ?? `Item #${id}` }));
 }
 
+function emptyPrices(ids: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const id of ids) out[id] = "";
+  return out;
+}
+
 export function StoreProductFormDialog({
   storeId,
   open,
   onOpenChange,
   product,
+  acceptedPaymentIds = [STORE_CURRENCY_USD_ID],
+  currencyExtras = [],
+  visualCurrencyId = STORE_CURRENCY_USD_ID,
 }: {
   storeId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   product?: StoreProductSummary | null;
+  acceptedPaymentIds?: string[];
+  currencyExtras?: StoreCurrencyExtra[];
+  visualCurrencyId?: string;
 }) {
   const { toast } = useToast();
   const isEdit = product != null;
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [price, setPrice] = useState("");
+  const [prices, setPrices] = useState<Record<string, string>>(() => emptyPrices(acceptedPaymentIds));
   const [hasIngredients, setHasIngredients] = useState(false);
   const [ingredients, setIngredients] = useState<SelectedIngredient[]>([]);
   const [categories, setCategories] = useState<SelectedEntity[]>([]);
@@ -92,6 +109,7 @@ export function StoreProductFormDialog({
   const saving = createMutation.isPending || updateMutation.isPending;
 
   const formSessionRef = useRef<string | null>(null);
+  const paymentIdsKey = acceptedPaymentIds.join("|");
 
   useEffect(() => {
     if (!open) {
@@ -99,14 +117,24 @@ export function StoreProductFormDialog({
       return;
     }
 
-    const session = product ? `edit:${product.id}` : "create";
+    const session = `${product ? `edit:${product.id}` : "create"}:${paymentIdsKey}`;
     if (formSessionRef.current === session) return;
     formSessionRef.current = session;
 
     if (product) {
       setName(product.name);
       setDescription(product.description ?? "");
-      setPrice(String(product.price));
+      const nextPrices = emptyPrices(acceptedPaymentIds);
+      const saved = product.pricesByCurrency ?? {};
+      for (const id of acceptedPaymentIds) {
+        if (saved[id] != null) nextPrices[id] = String(saved[id]);
+        else if (id === (product.displayCurrencyId ?? visualCurrencyId)) {
+          nextPrices[id] = String(product.price);
+        } else if (id === STORE_CURRENCY_USD_ID && product.price > 0 && !saved[id]) {
+          nextPrices[id] = String(product.price);
+        }
+      }
+      setPrices(nextPrices);
       const ids = product.ingredientMaterialIds ?? [];
       setHasIngredients(ids.length > 0);
       setResolving(ids.length > 0);
@@ -124,14 +152,14 @@ export function StoreProductFormDialog({
     } else {
       setName("");
       setDescription("");
-      setPrice("");
+      setPrices(emptyPrices(acceptedPaymentIds));
       setHasIngredients(false);
       setIngredients([]);
       setCategories([]);
       setImageDrafts([]);
       setResolving(false);
     }
-  }, [open, product, allCategories]);
+  }, [open, product, allCategories, acceptedPaymentIds, paymentIdsKey, visualCurrencyId]);
 
   useEffect(() => {
     if (!open || allCategories.length === 0) return;
@@ -161,22 +189,38 @@ export function StoreProductFormDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmedName = name.trim();
-    const priceNum = Number(price);
     if (!trimmedName) {
       toast({ variant: "destructive", title: "Nombre obligatorio" });
       return;
     }
-    if (!Number.isFinite(priceNum) || priceNum <= 0) {
-      toast({ variant: "destructive", title: "Precio inválido", description: "Ingresa un número mayor a 0." });
-      return;
+
+    const pricesByCurrency: Record<string, number> = {};
+    for (const id of acceptedPaymentIds) {
+      const raw = (prices[id] ?? "").trim().replace(",", ".");
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) {
+        toast({
+          variant: "destructive",
+          title: "Precio inválido",
+          description: `Ingresa un precio mayor a 0 para ${currencyLabelForId(id, currencyExtras)}.`,
+        });
+        return;
+      }
+      pricesByCurrency[id] = n;
     }
+
+    const visualPrice =
+      pricesByCurrency[visualCurrencyId] ??
+      pricesByCurrency[STORE_CURRENCY_USD_ID] ??
+      Object.values(pricesByCurrency)[0];
 
     try {
       const imageUrls = await resolveImageUrlsFromDrafts(imageDrafts);
       const payload = {
         name: trimmedName,
         description: description.trim() || null,
-        price: priceNum,
+        price: visualPrice,
+        pricesByCurrency,
         categoryIds: categories.map((c) => c.id),
         ingredientMaterialIds: hasIngredients ? ingredients.map((i) => i.id) : [],
         imageUrls,
@@ -234,17 +278,30 @@ export function StoreProductFormDialog({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="product-price">Precio (USD)</Label>
-            <Input
-              id="product-price"
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              required
-            />
+          <div className="space-y-3 rounded-lg border border-border p-3">
+            <div>
+              <p className="text-sm font-medium">Precios por moneda</p>
+              <p className="text-xs text-muted-foreground">
+                Según las monedas marcadas en «Se acepta como pago».
+              </p>
+            </div>
+            {acceptedPaymentIds.map((id) => {
+              const label = currencyLabelForId(id, currencyExtras);
+              return (
+                <div key={id} className="space-y-1.5">
+                  <Label htmlFor={`product-price-${id}`}>Precio ({label})</Label>
+                  <Input
+                    id={`product-price-${id}`}
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={prices[id] ?? ""}
+                    onChange={(e) => setPrices((prev) => ({ ...prev, [id]: e.target.value }))}
+                    required
+                  />
+                </div>
+              );
+            })}
           </div>
 
           <StoreProductPhotosPicker

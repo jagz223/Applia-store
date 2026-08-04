@@ -30,23 +30,37 @@ import { cn } from "@/lib/utils";
 
 const NEW_TAB = "_new";
 
+type ExtraFieldDraft = { id: string; name: string; value: string };
+
 type PaymentMethodFormState = {
   name: string;
-  accountNumber: string;
   imagePreviewUrl: string | null;
   pendingImageFile: File | null;
+  extraFields: ExtraFieldDraft[];
 };
 
+function newExtraField(): ExtraFieldDraft {
+  return {
+    id: `extra-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: "",
+    value: "",
+  };
+}
+
 function emptyForm(): PaymentMethodFormState {
-  return { name: "", accountNumber: "", imagePreviewUrl: null, pendingImageFile: null };
+  return { name: "", imagePreviewUrl: null, pendingImageFile: null, extraFields: [] };
 }
 
 function formFromMethod(method: StorePaymentMethodSummary): PaymentMethodFormState {
   return {
     name: method.name,
-    accountNumber: method.accountNumber,
     imagePreviewUrl: method.imageUrl,
     pendingImageFile: null,
+    extraFields: (method.extraFields ?? []).map((f, i) => ({
+      id: `extra-${method.id}-${i}`,
+      name: f.name,
+      value: f.value,
+    })),
   };
 }
 
@@ -95,25 +109,50 @@ function PaymentMethodForm({
     return form.imagePreviewUrl?.trim() || null;
   }
 
+  function updateExtraField(id: string, patch: Partial<Pick<ExtraFieldDraft, "name" | "value">>) {
+    setForm((prev) => ({
+      ...prev,
+      extraFields: prev.extraFields.map((f) => (f.id === id ? { ...f, ...patch } : f)),
+    }));
+  }
+
+  function removeExtraField(id: string) {
+    setForm((prev) => ({
+      ...prev,
+      extraFields: prev.extraFields.filter((f) => f.id !== id),
+    }));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmedName = form.name.trim();
-    const trimmedAccount = form.accountNumber.trim();
     if (!trimmedName) {
       toast({ variant: "destructive", title: "Nombre obligatorio" });
       return;
     }
-    if (!trimmedAccount) {
-      toast({ variant: "destructive", title: "Número de cuenta obligatorio" });
-      return;
+
+    const extraFields = form.extraFields
+      .map((f) => ({ name: f.name.trim(), value: f.value.trim() }))
+      .filter((f) => f.name || f.value);
+
+    for (const field of extraFields) {
+      if (!field.name || !field.value) {
+        toast({
+          variant: "destructive",
+          title: "Datos incompletos",
+          description: "Cada dato extra debe tener nombre y valor.",
+        });
+        return;
+      }
     }
 
     try {
       const imageUrl = await resolveImageUrl();
       const payload = {
         name: trimmedName,
-        accountNumber: trimmedAccount,
+        accountNumber: "",
         imageUrl,
+        extraFields,
       };
 
       if (isNew) {
@@ -168,16 +207,81 @@ function PaymentMethodForm({
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor={`pm-account-${methodId ?? "new"}`}>Número de cuenta</Label>
-          <Input
-            id={`pm-account-${methodId ?? "new"}`}
-            value={form.accountNumber}
-            maxLength={80}
-            disabled={saving || deleting}
-            placeholder="Cuenta, teléfono o alias de pago"
-            onChange={(e) => setForm((prev) => ({ ...prev, accountNumber: e.target.value }))}
-          />
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label>Datos del método</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={saving || deleting || form.extraFields.length >= 30}
+              onClick={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  extraFields: [...prev.extraFields, newExtraField()],
+                }))
+              }
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Agregar dato extra
+            </Button>
+          </div>
+
+          {form.extraFields.length === 0 ? (
+            <p className="text-sm text-muted-foreground rounded-md border border-dashed border-border px-3 py-3">
+              Agrega campos libres (por ejemplo ID, número, CI, teléfono). Cada uno tiene nombre y valor.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {form.extraFields.map((field, index) => (
+                <div
+                  key={field.id}
+                  className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3 sm:grid-cols-[1fr_1fr_auto]"
+                >
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`pm-extra-name-${field.id}`} className="text-xs text-muted-foreground">
+                      Nombre del campo {index + 1}
+                    </Label>
+                    <Input
+                      id={`pm-extra-name-${field.id}`}
+                      value={field.name}
+                      maxLength={80}
+                      disabled={saving || deleting}
+                      placeholder="Ej. ID, Número, CI"
+                      onChange={(e) => updateExtraField(field.id, { name: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`pm-extra-value-${field.id}`} className="text-xs text-muted-foreground">
+                      Valor
+                    </Label>
+                    <Input
+                      id={`pm-extra-value-${field.id}`}
+                      value={field.value}
+                      maxLength={200}
+                      disabled={saving || deleting}
+                      placeholder="Ej. 1234567890"
+                      onChange={(e) => updateExtraField(field.id, { value: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:text-destructive"
+                      disabled={saving || deleting}
+                      aria-label="Quitar dato extra"
+                      onClick={() => removeExtraField(field.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <StoreCoverPhotoPicker

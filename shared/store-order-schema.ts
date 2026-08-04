@@ -227,15 +227,11 @@ export type StoreOrder = {
 
 
 export type StoreCheckoutPaymentMethod = {
-
   id: number;
-
   name: string;
-
   accountNumber: string;
-
+  extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
-
 };
 
 
