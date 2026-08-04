@@ -179,7 +179,7 @@ export function StoreProductCustomizePanel({
         {ingredients.length > 0 ? (
           <section className="mt-4 border-t border-border/70 pt-4 space-y-2.5">
             <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Materiales o ingredientes
+              Ingredientes
             </h3>
             <ul className="flex flex-wrap gap-1.5">
               {ingredients.map((item) => (
@@ -198,7 +198,7 @@ export function StoreProductCustomizePanel({
           <section className="mt-4 border-t border-border/70 pt-4 space-y-2.5">
             <div className="space-y-1">
               <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Items a quitar
+                ingredientes no deseados
               </h3>
               <p className="text-xs text-muted-foreground">Toca para sacar del producto.</p>
             </div>

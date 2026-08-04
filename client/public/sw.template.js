@@ -16,7 +16,7 @@ firebase.initializeApp({
 
 firebase.messaging();
 
-const CACHE_NAME = "applia-v20";
+const CACHE_NAME = "applia-v21";
 const OFFLINE_URL = "/offline.html";
 
 const PRECACHE_ASSETS = [
@@ -26,7 +26,10 @@ const PRECACHE_ASSETS = [
   "/manifest.json",
   "/manifest.webmanifest",
   "/favicon.ico",
+  "/favicon.png",
+  "/favicon.svg",
   "/applia-logo-new.png",
+  "/applia-mark.svg",
 ];
 
 self.addEventListener("install", (event) => {
