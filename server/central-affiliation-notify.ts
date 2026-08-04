@@ -6,7 +6,7 @@ import {
 } from "@shared/central-affiliation";
 import { getDispatchCompany } from "./dispatch-companies";
 import { listCentralOperatorUserIds } from "./central-members";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { notificationService } from "./services/notification.service";
 import { getIO, sendNotificationToUser } from "./socket";
 
@@ -23,7 +23,7 @@ export async function notifyCentralOperatorsNewAffiliation(params: {
   companyId: string;
   applicantUserId: string;
 }): Promise<void> {
-  const user = (await genFebStorage.getUserById(params.applicantUserId)) as Record<string, unknown> | null | undefined;
+  const user = (await appliaStorage.getUserById(params.applicantUserId)) as Record<string, unknown> | null | undefined;
   const name = displayName(user, params.applicantUserId);
   const company = await getDispatchCompany(params.companyId);
   const companyName = company?.name ?? "Empresa";
@@ -39,7 +39,7 @@ export async function notifyCentralOperatorsNewAffiliation(params: {
   const io = getIO();
   const targets = await listCentralOperatorUserIds(params.companyId);
   for (const uid of targets) {
-    await genFebStorage.createNotification({
+    await appliaStorage.createNotification({
       userId: uid,
       type: NOTIFICATION_TYPE_CENTRAL_AFFILIATION,
       data,
@@ -66,7 +66,7 @@ export async function notifyApplicantDataAccessRequested(params: {
     companyName: params.companyName,
     url,
   };
-  await genFebStorage.createNotification({
+  await appliaStorage.createNotification({
     userId: params.applicantUserId,
     type: NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS,
     data,
@@ -96,7 +96,7 @@ export async function notifyApplicantAffiliationApproved(params: {
   };
   const title = "Afiliación aprobada";
   const body = `${params.companyName} aprobó tu solicitud como conductor en su central. Ya puedes operar bajo su despacho.`;
-  await genFebStorage.createNotification({
+  await appliaStorage.createNotification({
     userId: params.applicantUserId,
     type: NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED,
     data: { ...data, message: body },
@@ -137,7 +137,7 @@ export async function notifyApplicantAffiliationRejected(params: {
   };
   const title = "Afiliación no aprobada";
   const body = `${params.companyName} no aprobó tu solicitud de afiliación como conductor. Puedes revisar el estado en tu panel o contactar a la central.`;
-  await genFebStorage.createNotification({
+  await appliaStorage.createNotification({
     userId: params.applicantUserId,
     type: NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED,
     data: { ...data, message: body },

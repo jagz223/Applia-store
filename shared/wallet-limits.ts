@@ -1,9 +1,9 @@
 import { calcCommission, roundToCents } from "./platform-commission";
 
 /**
- * Piso mínimo de saldo (USD) en la billetera GenFeb para asociados y conductores
+ * Piso mínimo de saldo (USD) en la billetera Applia para asociados y conductores
  * con pagos en efectivo/transferencia: no puede bajar de este valor; al alcanzarlo
- * se bloquean nuevos servicios salvo pago con saldo GenFeb.
+ * se bloquean nuevos servicios salvo pago con saldo Applia.
  */
 export const PROVIDER_WALLET_FLOOR_USD = -20;
 

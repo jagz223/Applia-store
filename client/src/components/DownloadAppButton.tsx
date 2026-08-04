@@ -8,8 +8,8 @@ export function DownloadAppButton() {
         ¿Prefieres usar nuestra App?
       </p>
       <a 
-        href="/Genfeb.apk" 
-        download="Genfeb.apk"
+        href="/Applia.apk" 
+        download="Applia.apk"
         className="inline-block w-full group"
       >
         <Button 

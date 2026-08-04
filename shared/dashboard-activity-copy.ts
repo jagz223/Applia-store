@@ -26,7 +26,7 @@ export function dashboardActivityCardDescription(viewer: DashboardActivityViewer
 
 export function dashboardActivityTransactionsDescription(viewer: DashboardActivityViewer): string {
   if (viewer === "client_only") {
-    return "Pagos de viajes Car Go y cargos en Saldo GenFeb. Toca un registro para ver el resumen.";
+    return "Pagos de viajes Car Go y cargos en Saldo Applia. Toca un registro para ver el resumen.";
   }
   return "Mensualidades de visibilidad y pagos de viajes Car Go. Toca un registro para ver el detalle.";
 }

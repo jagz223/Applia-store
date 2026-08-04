@@ -48,7 +48,7 @@ async function loadVehiclesDbProjection(): Promise<VehiclesDbProjection> {
   const r = await fetch(VEHICLES_DB_URL, {
     headers: {
       // Explicitamos UA para algunas infraestructuras que bloquean fetch sin headers.
-      "User-Agent": "genfeb/vehiclesdb",
+      "User-Agent": "applia/vehiclesdb",
     },
   });
   if (!r.ok) {

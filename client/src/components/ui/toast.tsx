@@ -9,8 +9,8 @@ const ToastProvider = ToastPrimitives.Provider
 
 /** Evita crash «Invalid pointer id» al arrastrar toasts en Android/TWA. */
 function patchToastPointerCapture(node: HTMLElement | null) {
-  if (!node || (node as HTMLElement & { __genfebPtrPatch?: boolean }).__genfebPtrPatch) return
-  ;(node as HTMLElement & { __genfebPtrPatch?: boolean }).__genfebPtrPatch = true
+  if (!node || (node as HTMLElement & { __appliaPtrPatch?: boolean }).__appliaPtrPatch) return
+  ;(node as HTMLElement & { __appliaPtrPatch?: boolean }).__appliaPtrPatch = true
   const original = node.releasePointerCapture.bind(node)
   node.releasePointerCapture = (pointerId: number) => {
     try {

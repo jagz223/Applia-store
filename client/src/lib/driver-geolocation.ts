@@ -4,7 +4,7 @@ export type DriverGeoPoint = { lat: number; lon: number };
 
 export type DriverGeolocationError = "denied" | "unavailable" | "timeout";
 
-const LAST_KNOWN_KEY = "genfeb.driverGo.lastKnownGeo.v1";
+const LAST_KNOWN_KEY = "applia.driverGo.lastKnownGeo.v1";
 const LAST_KNOWN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function readLastKnownDriverGeo(): DriverGeoPoint | null {

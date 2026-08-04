@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import { storage as genFebStorage } from "./storage-genfeb";
+import { storage as appliaStorage } from "./storage-applia";
 import { authenticateJWT } from "./routes-auth";
 import { requireFullAdmin } from "./middleware-roles";
 import { getAdminAndSupportUsers, getFullAdminUsers } from "./staff-users";
@@ -30,13 +30,13 @@ import { getPlatformCommissionRate } from "./platform-commission-rate";
 import { hasAdminPrivileges, isFullAdmin, normalizeRoleCode } from "@shared/roles";
 import { isWalletAtOrBelowDebtCap, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { isOffPlatformServiceBookingPayment, serviceBookingPaymentLabel } from "@shared/booking-payment";
-import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
+import { SUPPRESS_APPLIA_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
 import { buildGoMobilityChatPath } from "@shared/chat-notification-open";
 import { getMobilityRideChatParticipants } from "./mobility-rides";
 import { getPackRideChatParticipants } from "./pack-rides";
 
-// Usar storage de GenFeb para las nuevas funcionalidades
-const storage = genFebStorage;
+// Usar storage de Applia para las nuevas funcionalidades
+const storage = appliaStorage;
 
 /** Mensajes por página en el chat (paginación). Balance entre UX y carga en servidor. */
 export const CHAT_MESSAGES_PAGE_SIZE = 25;
@@ -127,9 +127,9 @@ const updateUserRoleSchema = z.object({
   bio: z.string().optional(),
 });
 
-// ============== RUTAS GENFEB ==============
+// ============== RUTAS APPLIA ==============
 
-export async function registerGenFebRoutes(
+export async function registerAppliaRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
@@ -455,8 +455,8 @@ export async function registerGenFebRoutes(
 
           const message = refundHappened
             ? amountFormatted
-              ? `El asociado canceló el servicio. Se te devolvieron ${amountFormatted} a tu Saldo Genfeb.`
-              : "El asociado canceló el servicio. Se te devolvió el monto retenido a tu Saldo Genfeb."
+              ? `El asociado canceló el servicio. Se te devolvieron ${amountFormatted} a tu Saldo Applia.`
+              : "El asociado canceló el servicio. Se te devolvió el monto retenido a tu Saldo Applia."
             : "El asociado canceló el servicio. No se realizó ningún cobro.";
 
           const notifData = { bookingId, message };
@@ -1059,7 +1059,7 @@ export async function registerGenFebRoutes(
       const userName = (user as { name?: string; firstName?: string; lastName?: string }).name
         ?? ([((user as { firstName?: string }).firstName ?? ""), ((user as { lastName?: string }).lastName ?? "")].filter(Boolean).join(" ") || (user as { email?: string }).email || "Usuario");
 
-      if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+      if (!SUPPRESS_APPLIA_WALLET_FLOW_NOTIFICATIONS) {
         // Notificación persistente para cada admin (aparece en la campana al cargar o al conectarse)
         const adminUsers = await getFullAdminUsers(storage);
         for (const admin of adminUsers ?? []) {
@@ -1260,7 +1260,7 @@ export async function registerGenFebRoutes(
         currency: "USD",
       });
 
-      if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+      if (!SUPPRESS_APPLIA_WALLET_FLOW_NOTIFICATIONS) {
         // Notificación interna (Socket.io) a admins para alerta en tiempo real
         const io = getIO();
         if (io) {
@@ -1331,7 +1331,7 @@ export async function registerGenFebRoutes(
       const transfer = await storage.createTransfer(parsed.data);
       const data = parsed.data;
 
-      if (data.status === "completed" && data.userId && data.amount != null && !SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
+      if (data.status === "completed" && data.userId && data.amount != null && !SUPPRESS_APPLIA_WALLET_FLOW_NOTIFICATIONS) {
         const amountFormatted = new Intl.NumberFormat("es-EC", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
@@ -1405,7 +1405,7 @@ export async function registerGenFebRoutes(
 
       // Notificar al usuario cuando su recarga pasa a aprobada o rechazada (interna Socket.io + FCM push)
       if (
-        !SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS &&
+        !SUPPRESS_APPLIA_WALLET_FLOW_NOTIFICATIONS &&
         (newStatus === "completed" || newStatus === "rejected")
       ) {
         const uid = (transfer as { userId?: string; amount?: number }).userId;
@@ -1434,7 +1434,7 @@ export async function registerGenFebRoutes(
             void notificationService
               .sendPushToUser(uid, {
                 title: "Abono de saldo confirmado",
-                body: `Se acreditaron $${amountFormatted} USD a tu saldo GenFeb. Puedes descargar el comprobante en Mi actividad → Facturas.`,
+                body: `Se acreditaron $${amountFormatted} USD a tu saldo Applia. Puedes descargar el comprobante en Mi actividad → Facturas.`,
                 data: { type: "recharge_completed", url: "/dashboard" },
               })
               .catch((err) => console.error("[push] Error notificando recarga aprobada:", err));
@@ -1992,7 +1992,7 @@ export async function registerGenFebRoutes(
     }
   });
   
-  console.log("✅ GenFeb routes registered");
+  console.log("✅ Applia routes registered");
   
   // =====================================================
   // NUEVAS RUTAS (Inspiradas en BookingDo SaaS)
@@ -2131,7 +2131,7 @@ export async function registerGenFebRoutes(
       const isProfessional = normalizeRoleCode(role) === "professional";
       let hasProvider = false;
       if (!canAdmin && !isProfessional) {
-        const provider = await genFebStorage.getProviderByUserId(userId);
+        const provider = await appliaStorage.getProviderByUserId(userId);
         hasProvider = !!provider;
       }
       if (!canAdmin && !isProfessional && !hasProvider) {

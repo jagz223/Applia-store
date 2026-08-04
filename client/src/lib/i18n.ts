@@ -1,4 +1,4 @@
-// GenFeb - Internationalization (i18n)
+// Applia - Internationalization (i18n)
 // Soporte para Español (Ecuador) e Inglés
 
 export type Language = "es" | "en" | "pt";
@@ -172,13 +172,13 @@ const translations: Record<Language, Translations> = {
     home: {
       hero: {
         title: "La plataforma de servicios más avanzada",
-        subtitle: "Conecta con asociados verificados para servicios técnicos, legales, financieros y mantenimiento. Todo en un solo lugar con la garantía de GenFeb.",
+        subtitle: "Conecta con asociados verificados para servicios técnicos, legales, financieros y mantenimiento. Todo en un solo lugar con la garantía de Applia.",
         cta: "Explorar Servicios",
         ctaSecondary: "Reservar Ahora",
       },
       features: {
         title: "Todo lo que necesitas en una plataforma",
-        subtitle: "Descubre las herramientas que hacen de GenFeb la mejor opción para gestionar tus servicios",
+        subtitle: "Descubre las herramientas que hacen de Applia la mejor opción para gestionar tus servicios",
       },
       stats: {
         users: "Usuarios Activos",
@@ -297,13 +297,13 @@ const translations: Record<Language, Translations> = {
     home: {
       hero: {
         title: "The most advanced services platform",
-        subtitle: "Connect with verified professionals for technical, legal, financial, and maintenance services. All in one place with GenFeb guarantee.",
+        subtitle: "Connect with verified professionals for technical, legal, financial, and maintenance services. All in one place with Applia guarantee.",
         cta: "Explore Services",
         ctaSecondary: "Book Now",
       },
       features: {
         title: "Everything you need in one platform",
-        subtitle: "Discover the tools that make GenFeb the best choice for managing your services",
+        subtitle: "Discover the tools that make Applia the best choice for managing your services",
       },
       stats: {
         users: "Active Users",
@@ -422,13 +422,13 @@ const translations: Record<Language, Translations> = {
     home: {
       hero: {
         title: "A plataforma de serviços mais avançada",
-        subtitle: "Conecte-se com profissionais verificados para serviços técnicos, legais, financeiros e manutenção. Tudo em um só lugar com a garantia GenFeb.",
+        subtitle: "Conecte-se com profissionais verificados para serviços técnicos, legais, financeiros e manutenção. Tudo em um só lugar com a garantia Applia.",
         cta: "Explorar Serviços",
         ctaSecondary: "Reservar Agora",
       },
       features: {
         title: "Tudo o que você precisa em uma plataforma",
-        subtitle: "Descubra as ferramentas que fazem da GenFeb a melhor opção para gerenciar seus serviços",
+        subtitle: "Descubra as ferramentas que fazem da Applia a melhor opção para gerenciar seus serviços",
       },
       stats: {
         users: "Usuários Ativos",
@@ -522,7 +522,7 @@ export function getTranslations(lang: Language): Translations {
 
 export function getCurrentLanguage(): Language {
   if (typeof window !== "undefined") {
-    const saved = localStorage.getItem("genfeb-language");
+    const saved = localStorage.getItem("applia-language");
     if (saved && ["es", "en", "pt"].includes(saved)) {
       return saved as Language;
     }
@@ -536,7 +536,7 @@ export function getCurrentLanguage(): Language {
 
 export function setLanguage(lang: Language): void {
   if (typeof window !== "undefined") {
-    localStorage.setItem("genfeb-language", lang);
+    localStorage.setItem("applia-language", lang);
     window.location.reload();
   }
 }

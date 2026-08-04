@@ -170,7 +170,7 @@ class NotificationService {
     const webNotif: admin.messaging.WebpushNotification = {
       title: payload.title,
       body: payload.body,
-      icon: "/genfeb-logo-new.png",
+      icon: "/applia-logo-new.png",
       ...(urgent
         ? ({
             requireInteraction: true,

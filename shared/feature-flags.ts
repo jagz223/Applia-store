@@ -3,7 +3,7 @@
  * Reactivar: poner a `true` lo que corresponda.
  */
 
-/** Saldo GenFeb, recargas, historial de movimientos y opción de pago con saldo en flujos públicos. */
+/** Saldo Applia, recargas, historial de movimientos y opción de pago con saldo en flujos públicos. */
 export const FEATURE_WALLET_RECHARGE_UI_ENABLED = false;
 
 /**

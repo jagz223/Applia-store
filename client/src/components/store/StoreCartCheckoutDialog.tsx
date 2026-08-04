@@ -51,6 +51,7 @@ import {
 import { Button } from "@/components/ui/button";
 
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 
 import { Label } from "@/components/ui/label";
 
@@ -732,9 +733,13 @@ export function StoreCartCheckoutDialog({
 
                 storeLocation={cart.storeLocation}
 
+                deliveryFares={cart.deliveryFares}
+
                 value={deliveryLocation}
 
                 disabled={saving}
+
+                mapEnabled={open}
 
                 onChange={(value) => {
 
@@ -824,17 +829,13 @@ export function StoreCartCheckoutDialog({
 
                 <Label htmlFor="checkout-amount-paid">Monto pagado</Label>
 
-                <Input
+                <NumberField
 
                   id="checkout-amount-paid"
-
-                  type="number"
 
                   min={0.01}
 
                   step={0.01}
-
-                  inputMode="decimal"
 
                   value={amountPaid}
 
@@ -842,11 +843,11 @@ export function StoreCartCheckoutDialog({
 
                   placeholder={storePaymentDue.toFixed(2)}
 
-                  onChange={(e) => {
+                  onChange={(next) => {
 
                     clearFormFeedback();
 
-                    setAmountPaid(e.target.value);
+                    setAmountPaid(next);
 
                   }}
 

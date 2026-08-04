@@ -7,11 +7,11 @@ export default function GoPack() {
       <Card>
         <CardHeader>
           <CardTitle>{MOBILITY_UI.delivery}</CardTitle>
-          <CardDescription>{MOBILITY_UI.delivery}: envíos con tu saldo GenFeb.</CardDescription>
+          <CardDescription>{MOBILITY_UI.delivery}: envíos con tu saldo Applia.</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Aquí podrás solicitar delivery con el mismo saldo GenFeb, estrellas y chat.
+            Aquí podrás solicitar delivery con el mismo saldo Applia, estrellas y chat.
           </p>
         </CardContent>
       </Card>

@@ -1,8 +1,8 @@
-# Análisis Comparativo: GenFeb vs BookingDo SaaS
+# Análisis Comparativo: Applia vs BookingDo SaaS
 
 ## 1. Resumen Ejecutivo
 
-| Aspecto | GenFeb (Proyecto Actual) | BookingDo SaaS (Referencia) |
+| Aspecto | Applia (Proyecto Actual) | BookingDo SaaS (Referencia) |
 |---------|---------------------------|----------------------------|
 | **Tecnología Backend** | Node.js + Express + Drizzle ORM | Laravel (PHP) + MySQL |
 | **Tecnología Frontend** | React + TypeScript + Vite + Tailwind | Blade Templates + jQuery + Bootstrap |
@@ -15,7 +15,7 @@
 
 ### 2.1 Autenticación y Usuarios
 
-| Función | GenFeb | BookingDo |
+| Función | Applia | BookingDo |
 |---------|--------|-----------|
 | Inicio de sesión email/password | ✅ Firebase Auth | ✅ Laravel Auth |
 | Login con Google | ✅ | ✅ |
@@ -28,7 +28,7 @@
 
 ### 2.2 Sistema de Reservas
 
-| Función | GenFeb | BookingDo |
+| Función | Applia | BookingDo |
 |---------|--------|-----------|
 | Crear reserva | ✅ | ✅ |
 | Selección de servicio | ✅ | ✅ |
@@ -46,7 +46,7 @@
 
 ### 2.3 Gestión de Servicios
 
-| Función | GenFeb | BookingDo |
+| Función | Applia | BookingDo |
 |---------|--------|-----------|
 | Crear servicios | ✅ | ✅ |
 | Categorías | ✅ | ✅ |
@@ -62,7 +62,7 @@
 
 ### 2.4 Pagos
 
-| Función | GenFeb | BookingDo |
+| Función | Applia | BookingDo |
 |---------|--------|-----------|
 | Stripe | ✅ | ✅ |
 | PayPal | ✅ | ✅ |
@@ -75,7 +75,7 @@
 
 ### 2.5 Panel de Administración
 
-| Función | GenFeb | BookingDo |
+| Función | Applia | BookingDo |
 |---------|--------|-----------|
 | Dashboard con estadísticas | ✅ (básico) | ✅ (avanzado) |
 | Gestión de usuarios | ✅ | ✅ |
@@ -94,7 +94,7 @@
 
 ### 2.6 Funciones Adicionales
 
-| Función | GenFeb | BookingDo |
+| Función | Applia | BookingDo |
 |---------|--------|-----------|
 | Chat/mensajería | ✅ | ❌ |
 | Bóveda de documentos | ✅ | ❌ |
@@ -111,9 +111,9 @@
 
 ---
 
-## 3. Características Recomendadas para GenFeb
+## 3. Características Recomendadas para Applia
 
-Basado en el análisis, las siguientes características de BookingDo podrían agregarse a GenFeb:
+Basado en el análisis, las siguientes características de BookingDo podrían agregarse a Applia:
 
 ### Alta Prioridad
 
@@ -171,7 +171,7 @@ Basado en el análisis, las siguientes características de BookingDo podrían ag
 ### Estados de Reserva Personalizables
 
 ```typescript
-// shared/schema-genfeb.ts
+// shared/schema-applia.ts
 
 export const bookingStatuses = pgTable("booking_statuses", {
   id: serial("id").primaryKey(),
@@ -230,4 +230,4 @@ export const coupons = pgTable("coupons", {
 ---
 
 *Documento generado el 25 de febrero de 2026*
-*Proyecto GenFeb*
+*Proyecto Applia*

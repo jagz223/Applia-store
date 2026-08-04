@@ -52,14 +52,14 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
         .fontSize(24)
         .font("Helvetica-Bold")
         .fillColor("#f59e0b") // Mango orange
-        .text("GENFEB", 50, 50)
+        .text("APPLIA", 50, 50)
         .fillColor("#000000")
         .fontSize(10)
         .font("Helvetica")
         .text("RUC: 1792345678001", 50, 80)
         .text("Dirección: Av. Principal 123, Quito, Ecuador", 50, 95)
         .text("Teléfono: +593 2 123 4567", 50, 110)
-        .text("Email: facturacion@genfeb.com", 50, 125);
+        .text("Email: facturacion@applia.com", 50, 125);
 
       // Invoice Title
       doc
@@ -173,13 +173,13 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
         .fontSize(8)
         .fillColor("#666666")
         .text(
-          "Esta factura fue generada automáticamente por GenFeb.",
+          "Esta factura fue generada automáticamente por Applia.",
           50,
           doc.page.height - 70,
           { align: "center" }
         )
         .text(
-          "Gracias por confiar en nosotros - https://genfeb.com",
+          "Gracias por confiar en nosotros - https://applia.com",
           50,
           doc.page.height - 55,
           { align: "center" }
@@ -261,7 +261,7 @@ export function createInvoiceFromBooking(
 }
 
 /**
- * Crea datos de factura desde un abono de saldo GenFeb (recarga en la app)
+ * Crea datos de factura desde un abono de saldo Applia (recarga en la app)
  */
 export function createInvoiceFromTransfer(
   transfer: any,
@@ -282,14 +282,14 @@ export function createInvoiceFromTransfer(
       phone: user.phone,
     },
     provider: {
-      name: "GENFEB",
-      email: "pagos@genfeb.com",
+      name: "APPLIA",
+      email: "pagos@applia.com",
       ruc: "1792345678001",
       address: "Av. Principal 123, Quito, Ecuador",
     },
     service: {
-      name: "Abono a saldo GenFeb",
-      description: transfer.description || "Abono de saldo en la plataforma GenFeb",
+      name: "Abono a saldo Applia",
+      description: transfer.description || "Abono de saldo en la plataforma Applia",
       quantity: 1,
       unitPrice: Number(transfer.amount) || 0,
       total: subtotal,
@@ -300,7 +300,7 @@ export function createInvoiceFromTransfer(
     paymentMethod:
       transfer.transferType === "recharge"
         ? "Comprobante / referencia de pago"
-        : "Saldo GenFeb",
+        : "Saldo Applia",
     referenceId: `TR-${transfer.id}`,
   };
 }
@@ -362,8 +362,8 @@ export function createInvoiceFromFinancialReport(
       phone: user.phone,
     },
     provider: {
-      name: "GENFEB",
-      email: "verificaciones@genfeb.com",
+      name: "APPLIA",
+      email: "verificaciones@applia.com",
       ruc: "1792345678001",
       address: "Av. Principal 123, Quito, Ecuador",
     },

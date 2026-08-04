@@ -13,6 +13,8 @@ export type StoreProductSummary = {
   displayCurrencyLabel?: string;
   categoryIds: number[];
   ingredientMaterialIds: number[];
+  removableIngredientMaterialIds?: number[];
+  ingredientAdditionals?: { ingredientMaterialId: number; price: number }[];
   imageUrls: string[];
   showOnShowcase: boolean;
   createdAt: string;

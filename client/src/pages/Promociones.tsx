@@ -242,7 +242,7 @@ export default function Promociones() {
                     <p className={cn("text-xs text-muted-foreground", isExpired && "italic")}>
                       {isExpired
                         ? "Esta promoción ya no está activa. Revisa las demás tarjetas si hay alguna vigente."
-                        : "Aplica el código al pagar la mensualidad de tu servicio en GenFeb."}
+                        : "Aplica el código al pagar la mensualidad de tu servicio en Applia."}
                       {hasProvider ? (
                         <>
                           {" "}

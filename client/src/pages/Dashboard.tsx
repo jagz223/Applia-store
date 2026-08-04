@@ -4,22 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Store } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
-
-type PrimaryStore = {
-  id: number;
-  name: string;
-  slug: string;
-};
-
-async function fetchPrimaryStore(): Promise<PrimaryStore | null> {
-  const res = await fetch("/api/stores/primary");
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as { message?: string }).message ?? "No se pudo cargar la tienda");
-  }
-  const data = (await res.json()) as { store: PrimaryStore | null };
-  return data.store;
-}
+import {
+  fetchPrimaryStore,
+  getPrimaryStoreVitrinaHref,
+} from "@/hooks/use-primary-store";
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
@@ -28,7 +16,7 @@ export default function Dashboard() {
   const [needsStoreSetup, setNeedsStoreSetup] = useState(false);
   const [checkingStore, setCheckingStore] = useState(false);
 
-  /** Todos (incl. admin) van a la vitrina pública en /tienda. */
+  /** Clientes van directo a la vitrina principal. */
   useEffect(() => {
     if (authLoading) return;
     if (!isAdmin) {
@@ -43,8 +31,7 @@ export default function Dashboard() {
     try {
       const store = await fetchPrimaryStore();
       if (store?.slug) {
-        // Admin también ve la vitrina (con panel de configuración lateral).
-        setLocation(`/tienda/${encodeURIComponent(store.slug)}`);
+        setLocation(getPrimaryStoreVitrinaHref(store));
         return;
       }
       setNeedsStoreSetup(true);

@@ -49,7 +49,7 @@ export type MobilityRideHistoryListItem = {
   endedAt: string;
   durationMin: number;
   amountUsd: number;
-  payment: "genfeb" | "cash" | "bank_transfer";
+  payment: "applia" | "cash" | "bank_transfer";
   cancelledBy?: "rider" | "driver" | null;
   destinationPending?: boolean;
 };

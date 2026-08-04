@@ -268,9 +268,9 @@ function PaymentMethodForm({
                   <div className="flex items-end">
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                       size="icon"
-                      className="text-destructive hover:text-destructive"
+                      className="h-8 w-8 rounded-full border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive"
                       disabled={saving || deleting}
                       aria-label="Quitar dato extra"
                       onClick={() => removeExtraField(field.id)}

@@ -111,7 +111,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on("connect", () => {
-      console.log("🔌 Connected to GenFeb socket server");
+      console.log("🔌 Connected to Applia socket server");
       setIsConnected(true);
       // Al reconectar, refrescar reservas del profesional (debounced para no saturar)
       if (userRef.current?.role === "professional") {
@@ -142,7 +142,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on("disconnect", () => {
-      console.log("🔌 Disconnected from GenFeb socket server");
+      console.log("🔌 Disconnected from Applia socket server");
       setIsConnected(false);
     });
 
@@ -185,8 +185,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
             toast({
               title: "Abono confirmado",
               description: amount
-                ? `Se acreditaron $${amount} USD a tu saldo GenFeb. La factura queda en Mi actividad → Facturas.`
-                : "Tu saldo GenFeb fue actualizado. Revisa Facturas en Mi actividad si necesitas el comprobante.",
+                ? `Se acreditaron $${amount} USD a tu saldo Applia. La factura queda en Mi actividad → Facturas.`
+                : "Tu saldo Applia fue actualizado. Revisa Facturas en Mi actividad si necesitas el comprobante.",
             });
           } else {
             toast({
@@ -311,7 +311,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         if (!hideWalletUi) {
           toast({
             title: "Retiro rechazado",
-            description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.",
+            description: notification?.body ?? "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Applia.",
             variant: "destructive",
           });
         }
@@ -556,7 +556,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         const d = (notification?.data ?? {}) as Record<string, unknown>;
         const det = typeof d.details === "string" ? d.details.trim() : "";
         const handle = toast({
-          title: "Botón de pánico (Genfeb Go)",
+          title: "Botón de pánico (Applia Go)",
           description: det.length > 0 ? det : "Un usuario activó el botón de pánico durante un viaje o envío. Toca para ver el detalle completo.",
           variant: "destructive",
           duration: 30_000,

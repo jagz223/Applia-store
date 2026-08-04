@@ -1,7 +1,6 @@
 /**
- * Usuarios iniciales de GenFeb (Firestore).
- * - Elimina los usuarios de prueba antiguos del seed anterior (admin|professional|client)@test.com
- * - Crea o actualiza los correos corporativos con roles admin / tiSupport (Soporte TI)
+ * Usuarios de prueba Applia (Firestore).
+ * Crea o actualiza: admin@test.com, support@test.com, client@test.com
  *
  * Contraseña para todos: 12345678
  * Ejecutar desde la raíz: npm run seed:users
@@ -10,41 +9,40 @@
 
 import "dotenv/config";
 import bcrypt from "bcryptjs";
-import { initializeFirebase, getFirestore, FIRESTORE_COLLECTIONS } from "../server/firebase-admin";
+import { initializeFirebase } from "../server/firebase-admin";
 import { getFirestoreStorage } from "../server/storage-firestore";
 
 const PASSWORD_PLAIN = "12345678";
-const PHONE = "+58 414 9999999";
-
-/** Usuarios que generaba el seeder anterior; se borran si existen. */
-const LEGACY_TEST_EMAILS = ["admin@test.com", "professional@test.com", "client@test.com"] as const;
 
 const SEED_USERS: {
   email: string;
-  role: "admin" | "tiSupport";
+  role: "admin" | "tiSupport" | "client";
   name: string;
   lastName: string;
+  phone: string;
 }[] = [
-  { email: "rrhh@genfeb.com", role: "admin", name: "RRHH", lastName: "GenFeb" },
-  { email: "thebiglion2528@gmail.com", role: "admin", name: "Usuario", lastName: "Admin" },
-  { email: "gerencia@genfeb.com", role: "admin", name: "Gerencia", lastName: "GenFeb" },
-  { email: "jesusagz223@gmail.com", role: "admin", name: "Jesús", lastName: "AGZ" },
-  { email: "maycolcalero@genfeb.com", role: "tiSupport", name: "Maycol", lastName: "Calero" },
+  {
+    email: "admin@test.com",
+    role: "admin",
+    name: "Admin",
+    lastName: "Test",
+    phone: "+58 414 0000001",
+  },
+  {
+    email: "support@test.com",
+    role: "tiSupport",
+    name: "Soporte",
+    lastName: "Test",
+    phone: "+58 414 0000002",
+  },
+  {
+    email: "client@test.com",
+    role: "client",
+    name: "Cliente",
+    lastName: "Test",
+    phone: "+58 414 0000003",
+  },
 ];
-
-async function removeLegacyTestUsers(storage: ReturnType<typeof getFirestoreStorage>): Promise<void> {
-  const db = getFirestore();
-  for (const email of LEGACY_TEST_EMAILS) {
-    const existing = await storage.getUserByEmail(email);
-    if (!existing?.id) continue;
-    if (db) {
-      await db.collection(FIRESTORE_COLLECTIONS.USERS).doc(existing.id).delete();
-      console.log(`  🗑 Eliminado (seed antiguo): ${email}`);
-    } else {
-      console.log(`  ⚠ No se pudo eliminar ${email} (Firestore no disponible)`);
-    }
-  }
-}
 
 async function main() {
   const ok = initializeFirebase();
@@ -56,14 +54,12 @@ async function main() {
   const storage = getFirestoreStorage();
   await storage.seedRoles();
 
-  await removeLegacyTestUsers(storage);
-
   const hashedPassword = await bcrypt.hash(PASSWORD_PLAIN, 10);
 
-  for (const { email, role, name, lastName } of SEED_USERS) {
+  for (const { email, role, name, lastName, phone } of SEED_USERS) {
     const existing = await storage.getUserByEmail(email);
     if (existing) {
-      await storage.updateUser(existing.id, { name, lastName, role });
+      await storage.updateUser(existing.id, { name, lastName, role, phone });
       await storage.updateUserPassword(existing.id, hashedPassword);
       console.log(`  ✓ Actualizado: ${email} (rol: ${role})`);
     } else {
@@ -72,7 +68,7 @@ async function main() {
         password: hashedPassword,
         name,
         lastName,
-        phone: PHONE,
+        phone,
         role,
       });
       console.log(`  ✓ Creado: ${email} (rol: ${role})`);

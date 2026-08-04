@@ -11,7 +11,7 @@ import bcrypt from "bcryptjs";
 import { authenticateJWT } from "./routes-auth";
 import { requireAdminStaff, requireFullAdmin, requireStaffFromDb } from "./middleware-roles";
 import { adminUserRegistrationService, userService } from "./services";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { maybeVerifyProfessional } from "./maybe-verify-professional";
 import { catalogService, promotionalCodeService } from "./services";
 import {
@@ -45,7 +45,7 @@ import {
 } from "@shared/default-categories";
 import { SETTINGS_URL_AFTER_VEHICLE_CHANGE_RESOLVED } from "@shared/settings-notification-urls";
 import { applyRoleChangeSideEffects } from "./role-change-notify";
-import { SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
+import { SUPPRESS_APPLIA_WALLET_FLOW_NOTIFICATIONS } from "@shared/wallet-notifications";
 import {
   getHiddenCategorySlugs,
   getHiddenCategorySlugsByRole,
@@ -83,7 +83,7 @@ import {
 
 /** Lista servicios para el panel admin (incluye proveedores no verificados; el catálogo público los excluye). */
 async function adminListAllServices() {
-  return genFebStorage.getAllServices(undefined, undefined, undefined, undefined, true);
+  return appliaStorage.getAllServices(undefined, undefined, undefined, undefined, true);
 }
 
 type AdminAuditAction =
@@ -451,7 +451,7 @@ export function registerAdminRoutes(app: Express): void {
       }
       if (data.newPassword) {
         const hashed = await bcrypt.hash(data.newPassword, 10);
-        await genFebStorage.updateUserPassword(id, hashed);
+        await appliaStorage.updateUserPassword(id, hashed);
       }
       const updated = await userService.getUserByIdSafe(id);
       return res.status(200).json(toPlainUser(updated ?? {}));
@@ -472,14 +472,14 @@ export function registerAdminRoutes(app: Express): void {
    */
   app.get("/api/admin/verifying-status/pending", authenticateJWT, requireFullAdmin, async (_req, res) => {
     try {
-      const pending = await genFebStorage.getPendingVerifyingStatuses();
+      const pending = await appliaStorage.getPendingVerifyingStatuses();
       // Filtro por rol (si en el futuro un rol no-admin ve esta vista):
       // ocultar solicitudes de marcas que ese rol no puede ver.
       // Importante: NO aplicamos "hiddenSlugs" global aquí; solo reglas por rol (admin siempre ve todo).
       const reqRole = String((_req as any)?.user?.role ?? "");
       const hiddenByRole = reqRole && reqRole !== "admin" ? await getHiddenCategorySlugsByRole() : {};
       const hiddenSlugs = new Set(reqRole && reqRole !== "admin" ? (hiddenByRole[reqRole] ?? []) : []);
-      const categories = await genFebStorage.getCategories();
+      const categories = await appliaStorage.getCategories();
       const catById = new Map<number, any>();
       for (const c of categories ?? []) {
         const id = Number((c as any)?.id);
@@ -520,7 +520,7 @@ export function registerAdminRoutes(app: Express): void {
         const userId = String((st as any).user ?? "");
         if (!userId) continue;
 
-        const provider = await genFebStorage.getProviderByUserId(userId);
+        const provider = await appliaStorage.getProviderByUserId(userId);
         const providerEndsAtRaw = (provider as any)?.visibilitySubscriptionEndsAt;
         const providerEndsAtIso = (() => {
           const ms = parseVisibilitySubscriptionEndMs(providerEndsAtRaw);
@@ -537,7 +537,7 @@ export function registerAdminRoutes(app: Express): void {
           if (providerCategorySlug && hiddenSlugs.has(providerCategorySlug)) continue;
         }
 
-        const user = (await genFebStorage.getUserById(userId)) as any;
+        const user = (await appliaStorage.getUserById(userId)) as any;
         const name =
           (user?.name ?? [user?.firstName ?? "", user?.lastName ?? ""].filter(Boolean).join(" ").trim()) ||
           user?.email ||
@@ -546,7 +546,7 @@ export function registerAdminRoutes(app: Express): void {
         const avatar = user?.avatar ?? null;
         const user_identification = user?.user_identification ?? null;
 
-        const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
+        const profVer = await appliaStorage.getProfessionalVerificationByUserId(userId);
         const transacction_code = profVer?.transferReceiptCode ?? null;
         const subscriptionMonths =
           typeof (profVer as any)?.subscriptionMonths === "number" && Number.isFinite((profVer as any).subscriptionMonths)
@@ -712,7 +712,7 @@ export function registerAdminRoutes(app: Express): void {
       await Promise.all(
         uniqueAdminIds.map(async (id) => {
           try {
-            const u = (await genFebStorage.getUserById(id)) as any;
+            const u = (await appliaStorage.getUserById(id)) as any;
             const name =
               (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) ||
               u?.email ||
@@ -729,7 +729,7 @@ export function registerAdminRoutes(app: Express): void {
       await Promise.all(
         uniqueAffectedIds.map(async (id) => {
           try {
-            const u = (await genFebStorage.getUserById(id)) as any;
+            const u = (await appliaStorage.getUserById(id)) as any;
             const name =
               (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) ||
               u?.email ||
@@ -766,11 +766,11 @@ export function registerAdminRoutes(app: Express): void {
   // GET /api/admin/account-change-requests/pending - Peticiones pendientes (correo/nombre/teléfono)
   app.get("/api/admin/account-change-requests/pending", authenticateJWT, requireFullAdmin, async (_req: any, res) => {
     try {
-      const pending = await genFebStorage.getPendingAccountChangeRequests();
+      const pending = await appliaStorage.getPendingAccountChangeRequests();
       const enriched: any[] = [];
       for (const r of pending ?? []) {
         const uid = String((r as any).userId ?? "");
-        const u = (await genFebStorage.getUserById(uid, true)) as any;
+        const u = (await appliaStorage.getUserById(uid, true)) as any;
         enriched.push({
           ...r,
           user: u
@@ -808,7 +808,7 @@ export function registerAdminRoutes(app: Express): void {
         return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
       }
 
-      const pendingList = await genFebStorage.getPendingAccountChangeRequests();
+      const pendingList = await appliaStorage.getPendingAccountChangeRequests();
       const pendingRow = (pendingList as any[]).find((r) => Number(r?.id) === id) ?? null;
       if (!pendingRow) return res.status(404).json({ message: "Petición no encontrada o ya resuelta" });
 
@@ -833,7 +833,7 @@ export function registerAdminRoutes(app: Express): void {
         parsedVehicleProposal = parsed.data;
       }
 
-      const resolved = await genFebStorage.resolveAccountChangeRequest({
+      const resolved = await appliaStorage.resolveAccountChangeRequest({
         id,
         action: body.action,
         adminUserId: String(req.user.id),
@@ -883,16 +883,16 @@ export function registerAdminRoutes(app: Express): void {
 
       // Notificar y habilitar reconfiguración de preguntas de recuperación
       if (userId && allowedRecoveryQuestions && body.action === "approve") {
-        const u = (await genFebStorage.getUserById(userId, true)) as any;
+        const u = (await appliaStorage.getUserById(userId, true)) as any;
         const current = u ?? {};
         const grants = (current.profileEditGrants ?? {}) as Record<string, boolean>;
         const next = { ...grants, recoveryQuestions: true };
-        await genFebStorage.updateUser(userId, { profileEditGrants: next } as any);
+        await appliaStorage.updateUser(userId, { profileEditGrants: next } as any);
 
         const title = "Preguntas de recuperación: aprobado";
         const bodyText = "Ya puedes actualizar tus preguntas de seguridad en Configuración o desde esta notificación.";
         const notifData = { field: "recovery_questions", url: "/account-recovery/setup?reconfigure=1", message: bodyText, title };
-        const created = await genFebStorage.createNotification({
+        const created = await appliaStorage.createNotification({
           userId,
           type: "account_change_request_approved",
           data: notifData,
@@ -921,7 +921,7 @@ export function registerAdminRoutes(app: Express): void {
         const title = "Preguntas de recuperación: rechazado";
         const bodyText = `Tu solicitud fue rechazada. Motivo: ${rejectReason}`;
         const notifData = { field: "recovery_questions", url: "/settings", message: bodyText, title, reason: rejectReason };
-        const created = await genFebStorage.createNotification({
+        const created = await appliaStorage.createNotification({
           userId,
           type: "account_change_request_rejected",
           data: notifData,
@@ -943,16 +943,16 @@ export function registerAdminRoutes(app: Express): void {
 
       // Notificar y habilitar edición (grants) si se aprueba
       if (userId && allowed && body.action === "approve") {
-        const u = (await genFebStorage.getUserById(userId, true)) as any;
+        const u = (await appliaStorage.getUserById(userId, true)) as any;
         const current = u ?? {};
         const grants = (current.profileEditGrants ?? {}) as any;
         const next = { ...grants, [field]: true };
-        await genFebStorage.updateUser(userId, { profileEditGrants: next } as any);
+        await appliaStorage.updateUser(userId, { profileEditGrants: next } as any);
 
         const title = `${capLabel(field)}: aprobado`;
         const bodyText = "Abre Configuración para actualizar tu perfil.";
         const notifData = { field, url: "/settings", message: bodyText, title };
-        const created = await genFebStorage.createNotification({
+        const created = await appliaStorage.createNotification({
           userId,
           type: "account_change_request_approved",
           data: notifData,
@@ -981,7 +981,7 @@ export function registerAdminRoutes(app: Express): void {
         const title = `${capLabel(field)}: rechazado`;
         const bodyText = `Tu solicitud fue rechazada. Motivo: ${rejectReason}`;
         const notifData = { field, url: "/settings", message: bodyText, title, reason: rejectReason };
-        const created = await genFebStorage.createNotification({
+        const created = await appliaStorage.createNotification({
           userId,
           type: "account_change_request_rejected",
           data: notifData,
@@ -1024,7 +1024,7 @@ export function registerAdminRoutes(app: Express): void {
             goBrands: parsedVehicleProposal.goBrands,
           } as any);
           await catalogService.syncProviderCategorySlotsFromServices((provider as { id: number }).id);
-          await genFebStorage.upsertPrimaryProviderVehicle({
+          await appliaStorage.upsertPrimaryProviderVehicle({
             providerId: (provider as { id: number }).id,
             userId,
             vehicle: parsedVehicleProposal.vehicle,
@@ -1039,7 +1039,7 @@ export function registerAdminRoutes(app: Express): void {
           message: bodyText,
           title,
         };
-        const created = await genFebStorage.createNotification({
+        const created = await appliaStorage.createNotification({
           userId,
           type: "vehicle_change_request_approved",
           data: notifData,
@@ -1070,7 +1070,7 @@ export function registerAdminRoutes(app: Express): void {
         const title = "Vehículo: solicitud rechazada";
         const bodyText = `Tu solicitud de cambio de vehículo fue rechazada. Motivo: ${rejectReason}`;
         const notifData = { field: "vehicle", url: "/settings", message: bodyText, title, reason: rejectReason };
-        const created = await genFebStorage.createNotification({
+        const created = await appliaStorage.createNotification({
           userId,
           type: "vehicle_change_request_rejected",
           data: notifData,
@@ -1125,7 +1125,7 @@ export function registerAdminRoutes(app: Express): void {
           return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
         }
 
-        const updated = await genFebStorage.setVerifyingStatusIdentification(userId, status as any);
+        const updated = await appliaStorage.setVerifyingStatusIdentification(userId, status as any);
         if (status === "verified") {
           await maybeVerifyProfessional(userId);
         }
@@ -1153,7 +1153,7 @@ export function registerAdminRoutes(app: Express): void {
             ? "Tu identificación ha sido aprobada correctamente."
             : `Tu identificación ha sido rechazada. Motivo: ${rejectReason}`;
 
-          await genFebStorage.createNotification({
+          await appliaStorage.createNotification({
             userId,
             type: "verification_result",
             data: { step: "identification", status, message: msg, url: "/professional-dashboard" }
@@ -1204,12 +1204,12 @@ export function registerAdminRoutes(app: Express): void {
           return res.status(400).json({ message: "Debes indicar el motivo del rechazo." });
         }
 
-        const updated = await genFebStorage.setVerifyingStatusTransaction(userId, status as any);
+        const updated = await appliaStorage.setVerifyingStatusTransaction(userId, status as any);
         let verificationReportId: number | null = null;
         if (status === "verified") {
           await maybeVerifyProfessional(userId);
           try {
-            const providerAfter = await genFebStorage.getProviderByUserId(userId);
+            const providerAfter = await appliaStorage.getProviderByUserId(userId);
             if (providerAfter) {
               const approvalBase = (() => {
                 const raw = (updated as any)?.transacction_date;
@@ -1218,7 +1218,7 @@ export function registerAdminRoutes(app: Express): void {
                 if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00Z`);
                 return new Date();
               })();
-                const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
+                const profVer = await appliaStorage.getProfessionalVerificationByUserId(userId);
               const receipt = (profVer?.transferReceiptCode ?? "").trim();
               const months =
                 typeof (profVer as any)?.subscriptionMonths === "number" && Number.isFinite((profVer as any).subscriptionMonths)
@@ -1241,7 +1241,7 @@ export function registerAdminRoutes(app: Express): void {
                 months,
                 approvalBase,
               );
-                await genFebStorage.updateProvider(Number((providerAfter as { id: number }).id), {
+                await appliaStorage.updateProvider(Number((providerAfter as { id: number }).id), {
                   visibilitySubscriptionEndsAt: nextIso,
                   visibilitySubscriptionLastPaymentKey: paymentKey || null,
                   visibilitySubscriptionLastPaymentApprovedAt: new Date(),
@@ -1255,12 +1255,12 @@ export function registerAdminRoutes(app: Express): void {
           
           // Reporte financiero (factura USD 15): completar pendiente o crear si faltaba al subir comprobante
           try {
-            const reports = await genFebStorage.getFinancialReports(userId);
+            const reports = await appliaStorage.getFinancialReports(userId);
             const pendingFee = reports.find((r: { type?: string; status?: string }) => r.type === "verification_fee" && r.status === "pending");
             if (pendingFee) {
               const rid = pendingFee.id != null ? Number(pendingFee.id) : NaN;
               verificationReportId = Number.isFinite(rid) ? rid : null;
-              await genFebStorage.updateFinancialReportStatus(pendingFee.id, "completed");
+              await appliaStorage.updateFinancialReportStatus(pendingFee.id, "completed");
             } else {
               const alreadyDone = reports.find(
                 (r: { type?: string; status?: string }) => r.type === "verification_fee" && r.status === "completed",
@@ -1269,7 +1269,7 @@ export function registerAdminRoutes(app: Express): void {
                 const rid = alreadyDone.id != null ? Number(alreadyDone.id) : NaN;
                 verificationReportId = Number.isFinite(rid) ? rid : null;
               } else {
-                const profVer = await genFebStorage.getProfessionalVerificationByUserId(userId);
+                const profVer = await appliaStorage.getProfessionalVerificationByUserId(userId);
                 const months =
                   typeof (profVer as any)?.subscriptionMonths === "number" && Number.isFinite((profVer as any).subscriptionMonths)
                     ? Math.max(1, Math.min(12, Math.trunc((profVer as any).subscriptionMonths)))
@@ -1278,7 +1278,7 @@ export function registerAdminRoutes(app: Express): void {
                   typeof (profVer as any)?.subscriptionMonthlyUsd === "number" && Number.isFinite((profVer as any).subscriptionMonthlyUsd)
                     ? Math.max(0, Number((profVer as any).subscriptionMonthlyUsd))
                     : 15;
-                const created = await genFebStorage.createFinancialReport({
+                const created = await appliaStorage.createFinancialReport({
                   userId,
                   type: "verification_fee",
                   amount: (monthlyUsd * months).toFixed(2),
@@ -1297,10 +1297,10 @@ export function registerAdminRoutes(app: Express): void {
         } else {
           // Rechazo: marcar cargo pendiente como rechazado para poder crear uno nuevo al reenviar comprobante
           try {
-            const reports = await genFebStorage.getFinancialReports(userId);
+            const reports = await appliaStorage.getFinancialReports(userId);
             const pendingFee = reports.find(r => r.type === "verification_fee" && r.status === "pending");
             if (pendingFee) {
-              await genFebStorage.updateFinancialReportStatus(pendingFee.id, "rejected");
+              await appliaStorage.updateFinancialReportStatus(pendingFee.id, "rejected");
             }
           } catch (err) {
             console.error("Error actualizando reporte financiero (rechazo):", err);
@@ -1348,7 +1348,7 @@ export function registerAdminRoutes(app: Express): void {
             pushNotifyData.reportId = String(verificationReportId);
           }
 
-          await genFebStorage.createNotification({
+          await appliaStorage.createNotification({
             userId,
             type: "verification_result",
             data: txNotifyData as any,
@@ -1377,11 +1377,11 @@ export function registerAdminRoutes(app: Express): void {
         // --- Auditoría ---
         try {
           const isApprove = status === "verified";
-          const providerForAudit = await genFebStorage.getProviderByUserId(userId);
+          const providerForAudit = await appliaStorage.getProviderByUserId(userId);
           const isRenewal = (providerForAudit as any)?.isVerified === true;
-          const profVerForAudit = await genFebStorage.getProfessionalVerificationByUserId(userId);
-          const categoriesForAudit = await genFebStorage.getCategories();
-          const vehicleForAudit = userId ? await genFebStorage.getPrimaryVehicleFullByUserId(userId) : null;
+          const profVerForAudit = await appliaStorage.getProfessionalVerificationByUserId(userId);
+          const categoriesForAudit = await appliaStorage.getCategories();
+          const vehicleForAudit = userId ? await appliaStorage.getPrimaryVehicleFullByUserId(userId) : null;
           await createAdminAuditEvent({
             action: isApprove
               ? "subscription_payment_approved"
@@ -1443,11 +1443,11 @@ export function registerAdminRoutes(app: Express): void {
       }> = [];
 
       for (const [providerId, providerServices] of Array.from(byProviderId.entries())) {
-        const provider = await genFebStorage.getProvider(providerId);
+        const provider = await appliaStorage.getProvider(providerId);
         if (!provider) continue;
         const userId = String((provider as { userId?: string }).userId ?? "");
         if (!userId) continue;
-        const rawUser = await genFebStorage.getUserById(userId);
+        const rawUser = await appliaStorage.getUserById(userId);
         const u = rawUser as { name?: string; firstName?: string; lastName?: string; email?: string | null; rating?: number; ratingCount?: number } | null;
         const name =
           (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) || "Usuario";
@@ -1455,7 +1455,7 @@ export function registerAdminRoutes(app: Express): void {
         const ratingCount = typeof u?.ratingCount === "number" ? u.ratingCount : 0;
         const email = u?.email ?? null;
 
-        const bookings = await genFebStorage.getBookingsByProvider(providerId);
+        const bookings = await appliaStorage.getBookingsByProvider(providerId);
         const bookingsCount = (bookings ?? []).length;
 
         items.push({
@@ -1497,7 +1497,7 @@ export function registerAdminRoutes(app: Express): void {
       const db = getFirestore();
       if (!db) {
         const list = (await adminListAllServices()) ?? [];
-        const categories = (await genFebStorage.getCategories()) ?? [];
+        const categories = (await appliaStorage.getCategories()) ?? [];
         const active = list.filter((s: any) => s?.isActive !== false);
         const providerCache = new Map<number, any>();
         const userCache = new Map<string, any>();
@@ -1508,7 +1508,7 @@ export function registerAdminRoutes(app: Express): void {
           const providerId = Number(s?.providerId);
           if (!Number.isFinite(providerId) || providerId <= 0) continue;
           const provider =
-            providerCache.get(providerId) ?? (await genFebStorage.getProvider(providerId));
+            providerCache.get(providerId) ?? (await appliaStorage.getProvider(providerId));
           if (!provider) continue;
           providerCache.set(providerId, provider);
 
@@ -1517,12 +1517,12 @@ export function registerAdminRoutes(app: Express): void {
           if (slug && hiddenForRole.has(slug)) continue;
 
           const userId = String((provider as any)?.userId ?? "");
-          const user = userId ? (userCache.get(userId) ?? (await genFebStorage.getUserById(userId))) : null;
+          const user = userId ? (userCache.get(userId) ?? (await appliaStorage.getUserById(userId))) : null;
           if (userId) userCache.set(userId, user);
 
           let hasVehicle = vehicleCache.get(providerId);
           if (hasVehicle === undefined) {
-            const v = await genFebStorage.getPrimaryVehicleByProviderId(providerId);
+            const v = await appliaStorage.getPrimaryVehicleByProviderId(providerId);
             hasVehicle = !!v;
             vehicleCache.set(providerId, hasVehicle);
           }
@@ -1580,12 +1580,12 @@ export function registerAdminRoutes(app: Express): void {
         if (!Number.isFinite(providerId) || providerId <= 0) continue;
 
         const provider =
-          providerCache.get(providerId) ?? (await genFebStorage.getProvider(providerId));
+          providerCache.get(providerId) ?? (await appliaStorage.getProvider(providerId));
         if (!provider) continue;
         providerCache.set(providerId, provider);
 
         const userId = String((provider as any)?.userId ?? "");
-        const user = userId ? (userCache.get(userId) ?? (await genFebStorage.getUserById(userId))) : null;
+        const user = userId ? (userCache.get(userId) ?? (await appliaStorage.getUserById(userId))) : null;
         if (userId) userCache.set(userId, user);
 
         const category = catById.get(Number(s?.categoryId)) ?? null;
@@ -1594,7 +1594,7 @@ export function registerAdminRoutes(app: Express): void {
 
         let hasVehicle = vehicleCache.get(providerId);
         if (hasVehicle === undefined) {
-          const v = await genFebStorage.getPrimaryVehicleByProviderId(providerId);
+          const v = await appliaStorage.getPrimaryVehicleByProviderId(providerId);
           hasVehicle = !!v;
           vehicleCache.set(providerId, hasVehicle);
         }
@@ -1642,7 +1642,7 @@ export function registerAdminRoutes(app: Express): void {
    */
   app.get("/api/admin/service-brands", authenticateJWT, requireFullAdmin, async (_req, res) => {
     try {
-      const [categories, services] = await Promise.all([genFebStorage.getCategories(), adminListAllServices()]);
+      const [categories, services] = await Promise.all([appliaStorage.getCategories(), adminListAllServices()]);
       const brandSlugs = new Set(
         DEFAULT_CATEGORIES.map((c) => c.slug).filter((s) => !isRetiredProviderCategorySlug(s)),
       );
@@ -1753,7 +1753,7 @@ export function registerAdminRoutes(app: Express): void {
       if (!parsed.success) return res.status(400).json({ message: "Datos inválidos" });
 
       // Preparar info de marca para notificaciones
-      const categories = await genFebStorage.getCategories();
+      const categories = await appliaStorage.getCategories();
       const cat = (categories ?? []).find((c: any) => Number(c?.id) === categoryId);
       const slug = String((cat as any)?.slug ?? "");
       const brandDisplay = cat ? getCategoryDisplayName(cat) : `Categoría ${categoryId}`;
@@ -1774,12 +1774,12 @@ export function registerAdminRoutes(app: Express): void {
       const target = (all ?? []).filter((s: any) => serviceBelongsToBrand(s, categoryId, categories ?? []));
       const ids = target.map((s: any) => Number(s?.id)).filter((id: any) => Number.isFinite(id));
 
-      await Promise.all(ids.map((id) => genFebStorage.updateService(Number(id), { isActive: parsed.data.isActive })));
+      await Promise.all(ids.map((id) => appliaStorage.updateService(Number(id), { isActive: parsed.data.isActive })));
 
       // 2) Notificar a admins (solo rol admin) que se cambió el estatus de una marca/servicios
       try {
         const adminUserId = String((req as any).user?.id ?? "");
-        const adminWhoProcessed = adminUserId ? await genFebStorage.getUserById(adminUserId) : null;
+        const adminWhoProcessed = adminUserId ? await appliaStorage.getUserById(adminUserId) : null;
         const adminName =
           (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string } | null)?.name ??
           ([((adminWhoProcessed as any)?.firstName ?? ""), ((adminWhoProcessed as any)?.lastName ?? "")].filter(Boolean).join(" ") ||
@@ -1789,12 +1789,12 @@ export function registerAdminRoutes(app: Express): void {
         const title = "Cambio de estatus de marca";
         const body = `${adminName} ${actionLabel} ${brandDisplay}.`;
 
-        const allAdmins = await getFullAdminUsers(genFebStorage);
+        const allAdmins = await getFullAdminUsers(appliaStorage);
         for (const admin of allAdmins ?? []) {
           const aid = (admin as { id?: string }).id;
           if (!aid) continue;
           // Notificar a todos los admins (incluyendo al que ejecutó) según tu requerimiento
-          await genFebStorage.createNotification({
+          await appliaStorage.createNotification({
             userId: aid,
             type: "admin",
             data: {
@@ -1860,7 +1860,7 @@ export function registerAdminRoutes(app: Express): void {
           ? Number(req.query.subcategoryId)
           : undefined;
 
-      const [services, categories] = await Promise.all([adminListAllServices(), genFebStorage.getCategories()]);
+      const [services, categories] = await Promise.all([adminListAllServices(), appliaStorage.getCategories()]);
       let inBrand = (services ?? []).filter((s: any) => serviceBelongsToBrand(s, categoryId, categories ?? []));
       if (subcategoryId != null && Number.isFinite(subcategoryId) && subcategoryId > 0) {
         inBrand = inBrand.filter((s: any) => Number(s?.subcategoryId) === subcategoryId);
@@ -1889,11 +1889,11 @@ export function registerAdminRoutes(app: Express): void {
       }> = [];
 
       for (const [providerId, svc] of Array.from(byProvider.entries())) {
-        const provider = await genFebStorage.getProvider(providerId);
+        const provider = await appliaStorage.getProvider(providerId);
         if (!provider) continue;
         const userId = String((provider as any)?.userId ?? "");
         if (!userId) continue;
-        const rawUser = await genFebStorage.getUserById(userId);
+        const rawUser = await appliaStorage.getUserById(userId);
         const u = rawUser as any;
         const name = (u?.name ?? [u?.firstName ?? "", u?.lastName ?? ""].filter(Boolean).join(" ").trim()) || "Usuario";
         const email = u?.email ?? null;
@@ -1961,13 +1961,13 @@ export function registerAdminRoutes(app: Express): void {
       const parsed = providerToggleSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ message: "Datos inválidos" });
 
-      const provider = await genFebStorage.getProvider(providerId);
+      const provider = await appliaStorage.getProvider(providerId);
       const providerUserId = String((provider as any)?.userId ?? "");
 
       const all = await adminListAllServices();
       const target = (all ?? []).filter((s: any) => Number(s?.providerId) === providerId);
       const ids = target.map((s: any) => Number(s?.id)).filter((id: any) => Number.isFinite(id));
-      await Promise.all(ids.map((id) => genFebStorage.updateService(Number(id), { isActive: parsed.data.isActive })));
+      await Promise.all(ids.map((id) => appliaStorage.updateService(Number(id), { isActive: parsed.data.isActive })));
 
       return res.status(200).json({ ok: true, updated: ids.length });
     } catch (e) {
@@ -2048,11 +2048,11 @@ export function registerAdminRoutes(app: Express): void {
       if (!Number.isFinite(providerId) || providerId <= 0) {
         return res.status(400).json({ message: "providerId inválido" });
       }
-      const provider = await genFebStorage.getProvider(providerId);
+      const provider = await appliaStorage.getProvider(providerId);
       if (!provider) return res.status(404).json({ message: "Asociado no encontrado" });
 
       const userId = String((provider as { userId?: string }).userId ?? "");
-      const rawUser = userId ? await genFebStorage.getUserById(userId) : null;
+      const rawUser = userId ? await appliaStorage.getUserById(userId) : null;
       const u = rawUser as Record<string, unknown> | null;
       const user = u
         ? {
@@ -2068,7 +2068,7 @@ export function registerAdminRoutes(app: Express): void {
           }
         : null;
 
-      const categories = await genFebStorage.getCategories();
+      const categories = await appliaStorage.getCategories();
       const allServices = (await adminListAllServices()) ?? [];
       const providerServices = allServices.filter((s: any) => Number(s?.providerId) === providerId);
 
@@ -2083,7 +2083,7 @@ export function registerAdminRoutes(app: Express): void {
         const n = Number(subId);
         if (!Number.isFinite(n) || n <= 0) return null;
         if (subNameCache.has(n)) return subNameCache.get(n) ?? null;
-        const sub = await genFebStorage.getSubcategoryById(n);
+        const sub = await appliaStorage.getSubcategoryById(n);
         const name = sub?.name ?? null;
         if (name) subNameCache.set(n, name);
         return name;
@@ -2137,9 +2137,9 @@ export function registerAdminRoutes(app: Express): void {
         }
       }
 
-      const vehicle = userId ? await genFebStorage.getPrimaryVehicleFullByUserId(userId) : null;
-      const bookings = await genFebStorage.getBookingsByProvider(providerId);
-      const profVer = userId ? await genFebStorage.getProfessionalVerificationByUserId(userId) : null;
+      const vehicle = userId ? await appliaStorage.getPrimaryVehicleFullByUserId(userId) : null;
+      const bookings = await appliaStorage.getBookingsByProvider(providerId);
+      const profVer = userId ? await appliaStorage.getProfessionalVerificationByUserId(userId) : null;
       const primaryCatId = Number((provider as { categoryId?: unknown }).categoryId);
       const primaryCatRow =
         Number.isFinite(primaryCatId) && primaryCatId > 0
@@ -2213,7 +2213,7 @@ export function registerAdminRoutes(app: Express): void {
       if (!Number.isFinite(providerId) || providerId <= 0) {
         return res.status(400).json({ message: "providerId inválido" });
       }
-      const provider = await genFebStorage.getProvider(providerId);
+      const provider = await appliaStorage.getProvider(providerId);
       if (!provider) return res.status(404).json({ message: "Asociado no encontrado" });
 
       const parsed = adminProviderDetailPatchSchema.safeParse(req.body);
@@ -2229,7 +2229,7 @@ export function registerAdminRoutes(app: Express): void {
         if (body.user.lastName !== undefined) userPatch.lastName = body.user.lastName;
         if (body.user.email !== undefined) userPatch.email = body.user.email;
         if (body.user.phone !== undefined) userPatch.phone = body.user.phone;
-        const existingUser = await genFebStorage.getUserById(userId);
+        const existingUser = await appliaStorage.getUserById(userId);
         const previousRole = String((existingUser as { role?: string })?.role ?? "");
         let roleChanged = false;
         if (body.user.role !== undefined) {
@@ -2245,7 +2245,7 @@ export function registerAdminRoutes(app: Express): void {
         }
         if (body.user.newPassword) {
           const hashed = await bcrypt.hash(body.user.newPassword, 10);
-          await genFebStorage.updateUserPassword(userId, hashed);
+          await appliaStorage.updateUserPassword(userId, hashed);
         }
       }
 
@@ -2318,7 +2318,7 @@ export function registerAdminRoutes(app: Express): void {
         if (body.vehicle === null) {
           /* no borrar vehículo desde admin por ahora */
         } else if (Object.keys(body.vehicle).length > 0) {
-          const existingVehicle = (await genFebStorage.getPrimaryVehicleFullByUserId(userId)) ?? {};
+          const existingVehicle = (await appliaStorage.getPrimaryVehicleFullByUserId(userId)) ?? {};
           const fullVehicle = insertProviderVehicleSchema.safeParse({
             license_plate: "",
             model_year: new Date().getFullYear(),
@@ -2333,7 +2333,7 @@ export function registerAdminRoutes(app: Express): void {
           if (!fullVehicle.success) {
             return res.status(400).json({ message: "Datos de vehículo inválidos", issues: fullVehicle.error.flatten() });
           }
-          await genFebStorage.upsertPrimaryProviderVehicle({
+          await appliaStorage.upsertPrimaryProviderVehicle({
             providerId,
             userId,
             vehicle: fullVehicle.data,
@@ -2417,12 +2417,12 @@ export function registerAdminRoutes(app: Express): void {
    */
   app.get("/api/admin/bookings", authenticateJWT, requireStaffFromDb, async (_req, res) => {
     try {
-      const providers = await genFebStorage.getAllProviders();
+      const providers = await appliaStorage.getAllProviders();
       const map = new Map<number, any>();
       for (const p of providers ?? []) {
         const providerId = (p as { id?: number }).id;
         if (providerId == null) continue;
-        const bookings = await genFebStorage.getBookingsByProvider(Number(providerId));
+        const bookings = await appliaStorage.getBookingsByProvider(Number(providerId));
         for (const b of bookings ?? []) {
           const bid = Number((b as { id?: number }).id);
           if (!Number.isFinite(bid)) continue;
@@ -2457,39 +2457,39 @@ export function registerAdminRoutes(app: Express): void {
       const bookingId = Number(req.params.id);
       if (!Number.isFinite(bookingId)) return res.status(400).json({ message: "ID inválido" });
       const body = adminUpdateBookingSchema.parse(req.body);
-      const current = await genFebStorage.getBooking(bookingId);
+      const current = await appliaStorage.getBooking(bookingId);
       if (!current) return res.status(404).json({ message: "Reserva no encontrada" });
 
       if (body.cost != null) {
-        await genFebStorage.updateBookingCost(bookingId, body.cost);
+        await appliaStorage.updateBookingCost(bookingId, body.cost);
       }
       if (body.scheduleIso) {
         const d = new Date(body.scheduleIso);
         if (!Number.isFinite(d.getTime())) return res.status(400).json({ message: "scheduleIso inválido" });
-        await genFebStorage.updateBookingSchedule(bookingId, d);
+        await appliaStorage.updateBookingSchedule(bookingId, d);
       }
 
       if (body.status) {
         const bid = current as { confirmedByClient?: boolean; status?: string };
         if (body.status === "completed") {
           if (bid.confirmedByClient === true) {
-            await genFebStorage.completeBookingAndReleaseEscrow(bookingId);
+            await appliaStorage.completeBookingAndReleaseEscrow(bookingId);
           } else {
-            await genFebStorage.updateBookingStatus(bookingId, "completed");
+            await appliaStorage.updateBookingStatus(bookingId, "completed");
           }
         } else if (body.status === "cancelled") {
           if (bid.confirmedByClient === true) {
-            await genFebStorage.cancelBookingAndRefundClientEscrow(bookingId);
+            await appliaStorage.cancelBookingAndRefundClientEscrow(bookingId);
           } else {
-            await genFebStorage.updateBookingStatus(bookingId, "cancelled");
+            await appliaStorage.updateBookingStatus(bookingId, "cancelled");
           }
         } else {
-          await genFebStorage.updateBookingStatus(bookingId, body.status);
+          await appliaStorage.updateBookingStatus(bookingId, body.status);
         }
       }
 
-      const updated = await genFebStorage.getBooking(bookingId);
-      await applyServiceBookingChatLifecycle(getIO(), genFebStorage, updated ?? current);
+      const updated = await appliaStorage.getBooking(bookingId);
+      await applyServiceBookingChatLifecycle(getIO(), appliaStorage, updated ?? current);
       return res.status(200).json(updated ?? current);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -2507,7 +2507,7 @@ export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/conversations", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
     try {
       const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
-      const conversations = await genFebStorage.listConversationsForAdmin({ limit });
+      const conversations = await appliaStorage.listConversationsForAdmin({ limit });
       return res.status(200).json({ conversations, total: conversations.length });
     } catch (error) {
       console.error("Error listing admin conversations:", error);
@@ -2525,7 +2525,7 @@ export function registerAdminRoutes(app: Express): void {
       if (!Number.isFinite(conversationId)) return res.status(400).json({ message: "ID inválido" });
       const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
       const before = req.query.before != null ? Number(req.query.before) : undefined;
-      const { messages, hasMore } = await genFebStorage.getMessagesByConversation(conversationId, {
+      const { messages, hasMore } = await appliaStorage.getMessagesByConversation(conversationId, {
         limit,
         before: before && !Number.isNaN(before) ? before : undefined,
       });
@@ -2539,7 +2539,7 @@ export function registerAdminRoutes(app: Express): void {
   // GET /api/admin/withdrawals - Lista usuarios con withdrawingFunds > 0 (solo admin)
   app.get("/api/admin/withdrawals", authenticateJWT, requireFullAdmin, async (_req, res) => {
     try {
-      const list = await genFebStorage.getUsersWithPendingWithdrawals();
+      const list = await appliaStorage.getUsersWithPendingWithdrawals();
       return res.status(200).json(list);
     } catch (error) {
       console.error("Error listing pending withdrawals:", error);
@@ -2566,7 +2566,7 @@ export function registerAdminRoutes(app: Express): void {
 
       if (action === "approve") {
         // Liquidación: withdrawingFunds → 0 y registro en historial; el monto NO se transfiere a cuenta admin (pago externo manual).
-        const { transfer, user } = await genFebStorage.processWithdrawalApproval(userId, adminUserId);
+        const { transfer, user } = await appliaStorage.processWithdrawalApproval(userId, adminUserId);
         const professionalName = (user as { name?: string; firstName?: string; lastName?: string; email?: string }).name
           ?? ([((user as { firstName?: string }).firstName ?? ""), ((user as { lastName?: string }).lastName ?? "")].filter(Boolean).join(" ") || (user as { email?: string }).email || "Usuario");
         const amountFormatted = new Intl.NumberFormat("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(transfer.amount);
@@ -2579,8 +2579,8 @@ export function registerAdminRoutes(app: Express): void {
         };
         if (adminNote) notificationData.adminNote = adminNote;
 
-        if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
-          await genFebStorage.createNotification({
+        if (!SUPPRESS_APPLIA_WALLET_FLOW_NOTIFICATIONS) {
+          await appliaStorage.createNotification({
             userId,
             type: "withdrawal_approved",
             data: notificationData,
@@ -2601,14 +2601,14 @@ export function registerAdminRoutes(app: Express): void {
           }).catch(() => {});
 
           // Notificar a los demás admins: el retiro ya fue procesado por otro admin (queda en historial para evitar duplicados)
-          const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
+          const adminWhoProcessed = await appliaStorage.getUserById(adminUserId);
           const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
             ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
-          const allAdmins = await getFullAdminUsers(genFebStorage);
+          const allAdmins = await getFullAdminUsers(appliaStorage);
           for (const admin of allAdmins ?? []) {
             const aid = (admin as { id?: string }).id;
             if (aid && aid !== adminUserId) {
-              await genFebStorage.createNotification({
+              await appliaStorage.createNotification({
                 userId: aid,
                 type: "admin",
                 data: {
@@ -2653,8 +2653,8 @@ export function registerAdminRoutes(app: Express): void {
         return res.status(200).json({ message: "Pago aprobado y registrado.", transfer, user: toPlainUser(user) });
       } else {
         // Rollback: withdrawingFunds regresa íntegramente al wallet del profesional; luego withdrawingFunds = 0.
-        const { user, amount: rejectedAmount } = await genFebStorage.processWithdrawalRejection(userId);
-        await genFebStorage.recordWithdrawalRejection(
+        const { user, amount: rejectedAmount } = await appliaStorage.processWithdrawalRejection(userId);
+        await appliaStorage.recordWithdrawalRejection(
           userId,
           rejectedAmount,
           adminUserId,
@@ -2664,12 +2664,12 @@ export function registerAdminRoutes(app: Express): void {
         const professionalName = (user as { name?: string; firstName?: string; lastName?: string; email?: string }).name
           ?? ([((user as { firstName?: string }).firstName ?? ""), ((user as { lastName?: string }).lastName ?? "")].filter(Boolean).join(" ") || (user as { email?: string }).email || "Usuario");
 
-        const rejectedMessage = "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Genfeb.";
+        const rejectedMessage = "Tu solicitud de retiro fue rechazada. Los fondos fueron devueltos a tu Saldo Applia.";
         const rejectionData: Record<string, unknown> = { message: rejectedMessage };
         if (adminNote) rejectionData.adminNote = adminNote;
 
-        if (!SUPPRESS_GENFEB_WALLET_FLOW_NOTIFICATIONS) {
-          await genFebStorage.createNotification({
+        if (!SUPPRESS_APPLIA_WALLET_FLOW_NOTIFICATIONS) {
+          await appliaStorage.createNotification({
             userId,
             type: "withdrawal_rejected",
             data: rejectionData,
@@ -2689,20 +2689,20 @@ export function registerAdminRoutes(app: Express): void {
             body: bodyReject,
           }).catch(() => {});
 
-          const adminWhoProcessed = await genFebStorage.getUserById(adminUserId);
+          const adminWhoProcessed = await appliaStorage.getUserById(adminUserId);
           const adminName = (adminWhoProcessed as { name?: string; firstName?: string; lastName?: string; email?: string })?.name
             ?? ([((adminWhoProcessed as { firstName?: string })?.firstName ?? ""), ((adminWhoProcessed as { lastName?: string })?.lastName ?? "")].filter(Boolean).join(" ") || (adminWhoProcessed as { email?: string })?.email || "Un administrador");
-          const allAdmins = await getFullAdminUsers(genFebStorage);
+          const allAdmins = await getFullAdminUsers(appliaStorage);
           for (const admin of allAdmins ?? []) {
             const aid = (admin as { id?: string }).id;
             if (aid && aid !== adminUserId) {
-              await genFebStorage.createNotification({
+              await appliaStorage.createNotification({
                 userId: aid,
                 type: "admin",
                 data: {
                   type: "withdrawal_processed_by_other",
                   action: "rejected",
-                  message: `El retiro de ${professionalName} fue rechazado por ${adminName}. Los fondos fueron devueltos a su Saldo Genfeb.`,
+                  message: `El retiro de ${professionalName} fue rechazado por ${adminName}. Los fondos fueron devueltos a su Saldo Applia.`,
                   professionalUserId: userId,
                   professionalName,
                   processedByAdminId: adminUserId,
@@ -2735,7 +2735,7 @@ export function registerAdminRoutes(app: Express): void {
           }
         }
 
-        return res.status(200).json({ message: "Retiro rechazado; fondos devueltos al Saldo Genfeb del usuario.", user: toPlainUser(user) });
+        return res.status(200).json({ message: "Retiro rechazado; fondos devueltos al Saldo Applia del usuario.", user: toPlainUser(user) });
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -2755,7 +2755,7 @@ export function registerAdminRoutes(app: Express): void {
       const status = (req.query.status as string)?.toLowerCase();
       const validStatus =
         status === "approved" || status === "rejected" || status === "pending" ? status : "all";
-      const { items, total } = await genFebStorage.getWithdrawalHistory({ page, limit, status: validStatus });
+      const { items, total } = await appliaStorage.getWithdrawalHistory({ page, limit, status: validStatus });
       return res.status(200).json({ items, total, page, limit });
     } catch (error) {
       console.error("Error listing withdrawal history:", error);
@@ -2771,7 +2771,7 @@ export function registerAdminRoutes(app: Express): void {
         .safeParse(typeof req.query.period === "string" ? req.query.period : "week");
       const preset = (parsed.success ? parsed.data : "week") as AdminDashboardStatsPreset;
       const { from, to } = getDashboardStatsRange(preset);
-      const stats = await genFebStorage.getAdminDashboardStats({ from, to });
+      const stats = await appliaStorage.getAdminDashboardStats({ from, to });
       return res.status(200).json({
         preset,
         range: { from: from.toISOString(), to: to.toISOString() },

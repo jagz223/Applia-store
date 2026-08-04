@@ -202,8 +202,8 @@ export async function findDispatchCompanyByName(
 }
 
 export async function getDispatchCompanyForUser(userId: string): Promise<DispatchCompany | null> {
-  const { genFebStorage } = await import("./storage-genfeb");
-  const user = (await genFebStorage.getUserById(userId)) as { dispatchCompanyId?: string } | null;
+  const { appliaStorage } = await import("./storage-applia");
+  const user = (await appliaStorage.getUserById(userId)) as { dispatchCompanyId?: string } | null;
   const cid = user?.dispatchCompanyId;
   if (!cid) return null;
   return getDispatchCompany(cid);

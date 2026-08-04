@@ -1,4 +1,4 @@
-const EDIT_SERVICE_RETURN_KEY = "genfeb-edit-service-return";
+const EDIT_SERVICE_RETURN_KEY = "applia-edit-service-return";
 
 function isSafeInternalPath(path: string): boolean {
   const p = path.trim();

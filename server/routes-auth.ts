@@ -7,7 +7,7 @@ import { vehicleChangeProposalSchema } from "@shared/vehicle-change-proposal";
 import { isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categories";
 import { isGoVehicleProvider } from "@shared/provider-car-go";
 import { notifyFullAdminsPendingAccountChangeRequest } from "./account-change-notify-admins";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { PUBLIC_REGISTER_ROLES, normalizePhone } from "@shared/admin-user-registration";
 import { resolveUserPermissions } from "./resolve-user-permissions";
 import { canActAsAssociate } from "@shared/associate-role-access";
@@ -53,7 +53,7 @@ if (!JWT_SECRET) {
 }
 
 // Use a secure default only for development
-const devSecret = "genfeb-dev-secret-change-in-production";
+const devSecret = "applia-dev-secret-change-in-production";
 const effectiveSecret = JWT_SECRET || devSecret;
 
 // ============== ESQUEMAS DE VALIDACIÓN ==============
@@ -193,12 +193,12 @@ export async function registerAuthRoutes(
     try {
       const data = registerSchema.parse(req.body);
 
-      const existing = await genFebStorage.getUserByEmail(data.email);
+      const existing = await appliaStorage.getUserByEmail(data.email);
       if (existing && !(existing as { deletedAt?: unknown }).deletedAt) {
         return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE });
       }
 
-      const existingPhone = await genFebStorage.getUserByPhone(data.phone, true);
+      const existingPhone = await appliaStorage.getUserByPhone(data.phone, true);
       if (existingPhone) {
         return res.status(409).json({ message: DUPLICATE_PHONE_MESSAGE, field: "phone" });
       }
@@ -206,9 +206,9 @@ export async function registerAuthRoutes(
       // Hashear la contraseña
       const hashedPassword = await bcrypt.hash(data.password, 10);
       
-      // Crear el usuario en storage de GenFeb
+      // Crear el usuario en storage de Applia
       // Nota: el contrato del storage tipa esto como unknown; aquí lo tratamos como objeto de usuario.
-      const user = (await genFebStorage.createUser({
+      const user = (await appliaStorage.createUser({
         email: data.email,
         password: hashedPassword,
         name: data.name,
@@ -230,7 +230,7 @@ export async function registerAuthRoutes(
         phone: user.phone,
       });
 
-      const provider = await genFebStorage.getProviderByUserId(user.id);
+      const provider = await appliaStorage.getProviderByUserId(user.id);
       const clientUser = await buildAuthClientUser(
         user as Record<string, unknown>,
         provider as { id: number; [key: string]: unknown } | null
@@ -269,7 +269,7 @@ export async function registerAuthRoutes(
       const data = loginSchema.parse(req.body);
       
       // Buscar usuario
-      const user = (await genFebStorage.getUserByEmail(data.email)) as any;
+      const user = (await appliaStorage.getUserByEmail(data.email)) as any;
       
       if (!user) {
         return res.status(401).json({ message: "Credenciales inválidas" });
@@ -292,7 +292,7 @@ export async function registerAuthRoutes(
         phone: user.phone,
       });
 
-      const provider = await genFebStorage.getProviderByUserId(user.id);
+      const provider = await appliaStorage.getProviderByUserId(user.id);
       const clientUser = await buildAuthClientUser(
         user as Record<string, unknown>,
         provider as { id: number; [key: string]: unknown } | null
@@ -318,11 +318,11 @@ export async function registerAuthRoutes(
   // GET /api/auth/me - Usuario logueado; incluye perfil de proveedor si existe (una sola llamada para saber si es proveedor).
   app.get("/api/auth/me", authenticateJWT, async (req: any, res) => {
     try {
-      const user = await genFebStorage.getUserById(req.user.id);
+      const user = await appliaStorage.getUserById(req.user.id);
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
-      const provider = await genFebStorage.getProviderByUserId(req.user.id);
+      const provider = await appliaStorage.getProviderByUserId(req.user.id);
       res.json(
         await buildAuthClientUser(
           user as Record<string, unknown>,
@@ -351,11 +351,11 @@ export async function registerAuthRoutes(
       ]);
       const data = schema.parse(req.body);
       if (data.field === "vehicle") {
-        const provider = await genFebStorage.getProviderByUserId(String(req.user.id));
+        const provider = await appliaStorage.getProviderByUserId(String(req.user.id));
         if (!provider) {
           return res.status(403).json({ message: "Solo para asociados con perfil activo." });
         }
-        const categories = await genFebStorage.getCategories();
+        const categories = await appliaStorage.getCategories();
         if (!isGoVehicleProvider(provider, categories)) {
           return res.status(403).json({
             message: "Solo conductores taxi o delivery pueden solicitar cambio de vehículo.",
@@ -367,7 +367,7 @@ export async function registerAuthRoutes(
           return res.status(400).json({ message: "La categoría debe ser taxi o delivery." });
         }
       }
-      const created = await genFebStorage.createAccountChangeRequest(
+      const created = await appliaStorage.createAccountChangeRequest(
         data.field === "vehicle"
           ? {
               userId: String(req.user.id),
@@ -381,7 +381,7 @@ export async function registerAuthRoutes(
               reason: data.reason,
             }
       );
-      const applicantUser = (await genFebStorage.getUserById(String(req.user.id), true)) as Record<string, unknown> | null;
+      const applicantUser = (await appliaStorage.getUserById(String(req.user.id), true)) as Record<string, unknown> | null;
       const rid = Number((created as { id?: unknown }).id);
       if (Number.isFinite(rid) && rid > 0) {
         void notifyFullAdminsPendingAccountChangeRequest({
@@ -407,7 +407,7 @@ export async function registerAuthRoutes(
   // GET /api/me/account-change-requests - Historial del usuario
   app.get("/api/me/account-change-requests", authenticateJWT, async (req: any, res) => {
     try {
-      const list = await genFebStorage.getMyAccountChangeRequests(String(req.user.id));
+      const list = await appliaStorage.getMyAccountChangeRequests(String(req.user.id));
       return res.json({ requests: list });
     } catch (error) {
       console.error("Error listing my account change requests:", error);
@@ -449,7 +449,7 @@ export async function registerAuthRoutes(
       
       const data = updateSchema.parse(req.body);
 
-      const current = (await genFebStorage.getUserById(req.user.id, true)) as any;
+      const current = (await appliaStorage.getUserById(req.user.id, true)) as any;
       if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
 
       const grants = (current.profileEditGrants ?? {}) as { email?: boolean; name?: boolean; phone?: boolean };
@@ -472,13 +472,13 @@ export async function registerAuthRoutes(
 
       // Unicidad: email / phone
       if (wantsEmail) {
-        const existing = await genFebStorage.getUserByEmail(String(data.email), true);
+        const existing = await appliaStorage.getUserByEmail(String(data.email), true);
         if (existing && String((existing as any).id) !== String(req.user.id) && !(existing as any).deletedAt) {
           return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE, field: "email" });
         }
       }
       if (wantsPhone) {
-        const existing = await genFebStorage.getUserByPhone(String(data.phone), true);
+        const existing = await appliaStorage.getUserByPhone(String(data.phone), true);
         if (existing && String((existing as any).id) !== String(req.user.id) && !(existing as any).deletedAt) {
           return res.status(409).json({ message: DUPLICATE_PHONE_MESSAGE, field: "phone" });
         }
@@ -492,7 +492,7 @@ export async function registerAuthRoutes(
       if (wantsPhone) nextGrants.phone = false;
       if (wantsEmail || wantsName || wantsPhone) patch.profileEditGrants = nextGrants;
 
-      const updatedUser = await genFebStorage.updateUser(req.user.id, patch);
+      const updatedUser = await appliaStorage.updateUser(req.user.id, patch);
       
       if (!updatedUser) {
         return res.status(404).json({ message: "Usuario no encontrado" });
@@ -524,7 +524,7 @@ export async function registerAuthRoutes(
       const { avatarUrl } = schema.parse(req.body);
       const url = avatarUrl.trim();
 
-      const current = (await genFebStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
+      const current = (await appliaStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
       if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
 
       const prev = String(current.avatar ?? "").trim();
@@ -555,7 +555,7 @@ export async function registerAuthRoutes(
         }
       }
 
-      const updatedUser = await genFebStorage.updateUser(req.user.id, {
+      const updatedUser = await appliaStorage.updateUser(req.user.id, {
         avatar: url,
         avatarLastChangedAt: new Date(),
       } as Record<string, unknown>);
@@ -563,7 +563,7 @@ export async function registerAuthRoutes(
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
 
-      const provider = await genFebStorage.getProviderByUserId(req.user.id);
+      const provider = await appliaStorage.getProviderByUserId(req.user.id);
       const { password: _p, ...safe } = updatedUser as Record<string, unknown>;
       void _p;
       res.json({
@@ -593,7 +593,7 @@ export async function registerAuthRoutes(
       const data = passwordSchema.parse(req.body);
       
       // Obtener usuario actual
-      const user = (await genFebStorage.getUserById(req.user.id)) as any;
+      const user = (await appliaStorage.getUserById(req.user.id)) as any;
       
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
@@ -610,7 +610,7 @@ export async function registerAuthRoutes(
       const hashedPassword = await bcrypt.hash(data.newPassword, 10);
       
       // Actualizar contraseña
-      await genFebStorage.updateUserPassword(req.user.id, hashedPassword);
+      await appliaStorage.updateUserPassword(req.user.id, hashedPassword);
       
       res.json({ message: "Contraseña actualizada correctamente" });
     } catch (error) {
@@ -629,7 +629,7 @@ export async function registerAuthRoutes(
   // POST /api/auth/accept-provider-terms-of-use — Profesional acepta el estatuto (campo `acceptedProviderTermsOfUse`).
   app.post("/api/auth/accept-provider-terms-of-use", authenticateJWT, async (req: any, res) => {
     try {
-      const full = (await genFebStorage.getUserById(req.user.id)) as any;
+      const full = (await appliaStorage.getUserById(req.user.id)) as any;
       if (!full) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
@@ -637,11 +637,11 @@ export async function registerAuthRoutes(
       if (!canActAsAssociate(full.role, perms)) {
         return res.status(403).json({ message: "Solo los asociados deben aceptar estas condiciones" });
       }
-      const updated = await genFebStorage.updateUser(req.user.id, { acceptedProviderTermsOfUse: true } as any);
+      const updated = await appliaStorage.updateUser(req.user.id, { acceptedProviderTermsOfUse: true } as any);
       if (!updated) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
-      const provider = await genFebStorage.getProviderByUserId(req.user.id);
+      const provider = await appliaStorage.getProviderByUserId(req.user.id);
       const { password: _p, ...safe } = updated as Record<string, unknown>;
       void _p;
       res.json({
@@ -661,7 +661,7 @@ export async function registerAuthRoutes(
     const title = "Contraseña actualizada";
     const bodyText = "Tu contraseña fue cambiada correctamente. Si no fuiste tú, contacta a soporte de inmediato.";
     const notifData = { url: "/login", message: bodyText, title };
-    const created = await genFebStorage.createNotification({
+    const created = await appliaStorage.createNotification({
       userId,
       type: "password_changed",
       data: notifData,
@@ -685,7 +685,7 @@ export async function registerAuthRoutes(
   app.post("/api/auth/password-with-recovery", authenticateJWT, async (req: any, res) => {
     try {
       const { answers, newPassword } = changePasswordWithRecoverySchema.parse(req.body);
-      const current = (await genFebStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
+      const current = (await appliaStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
       if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
       if (!userHasRecoveryConfigured(current)) {
         return res.status(403).json({
@@ -700,7 +700,7 @@ export async function registerAuthRoutes(
         });
       }
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      await genFebStorage.updateUserPassword(req.user.id, hashedPassword);
+      await appliaStorage.updateUserPassword(req.user.id, hashedPassword);
       await notifyPasswordChanged(req.user.id);
       return res.status(200).json({ message: "Contraseña actualizada correctamente" });
     } catch (error) {
@@ -721,7 +721,7 @@ export async function registerAuthRoutes(
   app.post("/api/auth/recovery-questions", authenticateJWT, async (req: any, res) => {
     try {
       const answers = recoveryQuestionsSetupSchema.parse(req.body?.answers ?? req.body);
-      const current = (await genFebStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
+      const current = (await appliaStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
       if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
 
       const configured = userHasRecoveryConfigured(current);
@@ -735,14 +735,14 @@ export async function registerAuthRoutes(
 
       const hashed = await hashRecoveryQuestions(answers);
       const nextGrants = { ...grants, recoveryQuestions: false };
-      const updated = await genFebStorage.updateUser(req.user.id, {
+      const updated = await appliaStorage.updateUser(req.user.id, {
         recoveryQuestions: hashed,
         recoveryQuestionsConfigured: true,
         profileEditGrants: nextGrants,
       } as any);
       if (!updated) return res.status(404).json({ message: "Usuario no encontrado" });
 
-      const provider = await genFebStorage.getProviderByUserId(req.user.id);
+      const provider = await appliaStorage.getProviderByUserId(req.user.id);
       const { password: _p, recoveryQuestions: _rq, ...safe } = updated as Record<string, unknown>;
       void _p;
       void _rq;
@@ -766,7 +766,7 @@ export async function registerAuthRoutes(
   app.post("/api/auth/forgot-password/lookup", async (req, res) => {
     try {
       const lookup = parseForgotPasswordLookup(req.body);
-      const resolved = await resolveUserForForgotPassword(lookup, genFebStorage);
+      const resolved = await resolveUserForForgotPassword(lookup, appliaStorage);
       if (!resolved) {
         return res.status(200).json({
           found: false,
@@ -800,7 +800,7 @@ export async function registerAuthRoutes(
       const { email, answers } = forgotPasswordVerifySchema.parse(req.body);
       const resolved = await resolveUserForForgotPassword(
         { kind: "email", email },
-        genFebStorage,
+        appliaStorage,
       );
       if (!resolved) {
         return res.status(401).json({
@@ -836,12 +836,12 @@ export async function registerAuthRoutes(
       if (!payload) {
         return res.status(401).json({ message: "El enlace de recuperación expiró. Vuelve a intentarlo." });
       }
-      const user = (await genFebStorage.getUserById(payload.userId)) as Record<string, unknown> | null;
+      const user = (await appliaStorage.getUserById(payload.userId)) as Record<string, unknown> | null;
       if (!user || String(user.email ?? "").toLowerCase() !== payload.email) {
         return res.status(401).json({ message: "Token inválido" });
       }
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      await genFebStorage.updateUserPassword(payload.userId, hashedPassword);
+      await appliaStorage.updateUserPassword(payload.userId, hashedPassword);
       await notifyPasswordChanged(payload.userId);
       return res.status(200).json({
         message: "Contraseña actualizada. Ya puedes iniciar sesión.",
@@ -867,7 +867,7 @@ export async function registerAuthRoutes(
       const userId = req.user.id;
       
       // Eliminar el usuario de storage
-      await genFebStorage.deleteUser(userId);
+      await appliaStorage.deleteUser(userId);
       
       res.json({ message: "Cuenta eliminada correctamente" });
     } catch (error) {
@@ -881,23 +881,23 @@ export async function registerAuthRoutes(
     try {
       // Verificar secret key para protección
       const secretKey = req.headers["x-admin-key"];
-      if (secretKey !== "genfeb-admin-secret-2024" && process.env.NODE_ENV === "production") {
+      if (secretKey !== "applia-admin-secret-2024" && process.env.NODE_ENV === "production") {
         return res.status(403).json({ message: "Forbidden" });
       }
       
       // Verificar si ya existe
-      const existing = (await genFebStorage.getUserByEmail("admin@genfeb.com")) as any;
+      const existing = (await appliaStorage.getUserByEmail("admin@applia.com")) as any;
       if (existing) {
         return res.json({ message: "Admin user already exists", user: { email: existing.email, role: existing.role } });
       }
       
       // Crear admin
       const hashedPassword = await bcrypt.hash("admin123456", 10);
-      const admin = (await genFebStorage.createUser({
-        email: "admin@genfeb.com",
+      const admin = (await appliaStorage.createUser({
+        email: "admin@applia.com",
         password: hashedPassword,
         name: "Administrador",
-        lastName: "GenFeb",
+        lastName: "Applia",
         phone: "+593999999999",
         role: "admin",
       })) as any;

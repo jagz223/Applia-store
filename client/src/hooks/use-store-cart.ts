@@ -7,10 +7,11 @@ import type {
 } from "@shared/store-cart-schema";
 import type { SubmitStoreCheckout } from "@shared/store-order-schema";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
-import type { StoreLocation } from "@shared/store-schema";
+import type { StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
 
 export type StoreCartLine = {
   kind: "product" | "promotion";
+  lineKey: string;
   productId?: number;
   promotionId?: number;
   name: string;
@@ -18,6 +19,8 @@ export type StoreCartLine = {
   quantity: number;
   lineTotal: number;
   imageUrl: string | null;
+  removedIngredientMaterialIds?: number[];
+  additionalIngredientMaterialIds?: number[];
 };
 
 export type StoreCartFulfillmentOption = {
@@ -43,6 +46,7 @@ export type StoreCartSummary = {
   fulfillmentOptions: StoreCartFulfillmentOption[];
   paymentMethods: StoreCartPaymentMethodOption[];
   storeLocation: StoreLocation | null;
+  deliveryFares: StoreDeliveryFares;
 };
 
 function authHeaders(): HeadersInit {
@@ -125,29 +129,9 @@ export function useSubmitStoreCheckout(storeId: number) {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error((err as { message?: string }).message ?? "No se pudo completar la compra");
+        throw new Error((err as { message?: string }).message ?? "No se pudo confirmar la compra");
       }
-      return res.json() as Promise<{ order: { id: number; status: string } }>;
-    },
-    onSuccess: () => invalidateCart(qc, storeId),
-  });
-}
-
-export function useUpdateStoreCartFulfillment(storeId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: UpdateStoreCartFulfillment) => {
-      const res = await fetch(`/api/stores/${storeId}/cart/fulfillment`, {
-        method: "PATCH",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { message?: string }).message ?? "No se pudo actualizar la modalidad");
-      }
-      const data = (await res.json()) as { cart: StoreCartSummary };
-      return data.cart;
+      return res.json();
     },
     onSuccess: () => invalidateCart(qc, storeId),
   });
@@ -165,6 +149,26 @@ export function useRemoveFromStoreCart(storeId: number) {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { message?: string }).message ?? "No se pudo quitar del carrito");
+      }
+      const data = (await res.json()) as { cart: StoreCartSummary };
+      return data.cart;
+    },
+    onSuccess: () => invalidateCart(qc, storeId),
+  });
+}
+
+export function useUpdateStoreCartFulfillment(storeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: UpdateStoreCartFulfillment) => {
+      const res = await fetch(`/api/stores/${storeId}/cart/fulfillment`, {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudo actualizar la entrega");
       }
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;

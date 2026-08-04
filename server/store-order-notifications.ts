@@ -5,7 +5,7 @@ import {
   buildStoreOrderStatusNotification,
   storePushDataStrings,
 } from "@shared/store-notification-copy";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getIO, sendNotificationToUser } from "./socket";
 import { notificationService } from "./services/notification.service";
 
@@ -20,7 +20,7 @@ export async function notifyStoreOwnerNewOrder(order: StoreOrder, store: Store):
   const ownerUserId = String(store.ownerUserId ?? "");
   if (!ownerUserId) return;
 
-  const customer = await genFebStorage.getUserById(order.userId);
+  const customer = await appliaStorage.getUserById(order.userId);
   const customerName = customerDisplayName((customer ?? undefined) as Record<string, unknown> | undefined);
   const copy = buildStoreOrderNewNotification({
     storeName: store.name,
@@ -42,7 +42,7 @@ export async function notifyStoreOwnerNewOrder(order: StoreOrder, store: Store):
     url: copy.url,
   };
 
-  await genFebStorage.createNotification({
+  await appliaStorage.createNotification({
     userId: ownerUserId,
     type: "store_order_new",
     data,
@@ -91,7 +91,7 @@ export async function notifyCustomerStoreOrderStatusChanged(order: StoreOrder, s
     url: copy.url,
   };
 
-  await genFebStorage.createNotification({
+  await appliaStorage.createNotification({
     userId: customerUserId,
     type: "store_order_status",
     data,

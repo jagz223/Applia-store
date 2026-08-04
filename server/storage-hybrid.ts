@@ -3,7 +3,7 @@
  * proveedores, servicios, reservas) y memoria para el resto cuando Firebase está configurado.
  */
 
-import type { IStorage } from "./storage-genfeb";
+import type { IStorage } from "./storage-applia";
 import type { FirestoreStorage } from "./storage-firestore";
 
 const FIRESTORE_METHODS = new Set([

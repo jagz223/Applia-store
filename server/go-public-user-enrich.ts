@@ -1,6 +1,6 @@
 import { normalizeGoPublicUserStats, type GoPublicUserStats } from "@shared/go-public-user-stats";
 import { countCompletedMobilityTripsForUser } from "./mobility-ride-history-store";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 
 const tripCountCache = new Map<string, { n: number; at: number }>();
 const TRIP_CACHE_MS = 60_000;
@@ -40,9 +40,9 @@ export async function bumpGoUserCompletedTrips(userId: string): Promise<void> {
   const key = String(userId ?? "").trim();
   if (!key) return;
   try {
-    const u = (await genFebStorage.getUserById(key)) as { completedTrips?: number } | undefined;
+    const u = (await appliaStorage.getUserById(key)) as { completedTrips?: number } | undefined;
     const cur = typeof u?.completedTrips === "number" && Number.isFinite(u.completedTrips) ? u.completedTrips : 0;
-    await genFebStorage.updateUser(key, { completedTrips: cur + 1 });
+    await appliaStorage.updateUser(key, { completedTrips: cur + 1 });
     invalidateTripCountCache(key);
   } catch (e) {
     console.warn("[go-public-user] bump completedTrips", key, e);

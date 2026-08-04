@@ -1,7 +1,7 @@
 /**
  * Contratos de almacenamiento por dominio (SOLID - Interface Segregation).
  * Cada interfaz agrupa solo los métodos que un cliente (servicio) necesita.
- * El almacenamiento completo (IStorage) se define en storage-genfeb y compone estos contratos.
+ * El almacenamiento completo (IStorage) se define en storage-applia y compone estos contratos.
  */
 
 import type {

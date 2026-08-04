@@ -1,14 +1,14 @@
 /**
- * Textos del flujo «Convertirse en conductor» (asociado no-movilidad → Genfeb Go).
+ * Textos del flujo «Convertirse en conductor» (asociado no-movilidad → Applia Go).
  * Misma línea de redacción que Become Pro / catálogo, pero enfocado a taxi + delivery.
  */
 
 export const BECOME_DRIVER_PAGE_TITLE = "Convertirse en conductor";
 
 export const BECOME_DRIVER_PAGE_LEAD =
-  "Completa el recordatorio de módulos Go, el tipo de unidad y los datos del vehículo si aún no están registrados. Al guardar se habilitan taxi y delivery en Genfeb Go. Tu profesión y biografía de asociado no se editan aquí.";
+  "Completa el recordatorio de módulos Go, el tipo de unidad y los datos del vehículo si aún no están registrados. Al guardar se habilitan taxi y delivery en Applia Go. Tu profesión y biografía de asociado no se editan aquí.";
 
-export const BECOME_DRIVER_CARD_TITLE = "Datos para Genfeb Go";
+export const BECOME_DRIVER_CARD_TITLE = "Datos para Applia Go";
 
 export const BECOME_DRIVER_CARD_DESCRIPTION =
   "Se guardan los datos del vehículo (si aplica) y se activan taxi y delivery en tu cuenta. Tu profesión y biografía del perfil de asociado no cambian aquí. La verificación y suscripción de listado siguen las reglas generales de la plataforma.";
@@ -42,7 +42,7 @@ export const BECOME_DRIVER_SUBMIT_LABEL = "Guardar y activar taxi + delivery";
 export const BECOME_DRIVER_VEHICLE_ALREADY_TITLE = "Vehículo ya registrado";
 
 export const BECOME_DRIVER_VEHICLE_ALREADY_LEAD =
-  "La misma unidad se usa para taxi y delivery en Genfeb Go. Puedes solicitar cambios (placa, tipo, etc.) desde Configuración; un administrador debe aprobarlos.";
+  "La misma unidad se usa para taxi y delivery en Applia Go. Puedes solicitar cambios (placa, tipo, etc.) desde Configuración; un administrador debe aprobarlos.";
 
 export const BECOME_DRIVER_SETTINGS_VEHICLE_CTA = "Editar vehículo en Configuración";
 
@@ -56,11 +56,11 @@ export const BECOME_DRIVER_REDIRECT_DONE_TITLE = "Registro de conductor completo
 export const BECOME_DRIVER_REDIRECT_DONE_BODY =
   "Ya tienes taxi y delivery activos en tu cuenta con vehículo registrado. Gestiona todo desde Mis servicios.";
 
-export const BECOME_DRIVER_MOBILITY_DIALOG_TITLE = "Ir a movilidad (Genfeb Go)";
+export const BECOME_DRIVER_MOBILITY_DIALOG_TITLE = "Ir a movilidad (Applia Go)";
 
 export const BECOME_DRIVER_MOBILITY_DIALOG_DESCRIPTION =
-  "Ya puedes usar la app de movilidad para recibir viajes y pedidos. Abre Genfeb Go o vuelve a Mis servicios.";
+  "Ya puedes usar la app de movilidad para recibir viajes y pedidos. Abre Applia Go o vuelve a Mis servicios.";
 
-export const BECOME_DRIVER_MOBILITY_DIALOG_PRIMARY = "Abrir Genfeb Go";
+export const BECOME_DRIVER_MOBILITY_DIALOG_PRIMARY = "Abrir Applia Go";
 
 export const BECOME_DRIVER_MOBILITY_DIALOG_SECONDARY = "Ir a Mis servicios";

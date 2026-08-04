@@ -42,9 +42,7 @@ function formatPrice(value: number) {
 
 
 function cartLineKey(line: StoreCartLine) {
-
-  return line.kind === "product" ? `p-${line.productId}` : `m-${line.promotionId}`;
-
+  return line.lineKey || (line.kind === "product" ? `p-${line.productId}` : `m-${line.promotionId}`);
 }
 
 
@@ -78,12 +76,16 @@ function CartLineRow({
     try {
 
       const body =
-
         line.kind === "product"
-
-          ? { kind: "product" as const, productId: line.productId!, quantity: next }
-
-          : { kind: "promotion" as const, promotionId: line.promotionId!, quantity: next };
+          ? {
+              kind: "product" as const,
+              productId: line.productId!,
+              quantity: next,
+              lineKey: line.lineKey,
+              removedIngredientMaterialIds: line.removedIngredientMaterialIds ?? [],
+              additionalIngredientMaterialIds: line.additionalIngredientMaterialIds ?? [],
+            }
+          : { kind: "promotion" as const, promotionId: line.promotionId!, quantity: next, lineKey: line.lineKey };
 
       await updateMutation.mutateAsync(body);
 
@@ -110,12 +112,15 @@ function CartLineRow({
     try {
 
       const body =
-
         line.kind === "product"
-
-          ? { kind: "product" as const, productId: line.productId! }
-
-          : { kind: "promotion" as const, promotionId: line.promotionId! };
+          ? {
+              kind: "product" as const,
+              productId: line.productId!,
+              lineKey: line.lineKey,
+              removedIngredientMaterialIds: line.removedIngredientMaterialIds ?? [],
+              additionalIngredientMaterialIds: line.additionalIngredientMaterialIds ?? [],
+            }
+          : { kind: "promotion" as const, promotionId: line.promotionId!, lineKey: line.lineKey };
 
       await removeMutation.mutateAsync(body);
 
@@ -296,15 +301,9 @@ export function StoreCartPanel({
       <aside
 
         className={cn(
-
-          "flex flex-col flex-1 min-h-0 overflow-hidden",
-
-          "rounded-2xl border border-border/50 bg-card",
-
-          "shadow-[0_4px_24px_-4px_rgba(0,0,0,0.08)]",
-
-          storeCartPanelWidthClass,
-
+          "flex h-0 min-h-0 w-full flex-1 flex-col overflow-hidden",
+          "rounded-[1.25rem] border border-border/60 bg-white dark:bg-card",
+          "shadow-sm",
         )}
 
         aria-label="Carrito de compras"
@@ -331,7 +330,7 @@ export function StoreCartPanel({
 
 
 
-        <div className="flex-1 overflow-y-auto px-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5">
 
           {!isAuthenticated ? (
 

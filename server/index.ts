@@ -15,7 +15,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initializeSocket } from "./socket";
 import { initializeFirebase, isFirebaseConfigured } from "./firebase-admin";
-import { setGenFebStorage } from "./storage-genfeb";
+import { setAppliaStorage } from "./storage-applia";
 import { getFirestoreStorage } from "./storage-firestore";
 
 const app = express();
@@ -86,7 +86,7 @@ app.use((req, res, next) => {
   // Todo el almacenamiento en Firestore cuando Firebase está configurado (sin híbrido)
   if (isFirebaseConfigured()) {
     const firestoreStorage = getFirestoreStorage();
-    setGenFebStorage(firestoreStorage);
+    setAppliaStorage(firestoreStorage);
     try {
       const purged = await firestoreStorage.purgeRetiredCategoryDocuments();
       if (purged.removed.length > 0) {

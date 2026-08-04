@@ -127,7 +127,7 @@ export function ProfessionalVerificationBanner() {
         <Button
           size="sm"
           variant="default"
-          className="h-8 shrink-0 touch-manipulation self-start bg-teal-600 px-3 text-xs text-white hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600 sm:h-9 sm:self-center sm:text-sm"
+          className="h-8 shrink-0 touch-manipulation self-start bg-primary px-3 text-xs text-primary-foreground hover:opacity-90 sm:h-9 sm:self-center sm:text-sm"
           asChild
         >
           <Link href="/professional/verify" onClick={() => storeVerifyReturnPath()}>

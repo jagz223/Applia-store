@@ -169,7 +169,7 @@ function RecenterControl({
     if (!col) return;
 
     const el = document.createElement("div");
-    el.setAttribute("data-genfeb", "taxi-recenter");
+    el.setAttribute("data-applia", "taxi-recenter");
     el.className = "leaflet-control";
     // Importante: evita que el click se propague al mapa (y dispare onMapPick / arrastre).
     L.DomEvent.disableClickPropagation(el);
@@ -344,7 +344,7 @@ export function TaxiRouteMap({
   return (
     <div
       ref={shellRef}
-      className={cn("taxi-leaflet-wrapper", fullscreen && "genfeb-taxi-route-fs", wrapperClassName)}
+      className={cn("taxi-leaflet-wrapper", fullscreen && "applia-taxi-route-fs", wrapperClassName)}
       style={shellStyle}
     >
       {!ready ? (

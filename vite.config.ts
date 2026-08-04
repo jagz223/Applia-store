@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-function genfebServiceWorkerPlugin(): Plugin {
+function appliaServiceWorkerPlugin(): Plugin {
   return {
-    name: "genfeb-generate-sw",
+    name: "applia-generate-sw",
     async buildStart() {
       const { generateServiceWorker } = await import("./script/generate-sw.ts");
       await generateServiceWorker();
@@ -15,7 +15,7 @@ function genfebServiceWorkerPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [
-    genfebServiceWorkerPlugin(),
+    appliaServiceWorkerPlugin(),
     react(),
     runtimeErrorOverlay(),
     ...(process.env.NODE_ENV !== "production" &&

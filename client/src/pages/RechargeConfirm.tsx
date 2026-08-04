@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Clock, ArrowLeft, Home } from "lucide-react";
 
 const MESSAGE =
-  "Se notificó exitosamente a nuestro staff sobre tu solicitud; en breve podremos reflejar el monto en tu Saldo Genfeb.";
+  "Se notificó exitosamente a nuestro staff sobre tu solicitud; en breve podremos reflejar el monto en tu Saldo Applia.";
 
 export default function RechargeConfirm() {
   const returnTo = useMemo(() => {

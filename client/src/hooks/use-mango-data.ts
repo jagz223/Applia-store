@@ -383,10 +383,10 @@ export function useEnrollGoDriver() {
       debouncedRefetch(queryClient, [api.providers.me.path]);
       debouncedRefetch(queryClient, ["/api/me/provider-vehicle"]);
       toast({
-        title: "Genfeb Go activado",
+        title: "Applia Go activado",
         description: data?.centralAffiliationPending
           ? "Taxi y delivery quedan habilitados. Tu solicitud de afiliación a la central fue enviada; te avisaremos cuando la revisen."
-          : "Taxi y delivery quedan habilitados en tu cuenta (según verificación y suscripción). Puedes abrir Genfeb Go para conducir.",
+          : "Taxi y delivery quedan habilitados en tu cuenta (según verificación y suscripción). Puedes abrir Applia Go para conducir.",
       });
     },
     onError: (err: Error) => {
@@ -940,10 +940,10 @@ export function useUpdateBookingStatus() {
       queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
       queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
       if (status === "completed") {
-        queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+        queryClient.invalidateQueries({ queryKey: [api.applia.wallet.me.path] });
         queryClient.invalidateQueries({ queryKey: ["/api/professional/stats"] });
         queryClient.invalidateQueries({ queryKey: RATINGS_PENDING_QUERY_KEY });
-        debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+        debouncedRefetch(queryClient, [api.applia.wallet.me.path]);
         debouncedRefetch(queryClient, ["/api/professional/stats"]);
         void queryClient.refetchQueries({ queryKey: RATINGS_PENDING_QUERY_KEY });
       }
@@ -1083,10 +1083,10 @@ export function useConfirmBookingByClient() {
       queryClient.invalidateQueries({ queryKey: ["booking", bookingId] });
       queryClient.invalidateQueries({ queryKey: [api.bookings.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/bookings/provider"] });
-      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.invalidateQueries({ queryKey: [api.applia.wallet.me.path] });
       queryClient.refetchQueries({ queryKey: [api.bookings.list.path] });
       queryClient.refetchQueries({ queryKey: ["/api/bookings/provider"] });
-      queryClient.refetchQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.refetchQueries({ queryKey: [api.applia.wallet.me.path] });
       toast({
         title: "Confirmación registrada",
         description: "Tu conformidad quedó guardada. El asociado puede seguir con la reserva.",
@@ -1105,14 +1105,14 @@ export function useConfirmBookingByClient() {
 /** Wallet y totalEarnings del usuario autenticado. */
 export function useWallet(options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: [api.genfeb.wallet.me.path],
+    queryKey: [api.applia.wallet.me.path],
     queryFn: async () => {
       const token = getToken();
-      const res = await fetch(api.genfeb.wallet.me.path, {
+      const res = await fetch(api.applia.wallet.me.path, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!res.ok) throw new Error("No se pudo cargar el Saldo Genfeb");
-      return api.genfeb.wallet.me.responses[200].parse(await res.json());
+      if (!res.ok) throw new Error("No se pudo cargar el Saldo Applia");
+      return api.applia.wallet.me.responses[200].parse(await res.json());
     },
     enabled: options?.enabled !== false,
   });
@@ -1182,9 +1182,9 @@ export function useSubmitRating() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: RATINGS_PENDING_QUERY_KEY });
-      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.invalidateQueries({ queryKey: [api.applia.wallet.me.path] });
       debouncedRefetch(queryClient, [...RATINGS_PENDING_QUERY_KEY]);
-      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+      debouncedRefetch(queryClient, [api.applia.wallet.me.path]);
     },
   });
 }
@@ -1307,8 +1307,8 @@ export function useRechargeRequest() {
       transferCode?: string;
     }) => {
       const token = getToken();
-      const res = await fetch(api.genfeb.wallet.rechargeRequest.path, {
-        method: api.genfeb.wallet.rechargeRequest.method,
+      const res = await fetch(api.applia.wallet.rechargeRequest.path, {
+        method: api.applia.wallet.rechargeRequest.method,
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -1322,9 +1322,9 @@ export function useRechargeRequest() {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.invalidateQueries({ queryKey: [api.applia.wallet.me.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
-      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+      debouncedRefetch(queryClient, [api.applia.wallet.me.path]);
       debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
     },
   });
@@ -1336,7 +1336,7 @@ export function useWithdraw() {
   return useMutation({
     mutationFn: async (amount: number) => {
       const token = getToken();
-      const path = (api.genfeb.wallet as { withdraw?: { path: string; method: string } }).withdraw?.path ?? "/api/wallet/withdraw";
+      const path = (api.applia.wallet as { withdraw?: { path: string; method: string } }).withdraw?.path ?? "/api/wallet/withdraw";
       const res = await fetch(path, {
         method: "POST",
         headers: {
@@ -1352,9 +1352,9 @@ export function useWithdraw() {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.invalidateQueries({ queryKey: [api.applia.wallet.me.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/wallet/transfers"] });
-      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+      debouncedRefetch(queryClient, [api.applia.wallet.me.path]);
       debouncedRefetch(queryClient, ["/api/wallet/transfers"]);
     },
   });
@@ -1585,10 +1585,10 @@ export function useProcessWithdrawal() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_KEY] });
       queryClient.invalidateQueries({ queryKey: [ADMIN_WITHDRAWALS_HISTORY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+      queryClient.invalidateQueries({ queryKey: [api.applia.wallet.me.path] });
       debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_KEY]);
       debouncedRefetch(queryClient, [ADMIN_WITHDRAWALS_HISTORY_KEY]);
-      debouncedRefetch(queryClient, [api.genfeb.wallet.me.path]);
+      debouncedRefetch(queryClient, [api.applia.wallet.me.path]);
     },
   });
 }

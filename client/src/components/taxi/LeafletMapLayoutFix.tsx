@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useMap, useMapEvents } from "react-leaflet";
-import { isLeafletMapContainerLive, safeInvalidateSize } from "@/lib/safe-leaflet";
+import {
+  isLeafletMapContainerLive,
+  safeInvalidateSize,
+  safeStopLeafletMap,
+} from "@/lib/safe-leaflet";
 
 const DEBOUNCE_MS = 350;
 const BOOTSTRAP_DELAYS_MS = [0, 80, 200, 400];
@@ -39,6 +43,7 @@ export function LeafletMapLayoutFix() {
 
     const runInvalidate = () => {
       if (!alive || interactingRef.current) return;
+      if (!isLeafletMapContainerLive(map)) return;
       safeInvalidateSize(map);
     };
 
@@ -77,13 +82,14 @@ export function LeafletMapLayoutFix() {
     window.addEventListener("pageshow", onPageShow);
 
     let ro: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== "undefined") {
+    if (typeof ResizeObserver !== "undefined" && el?.isConnected) {
       ro = new ResizeObserver(() => scheduleDebounced());
       ro.observe(el);
     }
 
     return () => {
       alive = false;
+      safeStopLeafletMap(map);
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
       timeoutsRef.current.forEach((id) => window.clearTimeout(id));
       timeoutsRef.current = [];

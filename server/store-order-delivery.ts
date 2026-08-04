@@ -1,6 +1,6 @@
 import type { StoreOrder } from "@shared/store-order-schema";
 import type { Store, StoreLocation } from "@shared/store-schema";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getIO, sendNotificationToUser } from "./socket";
 import { notificationService } from "./services/notification.service";
 import {
@@ -20,7 +20,7 @@ import { notifyCustomerStoreOrderStatusChanged } from "./store-order-notificatio
 export type { StoreOrderDeliveryEventType };
 
 async function getStoreOwnerUserId(storeId: number): Promise<string | null> {
-  const store = await genFebStorage.getStoreById(storeId);
+  const store = await appliaStorage.getStoreById(storeId);
   return store?.ownerUserId ? String(store.ownerUserId) : null;
 }
 
@@ -33,7 +33,7 @@ export async function notifyStoreOwnerDeliveryEvent(input: {
   incrementUnread?: boolean;
   packRideId?: string | null;
 }): Promise<void> {
-  const store = await genFebStorage.getStoreById(input.storeId);
+  const store = await appliaStorage.getStoreById(input.storeId);
   if (!store) return;
 
   const copy = buildStoreOrderDeliveryNotification({
@@ -45,7 +45,7 @@ export async function notifyStoreOwnerDeliveryEvent(input: {
   });
 
   if (input.incrementUnread !== false) {
-    await genFebStorage.incrementStoreOrderDeliveryUnread(input.storeId, input.orderId);
+    await appliaStorage.incrementStoreOrderDeliveryUnread(input.storeId, input.orderId);
   }
 
   const data = {
@@ -60,7 +60,7 @@ export async function notifyStoreOwnerDeliveryEvent(input: {
     packRideId: input.packRideId ?? null,
   };
 
-  await genFebStorage.createNotification({
+  await appliaStorage.createNotification({
     userId: input.ownerUserId,
     type: "store_order_delivery",
     data,
@@ -144,7 +144,7 @@ export async function launchStoreOrderDeliverySearch(
     paymentMethod: "cash",
   });
 
-  const updated = await genFebStorage.patchStoreOrder(order.storeId, order.id, {
+  const updated = await appliaStorage.patchStoreOrder(order.storeId, order.id, {
     packRideId,
   });
 
@@ -165,39 +165,36 @@ export async function handleStoreOrderStatusListoParaEnvio(
   orderId: number,
   store: Store,
 ): Promise<StoreOrder> {
-  const ownerUserId = String(store.ownerUserId ?? "");
-  if (!ownerUserId) throw new Error("STORE_OWNER_REQUIRED");
-
-  const order = await genFebStorage.getStoreOrder(storeId, orderId);
+  const order = await appliaStorage.getStoreOrder(storeId, orderId);
   if (!order) throw new Error("STORE_ORDER_NOT_FOUND");
   if (order.fulfillmentMode !== "delivery") throw new Error("STORE_ORDER_NOT_DELIVERY");
 
   const storeLocation = normalizeStoreLocation(store.location ?? null);
   requireDeliveryLocations(storeLocation, order.deliveryLocation);
 
-  const withStatus = await genFebStorage.updateStoreOrderStatus(storeId, orderId, "listo_para_envio");
-  return launchStoreOrderDeliverySearch(withStatus, store, ownerUserId);
+  // La tienda envía el pedido; ya no se inicia búsqueda Pack Go automática.
+  return appliaStorage.updateStoreOrderStatus(storeId, orderId, "listo_para_envio");
 }
 
 export async function handleStoreOrderRevertFromListoParaEnvio(
   storeId: number,
   orderId: number,
 ): Promise<StoreOrder> {
-  const order = await genFebStorage.getStoreOrder(storeId, orderId);
+  const order = await appliaStorage.getStoreOrder(storeId, orderId);
   if (!order) throw new Error("STORE_ORDER_NOT_FOUND");
   if (order.status !== "listo_para_envio") throw new Error("STORE_ORDER_INVALID_STATUS_FOR_REVERT");
   if (order.fulfillmentMode !== "delivery") throw new Error("STORE_ORDER_NOT_DELIVERY");
 
   cancelStoreOrderPackSearch(orderId);
 
-  return genFebStorage.patchStoreOrder(storeId, orderId, {
+  return appliaStorage.patchStoreOrder(storeId, orderId, {
     status: "confirmado",
     packRideId: null,
   });
 }
 
 async function relaunchAfterDriverCancel(order: StoreOrder, store: Store, ownerUserId: string): Promise<void> {
-  const reset = await genFebStorage.patchStoreOrder(order.storeId, order.id, {
+  const reset = await appliaStorage.patchStoreOrder(order.storeId, order.id, {
     status: "listo_para_envio",
     packRideId: null,
   });
@@ -212,7 +209,7 @@ export async function onStoreOrderPackRideMatched(ride: PackRideRecordSnapshot):
   const ownerUserId = await getStoreOwnerUserId(ride.storeId);
   if (!ownerUserId) return;
 
-  await genFebStorage.patchStoreOrder(ride.storeId, ride.storeOrderId, {
+  await appliaStorage.patchStoreOrder(ride.storeId, ride.storeOrderId, {
     packRideId: ride.id,
   });
 
@@ -226,8 +223,8 @@ export async function onStoreOrderPackRideMatched(ride: PackRideRecordSnapshot):
 }
 
 async function notifyCustomerOrderStatusFromStore(storeId: number, orderId: number): Promise<void> {
-  const store = await genFebStorage.getStoreById(storeId);
-  const order = await genFebStorage.getStoreOrder(storeId, orderId);
+  const store = await appliaStorage.getStoreById(storeId);
+  const order = await appliaStorage.getStoreOrder(storeId, orderId);
   if (!store || !order) return;
   await notifyCustomerStoreOrderStatusChanged(order, store);
 }
@@ -237,11 +234,11 @@ export async function onStoreOrderPackRideStarted(ride: PackRideRecordSnapshot):
   const ownerUserId = await getStoreOwnerUserId(ride.storeId);
   if (!ownerUserId) return;
 
-  const order = await genFebStorage.getStoreOrder(ride.storeId, ride.storeOrderId);
+  const order = await appliaStorage.getStoreOrder(ride.storeId, ride.storeOrderId);
   if (!order) return;
 
   if (order.status === "listo_para_envio") {
-    await genFebStorage.patchStoreOrder(ride.storeId, ride.storeOrderId, {
+    await appliaStorage.patchStoreOrder(ride.storeId, ride.storeOrderId, {
       status: "enviado",
       packRideId: ride.id,
     });
@@ -261,12 +258,12 @@ export async function onStoreOrderPackRideStarted(ride: PackRideRecordSnapshot):
 
 export async function onStoreOrderPackRideCancelledByDriver(ride: PackRideRecordSnapshot): Promise<void> {
   if (ride.storeOrderId == null || ride.storeId == null) return;
-  const store = await genFebStorage.getStoreById(ride.storeId);
+  const store = await appliaStorage.getStoreById(ride.storeId);
   if (!store) return;
   const ownerUserId = String(store.ownerUserId ?? "");
   if (!ownerUserId) return;
 
-  const order = await genFebStorage.getStoreOrder(ride.storeId, ride.storeOrderId);
+  const order = await appliaStorage.getStoreOrder(ride.storeId, ride.storeOrderId);
   if (!order) return;
 
   if (order.status === "enviado" || order.status === "listo_para_envio") {
@@ -286,7 +283,7 @@ export async function onStoreOrderPackRideCompleted(ride: PackRideRecordSnapshot
   const ownerUserId = await getStoreOwnerUserId(ride.storeId);
   if (!ownerUserId) return;
 
-  await genFebStorage.patchStoreOrder(ride.storeId, ride.storeOrderId, {
+  await appliaStorage.patchStoreOrder(ride.storeId, ride.storeOrderId, {
     status: "completado",
     packRideId: ride.id,
   });
@@ -332,7 +329,7 @@ export async function getStoreDeliveryNotificationsSummary(storeId: number): Pro
   totalUnread: number;
   byOrderId: Record<number, number>;
 }> {
-  const orders = await genFebStorage.listStoreOrders(storeId, { deliveryQueue: true });
+  const orders = await appliaStorage.listStoreOrders(storeId, { deliveryQueue: true });
   let totalUnread = 0;
   const byOrderId: Record<number, number> = {};
   for (const o of orders) {

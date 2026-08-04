@@ -122,7 +122,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
 
   useEffect(() => {
     if (!open || !FEATURE_WALLET_RECHARGE_UI_ENABLED) return;
-    void queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] });
+    void queryClient.invalidateQueries({ queryKey: [api.applia.wallet.me.path] });
   }, [open, queryClient]);
 
   const requestWithdraw = async () => {
@@ -149,7 +149,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
         >
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" aria-hidden />
           <p>
-            Llegaste al límite de deuda: solo podrás aceptar viajes con pago en Saldo GenFeb hasta regularizar, o
+            Llegaste al límite de deuda: solo podrás aceptar viajes con pago en Saldo Applia hasta regularizar, o
             recarga en la app.
           </p>
         </div>
@@ -182,7 +182,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
               <CardHeader className="p-3 pb-1">
                 <CardTitle className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
                   <Wallet className="h-3.5 w-3.5 text-primary" aria-hidden />
-                  Saldo GenFeb
+                  Saldo Applia
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-3 pt-0">
@@ -256,7 +256,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
               ) : (
                 <p className="text-xl font-bold tabular-nums text-foreground">{money(totalPlatform)}</p>
               )}
-              <p className="text-xs text-muted-foreground">Acumulado de todos los servicios GenFeb vinculados a tu cuenta.</p>
+              <p className="text-xs text-muted-foreground">Acumulado de todos los servicios Applia vinculados a tu cuenta.</p>
             </CardContent>
           </Card>
 
@@ -269,7 +269,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
             </CardHeader>
             <CardContent className="p-3 pt-0 space-y-2 text-sm">
               <p className="text-xs text-muted-foreground">
-                Retira tu Saldo GenFeb a tu cuenta bancaria. El retiro queda pendiente hasta aprobación.
+                Retira tu Saldo Applia a tu cuenta bancaria. El retiro queda pendiente hasta aprobación.
               </p>
               {!hasBankData ? (
                 <Button asChild className="w-full">
@@ -306,7 +306,7 @@ export function DriverEarningsPanel({ open, configHref }: Props) {
       {FEATURE_WALLET_RECHARGE_UI_ENABLED && (
         <>
           <Button variant="secondary" className="w-full" asChild>
-            <Link href="/recharge" onClick={() => queryClient.invalidateQueries({ queryKey: [api.genfeb.wallet.me.path] })}>
+            <Link href="/recharge" onClick={() => queryClient.invalidateQueries({ queryKey: [api.applia.wallet.me.path] })}>
               Recargar saldo
             </Link>
           </Button>

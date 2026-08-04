@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { isAndroidTwaApp } from "@/lib/go-driver-bubble-capability";
 
-const HTML_CLASS = "genfeb-android-twa";
+const HTML_CLASS = "applia-android-twa";
 
 /**
  * Reduce «Buscar con Google» al tocar texto en Chrome TWA (no lo desactiva al 100%).

@@ -1,7 +1,7 @@
 import { Express } from "express";
 import { Server } from "http";
 import { hasAdminPrivileges } from "@shared/roles";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import jwt from "jsonwebtoken";
 import { 
   generateInvoice, 
@@ -20,7 +20,7 @@ function authenticateJWT(req: any, res: any, next: any) {
   }
   
   const token = authHeader.substring(7);
-  const JWT_SECRET = process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024";
+  const JWT_SECRET = process.env.JWT_SECRET || "applia-jwt-secret-key-2024";
   
   try {
     const user = jwt.verify(token, JWT_SECRET);
@@ -46,13 +46,13 @@ export async function registerInvoiceRoutes(
         let invoiceData: any = null;
 
         if (bookingId) {
-          const booking: any = await genFebStorage.getBooking(parseInt(bookingId));
+          const booking: any = await appliaStorage.getBooking(parseInt(bookingId));
           if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
 
-          const client: any = await genFebStorage.getUserById(booking.userId);
-          const provider: any = await genFebStorage.getProvider(booking.providerId);
-          const providerUser: any = provider ? await genFebStorage.getUserById(provider.userId) : null;
-          const service: any = await genFebStorage.getService(booking.serviceId);
+          const client: any = await appliaStorage.getUserById(booking.userId);
+          const provider: any = await appliaStorage.getProvider(booking.providerId);
+          const providerUser: any = provider ? await appliaStorage.getUserById(provider.userId) : null;
+          const service: any = await appliaStorage.getService(booking.serviceId);
 
           if (!client || !providerUser || !service) {
             return res.status(404).json({ message: "Datos incompletos para factura de reserva" });
@@ -61,10 +61,10 @@ export async function registerInvoiceRoutes(
           invoiceData = createInvoiceFromBooking(booking, client, providerUser, service, booking.paymentMethod || "Tarjeta de Crédito");
 
         } else if (transferId) {
-          const transfer: any = await genFebStorage.getWalletTransfer(parseInt(transferId));
+          const transfer: any = await appliaStorage.getWalletTransfer(parseInt(transferId));
           if (!transfer) return res.status(404).json({ message: "Transferencia no encontrada" });
 
-          const user: any = await genFebStorage.getUserById(transfer.userId);
+          const user: any = await appliaStorage.getUserById(transfer.userId);
           if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
 
           invoiceData = createInvoiceFromTransfer(transfer, user);
@@ -74,10 +74,10 @@ export async function registerInvoiceRoutes(
           if (!Number.isFinite(rid) || rid < 1) {
             return res.status(400).json({ message: "reportId inválido" });
           }
-          const report: any = await (genFebStorage as any).getFinancialReport(rid);
+          const report: any = await (appliaStorage as any).getFinancialReport(rid);
           if (!report) return res.status(404).json({ message: "Reporte financiero no encontrado" });
 
-          const user: any = await genFebStorage.getUserById(report.userId);
+          const user: any = await appliaStorage.getUserById(report.userId);
           if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
 
           invoiceData = createInvoiceFromFinancialReport(report, user);
@@ -87,7 +87,7 @@ export async function registerInvoiceRoutes(
         }
 
         const pdfBuffer = await generateInvoice(invoiceData);
-        const fileName = `GENFEB-${invoiceData.invoiceNumber}.pdf`;
+        const fileName = `APPLIA-${invoiceData.invoiceNumber}.pdf`;
 
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
@@ -110,15 +110,15 @@ export async function registerInvoiceRoutes(
       try {
         const { bookingId } = req.params;
         
-        const booking: any = await genFebStorage.getBooking(parseInt(bookingId));
+        const booking: any = await appliaStorage.getBooking(parseInt(bookingId));
         if (!booking) {
           return res.status(404).json({ message: "Reserva no encontrada" });
         }
 
-        const client: any = await genFebStorage.getUserById(booking.userId);
-        const provider: any = await genFebStorage.getProvider(booking.providerId);
-        const providerUser: any = provider ? await genFebStorage.getUserById(provider.userId) : null;
-        const service: any = await genFebStorage.getService(booking.serviceId);
+        const client: any = await appliaStorage.getUserById(booking.userId);
+        const provider: any = await appliaStorage.getProvider(booking.providerId);
+        const providerUser: any = provider ? await appliaStorage.getUserById(provider.userId) : null;
+        const service: any = await appliaStorage.getService(booking.serviceId);
 
         if (!client || !providerUser || !service) {
           return res.status(404).json({ message: "Datos incompletos para factura" });
@@ -153,7 +153,7 @@ export async function registerInvoiceRoutes(
 
         // Obtener reportes financieros (incluyendo verificaciones)
         try {
-          const financialReports = await genFebStorage.getFinancialReports(userId);
+          const financialReports = await appliaStorage.getFinancialReports(userId);
           const verificationFees = financialReports.filter(r => r.type === "verification_fee");
           
           for (const fee of verificationFees) {
@@ -165,7 +165,7 @@ export async function registerInvoiceRoutes(
 
         // Abonos de saldo (pendiente, completado o rechazado — misma línea que ves en Transacciones)
         try {
-          const { transfers } = await genFebStorage.getTransfersByUser(userId, { transferType: "recharge" });
+          const { transfers } = await appliaStorage.getTransfersByUser(userId, { transferType: "recharge" });
           for (const transfer of transfers) {
             if (transfer.status === "pending_approval" || transfer.status === "completed" || transfer.status === "rejected") {
               invoices.push({
@@ -174,7 +174,7 @@ export async function registerInvoiceRoutes(
                 type: "recharge",
                 invoiceNumber: `REC-${transfer.id}`,
                 date: transfer.createdAt,
-                service: "Abono a saldo GenFeb",
+                service: "Abono a saldo Applia",
                 amount: transfer.amount,
                 status: transfer.status,
               });
@@ -186,14 +186,14 @@ export async function registerInvoiceRoutes(
 
         // Reservas
         if (hasAdminPrivileges(userRole) || userRole === "professional") {
-          const providers = await genFebStorage.getAllProviders();
+          const providers = await appliaStorage.getAllProviders();
           for (const provider of providers) {
             if (userRole === "professional" && provider.userId !== userId) continue;
-            const bookings = await genFebStorage.getBookingsByProvider(provider.id);
+            const bookings = await appliaStorage.getBookingsByProvider(provider.id);
             for (const booking of bookings) {
               if (booking.status === "completed" || booking.status === "paid") {
-                const service: any = await genFebStorage.getService(booking.serviceId);
-                const client: any = await genFebStorage.getUserById(booking.userId);
+                const service: any = await appliaStorage.getService(booking.serviceId);
+                const client: any = await appliaStorage.getUserById(booking.userId);
                 if (service) {
                   invoices.push({
                     bookingId: booking.id,
@@ -210,10 +210,10 @@ export async function registerInvoiceRoutes(
             }
           }
         } else {
-          const bookings = await genFebStorage.getBookingsByUser(userId);
+          const bookings = await appliaStorage.getBookingsByUser(userId);
           for (const booking of bookings) {
             if (booking.status === "completed" || booking.status === "paid") {
-              const service: any = await genFebStorage.getService(booking.serviceId);
+              const service: any = await appliaStorage.getService(booking.serviceId);
               if (service) {
                 invoices.push({
                   bookingId: booking.id,

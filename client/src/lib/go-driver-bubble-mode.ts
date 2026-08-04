@@ -10,8 +10,8 @@ import {
 } from "@/lib/driver-bubble-receive-accent";
 
 /** Preferencia opcional: mantener burbuja aunque no se reciban servicios. */
-const PINNED_IN_SETTINGS_KEY = "genfeb.driverGo.floatingBubble.enabled.v1";
-const POSITION_KEY = "genfeb.driverGo.floatingBubble.position.v1";
+const PINNED_IN_SETTINGS_KEY = "applia.driverGo.floatingBubble.enabled.v1";
+const POSITION_KEY = "applia.driverGo.floatingBubble.position.v1";
 
 declare global {
   interface Window {
@@ -38,7 +38,7 @@ export { isDriverBubbleOverlaySupported, shouldAutoMinimizeDriverBubbleOnHide };
 /** Vista principal del conductor (no ajustes ni otras pantallas). */
 export function isDriverBubbleMainPath(pathname: string): boolean {
   const p = (pathname.split("?")[0] ?? pathname).trim();
-  if (p === "/go/driver" || p === "/driver/go-genfeb") return true;
+  if (p === "/go/driver" || p === "/driver/go-applia") return true;
   if (
     p.startsWith("/go/taxi/driver") ||
     p.startsWith("/go/cargo/driver") ||
@@ -142,10 +142,10 @@ function renderDriverBubblePiPContent(
   doc.body.replaceChildren();
   const btn = doc.createElement("button");
   btn.type = "button";
-  btn.setAttribute("aria-label", "Abrir panel conductor GenFeb");
+  btn.setAttribute("aria-label", "Abrir panel conductor Applia");
   btn.dataset.accent = accent;
   const img = doc.createElement("img");
-  img.src = "/genfeb-logo-new.png";
+  img.src = "/applia-logo-new.png";
   img.alt = "";
   img.width = DRIVER_BUBBLE_PIP_SIZE;
   img.height = DRIVER_BUBBLE_PIP_SIZE;

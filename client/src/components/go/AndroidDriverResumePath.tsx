@@ -3,7 +3,7 @@ import { loadGoDriverReceiveMode } from "@/lib/cargo-driver-storage";
 import { isAndroidInstalledWebApp } from "@/lib/go-driver-bubble-capability";
 
 const DRIVER_PATH = "/go/driver";
-const STORAGE_KEY = "genfeb.android.driverPath";
+const STORAGE_KEY = "applia.android.driverPath";
 
 /**
  * APK Android: si el conductor estaba recibiendo y la TWA vuelve a la home,

@@ -228,7 +228,7 @@ export function CargoIncomingRideDialog({
             }
             onMapPick={() => {}}
             suppressMapPick
-            wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full genfeb-taxi-offer-map"
+            wrapperClassName="!rounded-none !border-0 !shadow-none h-full w-full applia-taxi-offer-map"
           />
         </div>
 

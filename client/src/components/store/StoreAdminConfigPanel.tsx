@@ -2,12 +2,13 @@ import { StoreFulfillmentConfigCard } from "@/components/store/StoreFulfillmentC
 import { StoreLocationConfigCard } from "@/components/store/StoreLocationConfigCard";
 import { StorePaymentMethodsConfigCard } from "@/components/store/StorePaymentMethodsConfigCard";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
-import type { StoreLocation } from "@shared/store-schema";
+import type { StoreDeliveryFares, StoreLocation } from "@shared/store-schema";
 
 type StoreAdminConfigPanelProps = {
   storeId: number;
   slug: string;
   initialFulfillmentOptions: StoreFulfillmentMode[];
+  initialDeliveryFares?: StoreDeliveryFares | null;
   initialLocation: StoreLocation | null;
 };
 
@@ -15,6 +16,7 @@ export function StoreAdminConfigPanel({
   storeId,
   slug,
   initialFulfillmentOptions,
+  initialDeliveryFares,
   initialLocation,
 }: StoreAdminConfigPanelProps) {
   return (
@@ -24,6 +26,7 @@ export function StoreAdminConfigPanel({
       <StoreFulfillmentConfigCard
         slug={slug}
         initialOptions={initialFulfillmentOptions}
+        initialDeliveryFares={initialDeliveryFares}
         storeLocation={initialLocation}
       />
 

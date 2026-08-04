@@ -30,6 +30,7 @@ export function useUpdateStore(slug: string) {
           rubroLabel?: string | null;
           slug?: string;
           fulfillmentOptions?: import("@shared/store-fulfillment").StoreFulfillmentMode[];
+          deliveryFares?: import("@shared/store-schema").StoreDeliveryFares;
           location?: StoreLocation | null;
         };
       };

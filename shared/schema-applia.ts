@@ -1,4 +1,4 @@
-// GenFeb - Base de Datos Extendida
+// Applia - Base de Datos Extendida
 // Incluye roles de usuario, integración con App ManGo y nuevas funcionalidades
 
 import { pgTable, text, serial, integer, boolean, timestamp, varchar, decimal, jsonb } from "drizzle-orm/pg-core";
@@ -282,7 +282,7 @@ export type NewBookingAddon = typeof bookingAddons.$inferInsert;
 
 // === RELACIONES ===
 // Note: Relations for bookings, services, categories are defined in schema.ts
-// Relations for GenFeb-specific tables:
+// Relations for Applia-specific tables:
 
 export const bookingAddonsRelations = relations(bookingAddons, ({ one }) => ({
   addon: one(serviceAddons, {

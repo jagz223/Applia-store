@@ -20,14 +20,30 @@ export function extractRouteCoordinates(geometry: unknown): LonLat[] {
   if (!geometry || typeof geometry !== "object") return [];
   const g = geometry as { type?: string; geometry?: unknown; coordinates?: unknown };
 
-  const mergeLines = (raw: unknown): LonLat[] => {
+  const mergeLinesOriented = (raw: unknown): LonLat[] => {
     if (!Array.isArray(raw)) return [];
     const out: LonLat[] = [];
     for (const line of raw) {
       if (!Array.isArray(line)) continue;
+      let pts: LonLat[] = [];
       for (const pt of line) {
-        if (isLonLatPair(pt)) out.push([Number(pt[0]), Number(pt[1])]);
+        if (isLonLatPair(pt)) pts.push([Number(pt[0]), Number(pt[1])]);
       }
+      if (pts.length < 2) continue;
+      if (out.length > 0) {
+        const last = out[out.length - 1]!;
+        const start = pts[0]!;
+        const end = pts[pts.length - 1]!;
+        const dStart =
+          (last[0] - start[0]) ** 2 + (last[1] - start[1]) ** 2;
+        const dEnd = (last[0] - end[0]) ** 2 + (last[1] - end[1]) ** 2;
+        if (dEnd < dStart) pts = [...pts].reverse();
+        const next = pts[0]!;
+        if ((last[0] - next[0]) ** 2 + (last[1] - next[1]) ** 2 < 1e-14) {
+          pts = pts.slice(1);
+        }
+      }
+      out.push(...pts);
     }
     return out;
   };
@@ -48,7 +64,7 @@ export function extractRouteCoordinates(geometry: unknown): LonLat[] {
     return out;
   }
   if (g.type === "MultiLineString" && Array.isArray(g.coordinates)) {
-    return mergeLines(g.coordinates);
+    return mergeLinesOriented(g.coordinates);
   }
   if (Array.isArray(g.coordinates)) {
     const first = g.coordinates[0];
@@ -59,7 +75,7 @@ export function extractRouteCoordinates(geometry: unknown): LonLat[] {
       }
       return out;
     }
-    return mergeLines(g.coordinates);
+    return mergeLinesOriented(g.coordinates);
   }
   return [];
 }

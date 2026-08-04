@@ -1,14 +1,14 @@
 {
-  "name": "genfeb",
+  "name": "applia",
   "version": "1.0.0",
-  "description": "GenFeb - Plataforma de Servicios",
+  "description": "Applia - Plataforma de Servicios",
   "main": "dist/index.cjs",
   "scripts": {
     "start": "NODE_ENV=production node dist/index.cjs",
     "dev": "cross-env NODE_ENV=development npx tsx server/index.ts"
   },
-  "keywords": ["genfeb", "services", "marketplace"],
-  "author": "GenFeb",
+  "keywords": ["applia", "services", "marketplace"],
+  "author": "Applia",
   "license": "MIT",
   "dependencies": {
     "bcryptjs": "^2.4.3",

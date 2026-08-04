@@ -20,7 +20,7 @@ export function effectiveHiddenCategorySlugs(apiHidden: string[] | undefined | n
   return [...HIDDEN_CATEGORY_SLUGS_IN_UI];
 }
 
-/** Nombres de marca para mostrar en la UI (Familia GenFeb). Solo afecta la visualización. */
+/** Nombres de marca para mostrar en la UI (Familia Applia). Solo afecta la visualización. */
 /** Slug de categoría Marketplace (plataforma propia; no forma parte de Car Go). */
 export const MARKETPLACE_CATEGORY_SLUG = "marketplace" as const;
 

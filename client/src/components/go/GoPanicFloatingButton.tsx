@@ -33,7 +33,7 @@ export const GO_PANIC_FLOAT_BOTTOM =
   "bottom-[calc(var(--go-bottom-nav-height,4.75rem)+env(safe-area-inset-bottom,0px))] md:bottom-[calc(5rem+env(safe-area-inset-bottom,0px))]";
 
 /**
- * Botón de pánico durante Genfeb Go (taxi/delivery) en curso.
+ * Botón de pánico durante Applia Go (taxi/delivery) en curso.
  * POST `/api/go/panic` con JSON `{ rideId, module }`.
  *
  * `floating`: z-40 fijo izquierda, encima del mapa / bajo overlays z-50 del shell.

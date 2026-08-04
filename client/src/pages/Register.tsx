@@ -173,7 +173,7 @@ export default function Register() {
             Crear Cuenta
           </CardTitle>
           <CardDescription>
-            Regístrate en GenFeb para acceder a servicios
+            Regístrate en Applia para acceder a servicios
           </CardDescription>
         </CardHeader>
         <Form {...form}>

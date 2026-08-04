@@ -40,7 +40,7 @@ export function PushPermissionReminder({ className }: { className?: string }) {
   const blocked = push.permission === "denied";
 
   const description = iosNeedsInstall
-    ? "En iPhone, toca Compartir → «Añadir a pantalla de inicio» e instala Genfeb. Luego activa las notificaciones para recibir avisos."
+    ? "En iPhone, toca Compartir → «Añadir a pantalla de inicio» e instala Applia. Luego activa las notificaciones para recibir avisos."
     : blocked
       ? "Las notificaciones están bloqueadas. Actívalas en la configuración del navegador para no perder servicios."
       : "Recibe avisos aunque cierres la app (servicios, mensajes y alertas importantes).";

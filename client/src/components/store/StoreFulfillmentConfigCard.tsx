@@ -7,7 +7,10 @@ import {
   type StoreFulfillmentMode,
 } from "@shared/store-fulfillment";
 import {
+  DEFAULT_STORE_DELIVERY_FARES,
   STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE,
+  normalizeStoreDeliveryFares,
+  type StoreDeliveryFares,
   type StoreLocation,
 } from "@shared/store-schema";
 import { useUpdateStore } from "@/hooks/use-store-settings";
@@ -16,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { NumberField } from "@/components/ui/number-field";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +32,7 @@ import {
 type StoreFulfillmentConfigCardProps = {
   slug: string;
   initialOptions: StoreFulfillmentMode[];
+  initialDeliveryFares?: StoreDeliveryFares | null;
   storeLocation: StoreLocation | null;
   disabled?: boolean;
 };
@@ -35,6 +40,7 @@ type StoreFulfillmentConfigCardProps = {
 export function StoreFulfillmentConfigCard({
   slug,
   initialOptions,
+  initialDeliveryFares,
   storeLocation,
   disabled,
 }: StoreFulfillmentConfigCardProps) {
@@ -43,18 +49,44 @@ export function StoreFulfillmentConfigCard({
 
   const [savedOptions, setSavedOptions] = useState<StoreFulfillmentMode[]>(initialOptions);
   const [selected, setSelected] = useState<StoreFulfillmentMode[]>(initialOptions);
+  const [savedFares, setSavedFares] = useState<StoreDeliveryFares>(() =>
+    normalizeStoreDeliveryFares(initialDeliveryFares ?? DEFAULT_STORE_DELIVERY_FARES),
+  );
+  const [baseUsd, setBaseUsd] = useState(String(savedFares.baseUsd));
+  const [perKmUsd, setPerKmUsd] = useState(String(savedFares.perKmUsd));
   const [explainMode, setExplainMode] = useState<StoreFulfillmentMode | null>(null);
 
   const hasStoreLocation = storeLocation != null;
+  const deliveryEnabled = selected.includes("delivery");
 
   useEffect(() => {
     setSavedOptions(initialOptions);
     setSelected(initialOptions);
   }, [initialOptions]);
 
-  const dirty =
+  useEffect(() => {
+    const next = normalizeStoreDeliveryFares(initialDeliveryFares ?? DEFAULT_STORE_DELIVERY_FARES);
+    setSavedFares(next);
+    setBaseUsd(String(next.baseUsd));
+    setPerKmUsd(String(next.perKmUsd));
+  }, [initialDeliveryFares]);
+
+  const draftFares: StoreDeliveryFares = {
+    baseUsd: Number(String(baseUsd).replace(",", ".")),
+    perKmUsd: Number(String(perKmUsd).replace(",", ".")),
+  };
+
+  const faresDirty =
+    deliveryEnabled &&
+    (Number.isFinite(draftFares.baseUsd) &&
+      Number.isFinite(draftFares.perKmUsd) &&
+      (draftFares.baseUsd !== savedFares.baseUsd || draftFares.perKmUsd !== savedFares.perKmUsd));
+
+  const optionsDirty =
     selected.length !== savedOptions.length ||
     STORE_FULFILLMENT_MODES.some((mode) => selected.includes(mode) !== savedOptions.includes(mode));
+
+  const dirty = optionsDirty || Boolean(faresDirty);
 
   function warnLocationRequired() {
     toast({
@@ -93,6 +125,8 @@ export function StoreFulfillmentConfigCard({
 
   function discardChanges() {
     setSelected(savedOptions);
+    setBaseUsd(String(savedFares.baseUsd));
+    setPerKmUsd(String(savedFares.perKmUsd));
   }
 
   async function handleSave() {
@@ -100,11 +134,40 @@ export function StoreFulfillmentConfigCard({
       warnLocationRequired();
       return;
     }
+
+    let nextFares = savedFares;
+    if (selected.includes("delivery")) {
+      const base = Number(String(baseUsd).replace(",", "."));
+      const perKm = Number(String(perKmUsd).replace(",", "."));
+      if (!Number.isFinite(base) || base < 0 || !Number.isFinite(perKm) || perKm < 0) {
+        toast({
+          variant: "destructive",
+          title: "Tarifas inválidas",
+          description: "Indica un precio base y un precio por km válidos (0 o mayor).",
+        });
+        return;
+      }
+      nextFares = normalizeStoreDeliveryFares({ baseUsd: base, perKmUsd: perKm });
+    }
+
     try {
-      const store = await updateStore.mutateAsync({ fulfillmentOptions: selected });
-      const next = store.fulfillmentOptions ?? selected;
-      setSavedOptions(next);
-      setSelected(next);
+      const store = await updateStore.mutateAsync({
+        fulfillmentOptions: selected,
+        ...(selected.includes("delivery") ? { deliveryFares: nextFares } : {}),
+      });
+      const nextOptions = store.fulfillmentOptions ?? selected;
+      setSavedOptions(nextOptions);
+      setSelected(nextOptions);
+      if (store.deliveryFares) {
+        const fares = normalizeStoreDeliveryFares(store.deliveryFares);
+        setSavedFares(fares);
+        setBaseUsd(String(fares.baseUsd));
+        setPerKmUsd(String(fares.perKmUsd));
+      } else if (selected.includes("delivery")) {
+        setSavedFares(nextFares);
+        setBaseUsd(String(nextFares.baseUsd));
+        setPerKmUsd(String(nextFares.perKmUsd));
+      }
       toast({
         title: "Modalidades guardadas",
         description: "Los clientes verán estas opciones en el carrito.",
@@ -138,33 +201,71 @@ export function StoreFulfillmentConfigCard({
 
           <div className="space-y-3">
             {STORE_FULFILLMENT_MODES.map((mode) => (
-              <div
-                key={mode}
-                className="flex items-start gap-3 rounded-lg border border-border px-3 py-3"
-              >
-                <Checkbox
-                  id={`fulfillment-${mode}`}
-                  checked={isChecked(mode)}
-                  disabled={disabled || saving || (!hasStoreLocation && !isChecked(mode))}
-                  onCheckedChange={(v) => handleToggle(mode, v === true)}
-                />
-                <div className="space-y-1 min-w-0 flex-1">
-                  <Label htmlFor={`fulfillment-${mode}`} className="cursor-pointer font-medium">
-                    {STORE_FULFILLMENT_LABELS[mode]}
-                  </Label>
-                  <p className="text-xs text-muted-foreground line-clamp-2">
-                    {STORE_FULFILLMENT_DESCRIPTIONS[mode]}
-                  </p>
+              <div key={mode} className="space-y-3">
+                <div className="flex items-start gap-3 rounded-lg border border-border px-3 py-3">
+                  <Checkbox
+                    id={`fulfillment-${mode}`}
+                    checked={isChecked(mode)}
+                    disabled={disabled || saving || (!hasStoreLocation && !isChecked(mode))}
+                    onCheckedChange={(v) => handleToggle(mode, v === true)}
+                  />
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <Label htmlFor={`fulfillment-${mode}`} className="cursor-pointer font-medium">
+                      {STORE_FULFILLMENT_LABELS[mode]}
+                    </Label>
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {STORE_FULFILLMENT_DESCRIPTIONS[mode]}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label={`Más información sobre ${STORE_FULFILLMENT_LABELS[mode]}`}
+                    disabled={disabled || saving}
+                    onClick={() => setExplainMode(mode)}
+                  >
+                    <Info className="h-4 w-4" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
-                  aria-label={`Más información sobre ${STORE_FULFILLMENT_LABELS[mode]}`}
-                  disabled={disabled || saving}
-                  onClick={() => setExplainMode(mode)}
-                >
-                  <Info className="h-4 w-4" />
-                </button>
+
+                {mode === "delivery" && deliveryEnabled ? (
+                  <div className="ml-8 space-y-3 rounded-lg border border-border/80 bg-muted/20 p-3.5">
+                    <p className="text-xs font-medium text-foreground">Precios del delivery</p>
+                    <p className="text-xs text-muted-foreground">
+                      Se calculará como base + (km × precio por km) según la ruta hasta el cliente.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="delivery-base-usd" className="text-xs">
+                          Precio base (USD)
+                        </Label>
+                        <NumberField
+                          id="delivery-base-usd"
+                          prefix="$"
+                          min="0"
+                          step="0.01"
+                          value={baseUsd}
+                          disabled={disabled || saving}
+                          onChange={setBaseUsd}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="delivery-per-km-usd" className="text-xs">
+                          Precio por km (USD)
+                        </Label>
+                        <NumberField
+                          id="delivery-per-km-usd"
+                          prefix="$"
+                          min="0"
+                          step="0.01"
+                          value={perKmUsd}
+                          disabled={disabled || saving}
+                          onChange={setPerKmUsd}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

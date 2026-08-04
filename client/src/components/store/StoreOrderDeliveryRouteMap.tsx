@@ -26,8 +26,17 @@ function formatKm(meters: number): string {
   return `${Math.round(meters)} m`;
 }
 
+function themeHsl(cssVar: string, fallback: string): string {
+  if (typeof document === "undefined") return fallback;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
+  return raw ? `hsl(${raw})` : fallback;
+}
+
 function createLabeledMarkerIcon(label: string, variant: "origin" | "destination") {
-  const bg = variant === "origin" ? "#2563eb" : "#16a34a";
+  const bg =
+    variant === "origin"
+      ? themeHsl("--primary", "#2e2a27")
+      : themeHsl("--secondary", "#d94a3d");
   return L.divIcon({
     className: "",
     html: `

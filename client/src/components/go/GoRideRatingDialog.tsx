@@ -32,7 +32,7 @@ function getCopy(module: GoRideRatingModule, perspective: GoRideRatingPerspectiv
         roleLabel: "Asociado del pedido",
         serviceBadge: "Car Go · Marketplace",
         footerNote:
-          "Para seguir usando GenFeb necesitamos tu valoración de este pedido. Solo toma unos segundos.",
+          "Para seguir usando Applia necesitamos tu valoración de este pedido. Solo toma unos segundos.",
         submitLabel: "Enviar calificación",
         HeaderIcon: ShoppingBag,
       };
@@ -42,7 +42,7 @@ function getCopy(module: GoRideRatingModule, perspective: GoRideRatingPerspectiv
       subtitle: "Tu calificación ayuda a mantener una comunidad de compradores responsables.",
       roleLabel: "Comprador",
       serviceBadge: "Car Go · Marketplace",
-      footerNote: "Necesitamos tu valoración para cerrar este pedido en GenFeb Go.",
+      footerNote: "Necesitamos tu valoración para cerrar este pedido en Applia Go.",
       submitLabel: "Enviar calificación",
       HeaderIcon: ShoppingBag,
     };
@@ -56,7 +56,7 @@ function getCopy(module: GoRideRatingModule, perspective: GoRideRatingPerspectiv
         roleLabel: "Repartidor",
         serviceBadge: "Car Go · Delivery",
         footerNote:
-          "Para seguir usando GenFeb necesitamos tu valoración de este envío. Solo toma unos segundos.",
+          "Para seguir usando Applia necesitamos tu valoración de este envío. Solo toma unos segundos.",
         submitLabel: "Enviar calificación",
         HeaderIcon: Package,
       };
@@ -66,7 +66,7 @@ function getCopy(module: GoRideRatingModule, perspective: GoRideRatingPerspectiv
       subtitle: "Tu calificación ayuda a mantener una comunidad de clientes responsables.",
       roleLabel: "Cliente",
       serviceBadge: "Car Go · Delivery",
-      footerNote: "Necesitamos tu valoración para cerrar este envío en GenFeb Go.",
+      footerNote: "Necesitamos tu valoración para cerrar este envío en Applia Go.",
       submitLabel: "Enviar calificación",
       HeaderIcon: Package,
     };
@@ -79,7 +79,7 @@ function getCopy(module: GoRideRatingModule, perspective: GoRideRatingPerspectiv
       roleLabel: "Conductor",
       serviceBadge: "Car Go · Taxi",
       footerNote:
-        "Para seguir usando GenFeb necesitamos tu valoración de este viaje. Solo toma unos segundos.",
+        "Para seguir usando Applia necesitamos tu valoración de este viaje. Solo toma unos segundos.",
       submitLabel: "Enviar calificación",
       HeaderIcon: Car,
     };
@@ -90,7 +90,7 @@ function getCopy(module: GoRideRatingModule, perspective: GoRideRatingPerspectiv
     subtitle: "Tu calificación ayuda a mantener una comunidad de pasajeros responsables.",
     roleLabel: "Pasajero",
     serviceBadge: "Car Go · Taxi",
-    footerNote: "Necesitamos tu valoración para cerrar este viaje en GenFeb Go.",
+    footerNote: "Necesitamos tu valoración para cerrar este viaje en Applia Go.",
     submitLabel: "Enviar calificación",
     HeaderIcon: Car,
   };

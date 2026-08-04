@@ -22,7 +22,7 @@ export function RequestCentralAffiliationDialog({ open, onOpenChange }: RequestC
         <DialogHeader>
           <DialogTitle>Solicitar afiliación a una central</DialogTitle>
           <DialogDescription>
-            Tu cuenta Genfeb sigue siendo tuya. La central deberá aprobar la solicitud para vincularte como conductor
+            Tu cuenta Applia sigue siendo tuya. La central deberá aprobar la solicitud para vincularte como conductor
             despachado.
           </DialogDescription>
         </DialogHeader>

@@ -97,7 +97,7 @@ export function shouldHidePaymentMethodInBookingDetail(brand: AssociateActivityB
 
 function formatPaymentMethod(raw?: string | null): string {
   const s = String(raw ?? "").toLowerCase();
-  if (s === "wallet" || s === "genfeb") return "Saldo GenFeb";
+  if (s === "wallet" || s === "applia") return "Saldo Applia";
   if (s === "cash" || s === "efectivo") return "Efectivo";
   if (s === "bank_transfer" || s === "transferencia") return "Transferencia";
   return raw?.trim() || "—";

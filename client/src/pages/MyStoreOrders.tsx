@@ -7,6 +7,7 @@ import {
   type StoreOrderStatus,
 } from "@shared/store-order-schema";
 import { useAuth } from "@/hooks/use-auth";
+import { isClientRole } from "@/lib/auth-utils";
 import { useMyStoreOrderDetail, useMyStoreOrders, useMyStoreOrdersLiveSync } from "@/hooks/use-store-orders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -196,7 +197,7 @@ function MyOrderDetailContent({ orderId }: { orderId: number }) {
 }
 
 export default function MyStoreOrders() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const searchQs = useSearch();
   const [statusFilter, setStatusFilter] = useState("all");
   const [orderIdFilter, setOrderIdFilter] = useState("");
@@ -249,6 +250,10 @@ export default function MyStoreOrders() {
 
   if (!isAuthenticated) {
     return <Redirect to="/login" />;
+  }
+
+  if (!isClientRole(user)) {
+    return <Redirect to="/tienda" />;
   }
 
   return (

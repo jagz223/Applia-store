@@ -21,19 +21,17 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { MY_STORE_QUERY_KEY } from "@/hooks/use-my-store";
+import {
+  fetchPrimaryStore,
+  getPrimaryStoreVitrinaHref,
+  PRIMARY_STORE_QUERY_KEY,
+} from "@/hooks/use-primary-store";
 
 const createStoreFormSchema = z.object({
   name: storeNameSchema,
 });
 
 type CreateStoreForm = z.infer<typeof createStoreFormSchema>;
-
-async function fetchPrimaryStoreSlug(): Promise<string | null> {
-  const res = await fetch("/api/stores/primary");
-  if (!res.ok) return null;
-  const data = (await res.json()) as { store: { slug?: string } | null };
-  return data.store?.slug ?? null;
-}
 
 export default function StoreCreate() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -55,13 +53,17 @@ export default function StoreCreate() {
     }
     let cancelled = false;
     (async () => {
-      const slug = await fetchPrimaryStoreSlug();
-      if (cancelled) return;
-      if (slug) {
-        setLocation(`/tienda/${encodeURIComponent(slug)}`);
-        return;
+      try {
+        const store = await fetchPrimaryStore();
+        if (cancelled) return;
+        if (store?.slug) {
+          setLocation(getPrimaryStoreVitrinaHref(store));
+          return;
+        }
+      } catch {
+        // seguir al formulario si no hay tienda
       }
-      setCheckingPrimary(false);
+      if (!cancelled) setCheckingPrimary(false);
     })();
     return () => {
       cancelled = true;
@@ -87,11 +89,12 @@ export default function StoreCreate() {
     },
     onSuccess: async (data) => {
       await queryClient.invalidateQueries({ queryKey: MY_STORE_QUERY_KEY });
+      await queryClient.invalidateQueries({ queryKey: PRIMARY_STORE_QUERY_KEY });
       toast({
         title: "Tienda creada",
         description: `«${data.store.name}» está lista.`,
       });
-      setLocation(`/tienda/${encodeURIComponent(data.store.slug)}`);
+      setLocation(getPrimaryStoreVitrinaHref(data.store));
     },
     onError: (e: Error) => {
       toast({ title: "Error", description: e.message, variant: "destructive" });

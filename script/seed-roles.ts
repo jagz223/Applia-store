@@ -1,5 +1,5 @@
 /**
- * Crea los roles por defecto (admin, professional, client, tiSupport) en Firestore si aún no existen.
+ * Crea los roles por defecto (admin, tiSupport/Soporte, client) en Firestore si aún no existen.
  * Ejecutar desde la raíz: npm run seed:roles
  * Requiere .env con credenciales de Firebase.
  */

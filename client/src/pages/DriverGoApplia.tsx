@@ -161,7 +161,7 @@ function mapApiRideToOffer(ride: MobilityRideHydration): CargoRideOfferPayload {
   };
 }
 
-export default function DriverGoGenfeb() {
+export default function DriverGoApplia() {
   const queryClient = useQueryClient();
   const { geoPos, geoPosRef, geoLocating, geoError, requestLocation, receiveMode, setReceiveMode, stopReceiving } =
     useGoDriverSession();
@@ -602,7 +602,7 @@ export default function DriverGoGenfeb() {
         setActiveRideStarted(ride.status === "in_progress");
         setSearchingClient(!!ride.driverSearchingClient);
         setPaymentConfirmed(
-          (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
+          (ride.paymentMethod === "applia" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
         );
         saveGoDriverActiveRideId(serviceModule === "pack" ? "pack" : "cargo", ride.id);
         activeServiceRouteRef.current = null;
@@ -1161,7 +1161,7 @@ export default function DriverGoGenfeb() {
         setActiveRideOffer(snapOffer);
         setActiveRideStarted(false);
         setSearchingClient(false);
-        setPaymentConfirmed(snapOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED);
+        setPaymentConfirmed(snapOffer.paymentMethod === "applia" && FEATURE_WALLET_RECHARGE_UI_ENABLED);
         // Guardar según módulo para reanudar correctamente.
         setActiveServiceModule(snapModule === "pack" ? "pack" : "cargo");
         saveGoDriverActiveRideId(snapModule === "pack" ? "pack" : "cargo", snapOffer.rideId);
@@ -1628,7 +1628,7 @@ export default function DriverGoGenfeb() {
         setActiveRideStarted(ride.status === "in_progress");
         setSearchingClient(!!ride.driverSearchingClient);
         setPaymentConfirmed(
-          (ride.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
+          (ride.paymentMethod === "applia" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || !!ride.paymentConfirmed
         );
         syncRideConversation(ride.conversationId ?? null);
         setDriverNegotiationSent(null);
@@ -1858,7 +1858,7 @@ export default function DriverGoGenfeb() {
             )
           ) : null}
           {activeRideStarted &&
-          !(activeRideOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) ? (
+          !(activeRideOffer.paymentMethod === "applia" && FEATURE_WALLET_RECHARGE_UI_ENABLED) ? (
             paymentConfirmed ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-emerald-600/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-200">
                 <BadgeCheck className="h-4 w-4" aria-hidden />
@@ -1878,7 +1878,7 @@ export default function DriverGoGenfeb() {
             )
           ) : null}
           {activeRideStarted &&
-          ((activeRideOffer.paymentMethod === "genfeb" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || paymentConfirmed) ? (
+          ((activeRideOffer.paymentMethod === "applia" && FEATURE_WALLET_RECHARGE_UI_ENABLED) || paymentConfirmed) ? (
             <Button
               type="button"
               size="sm"
@@ -2262,7 +2262,7 @@ export default function DriverGoGenfeb() {
                 className="-mt-1 w-full rounded-lg px-1 py-1.5 text-left text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground lg:text-xs"
                 onClick={() => setDriverWalletOpen(true)}
               >
-                Saldo GenFeb · ver detalle de deuda / recarga
+                Saldo Applia · ver detalle de deuda / recarga
               </button>
             ) : null}
           </aside>
@@ -2283,12 +2283,12 @@ export default function DriverGoGenfeb() {
       <Dialog open={FEATURE_WALLET_RECHARGE_UI_ENABLED && driverWalletOpen} onOpenChange={setDriverWalletOpen}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
-            <DialogTitle>Saldo GenFeb · Conductor</DialogTitle>
+            <DialogTitle>Saldo Applia · Conductor</DialogTitle>
             <DialogDescription>
               {FEATURE_OFF_PLATFORM_COMMISSION_ENABLED ? (
                 <>
-                  Con pagos en efectivo o transferencia, GenFeb descuenta su comisión de tu cartera. Puedes quedar con
-                  saldo negativo hasta un límite; al alcanzarlo, solo se te ofrecerán viajes con pago en Saldo GenFeb
+                  Con pagos en efectivo o transferencia, Applia descuenta su comisión de tu cartera. Puedes quedar con
+                  saldo negativo hasta un límite; al alcanzarlo, solo se te ofrecerán viajes con pago en Saldo Applia
                   hasta regularizar.
                 </>
               ) : (
@@ -2315,11 +2315,11 @@ export default function DriverGoGenfeb() {
             {isDriverDebtCapped ? (
               <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-900 dark:text-amber-100 text-xs">
                 Estás en el límite: no se te ofrecerán viajes en efectivo/transfer hasta recargar. Sigue aceptando viajes
-                con Saldo GenFeb para descontar la deuda.
+                con Saldo Applia para descontar la deuda.
               </p>
             ) : walletBalance < 0 ? (
               <p className="text-xs text-muted-foreground">
-                Recarga o gana con viajes en Saldo GenFeb; el neto baja la deuda.
+                Recarga o gana con viajes en Saldo Applia; el neto baja la deuda.
               </p>
             ) : null}
             <Button asChild variant="outline" className="w-full">
@@ -2588,8 +2588,8 @@ export default function DriverGoGenfeb() {
   );
 }
 
-/** Ruta legacy `/driver/go-genfeb` (sin GoShellLayout): mismo panel de chat que en `/go/cargo/driver`. */
-export function DriverGoGenfebWithGoChat() {
+/** Ruta legacy `/driver/go-applia` (sin GoShellLayout): mismo panel de chat que en `/go/cargo/driver`. */
+export function DriverGoAppliaWithGoChat() {
   return (
     <GoDriverSessionProvider>
       <GoDriverBubbleProvider>
@@ -2599,7 +2599,7 @@ export function DriverGoGenfebWithGoChat() {
             <DriverFloatingBubble />
             <DriverBubbleScreenOverlay />
             <AndroidOverlayPermissionFeedback enabled />
-            <DriverGoGenfeb />
+            <DriverGoApplia />
             <GoChatDrawer />
           </GoDriverUiProvider>
         </GoChatProvider>

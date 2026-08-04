@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Loader2, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import { Label } from "@/components/ui/label";
 import {
   Command,
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useStoreProducts } from "@/hooks/use-store-products";
-import { cn } from "@/lib/utils";
 
 export type SelectedPromotionProduct = {
   id: number;
@@ -122,28 +122,27 @@ export function StorePromotionProductPicker({
                 <Label htmlFor={`promo-qty-${item.id}`} className="sr-only">
                   Cantidad de {item.name}
                 </Label>
-                <Input
+                <NumberField
                   id={`promo-qty-${item.id}`}
-                  type="number"
                   min={1}
                   max={9999}
-                  className="h-8 w-16 text-center px-1"
+                  step="1"
+                  className="h-8 w-[5.5rem]"
                   value={item.quantity}
                   disabled={disabled}
-                  onChange={(e) => setQuantity(item.id, e.target.value)}
+                  onChange={(next) => setQuantity(item.id, next)}
                 />
-                <button
+                <Button
                   type="button"
-                  className={cn(
-                    "shrink-0 rounded-full p-1 text-muted-foreground hover:text-foreground hover:bg-muted",
-                    disabled && "opacity-50 pointer-events-none",
-                  )}
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 rounded-full border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
                   aria-label={`Quitar ${item.name}`}
                   disabled={disabled}
                   onClick={() => remove(item.id)}
                 >
                   <X className="h-4 w-4" />
-                </button>
+                </Button>
               </div>
             </li>
           ))}

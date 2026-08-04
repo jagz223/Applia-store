@@ -19,5 +19,5 @@ export function supportConsultationBannerText(
   if (closed) {
     return `${label} cerrada. El historial queda guardado; para una nueva consulta, abre el chat de ayuda desde Reservar o el Centro de Ayuda.`;
   }
-  return `${label} — chat de ayuda GenFeb. Un asesor del equipo te atenderá por aquí.`;
+  return `${label} — chat de ayuda Applia. Un asesor del equipo te atenderá por aquí.`;
 }

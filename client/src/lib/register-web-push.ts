@@ -9,7 +9,7 @@ export type RegisterWebPushResult = {
 
 const SW_PATH = "/sw.js";
 const LEGACY_SW_PATH = "/firebase-messaging-sw.js";
-const TOKEN_STORAGE_KEY = "genfeb_fcm_web_token";
+const TOKEN_STORAGE_KEY = "applia_fcm_web_token";
 
 async function getAuthToken(): Promise<string | null> {
   try {

@@ -21,7 +21,7 @@ export function ThemeAppearanceCard({ className }: { className?: string }) {
       <CardContent>
         <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
           <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="genfeb-dark-mode-switch" className="text-sm font-medium text-foreground cursor-pointer">
+            <Label htmlFor="applia-dark-mode-switch" className="text-sm font-medium text-foreground cursor-pointer">
               Modo oscuro
             </Label>
             <p className="text-xs text-muted-foreground leading-snug">
@@ -29,7 +29,7 @@ export function ThemeAppearanceCard({ className }: { className?: string }) {
             </p>
           </div>
           <Switch
-            id="genfeb-dark-mode-switch"
+            id="applia-dark-mode-switch"
             checked={theme === "dark"}
             onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
             aria-label={theme === "dark" ? "Cambiar a modo claro" : "Activar modo oscuro"}

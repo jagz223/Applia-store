@@ -75,13 +75,13 @@ function CentralMobileHomeFab() {
       size="icon"
       className="pointer-events-auto size-10 shrink-0 overflow-hidden rounded-full border border-border/60 bg-background/90 p-1 shadow-md backdrop-blur-sm"
     >
-      <Link href="/" aria-label="Inicio GenFeb">
+      <Link href="/" aria-label="Inicio Applia">
         <span
           className="mx-auto flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border/55"
           aria-hidden
         >
           <img
-            src="/genfeb-logo-new.png"
+            src="/applia-logo-new.png"
             alt=""
             className="size-full object-contain"
             width={28}

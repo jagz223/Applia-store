@@ -2,7 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { z } from "zod";
 import jwt from "jsonwebtoken";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 
 // ============== ESQUEMAS ==============
 
@@ -35,7 +35,7 @@ function authenticateJWT(req: any, res: any, next: any) {
   }
   const token = authHeader.substring(7);
   try {
-    const user = jwt.verify(token, process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024");
+    const user = jwt.verify(token, process.env.JWT_SECRET || "applia-jwt-secret-key-2024");
     req.user = user;
     next();
   } catch {
@@ -55,7 +55,7 @@ export async function registerReviewRoutes(
     try {
       const { targetId, targetType, limit = "10", offset = "0" } = req.query;
       
-      const reviews = await genFebStorage.getReviews({
+      const reviews = await appliaStorage.getReviews({
         targetId: targetId as string,
         targetType: targetType as string,
         limit: parseInt(limit as string),
@@ -74,7 +74,7 @@ export async function registerReviewRoutes(
     try {
       const { targetType, targetId } = req.params;
       
-      const stats = await genFebStorage.getReviewStats(targetId, targetType);
+      const stats = await appliaStorage.getReviewStats(targetId, targetType);
       
       res.json(stats || {
         averageRating: 0,
@@ -92,14 +92,14 @@ export async function registerReviewRoutes(
     try {
       const data = createReviewSchema.parse(req.body);
       
-      const review = await genFebStorage.createReview({
+      const review = await appliaStorage.createReview({
         ...data,
         reviewerId: req.user.id,
         reviewerName: `${req.user.name} ${req.user.lastName}`,
       });
       
       // Actualizar estadísticas
-      await genFebStorage.updateReviewStats(data.targetId, data.targetType);
+      await appliaStorage.updateReviewStats(data.targetId, data.targetType);
       
       res.status(201).json(review);
     } catch (error) {
@@ -117,7 +117,7 @@ export async function registerReviewRoutes(
       const data = replyReviewSchema.parse(req.body);
       const reviewId = parseInt(req.params.id);
       
-      const review = await genFebStorage.replyToReview(
+      const review = await appliaStorage.replyToReview(
         reviewId,
         data.response,
         req.user.id,
@@ -139,7 +139,7 @@ export async function registerReviewRoutes(
     try {
       const reviewId = parseInt(req.params.id);
       
-      const review = await genFebStorage.markReviewHelpful(reviewId);
+      const review = await appliaStorage.markReviewHelpful(reviewId);
       
       res.json(review);
     } catch (error) {
@@ -153,7 +153,7 @@ export async function registerReviewRoutes(
     try {
       const reviewId = parseInt(req.params.id);
       
-      await genFebStorage.deleteReview(reviewId, req.user.id, req.user.role);
+      await appliaStorage.deleteReview(reviewId, req.user.id, req.user.role);
       
       res.json({ message: "Reseña eliminada" });
     } catch (error) {

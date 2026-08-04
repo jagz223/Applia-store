@@ -3,7 +3,7 @@
  * Encapsula validación condicional y reglas de negocio de expiración y beneficios.
  */
 
-import type { IStorage } from "../storage-genfeb";
+import type { IStorage } from "../storage-applia";
 import {
   applySubscriptionDiscountPercent,
   createPromotionalCodeSchema,
@@ -16,7 +16,7 @@ import {
   type RedeemPromotionalCodeResult,
   type UpdatePromotionalCodeInput,
 } from "@shared/promotional-code-schema";
-import type { PromotionalCode } from "@shared/schema-genfeb";
+import type { PromotionalCode } from "@shared/schema-applia";
 import {
   filterActivePublicPromotionalCodes,
   describePublicPromotionalBenefit,

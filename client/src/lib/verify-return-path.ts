@@ -1,4 +1,4 @@
-const VERIFY_RETURN_KEY = "genfeb-verify-return";
+const VERIFY_RETURN_KEY = "applia-verify-return";
 
 export const VERIFY_PAYMENT_PATH = "/professional/verify/payment";
 

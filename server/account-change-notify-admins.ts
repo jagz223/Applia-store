@@ -5,7 +5,7 @@
 import { getFullAdminUsers } from "./staff-users";
 import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 
 const ADMIN_OVERVIEW_URL = "/admin?tab=overview";
 
@@ -56,11 +56,11 @@ export async function notifyFullAdminsPendingAccountChangeRequest(args: {
   const message = `${display} solicita revisar un cambio de ${label}.`;
 
   try {
-    const admins = await getFullAdminUsers(genFebStorage);
+    const admins = await getFullAdminUsers(appliaStorage);
     for (const admin of admins ?? []) {
       const adminId = String((admin as { id?: string }).id ?? "").trim();
       if (!adminId) continue;
-      await genFebStorage.createNotification({
+      await appliaStorage.createNotification({
         userId: adminId,
         type: "admin",
         data: {

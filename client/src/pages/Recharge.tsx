@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useRechargeRequest, useWallet } from "@/hooks/use-mango-data";
 import { useToast } from "@/hooks/use-toast";
-import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
+import qrAppliaUrl from "@/assets/images/applia_qr.png";
 
 const BANK_ACCOUNT_NUMBER = "7700896747";
 
@@ -109,7 +109,7 @@ export default function Recharge() {
         <Card className="border-border bg-card">
           <CardContent className="pt-6">
             <p className="text-muted-foreground text-center mb-4">
-              Debes iniciar sesión para recargar tu Saldo Genfeb.
+              Debes iniciar sesión para recargar tu Saldo Applia.
             </p>
             <Button asChild className="w-full sm:w-auto">
               <Link href="/login">Iniciar sesión</Link>
@@ -135,17 +135,17 @@ export default function Recharge() {
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
             <Banknote className="h-8 w-8 text-primary" />
-            Recargar Saldo Genfeb
+            Recargar Saldo Applia
           </h1>
           <p className="text-muted-foreground mt-1">
-            Realiza una transferencia bancaria y registra los datos para acreditar tu Saldo Genfeb.
+            Realiza una transferencia bancaria y registra los datos para acreditar tu Saldo Applia.
           </p>
         </div>
 
-        {/* Resumen: Saldo Genfeb */}
+        {/* Resumen: Saldo Applia */}
         <Card className="border-border bg-card shadow-sm mb-8">
           <CardHeader>
-            <CardTitle className="text-lg">Saldo Genfeb</CardTitle>
+            <CardTitle className="text-lg">Saldo Applia</CardTitle>
             <CardDescription>
               Monto disponible en tu cuenta de la plataforma para pagar servicios y reservas.
             </CardDescription>
@@ -253,7 +253,7 @@ export default function Recharge() {
             <CardContent className="flex flex-col items-center">
               <div className="rounded-xl border border-border bg-muted/30 p-4 mb-6">
                 <img
-                  src={qrGenfebUrl}
+                  src={qrAppliaUrl}
                   alt="QR para transferencia bancaria"
                   className="w-48 h-48 sm:w-56 sm:h-56 object-contain"
                 />

@@ -1,13 +1,11 @@
 import { useMemo, useState, useEffect } from "react";
-import { useLocation } from "wouter";
-import { ExternalLink, ImageIcon, Loader2, MapPin, Package, Truck } from "lucide-react";
+import { ExternalLink, ImageIcon, Loader2, MapPin, Package } from "lucide-react";
 import {
   STORE_ORDER_STATUS_LABELS,
   STORE_ORDER_STATUSES,
   type StoreOrderStatus,
 } from "@shared/store-order-schema";
 import {
-  useStoreDeliveryNotifications,
   useStoreOrderDetail,
   useStoreOrders,
   useUpdateStoreOrderStatus,
@@ -39,7 +37,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { StoreOrderStatusRoadmap } from "@/components/store/StoreOrderStatusRoadmap";
 import { StoreOrderDeliveryRouteMap } from "@/components/store/StoreOrderDeliveryRouteMap";
@@ -353,15 +350,11 @@ function OrderDetailDialog({
 
 export function StoreAdminOrdersPanel({
   storeId,
-  storeSlug,
   storeLocation,
 }: {
   storeId: number;
-  storeSlug: string;
   storeLocation: StoreLocation | null;
 }) {
-  const [, setLocation] = useLocation();
-  const [listTab, setListTab] = useState<"all" | "delivery">("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [orderIdFilter, setOrderIdFilter] = useState("");
   const [dateFromFilter, setDateFromFilter] = useState("");
@@ -385,30 +378,15 @@ export function StoreAdminOrdersPanel({
 
   const filters = useMemo(
     () => ({
-      status: listTab === "delivery" ? undefined : statusFilter === "all" ? undefined : statusFilter,
+      status: statusFilter === "all" ? undefined : statusFilter,
       orderId: orderIdFilter.trim() || undefined,
       dateFrom: dateFromFilter.trim() || undefined,
       dateTo: dateToFilter.trim() || undefined,
-      deliveryQueue: listTab === "delivery" ? true : undefined,
     }),
-    [listTab, statusFilter, orderIdFilter, dateFromFilter, dateToFilter],
+    [statusFilter, orderIdFilter, dateFromFilter, dateToFilter],
   );
 
   const { data: orders = [], isLoading, error } = useStoreOrders(storeId, filters);
-  const { data: deliveryNotifications } = useStoreDeliveryNotifications(storeId);
-
-  const deliveryTabUnread = useMemo(() => {
-    if (!deliveryNotifications?.byOrderId) return 0;
-    return Object.values(deliveryNotifications.byOrderId).reduce((sum, n) => sum + n, 0);
-  }, [deliveryNotifications]);
-
-  function openOrder(orderId: number) {
-    if (listTab === "delivery") {
-      setLocation(`/tienda/${encodeURIComponent(storeSlug)}/admin/ordenes/delivery/${orderId}`);
-      return;
-    }
-    setSelectedOrderId(orderId);
-  }
 
   function closeOrderDialog(open: boolean) {
     if (!open) setSelectedOrderId(null);
@@ -427,106 +405,52 @@ export function StoreAdminOrdersPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <Tabs value={listTab} onValueChange={(v) => setListTab(v as "all" | "delivery")}>
-            <TabsList>
-              <TabsTrigger value="all">Todas</TabsTrigger>
-              <TabsTrigger value="delivery" className="gap-2">
-                <Truck className="h-3.5 w-3.5" />
-                Deliverys
-                {deliveryTabUnread > 0 ? (
-                  <span className="inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground">
-                    {deliveryTabUnread > 99 ? "99+" : deliveryTabUnread}
-                  </span>
-                ) : null}
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="all" className="mt-4 space-y-6">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-2">
-                  <Label htmlFor="order-status-filter">Estado</Label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger id="order-status-filter">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STATUS_FILTER_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="order-id-filter">ID de orden</Label>
-                  <Input
-                    id="order-id-filter"
-                    inputMode="numeric"
-                    placeholder="Ej. 12"
-                    value={orderIdFilter}
-                    onChange={(e) => setOrderIdFilter(e.target.value.replace(/\D/g, ""))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="order-date-from">Desde</Label>
-                  <Input
-                    id="order-date-from"
-                    type="date"
-                    value={dateFromFilter}
-                    onChange={(e) => setDateFromFilter(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="order-date-to">Hasta</Label>
-                  <Input
-                    id="order-date-to"
-                    type="date"
-                    value={dateToFilter}
-                    min={dateFromFilter || undefined}
-                    onChange={(e) => setDateToFilter(e.target.value)}
-                  />
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="delivery" className="mt-4 space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Pedidos listos para envío o en camino. Pulsa una fila para ver conductor, mapa y chat.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="delivery-order-id-filter">ID de orden</Label>
-                  <Input
-                    id="delivery-order-id-filter"
-                    inputMode="numeric"
-                    placeholder="Ej. 12"
-                    value={orderIdFilter}
-                    onChange={(e) => setOrderIdFilter(e.target.value.replace(/\D/g, ""))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="delivery-date-from">Desde</Label>
-                  <Input
-                    id="delivery-date-from"
-                    type="date"
-                    value={dateFromFilter}
-                    onChange={(e) => setDateFromFilter(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="delivery-date-to">Hasta</Label>
-                  <Input
-                    id="delivery-date-to"
-                    type="date"
-                    value={dateToFilter}
-                    min={dateFromFilter || undefined}
-                    onChange={(e) => setDateToFilter(e.target.value)}
-                  />
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-2">
+              <Label htmlFor="order-status-filter">Estado</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger id="order-status-filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_FILTER_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="order-id-filter">ID de orden</Label>
+              <Input
+                id="order-id-filter"
+                inputMode="numeric"
+                placeholder="Ej. 12"
+                value={orderIdFilter}
+                onChange={(e) => setOrderIdFilter(e.target.value.replace(/\D/g, ""))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="order-date-from">Desde</Label>
+              <Input
+                id="order-date-from"
+                type="date"
+                value={dateFromFilter}
+                onChange={(e) => setDateFromFilter(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="order-date-to">Hasta</Label>
+              <Input
+                id="order-date-to"
+                type="date"
+                value={dateToFilter}
+                min={dateFromFilter || undefined}
+                onChange={(e) => setDateToFilter(e.target.value)}
+              />
+            </div>
+          </div>
 
           {isLoading ? (
             <div className="py-12 flex justify-center">
@@ -551,24 +475,13 @@ export function StoreAdminOrdersPanel({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((order) => {
-                    const unread = deliveryNotifications?.byOrderId?.[order.id] ?? 0;
-                    return (
+                  {orders.map((order) => (
                     <TableRow
                       key={order.id}
-                      className="cursor-pointer hover:bg-muted/40 relative"
-                      onClick={() => openOrder(order.id)}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => setSelectedOrderId(order.id)}
                     >
-                      <TableCell className="font-mono font-medium">
-                        <span className="relative inline-block pr-6">
-                          #{order.id}
-                          {unread > 0 ? (
-                            <span className="absolute -top-1.5 -right-1 inline-flex min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 py-0.5 text-[9px] font-bold text-destructive-foreground">
-                              {unread > 9 ? "9+" : unread}
-                            </span>
-                          ) : null}
-                        </span>
-                      </TableCell>
+                      <TableCell className="font-mono font-medium">#{order.id}</TableCell>
                       <TableCell>{order.customerName ?? order.customerEmail ?? "—"}</TableCell>
                       <TableCell>
                         <Badge variant={statusBadgeVariant(order.status)}>{order.statusLabel}</Badge>
@@ -582,8 +495,7 @@ export function StoreAdminOrdersPanel({
                         {formatDate(order.updatedAt)}
                       </TableCell>
                     </TableRow>
-                    );
-                  })}
+                  ))}
                 </TableBody>
               </Table>
             </div>

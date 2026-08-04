@@ -488,7 +488,7 @@ export default function TaxiRide({ goSlug = "cargo" }: { goSlug?: "cargo" | "pac
 
   const goBack = () => setLocation(fromCategories ? "/categories" : "/explore");
 
-  const riderDraftKey = useMemo(() => `genfeb-go-rider-draft:${goSlug}`, [goSlug]);
+  const riderDraftKey = useMemo(() => `applia-go-rider-draft:${goSlug}`, [goSlug]);
   const saveRiderDraft = useCallback(
     () => {
       if (typeof window === "undefined") return;

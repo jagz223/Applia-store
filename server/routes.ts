@@ -13,7 +13,7 @@ import { buildGoDriverEnrollmentCategoryPatch } from "@shared/provider-category-
 import { isCatalogAssignableServiceCategorySlug } from "@shared/catalog-service-categories";
 import { providerCategorySchema, PROVIDER_CATEGORIES } from "@shared/provider-categories";
 import { catalogService, bookingService, vehiclesDbService, nhtsaVehicleYearsService } from "./services";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getDispatchCompany } from "./dispatch-companies";
 import {
   createCentralAffiliationRequest,
@@ -33,7 +33,7 @@ import {
 } from "@shared/professional-verification";
 import { ensurePromoPrefundedOnboardingQueuedForAdmin } from "./associate-verification-promo-prefund";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
-import { registerGenFebRoutes } from "./routes-genfeb";
+import { registerAppliaRoutes } from "./routes-applia";
 import { registerAuthRoutes as registerJwtAuthRoutes, authenticateJWT, optionalAuthenticateJWT } from "./routes-auth";
 import { registerInvoiceRoutes } from "./routes-invoices";
 import { registerPayPalRoutes } from "./routes-paypal";
@@ -111,7 +111,7 @@ export async function registerRoutes(
   registerMobilityRideRoutes(app);
   registerPackRideRoutes(app);
 
-  /** Pánico Genfeb Go: ruta única bajo `/api` (evita 404 si el enrutado por segmentos falla en algún despliegue). */
+  /** Pánico Applia Go: ruta única bajo `/api` (evita 404 si el enrutado por segmentos falla en algún despliegue). */
   const goPanicBodySchema = z.object({
     rideId: z.string().min(1),
     module: z.enum(["taxi", "delivery"]),
@@ -219,7 +219,7 @@ export async function registerRoutes(
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.json(null);
-      const v = await genFebStorage.getPrimaryVehicleFullByUserId(userId);
+      const v = await appliaStorage.getPrimaryVehicleFullByUserId(userId);
       res.json(v ?? null);
     } catch (e: any) {
       res.status(500).json({ message: e?.message ?? "Error" });
@@ -246,15 +246,15 @@ export async function registerRoutes(
       const body = enrollGoDriverBodySchema.parse(req.body);
       const pid = (provider as { id: number }).id;
       const categories = await catalogService.getCategories();
-      const existingV = await genFebStorage.getPrimaryVehicleByProviderId(pid);
+      const existingV = await appliaStorage.getPrimaryVehicleByProviderId(pid);
 
       const titleIn = typeof body.serviceTitle === "string" ? body.serviceTitle.trim() : "";
       const descIn = typeof body.serviceDescription === "string" ? body.serviceDescription.trim() : "";
       const prevTitle = String((provider as { goDriverOfferTitle?: unknown }).goDriverOfferTitle ?? "").trim();
       const prevDesc = String((provider as { goDriverOfferDescription?: unknown }).goDriverOfferDescription ?? "").trim();
-      const defaultTitle = "Conductor Genfeb Go";
+      const defaultTitle = "Conductor Applia Go";
       const defaultDesc =
-        "Servicios de taxi y delivery en Genfeb Go. Puedes personalizar título y descripción desde Mis servicios cuando quieras.";
+        "Servicios de taxi y delivery en Applia Go. Puedes personalizar título y descripción desde Mis servicios cuando quieras.";
       const serviceTitle = titleIn.length >= 2 ? titleIn : prevTitle || defaultTitle;
       let serviceDescription = descIn.length >= 50 ? descIn : prevDesc;
       if (serviceDescription.length < 50) {
@@ -272,7 +272,7 @@ export async function registerRoutes(
             issues: parsedVehicle.error.flatten(),
           });
         }
-        await genFebStorage.createProviderVehicle({
+        await appliaStorage.createProviderVehicle({
           providerId: pid,
           userId,
           vehicle: parsedVehicle.data,
@@ -354,7 +354,7 @@ export async function registerRoutes(
 
       const hasTransport = providerHasGoBrand({ ...provider, goBrands: merged }, "transport", categories);
       const hasDelivery = providerHasGoBrand({ ...provider, goBrands: merged }, "delivery", categories);
-      const vAfter = existingV ?? (await genFebStorage.getPrimaryVehicleByProviderId(pid));
+      const vAfter = existingV ?? (await appliaStorage.getPrimaryVehicleByProviderId(pid));
 
       return res.json({
         ok: true,
@@ -406,10 +406,10 @@ export async function registerRoutes(
         return res.status(409).json({ message: "No hay una solicitud de datos pendiente para esta central." });
       }
       await updateCentralAffiliationRequest(requestId, { dataAccessStatus: "granted" });
-      await genFebStorage.updateUser(userId, {
+      await appliaStorage.updateUser(userId, {
         centralDataShareForCompanyId: row.dispatchCompanyId,
         centralDataShareGrantedAt: new Date().toISOString(),
-      } as Parameters<typeof genFebStorage.updateUser>[1]);
+      } as Parameters<typeof appliaStorage.updateUser>[1]);
       res.json({ ok: true });
     } catch (e: any) {
       if (e?.name === "ZodError") return res.status(400).json({ message: "Datos inválidos", errors: e.errors });
@@ -426,7 +426,7 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
 
-      const rawUser = await genFebStorage.getUserById(userId);
+      const rawUser = await appliaStorage.getUserById(userId);
       const rawIdent = (rawUser as any)?.user_identification ?? null;
       let imageUrl: string | null = null;
       if (typeof rawIdent === "string") {
@@ -435,7 +435,7 @@ export async function registerRoutes(
         imageUrl = String((rawIdent as any).imageUrl).trim() || null;
       }
 
-      const doc = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const doc = await appliaStorage.getProfessionalVerificationByUserId(userId);
       res.json({
         userId,
         imageUrl,
@@ -459,7 +459,7 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
 
-      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      const st = await appliaStorage.getVerifyingStatusByUserId(userId);
       if (!st) {
         return res.json({
           user: userId,
@@ -505,14 +505,14 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
 
-      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      const st = await appliaStorage.getVerifyingStatusByUserId(userId);
       // Solo bloqueamos si el admin ya aprobó la identificación. En "pending" o "rejected"
       // el usuario puede volver a enviar y se fusionan los datos nuevos.
       if (st?.identification_verified === "verified") {
         return res.status(409).json({ message: "La identificación ya fue verificada" });
       }
 
-      const profBefore = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const profBefore = await appliaStorage.getProfessionalVerificationByUserId(userId);
       const hadImage = Boolean(typeof profBefore?.imageUrl === "string" && profBefore.imageUrl.trim());
       const idPending = st?.identification_verified === "pending";
       if (hadImage && idPending && (st?.pendingIdResubmitCount ?? 0) >= 1) {
@@ -524,24 +524,24 @@ export async function registerRoutes(
 
       const body = patchProfessionalVerificationImageBody.parse(req.body);
 
-      await genFebStorage.updateUser(userId, {
+      await appliaStorage.updateUser(userId, {
         user_identification: body.imageUrl,
       } as any);
 
       // También guardamos el imageUrl en el documento de verificación para que el paso de pago
       // pueda validar que primero existe el documento.
-      await genFebStorage.upsertProfessionalVerificationImage(userId, body.imageUrl);
+      await appliaStorage.upsertProfessionalVerificationImage(userId, body.imageUrl);
 
       // Cambiar estado en verifying_status → identification_verified = pending
-      await genFebStorage.upsertVerifyingStatusIdentificationPending(userId, "onboarding" as any);
+      await appliaStorage.upsertVerifyingStatusIdentificationPending(userId, "onboarding" as any);
 
       if (hadImage && idPending) {
-        await genFebStorage.incrementPendingIdResubmitCount(userId);
+        await appliaStorage.incrementPendingIdResubmitCount(userId);
       }
 
       await ensurePromoPrefundedOnboardingQueuedForAdmin(userId);
 
-      const doc = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const doc = await appliaStorage.getProfessionalVerificationByUserId(userId);
       res.json({
         userId,
         imageUrl: body.imageUrl,
@@ -566,12 +566,12 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
 
-      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      const st = await appliaStorage.getVerifyingStatusByUserId(userId);
       if ((provider as { isVerified?: boolean }).isVerified) {
         return res.status(409).json({ message: "Tu cuenta profesional ya está verificada" });
       }
 
-      const profBefore = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const profBefore = await appliaStorage.getProfessionalVerificationByUserId(userId);
       const hadCred = Boolean(
         typeof profBefore?.professionalCredentialUrl === "string" && profBefore.professionalCredentialUrl.trim(),
       );
@@ -585,10 +585,10 @@ export async function registerRoutes(
       }
 
       const parsed = patchProfessionalVerificationCredentialBody.parse(req.body);
-      const updated = await genFebStorage.upsertProfessionalVerificationCredential(userId, parsed.professionalCredentialUrl);
+      const updated = await appliaStorage.upsertProfessionalVerificationCredential(userId, parsed.professionalCredentialUrl);
 
       if (hadCred && inReview) {
-        await genFebStorage.incrementPendingCredentialResubmitCount(userId);
+        await appliaStorage.incrementPendingCredentialResubmitCount(userId);
       }
 
       // Guardar también en Mis documentos (bóveda). Esto permite verlo siempre aunque haya subido más tarde.
@@ -597,7 +597,7 @@ export async function registerRoutes(
         const carGo = isCarGoProvider(provider as any, categories);
         const name =
           parsed.name?.trim() || (carGo ? "Licencia de conducir" : "Documento profesional");
-        await genFebStorage.createDocument({
+        await appliaStorage.createDocument({
           userId,
           name,
           type: "professional_credential",
@@ -645,14 +645,14 @@ export async function registerRoutes(
         });
       }
 
-      const prof = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const prof = await appliaStorage.getProfessionalVerificationByUserId(userId);
       if (!isAssociateOnboardingVerificationDocsComplete(prof)) {
         return res.status(400).json({
           message: "Sube tu identificación y tu documento profesional (o licencia) antes de enviar a verificación.",
         });
       }
 
-      const stBefore = await genFebStorage.getVerifyingStatusByUserId(userId);
+      const stBefore = await appliaStorage.getVerifyingStatusByUserId(userId);
       if (stBefore?.transacction_verified === "pending") {
         return res.status(409).json({
           message: "Tu solicitud ya está en revisión. El equipo validará tus documentos y el beneficio del código.",
@@ -664,8 +664,8 @@ export async function registerRoutes(
 
       await ensurePromoPrefundedOnboardingQueuedForAdmin(userId);
 
-      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
-      const profAfter = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const st = await appliaStorage.getVerifyingStatusByUserId(userId);
+      const profAfter = await appliaStorage.getProfessionalVerificationByUserId(userId);
       if (!isAssociateOnboardingDossierComplete(profAfter) || st?.transacction_verified !== "pending") {
         return res.status(500).json({
           message: "No se pudo registrar el envío. Intenta de nuevo o contacta soporte.",
@@ -691,12 +691,12 @@ export async function registerRoutes(
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.status(403).json({ message: "Solo para cuentas de profesional" });
 
-      const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+      const st = await appliaStorage.getVerifyingStatusByUserId(userId);
       if (st?.transacction_verified === "pending") {
         return res.status(409).json({ message: "Ya hay un comprobante de pago en revisión. Espera la validación del equipo." });
       }
 
-      const profBeforePayment = await genFebStorage.getProfessionalVerificationByUserId(userId);
+      const profBeforePayment = await appliaStorage.getProfessionalVerificationByUserId(userId);
       if (!(provider as { isVerified?: boolean }).isVerified) {
         const img = typeof profBeforePayment?.imageUrl === "string" ? profBeforePayment.imageUrl.trim() : "";
         const cred =
@@ -725,7 +725,7 @@ export async function registerRoutes(
         categoriesForSub,
       );
       const promoCode = body.promotionalCode?.trim().toUpperCase();
-      const updated = await genFebStorage.upsertProfessionalVerificationPayment(userId, {
+      const updated = await appliaStorage.upsertProfessionalVerificationPayment(userId, {
         transferReceiptCode: body.transferReceiptCode,
         transferDate: body.transferDate,
         subscriptionMonths: body.subscriptionMonths,
@@ -739,11 +739,11 @@ export async function registerRoutes(
       // Cambiar estado en verifying_status → transacction_date = body.transferDate y transacction_verified = pending
       const requestType =
         (provider as any)?.isVerified === true ? ("renewal" as const) : ("onboarding" as const);
-      await genFebStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate, requestType as any);
+      await appliaStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate, requestType as any);
 
       // Un solo cargo pendiente por usuario: evita duplicados si reenvía comprobante.
       try {
-        const reports = await genFebStorage.getFinancialReports(userId);
+        const reports = await appliaStorage.getFinancialReports(userId);
         const hasPendingVerification = reports.some(
           (r: { type?: string; status?: string }) => r.type === "verification_fee" && r.status === "pending",
         );
@@ -755,7 +755,7 @@ export async function registerRoutes(
               ? body.subscriptionDiscountedTotalUsd.toFixed(2)
               : fullTotal.toFixed(2);
           const { buildVerificationReportDescription } = await import("./subscription-invoice-metadata");
-          await genFebStorage.createFinancialReport({
+          await appliaStorage.createFinancialReport({
             userId,
             type: "verification_fee",
             amount: amountUsd,
@@ -786,8 +786,8 @@ export async function registerRoutes(
 
       // --- Notificar a administradores ---
       try {
-        const admins = await getFullAdminUsers(genFebStorage);
-        const user = (await genFebStorage.getUserById(userId)) as any;
+        const admins = await getFullAdminUsers(appliaStorage);
+        const user = (await appliaStorage.getUserById(userId)) as any;
         const name = user ? ([user.firstName, user.lastName].filter(Boolean).join(" ").trim() || (user as any).name || (user as any).email || userId) : userId;
         const msg = `El usuario ${name} completó documentación y comprobante de pago (alta como asociado). Revisá la solicitud en el panel.`;
         const urlAdmin = "/admin?tab=overview";
@@ -795,7 +795,7 @@ export async function registerRoutes(
         for (const admin of admins) {
           const adminId = String(admin.id);
           // 1. Notificación persistente
-          await genFebStorage.createNotification({
+          await appliaStorage.createNotification({
             userId: adminId,
             type: "admin_verification_request",
             data: { userId, name, message: msg, url: urlAdmin, step: "payment" }
@@ -830,7 +830,7 @@ export async function registerRoutes(
     }
   });
 
-  // Catálogo público: registrar ANTES de GenFeb para que /api/provider-categories/availability y /api/services coincidan
+  // Catálogo público: registrar ANTES de Applia para que /api/provider-categories/availability y /api/services coincidan
   app.get(api.categories.list.path, async (_req, res) => {
     const categories = await catalogService.getCategoriesForPublicCatalog();
     res.json(filterCategoriesExcludedFromPublicApi(categories));
@@ -929,7 +929,7 @@ export async function registerRoutes(
       if (!Number.isFinite(providerId) || providerId <= 0) {
         return res.status(400).json({ message: "providerId inválido" });
       }
-      const bookings = await genFebStorage.getBookingsByProvider(providerId);
+      const bookings = await appliaStorage.getBookingsByProvider(providerId);
       const completedCount = (bookings ?? []).filter((b: any) => b?.status === "completed").length;
       res.json({ providerId, completedCount });
     } catch (error) {
@@ -1189,7 +1189,7 @@ export async function registerRoutes(
 
   await setupAuth(app);
   registerAuthRoutes(app);
-  await registerGenFebRoutes(httpServer, app);
+  await registerAppliaRoutes(httpServer, app);
   
   // Registrar rutas de autenticación JWT
   await registerJwtAuthRoutes(httpServer, app);
@@ -1300,7 +1300,7 @@ export async function registerRoutes(
           });
         }
       }
-      const dbUser = await genFebStorage.getUserById(userId);
+      const dbUser = await appliaStorage.getUserById(userId);
       const effectiveRole = (dbUser as { role?: string } | undefined)?.role ?? req.user?.role;
       /** Admin o Soporte TI: no degradar a professional; misma regla que requireStaffFromDb (BD primero). */
       const keepStaffRole = hasAdminPrivileges(effectiveRole);
@@ -1308,7 +1308,7 @@ export async function registerRoutes(
       if (existing) {
         // No degradar staff a professional si ya tenía proveedor (409).
         if (!keepStaffRole) {
-          await genFebStorage.updateUser(userId, {
+          await appliaStorage.updateUser(userId, {
             role: "professional",
             acceptedProviderTermsOfUse: false,
           } as any);
@@ -1357,7 +1357,7 @@ export async function registerRoutes(
           await catalogService.updateProvider((provider as { id: number }).id, { isVerified: true } as any);
         }
       } else {
-        await genFebStorage.updateUser(userId, {
+        await appliaStorage.updateUser(userId, {
           role: "professional",
           acceptedProviderTermsOfUse: false,
         } as any);
@@ -1366,7 +1366,7 @@ export async function registerRoutes(
       // Un solo servicio por profesional: título = nombre explícito del servicio, o profesión, o nombre del usuario.
       const categoryId = (provider as { categoryId?: number }).categoryId;
       if (categoryId != null && !Number.isNaN(Number(categoryId)) && Number(categoryId) >= 1) {
-        const user = await genFebStorage.getUserById(userId);
+        const user = await appliaStorage.getUserById(userId);
         const u = user as { name?: string; firstName?: string; lastName?: string } | null;
         const fullName =
           (typeof u?.name === "string" && u.name.trim()) ||
@@ -1396,7 +1396,7 @@ export async function registerRoutes(
       }
 
       if (parsedVehicle?.success) {
-        await genFebStorage.createProviderVehicle({
+        await appliaStorage.createProviderVehicle({
           providerId: (provider as { id: number }).id,
           userId,
           vehicle: parsedVehicle.data,
@@ -1478,7 +1478,7 @@ export async function registerRoutes(
   });
 
   /**
-   * PATCH /api/bookings/:id/schedule → actualizar fecha/hora de la reserva (GenFeb, solo profesional y pending)
+   * PATCH /api/bookings/:id/schedule → actualizar fecha/hora de la reserva (Applia, solo profesional y pending)
    */
   app.patch("/api/bookings/:id/schedule", authenticateJWT, async (req: any, res) => {
     try {
@@ -1489,7 +1489,7 @@ export async function registerRoutes(
       const body = z.object({ date: z.string().min(1, "La fecha es requerida") }).parse(req.body);
       const date = new Date(body.date);
       if (Number.isNaN(date.getTime())) return res.status(400).json({ message: "Fecha u hora inválida" });
-      const booking = await genFebStorage.getBooking(bookingId);
+      const booking = await appliaStorage.getBooking(bookingId);
       if (!booking) return res.status(404).json({ message: "Reserva no encontrada" });
       const provider = await catalogService.getProviderByUserId(userId);
       if (!provider) return res.status(403).json({ message: "No eres el asociado de esta reserva" });
@@ -1498,7 +1498,7 @@ export async function registerRoutes(
       if ((bid.status || "pending") !== "pending") {
         return res.status(403).json({ message: "Solo puedes cambiar la fecha cuando la reserva está pendiente" });
       }
-      const updated = await genFebStorage.updateBookingSchedule(bookingId, date);
+      const updated = await appliaStorage.updateBookingSchedule(bookingId, date);
       if (!updated) return res.status(500).json({ message: "Error al actualizar la fecha" });
       return res.json(updated);
     } catch (e: any) {

@@ -3,8 +3,12 @@ import { GeoJSON, MapContainer, Marker, TileLayer, useMap, useMapEvents } from "
 import type { GeoJsonObject } from "geojson";
 import L from "leaflet";
 import { Loader2, MapPin, Navigation } from "lucide-react";
-import type { StoreLocation } from "@shared/store-schema";
-import { computeLowestPackSuggestedUsd, type PackFaresQuote } from "@shared/mobility-fare-quote";
+import type { StoreDeliveryFares, StoreLocation } from "@shared/store-schema";
+import {
+  computeStoreDeliveryFeeUsd,
+  DEFAULT_STORE_DELIVERY_FARES,
+  normalizeStoreDeliveryFares,
+} from "@shared/store-schema";
 import {
   getEffectiveLeafletMaxZoom,
   getLeafletMapContainerBehaviorProps,
@@ -16,11 +20,10 @@ import { LeafletMapLayoutFix } from "@/components/taxi/LeafletMapLayoutFix";
 import { GeoapifyMapAttribution } from "@/components/taxi/GeoapifyMapAttribution";
 import "@/components/taxi/leaflet-config";
 import { useDeferredLeafletMount } from "@/hooks/useDeferredLeafletMount";
-import { usePlatformPackFares } from "@/hooks/use-mango-data";
 import { fetchRoadDrivingRoute, ROAD_ROUTE_MAP_STYLE } from "@/lib/load-driving-route";
 import { mapBoundsFitKey, mapPointFitKey } from "@/lib/leaflet-map-camera";
 import { useEnsureMapGeolocation } from "@/lib/map-geolocation";
-import { isLeafletMapContainerLive, safeInvalidateSize } from "@/lib/safe-leaflet";
+import { safeInvalidateSize, safeLeafletCamera, safeStopLeafletMap } from "@/lib/safe-leaflet";
 import type { PickedLocation } from "@/components/taxi/SingleLocationPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,8 +46,17 @@ function formatPrice(value: number) {
   return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
 }
 
+function themeHsl(cssVar: string, fallback: string): string {
+  if (typeof document === "undefined") return fallback;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
+  return raw ? `hsl(${raw})` : fallback;
+}
+
 function createLabeledMarkerIcon(label: string, variant: "origin" | "destination") {
-  const bg = variant === "origin" ? "#2563eb" : "#16a34a";
+  const bg =
+    variant === "origin"
+      ? themeHsl("--primary", "#2e2a27")
+      : themeHsl("--secondary", "#d94a3d");
   return L.divIcon({
     className: "",
     html: `
@@ -66,20 +78,19 @@ function FitRouteBounds({ start, end }: { start: MapPoint; end: MapPoint }) {
     if (lastFitKeyRef.current === key) return;
     lastFitKeyRef.current = key;
     let cancelled = false;
-    try {
-      if (!isLeafletMapContainerLive(map)) return;
+    let raf = 0;
+    safeLeafletCamera(map, (live) => {
       const bounds = L.latLngBounds(L.latLng(start.lat, start.lon), L.latLng(end.lat, end.lon));
-      map.fitBounds(bounds, { padding: [48, 48], maxZoom: 15 });
-      const raf = requestAnimationFrame(() => {
-        if (!cancelled) safeInvalidateSize(map);
+      live.fitBounds(bounds, { padding: [48, 48], maxZoom: 15, animate: false });
+      raf = requestAnimationFrame(() => {
+        if (!cancelled) safeInvalidateSize(live);
       });
-      return () => {
-        cancelled = true;
-        cancelAnimationFrame(raf);
-      };
-    } catch {
-      /* mapa desmontándose */
-    }
+    });
+    return () => {
+      cancelled = true;
+      if (raf) cancelAnimationFrame(raf);
+      safeStopLeafletMap(map);
+    };
   }, [map, start.lat, start.lon, end.lat, end.lon]);
   return null;
 }
@@ -93,19 +104,18 @@ function FocusSinglePoint({ point }: { point: MapPoint }) {
     if (lastKeyRef.current === key) return;
     lastKeyRef.current = key;
     let cancelled = false;
-    try {
-      if (!isLeafletMapContainerLive(map)) return;
-      map.setView(L.latLng(point.lat, point.lon), z, { animate: true });
-      const raf = requestAnimationFrame(() => {
-        if (!cancelled) safeInvalidateSize(map);
+    let raf = 0;
+    safeLeafletCamera(map, (live) => {
+      live.setView(L.latLng(point.lat, point.lon), z, { animate: false });
+      raf = requestAnimationFrame(() => {
+        if (!cancelled) safeInvalidateSize(live);
       });
-      return () => {
-        cancelled = true;
-        cancelAnimationFrame(raf);
-      };
-    } catch {
-      /* mapa desmontándose */
-    }
+    });
+    return () => {
+      cancelled = true;
+      if (raf) cancelAnimationFrame(raf);
+      safeStopLeafletMap(map);
+    };
   }, [map, point.lat, point.lon]);
   return null;
 }
@@ -128,22 +138,29 @@ function MapClickPick({
 
 type StoreCheckoutDeliverySectionProps = {
   storeLocation: StoreLocation;
+  deliveryFares?: StoreDeliveryFares | null;
   value: PickedLocation | null;
   onChange: (place: PickedLocation | null) => void;
   onQuoteChange: (quote: StoreDeliveryQuote | null) => void;
   disabled?: boolean;
+  /**
+   * Si es false (p. ej. al cerrar el diálogo de compra), no monta Leaflet.
+   * Evita `_leaflet_pos` durante la animación de cierre del Dialog.
+   */
+  mapEnabled?: boolean;
 };
 
 export function StoreCheckoutDeliverySection({
   storeLocation,
+  deliveryFares,
   value,
   onChange,
   onQuoteChange,
   disabled,
+  mapEnabled = true,
 }: StoreCheckoutDeliverySectionProps) {
   useEnsureMapGeolocation();
   const { theme } = useTheme();
-  const { data: packFaresDto } = usePlatformPackFares();
   const { shellRef, ready } = useDeferredLeafletMount({ minShellHeightPx: 220 });
 
   const [input, setInput] = useState(value?.label ?? "");
@@ -169,12 +186,11 @@ export function StoreCheckoutDeliverySection({
   const origin: MapPoint = { lat: storeLocation.lat, lon: storeLocation.lon };
   const destination = value ? { lat: value.lat, lon: value.lon } : null;
   const hasBoth = destination != null;
+  const fares = normalizeStoreDeliveryFares(deliveryFares ?? DEFAULT_STORE_DELIVERY_FARES);
 
   useEffect(() => {
     setInput(value?.label ?? "");
   }, [value?.label, value?.lat, value?.lon]);
-
-  const packFares = (packFaresDto as { fares?: PackFaresQuote } | undefined)?.fares;
 
   useEffect(() => {
     if (!destination) {
@@ -210,13 +226,9 @@ export function StoreCheckoutDeliverySection({
 
         setRouteGeometry(route.geometry);
         setDistanceM(route.distanceM);
-        const fee = packFares ? computeLowestPackSuggestedUsd(packFares, route.distanceM) : null;
+        const fee = computeStoreDeliveryFeeUsd(fares, route.distanceM);
         setDeliveryFee(fee);
-        if (fee != null) {
-          onQuoteChangeRef.current({ distanceM: route.distanceM, deliveryFee: fee });
-        } else {
-          onQuoteChangeRef.current(null);
-        }
+        onQuoteChangeRef.current({ distanceM: route.distanceM, deliveryFee: fee });
       } catch {
         if (cancelled) return;
         setRouteError("No se pudo conectar al servicio de rutas. Revisa tu red e intenta otra vez.");
@@ -232,7 +244,9 @@ export function StoreCheckoutDeliverySection({
     return () => {
       cancelled = true;
     };
-  }, [origin.lat, origin.lon, destination?.lat, destination?.lon, packFares]);
+    // fares as primitives to avoid object identity churn
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- origin/destination coords
+  }, [destination?.lat, destination?.lon, origin.lat, origin.lon, fares.baseUsd, fares.perKmUsd]);
 
   const reverseAt = useCallback(async (lat: number, lon: number) => {
     setReverseLoading(true);
@@ -352,7 +366,6 @@ export function StoreCheckoutDeliverySection({
         </div>
         <Button
           type="button"
-          variant="secondary"
           className="shrink-0 gap-2"
           onClick={useGps}
           disabled={disabled || gpsLoading}
@@ -366,7 +379,7 @@ export function StoreCheckoutDeliverySection({
         ref={shellRef}
         className="relative overflow-hidden rounded-md border border-border min-h-[220px] h-56"
       >
-        {!ready ? (
+        {!ready || !mapEnabled ? (
           <div className="flex h-full items-center justify-center bg-muted/20">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>

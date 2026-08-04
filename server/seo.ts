@@ -1,7 +1,7 @@
 import type { Express } from "express";
 
 /** Dominio canónico (sitemap / robots / TWA). Apex sin www (coincide con Play + bubblewrap). Sobrescribible con PUBLIC_SITE_URL. */
-const CANONICAL_SITE_ORIGIN = "https://genfeb.com";
+const CANONICAL_SITE_ORIGIN = "https://applia.com";
 
 /** Entradas del sitemap: sin /login ni /register (no suelen indexarse). */
 const SITEMAP_ENTRIES: readonly { path: string; changefreq: string; priority: string }[] = [
@@ -14,7 +14,7 @@ const SITEMAP_ENTRIES: readonly { path: string; changefreq: string; priority: st
 /**
  * Origen canónico del sitio (sin barra final).
  * - Definí PUBLIC_SITE_URL si usás otro dominio o staging (p. ej. https://xxx.onrender.com).
- * - En producción sin env, se usa CANONICAL_SITE_ORIGIN (https://genfeb.com).
+ * - En producción sin env, se usa CANONICAL_SITE_ORIGIN (https://applia.com).
  * - En desarrollo: RENDER_EXTERNAL_URL si existe, si no localhost.
  */
 function getPublicOrigin(): string {
@@ -36,8 +36,8 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** Package name de la TWA / Play (com.genfeb.www.twa). Sobrescribible con TWA_PACKAGE_NAME. */
-const DEFAULT_TWA_PACKAGE_NAME = "com.genfeb.www.twa";
+/** Package name de la TWA / Play (com.applia.www.twa). Sobrescribible con TWA_PACKAGE_NAME. */
+const DEFAULT_TWA_PACKAGE_NAME = "com.applia.www.twa";
 
 /**
  * Huellas SHA-256 exigidas por Play Console para Digital Asset Links
@@ -62,7 +62,7 @@ function resolveTwaSha256Fingerprints(): string[] {
 
 /**
  * Digital Asset Links para la app TWA + compartir credenciales con el sitio.
- * Debe responder 200 + JSON en https://genfeb.com/.well-known/assetlinks.json
+ * Debe responder 200 + JSON en https://applia.com/.well-known/assetlinks.json
  * (mismo origen que pide Play; un 301 solo hacia www puede romper la verificación).
  */
 export function registerAssetLinksRoute(app: Express): void {

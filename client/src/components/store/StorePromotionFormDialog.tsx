@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -195,14 +196,13 @@ export function StorePromotionFormDialog({
 
           <div className="space-y-2">
             <Label htmlFor="promotion-price">Precio del pack (USD)</Label>
-            <Input
+            <NumberField
               id="promotion-price"
-              type="number"
               min={0.01}
               step="0.01"
               value={price}
               required
-              onChange={(e) => setPrice(e.target.value)}
+              onChange={setPrice}
             />
           </div>
 

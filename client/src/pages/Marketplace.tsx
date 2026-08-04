@@ -3,7 +3,7 @@ import { Store, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-/** Marketplace GenFeb — sección en preparación (visibilidad según panel admin). */
+/** Marketplace Applia — sección en preparación (visibilidad según panel admin). */
 export default function Marketplace() {
   return (
     <div className="container mx-auto max-w-lg px-4 py-12">

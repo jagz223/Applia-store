@@ -1,4 +1,4 @@
-# Servidores gratuitos o con capa gratis para GenFeb (demo y pruebas)
+# Servidores gratuitos o con capa gratis para Applia (demo y pruebas)
 
 Tu proyecto usa **Node.js (Express)** + **React/Vite** + **Firestore**. La base de datos ya está en la nube (Firebase), así que solo necesitas hospedar **una sola app** que sirve el backend y el front estático.
 
@@ -23,11 +23,11 @@ En la pantalla de opciones (Static Site, Web Service, Private Services, etc.) de
 
 ### Paso 1 — Crear el Web Service
 - Clic en **Web Service**.
-- Si te pide conectar un repo: **Connect a repository** → elige tu cuenta de GitHub y el repositorio de GenFeb (si no lo ves, autoriza a Render para ver los repos).
+- Si te pide conectar un repo: **Connect a repository** → elige tu cuenta de GitHub y el repositorio de Applia (si no lo ves, autoriza a Render para ver los repos).
 - Selecciona el repo y confirma.
 
 ### Paso 2 — Configuración del servicio
-- **Name:** por ejemplo `genfeb` (o el que quieras; será parte de la URL).
+- **Name:** por ejemplo `applia` (o el que quieras; será parte de la URL).
 - **Region:** el que prefieras (ej. Oregon).
 - **Branch:** `main` (o la rama donde tengas el código).
 - **Root Directory:** déjalo **vacío** (el proyecto está en la raíz del repo).
@@ -42,19 +42,19 @@ En la pantalla de opciones (Static Site, Web Service, Private Services, etc.) de
 - En la misma pantalla, abre la sección **Environment** (o **Environment Variables**).
 - Añade **una por una** las variables de tu `.env` (las que usa el backend: Firebase, JWT, sesión, etc.). Ejemplos:
   - `NODE_ENV` = `production`
-  - `FRONTEND_URL` = `https://genfeb-xxxx.onrender.com` (primero puedes dejarla vacía o poner la URL que Render te muestre después del primer deploy; luego la actualizas).
+  - `FRONTEND_URL` = `https://applia-xxxx.onrender.com` (primero puedes dejarla vacía o poner la URL que Render te muestre después del primer deploy; luego la actualizas).
   - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `SESSION_SECRET`, `JWT_SECRET`, etc.
 - **No subas** el archivo `.env` al repo; solo copia los nombres y valores en Render.
 
 ### Paso 4 — Deploy
 - Clic en **Create Web Service** (o **Deploy**).
 - Render instalará dependencias, ejecutará el build y arrancará el servidor. La primera vez puede tardar unos minutos.
-- Al terminar te dará una URL tipo: `https://genfeb-xxxx.onrender.com`.
+- Al terminar te dará una URL tipo: `https://applia-xxxx.onrender.com`.
 - Si configuraste `FRONTEND_URL` en blanco, vuelve a **Environment**, edita `FRONTEND_URL` y pon esa URL; guarda (Render hará un redeploy automático si aplica).
 
 ### Paso 5 — Probar
 - Abre la URL en el navegador: deberías ver tu app (login, etc.).
-- La API estará en la misma URL, por ejemplo: `https://genfeb-xxxx.onrender.com/api/health` → debería devolver `{"ok":true,"message":"API OK"}`.
+- La API estará en la misma URL, por ejemplo: `https://applia-xxxx.onrender.com/api/health` → debería devolver `{"ok":true,"message":"API OK"}`.
 
 **Nota:** En plan Free, si no hay visitas unos 15 minutos, el servicio se duerme. La primera petición tras eso puede tardar 30–60 segundos en responder (cold start).
 
@@ -81,7 +81,7 @@ En la pantalla de opciones (Static Site, Web Service, Private Services, etc.) de
    - **Start Command:** `npm run start` (o `node dist/index.cjs` si en producción no usas el script).
    - **Root Directory:** (dejar vacío si el repo es la raíz del proyecto).
 5. En **Environment** añade todas las variables de tu `.env` (Firebase, JWT, etc.). No subas el archivo `.env` al repo.
-6. Deploy. Te dará una URL tipo `https://genfeb-xxxx.onrender.com`.
+6. Deploy. Te dará una URL tipo `https://applia-xxxx.onrender.com`.
 
 **Importante:** En producción, en el backend configura `FRONTEND_URL` (y CORS si aplica) con la URL que te dé Render (ej. `https://tu-app.onrender.com`).
 

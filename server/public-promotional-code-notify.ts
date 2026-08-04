@@ -12,7 +12,7 @@ import {
   userHasRedeemedPromotionalCode,
   type PromotionalCodeRecord,
 } from "@shared/promotional-code-utils";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { notificationService } from "./services/notification.service";
 import { getIO, sendNotificationToUser } from "./socket";
 const TICK_MS = 5 * 60 * 1000;
@@ -39,7 +39,7 @@ async function sendPublicPromoPushAndInApp(params: {
     title: params.title,
     body: params.body,
   };
-  await genFebStorage.createNotification({
+  await appliaStorage.createNotification({
     userId: params.userId,
     type: params.type,
     data,
@@ -60,8 +60,8 @@ async function processPublicPromotionalCodeNotifications(): Promise<void> {
   tickInFlight = true;
   try {
     const nowMs = Date.now();
-    const all = (await genFebStorage.getPromotionalCodes()) as PromotionalCodeRecord[];
-    const recipientIds = await genFebStorage.listPublicPromoNotificationRecipientUserIds();
+    const all = (await appliaStorage.getPromotionalCodes()) as PromotionalCodeRecord[];
+    const recipientIds = await appliaStorage.listPublicPromoNotificationRecipientUserIds();
     if (recipientIds.length === 0) return;
 
     for (const promo of all) {
@@ -86,7 +86,7 @@ async function processPublicPromotionalCodeNotifications(): Promise<void> {
             code,
           });
         }
-        await genFebStorage.patchPromotionalCodePublicNotifyFields(promoId, {
+        await appliaStorage.patchPromotionalCodePublicNotifyFields(promoId, {
           publicAnnouncementSentAt: new Date(),
         });
       }
@@ -119,7 +119,7 @@ async function processPublicPromotionalCodeNotifications(): Promise<void> {
       }
 
       if (Object.keys(reminderPatch).length > 0) {
-        await genFebStorage.patchPromotionalCodePublicNotifyFields(promoId, {
+        await appliaStorage.patchPromotionalCodePublicNotifyFields(promoId, {
           publicUserReminders: reminderPatch,
         });
       }

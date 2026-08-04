@@ -1,10 +1,10 @@
-# GENFEB - Plataforma de Servicios
+# APPLIA - Plataforma de Servicios
 
-Plataforma de reservas de servicios profesionales desarrollada por **GenFeb**
+Plataforma de reservas de servicios profesionales desarrollada por **Applia**
 
 ## Descripción
 
-GENFEB es una plataforma SaaS de reservas de citas y servicios multi-negocio, diseñada para conectar clientes con profesionales verificados. La plataforma incluye:
+APPLIA es una plataforma SaaS de reservas de citas y servicios multi-negocio, diseñada para conectar clientes con profesionales verificados. La plataforma incluye:
 
 - **Explorar Servicios**: Navega por categorías de servicios profesionales
 - **Reservas**: Reserva citas con calendario integrado
@@ -44,7 +44,7 @@ npm run dev
 Crear archivo `.env`:
 
 ```env
-DATABASE_URL=postgresql://user:password@localhost:5432/genfeb
+DATABASE_URL=postgresql://user:password@localhost:5432/applia
 SESSION_SECRET=your-secret-key
 NODE_ENV=development
 ```
@@ -52,7 +52,7 @@ NODE_ENV=development
 ## Estructura del Proyecto
 
 ```
-mango-genfeb/
+mango-applia/
 ├── client/                 # Frontend React
 │   ├── src/
 │   │   ├── components/    # Componentes UI
@@ -87,7 +87,7 @@ mango-genfeb/
 
 ## Marca
 
-Desarrollado por **GenFeb**
+Desarrollado por **Applia**
 - Representante Legal: Econ. Daniel Ignacio Gómez Alvarado, Mgs.
 - Objeto Social: Desarrollo de software, consultoría, servicios integrales
 

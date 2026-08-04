@@ -337,9 +337,9 @@ export function StoreAdminCurrencyPanel({
                       <td className="px-2 py-3 align-middle">
                         <Button
                           type="button"
-                          variant="ghost"
+                          variant="outline"
                           size="icon"
-                          className="text-destructive hover:text-destructive"
+                          className="h-8 w-8 rounded-full border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive"
                           disabled={saving}
                           aria-label="Quitar tasa extra"
                           onClick={() => {

@@ -30,7 +30,7 @@
 import type { Express } from "express";
 import { z } from "zod";
 import { authenticateJWT, optionalAuthenticateJWT } from "./routes-auth";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getStoreSubscriptionQuote } from "./store-subscription";
 import {
   storeHasPendingSubscriptionPayment,
@@ -74,6 +74,7 @@ import {
   STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE,
   normalizeStoreLocation,
   normalizeStoreCurrencyFields,
+  normalizeStoreDeliveryFares,
 } from "@shared/store-schema";
 import {
   DOLARAPI_VE_BASE,
@@ -114,9 +115,46 @@ import {
   validateCheckoutPaymentMethod,
 } from "./store-cart";
 
-function serializeDate(value: Date | string | null | undefined): string | null {
+function serializeDate(value: Date | string | number | null | undefined | unknown): string | null {
   if (value == null) return null;
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  if (typeof value === "object") {
+    const o = value as {
+      toDate?: () => Date;
+      toMillis?: () => number;
+      seconds?: number;
+      _seconds?: number;
+      nanoseconds?: number;
+      _nanoseconds?: number;
+    };
+    if (typeof o.toDate === "function") {
+      try {
+        const d = o.toDate();
+        return d instanceof Date && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+      } catch {
+        return null;
+      }
+    }
+    if (typeof o.toMillis === "function") {
+      try {
+        const ms = o.toMillis();
+        return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+      } catch {
+        return null;
+      }
+    }
+    const sec = o.seconds ?? o._seconds;
+    if (typeof sec === "number" && Number.isFinite(sec)) {
+      const nano = o.nanoseconds ?? o._nanoseconds ?? 0;
+      return new Date(sec * 1000 + (typeof nano === "number" ? nano / 1e6 : 0)).toISOString();
+    }
+  }
   const t = Date.parse(String(value));
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
@@ -141,6 +179,8 @@ function serializeStoreProduct(
     ),
     categoryIds: product.categoryIds,
     ingredientMaterialIds: product.ingredientMaterialIds,
+    removableIngredientMaterialIds: product.removableIngredientMaterialIds ?? [],
+    ingredientAdditionals: product.ingredientAdditionals ?? [],
     imageUrls: product.imageUrls ?? [],
     showOnShowcase: product.showOnShowcase !== false,
     createdAt: serializeDate(product.createdAt),
@@ -164,7 +204,7 @@ function serializeStoreCategory(category: StoreCategory, products: StoreProduct[
 
 async function assertStoreProductIds(storeId: number, productIds: number[]): Promise<void> {
   if (productIds.length === 0) return;
-  const products = await genFebStorage.listStoreProducts(storeId);
+  const products = await appliaStorage.listStoreProducts(storeId);
   const valid = new Set(products.map((p) => p.id));
   for (const id of productIds) {
     if (!valid.has(id)) throw new Error("STORE_PRODUCT_INVALID");
@@ -206,9 +246,14 @@ async function assertStorePromotionItems(
 function serializeStoreShowcaseProduct(
   product: StoreProduct,
   store: Store,
+  ingredientNameById: Map<number, string> = new Map(),
 ) {
   const currency = normalizeStoreCurrencyFields(store);
   const displayPrice = resolveProductDisplayPrice(product, currency.currencyVisualId);
+  const ingredientMaterialIds = product.ingredientMaterialIds ?? [];
+  const removableIngredientMaterialIds = product.removableIngredientMaterialIds ?? [];
+  const ingredientAdditionals = product.ingredientAdditionals ?? [];
+  const resolveName = (id: number) => ingredientNameById.get(id) ?? `Item #${id}`;
   return {
     id: product.id,
     name: product.name,
@@ -219,6 +264,16 @@ function serializeStoreShowcaseProduct(
     displayCurrencyLabel: currencyLabelForId(currency.currencyVisualId, currency.currencyExtras),
     imageUrls: product.imageUrls ?? [],
     categoryIds: product.categoryIds ?? [],
+    ingredients: ingredientMaterialIds.map((id) => ({ id, name: resolveName(id) })),
+    removableIngredients: removableIngredientMaterialIds.map((id) => ({
+      id,
+      name: resolveName(id),
+    })),
+    additionals: ingredientAdditionals.map((a) => ({
+      id: a.ingredientMaterialId,
+      name: resolveName(a.ingredientMaterialId),
+      price: a.price,
+    })),
   };
 }
 
@@ -296,10 +351,10 @@ async function serializeStoreOrder(
   includeAllowedStatuses = false,
   storeOverride?: Store | null,
 ) {
-  const user = (await genFebStorage.getUserById(order.userId)) as
+  const user = (await appliaStorage.getUserById(order.userId)) as
     | { name?: string; firstName?: string; lastName?: string; email?: string }
     | undefined;
-  const store = storeOverride ?? (await genFebStorage.getStoreById(order.storeId));
+  const store = storeOverride ?? (await appliaStorage.getStoreById(order.storeId));
   const storeLocation = normalizeStoreLocation(store?.location ?? null);
   const customerName = user
     ? [user.name ?? user.firstName, user.lastName].filter(Boolean).join(" ").trim() || null
@@ -359,6 +414,7 @@ function serializeStore(
     coverImageUrl: store.coverImageUrl ?? null,
     location: store.location ?? null,
     fulfillmentOptions: normalizeStoreFulfillmentOptions(store.fulfillmentOptions),
+    deliveryFares: normalizeStoreDeliveryFares(store.deliveryFares),
     ...(() => {
       const currency = normalizeStoreCurrencyFields(store);
       return {
@@ -439,14 +495,14 @@ export function registerStoreRoutes(app: Express): void {
       const role = String(req.user?.role ?? "");
       let isAdmin = hasAdminPrivileges(role);
       if (!isAdmin) {
-        const dbUser = await genFebStorage.getUserById(userId);
+        const dbUser = await appliaStorage.getUserById(userId);
         isAdmin = hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
       }
       if (!isAdmin) {
         return res.status(403).json({ message: "Solo un administrador puede crear la tienda." });
       }
 
-      const existing = await genFebStorage.getOldestStore();
+      const existing = await appliaStorage.getOldestStore();
       if (existing) {
         return res.status(409).json({
           message: "Ya existe una tienda en el sistema.",
@@ -454,7 +510,7 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      const store = await genFebStorage.createStore({
+      const store = await appliaStorage.createStore({
         ownerUserId: userId,
         name: parsed.data.name,
       });
@@ -473,14 +529,14 @@ export function registerStoreRoutes(app: Express): void {
     try {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      let store = await genFebStorage.getStoreByOwnerUserId(userId);
+      let store = await appliaStorage.getStoreByOwnerUserId(userId);
       if (!store) {
-        const dbUser = await genFebStorage.getUserById(userId);
+        const dbUser = await appliaStorage.getUserById(userId);
         const admin =
           hasAdminPrivileges(req.user?.role) ||
           hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
         if (admin) {
-          store = (await genFebStorage.getOldestStore()) ?? undefined;
+          store = (await appliaStorage.getOldestStore()) ?? undefined;
         }
       }
       if (!store) return res.status(404).json({ message: "Aún no tienes una tienda." });
@@ -499,14 +555,14 @@ export function registerStoreRoutes(app: Express): void {
     try {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      let store = await genFebStorage.getStoreByOwnerUserId(userId);
+      let store = await appliaStorage.getStoreByOwnerUserId(userId);
       if (!store) {
-        const dbUser = await genFebStorage.getUserById(userId);
+        const dbUser = await appliaStorage.getUserById(userId);
         const admin =
           hasAdminPrivileges(req.user?.role) ||
           hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
         if (admin) {
-          store = (await genFebStorage.getOldestStore()) ?? undefined;
+          store = (await appliaStorage.getOldestStore()) ?? undefined;
         }
       }
       if (!store) return res.status(404).json({ message: "Aún no tienes una tienda." });
@@ -528,7 +584,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation)) {
         return res.status(400).json({ message: STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE });
       }
-      const updated = await genFebStorage.updateStore(store.id, parsed.data);
+      const updated = await appliaStorage.updateStore(store.id, parsed.data);
       const hasPending = await storeHasPendingSubscriptionPayment(updated.id);
       return res.json({
         store: serializeStore(updated, { hasPendingSubscriptionPayment: hasPending, isOwner: true }),
@@ -547,7 +603,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!parsed.success) {
         return res.status(400).json({ message: "Parámetros inválidos.", errors: parsed.error.errors });
       }
-      const stores = await genFebStorage.listActiveStores({ limit: 200 });
+      const stores = await appliaStorage.listActiveStores({ limit: 200 });
       const filtered = filterStoresByCatalogQuery(stores, {
         q: parsed.data.q,
         rubro: parsed.data.rubro,
@@ -559,10 +615,10 @@ export function registerStoreRoutes(app: Express): void {
     }
   });
 
-  /** Tienda única del sistema: la más antigua en BD (o null si no hay ninguna). */
+  /** Tienda única del sistema: la de menor id en BD (tienda nº 1), o null si no hay ninguna. */
   app.get("/api/stores/primary", async (_req, res) => {
     try {
-      const store = await genFebStorage.getOldestStore();
+      const store = await appliaStorage.getOldestStore();
       if (!store) return res.json({ store: null });
       return res.json({ store: serializeStoreCatalogItem(store) });
     } catch (e) {
@@ -585,7 +641,7 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
-      const existing = await genFebStorage.getStoreById(storeId);
+      const existing = await appliaStorage.getStoreById(storeId);
       if (!existing) return res.status(404).json({ message: "Tienda no encontrada." });
       const nextFulfillment =
         parsed.data.fulfillmentOptions !== undefined
@@ -596,7 +652,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation)) {
         return res.status(400).json({ message: STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE });
       }
-      const store = await genFebStorage.updateStore(storeId, parsed.data);
+      const store = await appliaStorage.updateStore(storeId, parsed.data);
       return res.json({ store: serializeStore(store, { isOwner: true }) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -651,8 +707,8 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
       const [categories, products] = await Promise.all([
-        genFebStorage.listStoreCategories(storeId),
-        genFebStorage.listStoreProducts(storeId),
+        appliaStorage.listStoreCategories(storeId),
+        appliaStorage.listStoreProducts(storeId),
       ]);
       return res.json({ categories: categories.map((c) => serializeStoreCategory(c, products)) });
     } catch (e: unknown) {
@@ -680,12 +736,12 @@ export function registerStoreRoutes(app: Express): void {
       }
       const productIds = parsed.data.productIds ?? [];
       await assertStoreProductIds(storeId, productIds);
-      const category = await genFebStorage.createStoreCategory(storeId, {
+      const category = await appliaStorage.createStoreCategory(storeId, {
         name: parsed.data.name,
         description: parsed.data.description,
       });
       await syncCategoryProductMembership(storeId, category.id, productIds);
-      const products = await genFebStorage.listStoreProducts(storeId);
+      const products = await appliaStorage.listStoreProducts(storeId);
       return res.status(201).json({ category: serializeStoreCategory(category, products) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -707,9 +763,9 @@ export function registerStoreRoutes(app: Express): void {
       const categoryId = parsePositiveIntParam(req.params.categoryId);
       if (!storeId || !categoryId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
-      const category = await genFebStorage.getStoreCategory(storeId, categoryId);
+      const category = await appliaStorage.getStoreCategory(storeId, categoryId);
       if (!category) return res.status(404).json({ message: "Categoría no encontrada." });
-      const products = await genFebStorage.listStoreProducts(storeId);
+      const products = await appliaStorage.listStoreProducts(storeId);
       return res.json({ category: serializeStoreCategory(category, products) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -738,14 +794,14 @@ export function registerStoreRoutes(app: Express): void {
       if (parsed.data.productIds != null) {
         await assertStoreProductIds(storeId, parsed.data.productIds);
       }
-      const category = await genFebStorage.updateStoreCategory(storeId, categoryId, {
+      const category = await appliaStorage.updateStoreCategory(storeId, categoryId, {
         name: parsed.data.name,
         description: parsed.data.description,
       });
       if (parsed.data.productIds != null) {
         await syncCategoryProductMembership(storeId, categoryId, parsed.data.productIds);
       }
-      const products = await genFebStorage.listStoreProducts(storeId);
+      const products = await appliaStorage.listStoreProducts(storeId);
       return res.json({ category: serializeStoreCategory(category, products) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -769,7 +825,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId || !categoryId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
       await removeCategoryFromAllProducts(storeId, categoryId);
-      await genFebStorage.deleteStoreCategory(storeId, categoryId);
+      await appliaStorage.deleteStoreCategory(storeId, categoryId);
       return res.status(204).send();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -789,8 +845,8 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
       const [promotions, products] = await Promise.all([
-        genFebStorage.listStorePromotions(storeId),
-        genFebStorage.listStoreProducts(storeId),
+        appliaStorage.listStorePromotions(storeId),
+        appliaStorage.listStoreProducts(storeId),
       ]);
       return res.json({ promotions: promotions.map((p) => serializeStorePromotion(p, products)) });
     } catch (e: unknown) {
@@ -817,8 +873,8 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
       await assertStorePromotionItems(storeId, parsed.data.items);
-      const promotion = await genFebStorage.createStorePromotion(storeId, parsed.data);
-      const products = await genFebStorage.listStoreProducts(storeId);
+      const promotion = await appliaStorage.createStorePromotion(storeId, parsed.data);
+      const products = await appliaStorage.listStoreProducts(storeId);
       return res.status(201).json({ promotion: serializeStorePromotion(promotion, products) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -840,9 +896,9 @@ export function registerStoreRoutes(app: Express): void {
       const promotionId = parsePositiveIntParam(req.params.promotionId);
       if (!storeId || !promotionId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
-      const promotion = await genFebStorage.getStorePromotion(storeId, promotionId);
+      const promotion = await appliaStorage.getStorePromotion(storeId, promotionId);
       if (!promotion) return res.status(404).json({ message: "Promoción no encontrada." });
-      const products = await genFebStorage.listStoreProducts(storeId);
+      const products = await appliaStorage.listStoreProducts(storeId);
       return res.json({ promotion: serializeStorePromotion(promotion, products) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -871,8 +927,8 @@ export function registerStoreRoutes(app: Express): void {
       if (parsed.data.items != null) {
         await assertStorePromotionItems(storeId, parsed.data.items);
       }
-      const promotion = await genFebStorage.updateStorePromotion(storeId, promotionId, parsed.data);
-      const products = await genFebStorage.listStoreProducts(storeId);
+      const promotion = await appliaStorage.updateStorePromotion(storeId, promotionId, parsed.data);
+      const products = await appliaStorage.listStoreProducts(storeId);
       return res.json({ promotion: serializeStorePromotion(promotion, products) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -895,7 +951,7 @@ export function registerStoreRoutes(app: Express): void {
       const promotionId = parsePositiveIntParam(req.params.promotionId);
       if (!storeId || !promotionId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
-      await genFebStorage.deleteStorePromotion(storeId, promotionId);
+      await appliaStorage.deleteStorePromotion(storeId, promotionId);
       return res.status(204).send();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -914,7 +970,7 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
-      const methods = await genFebStorage.listStorePaymentMethods(storeId);
+      const methods = await appliaStorage.listStorePaymentMethods(storeId);
       return res.json({ paymentMethods: methods.map(serializeStorePaymentMethod) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -939,7 +995,7 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
-      const method = await genFebStorage.createStorePaymentMethod(storeId, parsed.data);
+      const method = await appliaStorage.createStorePaymentMethod(storeId, parsed.data);
       return res.status(201).json({ paymentMethod: serializeStorePaymentMethod(method) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -965,7 +1021,7 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
-      const method = await genFebStorage.updateStorePaymentMethod(storeId, paymentMethodId, parsed.data);
+      const method = await appliaStorage.updateStorePaymentMethod(storeId, paymentMethodId, parsed.data);
       return res.json({ paymentMethod: serializeStorePaymentMethod(method) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -987,7 +1043,7 @@ export function registerStoreRoutes(app: Express): void {
       const paymentMethodId = parsePositiveIntParam(req.params.paymentMethodId);
       if (!storeId || !paymentMethodId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
-      await genFebStorage.deleteStorePaymentMethod(storeId, paymentMethodId);
+      await appliaStorage.deleteStorePaymentMethod(storeId, paymentMethodId);
       return res.status(204).send();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1008,10 +1064,10 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
-      let cart = await genFebStorage.getStoreCart(userId, storeId);
+      let cart = await appliaStorage.getStoreCart(userId, storeId);
       if (cart) cart = await pruneAndSaveCart(userId, cart);
       const payload = await enrichStoreCart(cart, storeId);
       return res.json({ cart: payload });
@@ -1027,7 +1083,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const parsed = addStoreCartItemSchema.safeParse(req.body ?? {});
@@ -1041,9 +1097,9 @@ export function registerStoreRoutes(app: Express): void {
       const incoming = addBodyToCartItem(parsed.data);
       await validateCartItemForStore(storeId, incoming);
 
-      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const existing = (await appliaStorage.getStoreCart(userId, storeId))?.items ?? [];
       const nextItems = mergeAddCartItem(existing, incoming);
-      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const saved = await appliaStorage.saveStoreCart(userId, storeId, nextItems);
       const payload = await enrichStoreCart(saved, storeId);
       return res.status(201).json({ cart: payload });
     } catch (e: unknown) {
@@ -1062,7 +1118,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const parsed = updateStoreCartItemSchema.safeParse(req.body ?? {});
@@ -1073,7 +1129,7 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const existing = (await appliaStorage.getStoreCart(userId, storeId))?.items ?? [];
       const nextItems = setCartItemQuantity(existing, parsed.data);
       if (parsed.data.quantity > 0) {
         const probe =
@@ -1082,7 +1138,7 @@ export function registerStoreRoutes(app: Express): void {
             : { kind: "promotion" as const, promotionId: parsed.data.promotionId!, quantity: parsed.data.quantity };
         await validateCartItemForStore(storeId, probe);
       }
-      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const saved = await appliaStorage.saveStoreCart(userId, storeId, nextItems);
       const payload = await enrichStoreCart(saved, storeId);
       return res.json({ cart: payload });
     } catch (e: unknown) {
@@ -1101,7 +1157,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const parsed = removeStoreCartItemSchema.safeParse(req.body ?? {});
@@ -1112,9 +1168,9 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      const existing = (await genFebStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const existing = (await appliaStorage.getStoreCart(userId, storeId))?.items ?? [];
       const nextItems = removeCartItem(existing, parsed.data);
-      const saved = await genFebStorage.saveStoreCart(userId, storeId, nextItems);
+      const saved = await appliaStorage.saveStoreCart(userId, storeId, nextItems);
       const payload = await enrichStoreCart(saved, storeId);
       return res.json({ cart: payload });
     } catch (e: unknown) {
@@ -1129,7 +1185,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const parsed = updateStoreCartFulfillmentSchema.safeParse(req.body ?? {});
@@ -1141,8 +1197,8 @@ export function registerStoreRoutes(app: Express): void {
       }
 
       await validateCartFulfillmentForStore(storeId, parsed.data.fulfillmentMode);
-      const existing = await genFebStorage.getStoreCart(userId, storeId);
-      const saved = await genFebStorage.saveStoreCart(
+      const existing = await appliaStorage.getStoreCart(userId, storeId);
+      const saved = await appliaStorage.saveStoreCart(
         userId,
         storeId,
         existing?.items ?? [],
@@ -1166,7 +1222,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const parsed = submitStoreCheckoutSchema.safeParse(req.body ?? {});
@@ -1177,7 +1233,7 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      let cart = await genFebStorage.getStoreCart(userId, storeId);
+      let cart = await appliaStorage.getStoreCart(userId, storeId);
       if (!cart) return res.status(400).json({ message: "El carrito está vacío." });
       cart = await pruneAndSaveCart(userId, cart);
       const enriched = await enrichStoreCart(cart, storeId);
@@ -1187,7 +1243,7 @@ export function registerStoreRoutes(app: Express): void {
 
       await validateCheckoutPaymentMethod(storeId, parsed.data.paymentMethodId);
       const fulfillmentMode = await validateCheckoutFulfillment(storeId, parsed.data.fulfillmentMode);
-      const paymentMethod = await genFebStorage.getStorePaymentMethod(storeId, parsed.data.paymentMethodId);
+      const paymentMethod = await appliaStorage.getStorePaymentMethod(storeId, parsed.data.paymentMethodId);
       if (!paymentMethod) {
         return res.status(400).json({ message: "Método de pago no válido." });
       }
@@ -1218,7 +1274,11 @@ export function registerStoreRoutes(app: Express): void {
         if (!deliveryLocation) {
           return res.status(400).json({ message: "Selecciona la ubicación de entrega." });
         }
-        const quote = await computeStoreDeliveryQuote(storeLocation, deliveryLocation);
+        const quote = await computeStoreDeliveryQuote(
+          storeLocation,
+          deliveryLocation,
+          store.deliveryFares,
+        );
         deliveryFee = quote.deliveryFee;
         deliveryDistanceM = quote.distanceM;
       }
@@ -1226,7 +1286,7 @@ export function registerStoreRoutes(app: Express): void {
       const amountDue =
         fulfillmentMode === "delivery" ? enriched.subtotal + deliveryFee : enriched.subtotal;
 
-      const order = await genFebStorage.createStoreOrder({
+      const order = await appliaStorage.createStoreOrder({
         storeId,
         userId,
         paymentMethodId: parsed.data.paymentMethodId,
@@ -1249,7 +1309,7 @@ export function registerStoreRoutes(app: Express): void {
         deliveryUnreadCount: 0,
       });
 
-      await genFebStorage.deleteStoreCart(userId, storeId);
+      await appliaStorage.deleteStoreCart(userId, storeId);
 
       void notifyStoreOwnerNewOrder(order, store).catch((err) =>
         console.error("[stores] notify owner new order", err),
@@ -1297,7 +1357,7 @@ export function registerStoreRoutes(app: Express): void {
       const orderId = orderIdRaw ? Number.parseInt(orderIdRaw, 10) : undefined;
       const statusParsed = statusRaw ? storeOrderStatusSchema.safeParse(statusRaw) : null;
 
-      const orders = await genFebStorage.listStoreOrders(storeId, {
+      const orders = await appliaStorage.listStoreOrders(storeId, {
         status: statusParsed?.success ? statusParsed.data : undefined,
         orderId: Number.isFinite(orderId) ? orderId : undefined,
         dateFrom: parseStoreOrderDateFilter(dateFromRaw),
@@ -1305,7 +1365,7 @@ export function registerStoreRoutes(app: Express): void {
         deliveryQueue: deliveryQueue || undefined,
       });
 
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       const serialized = await Promise.all(orders.map((o) => serializeStoreOrder(o, false, store)));
       return res.json({ orders: serialized });
     } catch (e: unknown) {
@@ -1346,10 +1406,10 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
 
-      const order = await genFebStorage.getStoreOrder(storeId, orderId);
+      const order = await appliaStorage.getStoreOrder(storeId, orderId);
       if (!order) return res.status(404).json({ message: "Orden no encontrada." });
 
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       return res.json({ order: await serializeStoreOrder(order, true, store) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1378,14 +1438,14 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      const existing = await genFebStorage.getStoreOrder(storeId, orderId);
+      const existing = await appliaStorage.getStoreOrder(storeId, orderId);
       if (!existing) return res.status(404).json({ message: "Orden no encontrada." });
 
       if (!canTransitionStoreOrderStatus(existing, parsed.data.status)) {
         return res.status(400).json({ message: "No puedes cambiar a ese estado desde el estado actual." });
       }
 
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       if (parsed.data.status === "listo_para_envio") {
@@ -1404,7 +1464,7 @@ export function registerStoreRoutes(app: Express): void {
         return res.json({ order: await serializeStoreOrder(order, true, store) });
       }
 
-      const order = await genFebStorage.updateStoreOrderStatus(storeId, orderId, parsed.data.status);
+      const order = await appliaStorage.updateStoreOrderStatus(storeId, orderId, parsed.data.status);
       void notifyCustomerStoreOrderStatusChanged(order, store).catch((err) =>
         console.error("[stores] notify customer order status", err),
       );
@@ -1450,8 +1510,8 @@ export function registerStoreRoutes(app: Express): void {
         const orderId = parsePositiveIntParam(req.params.orderId);
         if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
         await requireStoreOwner(userId, storeId);
-        const order = await genFebStorage.resetStoreOrderDeliveryUnread(storeId, orderId);
-        const store = await genFebStorage.getStoreById(storeId);
+        const order = await appliaStorage.resetStoreOrderDeliveryUnread(storeId, orderId);
+        const store = await appliaStorage.getStoreById(storeId);
         return res.json({ order: await serializeStoreOrder(order, false, store) });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1476,15 +1536,15 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
 
-      const order = await genFebStorage.getStoreOrder(storeId, orderId);
+      const order = await appliaStorage.getStoreOrder(storeId, orderId);
       if (!order) return res.status(404).json({ message: "Orden no encontrada." });
       if (order.fulfillmentMode !== "delivery") {
         return res.status(400).json({ message: "Esta orden no es delivery." });
       }
 
-      await genFebStorage.resetStoreOrderDeliveryUnread(storeId, orderId);
+      await appliaStorage.resetStoreOrderDeliveryUnread(storeId, orderId);
 
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       const packRide = order.packRideId ? await getPackRideDeliveryDetail(order.packRideId) : null;
 
       return res.json({
@@ -1516,7 +1576,7 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = storeIdRaw ? Number.parseInt(storeIdRaw, 10) : undefined;
       const statusParsed = statusRaw ? storeOrderStatusSchema.safeParse(statusRaw) : null;
 
-      const orders = await genFebStorage.listStoreOrdersForUser(userId, {
+      const orders = await appliaStorage.listStoreOrdersForUser(userId, {
         status: statusParsed?.success ? statusParsed.data : undefined,
         orderId: Number.isFinite(orderId) ? orderId : undefined,
         storeId: Number.isFinite(storeId) ? storeId : undefined,
@@ -1539,10 +1599,10 @@ export function registerStoreRoutes(app: Express): void {
       const orderId = parsePositiveIntParam(req.params.orderId);
       if (!orderId) return res.status(400).json({ message: "ID inválido." });
 
-      const order = await genFebStorage.getStoreOrderForUser(userId, orderId);
+      const order = await appliaStorage.getStoreOrderForUser(userId, orderId);
       if (!order) return res.status(404).json({ message: "Pedido no encontrado." });
 
-      const store = await genFebStorage.getStoreById(order.storeId);
+      const store = await appliaStorage.getStoreById(order.storeId);
       return res.json({ order: await serializeStoreOrder(order, false, store) });
     } catch (e) {
       console.error("[stores] get my order", e);
@@ -1556,9 +1616,9 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
-      const products = await genFebStorage.listStoreProducts(storeId);
+      const products = await appliaStorage.listStoreProducts(storeId);
       const currency = normalizeStoreCurrencyFields(store);
       return res.json({
         products: products.map((p) =>
@@ -1584,7 +1644,7 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
       const parsed = insertStoreProductSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -1596,7 +1656,7 @@ export function registerStoreRoutes(app: Express): void {
       const priceError = assertProductPricesForAcceptedCurrencies(store, parsed.data.pricesByCurrency);
       if (priceError) return res.status(400).json({ message: priceError });
       await assertStoreCategoryIds(storeId, parsed.data.categoryIds ?? []);
-      const product = await genFebStorage.createStoreProduct(storeId, parsed.data);
+      const product = await appliaStorage.createStoreProduct(storeId, parsed.data);
       const currency = normalizeStoreCurrencyFields(store);
       return res.status(201).json({
         product: serializeStoreProduct(product, {
@@ -1624,9 +1684,9 @@ export function registerStoreRoutes(app: Express): void {
       const productId = parsePositiveIntParam(req.params.productId);
       if (!storeId || !productId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
-      const product = await genFebStorage.getStoreProduct(storeId, productId);
+      const product = await appliaStorage.getStoreProduct(storeId, productId);
       if (!product) return res.status(404).json({ message: "Producto no encontrado." });
       const currency = normalizeStoreCurrencyFields(store);
       return res.json({
@@ -1652,7 +1712,7 @@ export function registerStoreRoutes(app: Express): void {
       const productId = parsePositiveIntParam(req.params.productId);
       if (!storeId || !productId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
-      const store = await genFebStorage.getStoreById(storeId);
+      const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
       const parsed = updateStoreProductSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -1662,7 +1722,7 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
       if (parsed.data.pricesByCurrency !== undefined || parsed.data.price !== undefined) {
-        const existing = await genFebStorage.getStoreProduct(storeId, productId);
+        const existing = await appliaStorage.getStoreProduct(storeId, productId);
         if (!existing) return res.status(404).json({ message: "Producto no encontrado." });
         const mergedPrices = {
           ...(existing.pricesByCurrency ?? {}),
@@ -1678,7 +1738,7 @@ export function registerStoreRoutes(app: Express): void {
       if (parsed.data.categoryIds != null) {
         await assertStoreCategoryIds(storeId, parsed.data.categoryIds);
       }
-      const product = await genFebStorage.updateStoreProduct(storeId, productId, parsed.data);
+      const product = await appliaStorage.updateStoreProduct(storeId, productId, parsed.data);
       const currency = normalizeStoreCurrencyFields(store);
       return res.json({
         product: serializeStoreProduct(product, {
@@ -1707,7 +1767,7 @@ export function registerStoreRoutes(app: Express): void {
       const productId = parsePositiveIntParam(req.params.productId);
       if (!storeId || !productId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
-      await genFebStorage.deleteStoreProduct(storeId, productId);
+      await appliaStorage.deleteStoreProduct(storeId, productId);
       return res.status(204).send();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1725,7 +1785,7 @@ export function registerStoreRoutes(app: Express): void {
       const slug = String(req.params.slug ?? "").trim();
       if (!slug) return res.status(400).json({ message: "Slug inválido." });
 
-      const store = await genFebStorage.getStoreBySlug(slug);
+      const store = await appliaStorage.getStoreBySlug(slug);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const viewerId = req.user?.id != null ? String(req.user.id) : null;
@@ -1735,16 +1795,20 @@ export function registerStoreRoutes(app: Express): void {
       const visibilityActive = isStoreVisibilityActive(storeForView);
 
       // Vitrina pública: clientes e invitados siempre ven productos (tienda única).
-      const all = await genFebStorage.listStoreProducts(storeForView.id);
+      const all = await appliaStorage.listStoreProducts(storeForView.id);
       const showcaseList = all.filter((p) => p.showOnShowcase !== false);
-      const products = showcaseList.map((p) => serializeStoreShowcaseProduct(p, storeForView));
+      const ingredientsPage = await appliaStorage.listIngredientsMaterials({ page: 1, limit: 500 });
+      const ingredientNameById = new Map(ingredientsPage.items.map((i) => [i.id, i.name]));
+      const products = showcaseList.map((p) =>
+        serializeStoreShowcaseProduct(p, storeForView, ingredientNameById),
+      );
 
-      const allCategories = await genFebStorage.listStoreCategories(storeForView.id);
+      const allCategories = await appliaStorage.listStoreCategories(storeForView.id);
       const categories = allCategories
         .filter((c) => productIdsForCategory(showcaseList, c.id).length > 0)
         .map(serializeShowcaseCategory);
 
-      const allPromotions = await genFebStorage.listStorePromotions(storeForView.id);
+      const allPromotions = await appliaStorage.listStorePromotions(storeForView.id);
       const promotions = allPromotions
         .filter((p) => p.status === "active" && p.items.some((item) => item.status === "active"))
         .map((p) => serializeStoreShowcasePromotion(p, all));
@@ -1773,7 +1837,7 @@ export function registerStoreRoutes(app: Express): void {
         return res.status(404).json({ message: "Ruta no válida." });
       }
 
-      const store = await genFebStorage.getStoreBySlug(slug);
+      const store = await appliaStorage.getStoreBySlug(slug);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const viewerId = req.user?.id != null ? String(req.user.id) : null;
@@ -1804,7 +1868,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!parsed.success) {
         return res.status(400).json({ message: "Parámetros inválidos.", errors: parsed.error.errors });
       }
-      const result = await genFebStorage.listIngredientsMaterials({
+      const result = await appliaStorage.listIngredientsMaterials({
         q: parsed.data.q,
         page: parsed.data.page,
         limit: INGREDIENTS_MATERIALS_PAGE_SIZE,
@@ -1838,7 +1902,7 @@ export function registerStoreRoutes(app: Express): void {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-      const item = await genFebStorage.createIngredientMaterial(parsed.data);
+      const item = await appliaStorage.createIngredientMaterial(parsed.data);
       return res.status(201).json({
         item: {
           id: item.id,

@@ -1,4 +1,4 @@
-// Reseñas y Ratings para GenFeb
+// Reseñas y Ratings para Applia
 
 import { pgTable, text, serial, integer, boolean, timestamp, varchar, decimal, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";

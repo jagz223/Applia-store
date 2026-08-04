@@ -1,5 +1,5 @@
 /* eslint-disable no-undef */
-// GenFeb — Service Worker unificado: PWA offline + Firebase Cloud Messaging (push)
+// Applia — Service Worker unificado: PWA offline + Firebase Cloud Messaging (push)
 // Generado desde sw.template.js — no editar sw.js a mano.
 
 importScripts("https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js");
@@ -16,7 +16,7 @@ firebase.initializeApp({
 
 firebase.messaging();
 
-const CACHE_NAME = "genfeb-v19";
+const CACHE_NAME = "applia-v20";
 const OFFLINE_URL = "/offline.html";
 
 const PRECACHE_ASSETS = [
@@ -26,7 +26,7 @@ const PRECACHE_ASSETS = [
   "/manifest.json",
   "/manifest.webmanifest",
   "/favicon.ico",
-  "/genfeb-logo-new.png",
+  "/applia-logo-new.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -106,21 +106,21 @@ function parseFcmPushPayload(raw) {
   const msg = raw.message || raw;
   const notification = msg.notification || {};
   const data = msg.data || msg;
-  const title = notification.title || (data && data.title) || "Genfeb";
+  const title = notification.title || (data && data.title) || "Applia";
   const body = notification.body || (data && data.body) || "Tienes una nueva notificación";
   const url = (data && data.url) || "/";
   const offerType = String((data && data.type) || "").toLowerCase();
   const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
   const rideId = data && data.rideId ? String(data.rideId) : "";
   const tagType =
-    (data && (data.type || data.withdrawalType || data.conversationId || data.transferId)) || "genfeb";
+    (data && (data.type || data.withdrawalType || data.conversationId || data.transferId)) || "applia";
   const tagId =
     rideId ||
     (data && (data.bookingId || data.messageId || data.transferId || data.conversationId)) ||
-    "genfeb";
+    "applia";
   const tag = isRideOffer && rideId
-    ? `genfeb-ride-offer-${rideId.replace(/[^a-zA-Z0-9-_]/g, "_")}`
-    : `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
+    ? `applia-ride-offer-${rideId.replace(/[^a-zA-Z0-9-_]/g, "_")}`
+    : `applia-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
   const isPanic = String((data && data.type) || "").toLowerCase() === "go_panic";
   const expiresAt = data && data.expiresAt ? Number(data.expiresAt) : 0;
   return { title, body, url, tag, isPanic, isRideOffer, rideId, expiresAt };
@@ -143,8 +143,8 @@ function stopOfferAlarm(rideId) {
 function showRideOfferNotification(title, body, url, tag, renotify) {
   return self.registration.showNotification(title, {
     body,
-    icon: "/genfeb-logo-new.png",
-    badge: "/genfeb-logo-new.png",
+    icon: "/applia-logo-new.png",
+    badge: "/applia-logo-new.png",
     tag,
     renotify: !!renotify,
     data: { url },
@@ -190,8 +190,8 @@ self.addEventListener("push", (event) => {
       : self.registration
           .showNotification(title, {
             body,
-            icon: "/genfeb-logo-new.png",
-            badge: "/genfeb-logo-new.png",
+            icon: "/applia-logo-new.png",
+            badge: "/applia-logo-new.png",
             tag,
             renotify: true,
             data: { url },
@@ -215,7 +215,7 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   const rideTag = event.notification.tag || "";
-  const m = /^genfeb-ride-offer-(.+)$/.exec(rideTag);
+  const m = /^applia-ride-offer-(.+)$/.exec(rideTag);
   if (m) stopOfferAlarm(m[1]);
   event.notification.close();
   const url = event.notification.data?.url || "/";

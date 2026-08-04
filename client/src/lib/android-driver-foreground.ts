@@ -2,12 +2,12 @@ import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
 import { hasGoDriverActiveRide } from "@/lib/cargo-driver-storage";
 import { isAndroidTwaApp } from "@/lib/go-driver-bubble-capability";
 
-const GENFEB_DRIVER_BRIDGE = "genfeb://driver";
-const GENFEB_TWA_PACKAGE = "com.genfeb.www.twa";
+const APPLIA_DRIVER_BRIDGE = "applia://driver";
+const APPLIA_TWA_PACKAGE = "com.applia.www.twa";
 
-export const ANDROID_OVERLAY_PENDING_KEY = "genfeb.androidOverlay.pending";
-export const ANDROID_BUBBLE_NOTIFY_KEY = "genfeb.androidBubble.notifyUnlocked";
-export const ANDROID_OVERLAY_GRANTED_KEY = "genfeb.androidOverlay.granted";
+export const ANDROID_OVERLAY_PENDING_KEY = "applia.androidOverlay.pending";
+export const ANDROID_BUBBLE_NOTIFY_KEY = "applia.androidBubble.notifyUnlocked";
+export const ANDROID_OVERLAY_GRANTED_KEY = "applia.androidOverlay.granted";
 
 let lastReceivingBridgeKey: string | null = null;
 
@@ -16,9 +16,9 @@ function androidModeParam(mode: GoDriverReceiveMode): string {
   return "both";
 }
 
-function buildGenfebBridgeUrl(path: string, query?: Record<string, string>): string {
+function buildAppliaBridgeUrl(path: string, query?: Record<string, string>): string {
   const normalized = path.startsWith("/") ? path : `/${path}`;
-  const url = new URL(`${GENFEB_DRIVER_BRIDGE}${normalized}`);
+  const url = new URL(`${APPLIA_DRIVER_BRIDGE}${normalized}`);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       url.searchParams.set(key, value);
@@ -28,17 +28,17 @@ function buildGenfebBridgeUrl(path: string, query?: Record<string, string>): str
 }
 
 function buildSameAppIntentUrl(path: string, query?: Record<string, string>): string {
-  const genfebUrl = buildGenfebBridgeUrl(path, query);
-  const withoutScheme = genfebUrl.replace(/^genfeb:\/\//, "");
+  const appliaUrl = buildAppliaBridgeUrl(path, query);
+  const withoutScheme = appliaUrl.replace(/^applia:\/\//, "");
   const fallback = encodeURIComponent(
-    typeof window !== "undefined" ? window.location.href.split("#")[0] : "https://genfeb.com/go/driver",
+    typeof window !== "undefined" ? window.location.href.split("#")[0] : "https://applia.com/go/driver",
   );
-  return `intent://${withoutScheme}#Intent;scheme=genfeb;package=${GENFEB_TWA_PACKAGE};S.browser_fallback_url=${fallback};end`;
+  return `intent://${withoutScheme}#Intent;scheme=applia;package=${APPLIA_TWA_PACKAGE};S.browser_fallback_url=${fallback};end`;
 }
 
 /** Puente sin navegar la pestaña (no recarga la TWA). */
-function fireGenfebBridgeSilent(path: string, query?: Record<string, string>): void {
-  const url = buildGenfebBridgeUrl(path, query);
+function fireAppliaBridgeSilent(path: string, query?: Record<string, string>): void {
+  const url = buildAppliaBridgeUrl(path, query);
   try {
     const iframe = document.createElement("iframe");
     iframe.style.cssText = "display:none;width:0;height:0;border:0;position:absolute";
@@ -121,7 +121,7 @@ export function notifyAndroidDriverReceiving(
   }
 
   if (!receiving) {
-    fireGenfebBridgeSilent("/receiving", { on: "0" });
+    fireAppliaBridgeSilent("/receiving", { on: "0" });
   }
 }
 
@@ -129,7 +129,7 @@ export function notifyAndroidDriverReceiving(
 export function stopAndroidDriverOverlayAfterRide(): void {
   if (!isAndroidTwaApp() || hasGoDriverActiveRide()) return;
   lastReceivingBridgeKey = "0";
-  fireGenfebBridgeSilent("/receiving", { on: "0" });
+  fireAppliaBridgeSilent("/receiving", { on: "0" });
 }
 
 export function openAndroidOverlayPermissionSettings(): void {
@@ -156,7 +156,7 @@ export function checkAndroidOverlayPermissionAfterReturn(): void {
   }
 
   const returnUrl = window.location.href.split("#")[0];
-  fireGenfebBridgeSilent("/overlay-check", { return: returnUrl });
+  fireAppliaBridgeSilent("/overlay-check", { return: returnUrl });
 }
 
 export type AndroidOverlayPermissionResult = "granted" | "denied";

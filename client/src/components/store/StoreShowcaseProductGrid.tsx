@@ -4,8 +4,6 @@ import {
   StoreShowcaseAddToCartButton,
   showcaseCartItemKey,
 } from "@/components/store/StoreShowcaseAddToCartButton";
-import { StoreShowcaseCardImage } from "@/components/store/StoreShowcaseCardImage";
-import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 function formatPrice(value: number, currencyLabel?: string) {
@@ -19,71 +17,86 @@ function formatPrice(value: number, currencyLabel?: string) {
 function ShowcaseProductCard({
   product,
   onAddToCart,
+  onSelect,
   addBusyKey,
-  large,
+  selected,
 }: {
   product: StoreShowcaseProduct;
   onAddToCart?: () => void;
+  onSelect?: () => void;
   addBusyKey?: string | null;
-  large?: boolean;
+  selected?: boolean;
 }) {
   const imageUrl = product.imageUrls[0]?.trim();
   const itemKey = showcaseCartItemKey("product", product.id);
   const busy = addBusyKey === itemKey;
 
-  if (large) {
-    return (
-      <Card className="overflow-hidden border-0 shadow-md bg-card flex flex-col rounded-2xl">
-        <CardContent className="p-0 flex flex-col">
-          <StoreShowcaseCardImage src={imageUrl} placeholderIcon={ImageIcon} />
-          <div className="p-3 flex flex-col gap-1.5">
-            <p className="text-sm font-bold leading-snug line-clamp-2 text-foreground">{product.name}</p>
-            {product.description ? (
-              <p className="text-xs text-muted-foreground line-clamp-2">{product.description}</p>
-            ) : null}
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-sm font-bold text-primary">
-                {formatPrice(product.price, product.displayCurrencyLabel)}
-              </span>
-              {onAddToCart ? (
-                <StoreShowcaseAddToCartButton
-                  variant="footer"
-                  onClick={onAddToCart}
-                  busy={busy}
-                  ariaLabel={`Añadir ${product.name} al carrito`}
-                />
-              ) : null}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <Card className="overflow-hidden border-border flex flex-col">
-      <CardContent className="p-0 flex flex-col">
-        <div className="relative">
-          <StoreShowcaseCardImage src={imageUrl} aspect="square" placeholderIcon={ImageIcon} />
-          {onAddToCart ? (
+    <article
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={onSelect}
+      onKeyDown={
+        onSelect
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect();
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        "group flex min-h-[17.5rem] flex-col overflow-hidden rounded-2xl border border-border/80 bg-white shadow-sm",
+        "transition-all dark:bg-card dark:border-border",
+        onSelect && "cursor-pointer hover:border-border hover:shadow-md",
+        selected && "border-foreground/40 ring-2 ring-foreground/80 shadow-md",
+      )}
+    >
+      <div className="relative bg-muted/20 p-3 pb-0">
+        <div className="relative aspect-[5/4] overflow-hidden rounded-xl bg-muted/40">
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt=""
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
+            </div>
+          )}
+          {onAddToCart && !onSelect ? (
+            <div onClick={(e) => e.stopPropagation()}>
+              <StoreShowcaseAddToCartButton
+                onClick={onAddToCart}
+                busy={busy}
+                ariaLabel={`Añadir ${product.name} al carrito`}
+              />
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="flex flex-1 flex-col gap-1 px-3.5 pb-4 pt-3">
+        <p className="text-sm font-bold leading-snug line-clamp-2 text-foreground">{product.name}</p>
+        <p className="text-sm font-semibold text-foreground">
+          {formatPrice(product.price, product.displayCurrencyLabel)}
+        </p>
+        {product.description ? (
+          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{product.description}</p>
+        ) : null}
+        {onAddToCart && onSelect ? (
+          <div className="mt-auto pt-2" onClick={(e) => e.stopPropagation()}>
             <StoreShowcaseAddToCartButton
+              variant="footer"
               onClick={onAddToCart}
               busy={busy}
               ariaLabel={`Añadir ${product.name} al carrito`}
             />
-          ) : null}
-        </div>
-        <div className="p-3 flex flex-col gap-1">
-          <p className="text-sm font-semibold leading-snug line-clamp-2 text-foreground">{product.name}</p>
-          <p className="text-sm font-medium text-primary">
-            {formatPrice(product.price, product.displayCurrencyLabel)}
-          </p>
-          {product.description ? (
-            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
+          </div>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
@@ -96,6 +109,8 @@ type StoreShowcaseProductGridProps = {
   centered?: boolean;
   largeCards?: boolean;
   onAddProductToCart?: (productId: number) => void;
+  onSelectProduct?: (product: StoreShowcaseProduct) => void;
+  selectedProductId?: number | null;
   addToCartBusyKey?: string | null;
 };
 
@@ -108,6 +123,8 @@ export function StoreShowcaseProductGrid({
   centered = false,
   largeCards = false,
   onAddProductToCart,
+  onSelectProduct,
+  selectedProductId,
   addToCartBusyKey,
 }: StoreShowcaseProductGridProps) {
   if (isLoading) {
@@ -128,7 +145,7 @@ export function StoreShowcaseProductGrid({
     return (
       <div
         className={cn(
-          "rounded-xl border border-dashed border-border py-12 px-6 text-center",
+          "rounded-[1.25rem] border border-dashed border-border bg-white/60 py-12 px-6 text-center dark:bg-card/40",
           className,
         )}
       >
@@ -138,54 +155,31 @@ export function StoreShowcaseProductGrid({
     );
   }
 
-  if (largeCards) {
-    return (
-      <div
-        className={cn(
-          "grid grid-cols-2 md:grid-cols-3 gap-4",
-          className,
-        )}
-      >
-        {products.map((product) => (
-          <ShowcaseProductCard
-            key={product.id}
-            product={product}
-            large
-            addBusyKey={addToCartBusyKey}
-            onAddToCart={onAddProductToCart ? () => onAddProductToCart(product.id) : undefined}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  if (centered) {
-    return (
-      <div className={cn("flex flex-wrap justify-center gap-4 max-w-2xl mx-auto", className)}>
-        {products.map((product) => (
-          <div key={product.id} className="w-[calc(50%-0.5rem)] sm:w-[180px]">
-            <ShowcaseProductCard
-              product={product}
-              addBusyKey={addToCartBusyKey}
-              onAddToCart={
-                onAddProductToCart ? () => onAddProductToCart(product.id) : undefined
-              }
-            />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  const gridClass = largeCards
+    ? "grid grid-cols-2 md:grid-cols-3 gap-4"
+    : centered
+      ? "flex flex-wrap justify-center gap-4 max-w-2xl mx-auto"
+      : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4";
 
   return (
-    <div className={cn("grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4", className)}>
+    <div className={cn(gridClass, className)}>
       {products.map((product) => (
-        <ShowcaseProductCard
+        <div
           key={product.id}
-          product={product}
-          addBusyKey={addToCartBusyKey}
-          onAddToCart={onAddProductToCart ? () => onAddProductToCart(product.id) : undefined}
-        />
+          className={centered && !largeCards ? "w-[calc(50%-0.5rem)] sm:w-[180px]" : undefined}
+        >
+          <ShowcaseProductCard
+            product={product}
+            addBusyKey={addToCartBusyKey}
+            selected={selectedProductId === product.id}
+            onSelect={onSelectProduct ? () => onSelectProduct(product) : undefined}
+            onAddToCart={
+              onAddProductToCart && !onSelectProduct
+                ? () => onAddProductToCart(product.id)
+                : undefined
+            }
+          />
+        </div>
       ))}
     </div>
   );

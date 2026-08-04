@@ -11,7 +11,7 @@ import {
   updateUserGoPresence,
 } from "./go-user-presence";
 
-const JWT_SECRET = process.env.JWT_SECRET || "genfeb-jwt-secret-key-2024";
+const JWT_SECRET = process.env.JWT_SECRET || "applia-jwt-secret-key-2024";
 
 interface ConnectedUser {
   userId: string;
@@ -147,7 +147,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
 
     // Send confirmation to client
     socket.emit("connected", {
-      message: "Connected to GenFeb real-time server",
+      message: "Connected to Applia real-time server",
       userId: user.id,
     });
   });
