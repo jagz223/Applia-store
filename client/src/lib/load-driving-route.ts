@@ -81,7 +81,10 @@ export async function fetchRoadDrivingRoute(
   const to = `${end.lon},${end.lat}`;
   const url = `/api/maps/route?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
 
-  const tryFetch = () => parseRoadRouteResponse(fetch(url));
+  const tryFetch = async () => {
+    const res = await fetch(url);
+    return parseRoadRouteResponse(res);
+  };
 
   try {
     const parsed = await tryFetch();

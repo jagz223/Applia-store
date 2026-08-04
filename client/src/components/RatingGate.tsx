@@ -39,7 +39,7 @@ export function RatingGate() {
         roleRated: firstPending.roleRated,
         stars: safeStars,
       });
-      toast({ title: "¡Gracias!", description: "Tu opinión ayuda a mejorar la comunidad GenFeb." });
+      toast({ title: "¡Gracias!", description: "Tu opinión ayuda a mejorar la comunidad Applia." });
     } catch (e) {
       toast({
         title: "No se pudo enviar",
@@ -94,7 +94,7 @@ export function RatingGate() {
               <p className="mx-auto mt-2 max-w-[18rem] text-sm leading-relaxed text-muted-foreground">
                 {isProfessional
                   ? "Tu calificación ayuda a otros usuarios a elegir con confianza."
-                  : "Tu calificación ayuda al asociado a seguir creciendo en GenFeb."}
+                  : "Tu calificación ayuda al asociado a seguir creciendo en Applia."}
               </p>
 
               {pendingCount > 1 ? (
@@ -144,7 +144,7 @@ export function RatingGate() {
               <RatingStarsPicker stars={stars} onChange={setStars} />
 
               <p className="rounded-xl border border-border/80 bg-muted/40 px-3 py-2.5 text-center text-xs leading-relaxed text-muted-foreground">
-                Para seguir usando GenFeb necesitamos tu valoración de este servicio. Solo toma unos segundos.
+                Para seguir usando Applia necesitamos tu valoración de este servicio. Solo toma unos segundos.
               </p>
 
               <Button

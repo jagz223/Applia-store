@@ -1,4 +1,4 @@
-import type { IStorage } from "./storage-genfeb";
+import type { IStorage } from "./storage-applia";
 
 const emptyFilters = { page: 1, limit: 100, name: "", email: "", lastName: "" } as const;
 

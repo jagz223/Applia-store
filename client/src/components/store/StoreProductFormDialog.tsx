@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import {
   useCreateStoreProduct,
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -28,6 +29,11 @@ import {
   IngredientMaterialPicker,
   type SelectedIngredient,
 } from "@/components/store/IngredientMaterialPicker";
+import { ProductRemovableIngredientsPicker } from "@/components/store/ProductRemovableIngredientsPicker";
+import {
+  ProductIngredientAdditionalsEditor,
+  type ProductIngredientAdditionalDraft,
+} from "@/components/store/ProductIngredientAdditionalsEditor";
 import { StoreProductCategoryPicker } from "@/components/store/StoreProductCategoryPicker";
 import type { SelectedEntity } from "@/components/store/StoreEntityMultiPicker";
 import { categoriesFromIds, useStoreCategories } from "@/hooks/use-store-categories";
@@ -98,6 +104,9 @@ export function StoreProductFormDialog({
   const [prices, setPrices] = useState<Record<string, string>>(() => emptyPrices(acceptedPaymentIds));
   const [hasIngredients, setHasIngredients] = useState(false);
   const [ingredients, setIngredients] = useState<SelectedIngredient[]>([]);
+  const [removableIds, setRemovableIds] = useState<number[]>([]);
+  const [hasAdditionals, setHasAdditionals] = useState(false);
+  const [additionals, setAdditionals] = useState<ProductIngredientAdditionalDraft[]>([]);
   const [categories, setCategories] = useState<SelectedEntity[]>([]);
   const [imageDrafts, setImageDrafts] = useState<StoreImageDraft[]>([]);
   const [resolving, setResolving] = useState(false);
@@ -109,11 +118,22 @@ export function StoreProductFormDialog({
   const saving = createMutation.isPending || updateMutation.isPending;
 
   const formSessionRef = useRef<string | null>(null);
+  /** Evita que el efecto de poda borre «a sacar»/adicionales mientras cargan los ingredientes. */
+  const hydratingIngredientsRef = useRef(false);
   const paymentIdsKey = acceptedPaymentIds.join("|");
+
+  const removableSet = useMemo(() => new Set(removableIds), [removableIds]);
+  const additionalOptions = useMemo(
+    () => ingredients.filter((i) => !removableSet.has(i.id)),
+    [ingredients, removableSet],
+  );
+  const showRemovableSection = hasIngredients && ingredients.length >= 2;
+  const additionalCurrencyLabel = currencyLabelForId(visualCurrencyId, currencyExtras);
 
   useEffect(() => {
     if (!open) {
       formSessionRef.current = null;
+      hydratingIngredientsRef.current = false;
       return;
     }
 
@@ -136,25 +156,48 @@ export function StoreProductFormDialog({
       }
       setPrices(nextPrices);
       const ids = product.ingredientMaterialIds ?? [];
+      const removable = product.removableIngredientMaterialIds ?? [];
+      const savedAdditionals = product.ingredientAdditionals ?? [];
+      hydratingIngredientsRef.current = ids.length > 0;
       setHasIngredients(ids.length > 0);
+      setRemovableIds(removable);
+      setHasAdditionals(savedAdditionals.length > 0);
+      setAdditionals(
+        savedAdditionals.map((a) => ({
+          ingredientMaterialId: a.ingredientMaterialId,
+          price: String(a.price),
+        })),
+      );
+      // Placeholders síncronos para que la poda no vacíe la selección antes de resolver nombres.
+      setIngredients(ids.map((id) => ({ id, name: `Item #${id}` })));
       setResolving(ids.length > 0);
-      void resolveIngredientNames(ids)
-        .then((resolved) => {
-          setIngredients(resolved);
-          setResolving(false);
-        })
-        .catch(() => {
-          setIngredients(ids.map((id) => ({ id, name: `Item #${id}` })));
-          setResolving(false);
-        });
+      if (ids.length === 0) {
+        hydratingIngredientsRef.current = false;
+      } else {
+        void resolveIngredientNames(ids)
+          .then((resolved) => {
+            setIngredients(resolved);
+          })
+          .catch(() => {
+            setIngredients(ids.map((id) => ({ id, name: `Item #${id}` })));
+          })
+          .finally(() => {
+            hydratingIngredientsRef.current = false;
+            setResolving(false);
+          });
+      }
       setImageDrafts(draftsFromSavedUrls(product.imageUrls ?? []));
       setCategories(categoriesFromIds(allCategories, product.categoryIds ?? []));
     } else {
+      hydratingIngredientsRef.current = false;
       setName("");
       setDescription("");
       setPrices(emptyPrices(acceptedPaymentIds));
       setHasIngredients(false);
       setIngredients([]);
+      setRemovableIds([]);
+      setHasAdditionals(false);
+      setAdditionals([]);
       setCategories([]);
       setImageDrafts([]);
       setResolving(false);
@@ -168,6 +211,52 @@ export function StoreProductFormDialog({
       return prev.map((p) => ({ id: p.id, name: map.get(p.id) ?? p.name }));
     });
   }, [open, allCategories]);
+
+  /** Mantener removibles/adicionales coherentes con la lista base. */
+  useEffect(() => {
+    if (hydratingIngredientsRef.current || resolving) return;
+    if (!hasIngredients) {
+      setRemovableIds([]);
+      setHasAdditionals(false);
+      setAdditionals([]);
+      return;
+    }
+    const ids = new Set(ingredients.map((i) => i.id));
+    setRemovableIds((prev) => {
+      const next = ingredients.length < 2 ? [] : prev.filter((id) => ids.has(id));
+      if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
+      return next;
+    });
+    setAdditionals((prev) => {
+      const next = prev.filter((a) => ids.has(a.ingredientMaterialId));
+      if (
+        next.length === prev.length &&
+        next.every((a, i) => a.ingredientMaterialId === prev[i]?.ingredientMaterialId)
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [hasIngredients, ingredients, resolving]);
+
+  /** Si un material pasa a «a sacar», sale de adicionales. */
+  useEffect(() => {
+    if (!hasAdditionals) return;
+    setAdditionals((prev) => {
+      const next = prev.filter((a) => !removableSet.has(a.ingredientMaterialId));
+      if (next.length === prev.length) return prev;
+      return next;
+    });
+  }, [hasAdditionals, removableSet]);
+
+  function handleIngredientsChange(next: SelectedIngredient[]) {
+    setIngredients(next);
+    const nextIds = new Set(next.map((i) => i.id));
+    setRemovableIds((prev) => prev.filter((id) => nextIds.has(id)));
+    setAdditionals((prev) =>
+      prev.filter((a) => nextIds.has(a.ingredientMaterialId)),
+    );
+  }
 
   function handleOpenChange(next: boolean) {
     if (!next) revokeBlobPreviews(imageDrafts);
@@ -214,6 +303,41 @@ export function StoreProductFormDialog({
       pricesByCurrency[STORE_CURRENCY_USD_ID] ??
       Object.values(pricesByCurrency)[0];
 
+    const baseIngredientIds = hasIngredients ? ingredients.map((i) => i.id) : [];
+    const nextRemovable =
+      hasIngredients && baseIngredientIds.length >= 2
+        ? removableIds.filter((id) => baseIngredientIds.includes(id))
+        : [];
+    const removableForbidden = new Set(nextRemovable);
+
+    let nextAdditionals: { ingredientMaterialId: number; price: number }[] = [];
+    if (hasIngredients && hasAdditionals) {
+      for (const row of additionals) {
+        if (!baseIngredientIds.includes(row.ingredientMaterialId)) continue;
+        if (removableForbidden.has(row.ingredientMaterialId)) {
+          toast({
+            variant: "destructive",
+            title: "Adicional inválido",
+            description: "Un adicional no puede estar también en «a sacar».",
+          });
+          return;
+        }
+        const n = Number(String(row.price).trim().replace(",", "."));
+        if (!Number.isFinite(n) || n <= 0) {
+          const label =
+            ingredients.find((i) => i.id === row.ingredientMaterialId)?.name ??
+            `Item #${row.ingredientMaterialId}`;
+          toast({
+            variant: "destructive",
+            title: "Precio de adicional inválido",
+            description: `Indica un precio mayor a 0 para «${label}».`,
+          });
+          return;
+        }
+        nextAdditionals.push({ ingredientMaterialId: row.ingredientMaterialId, price: n });
+      }
+    }
+
     try {
       const imageUrls = await resolveImageUrlsFromDrafts(imageDrafts);
       const payload = {
@@ -222,7 +346,9 @@ export function StoreProductFormDialog({
         price: visualPrice,
         pricesByCurrency,
         categoryIds: categories.map((c) => c.id),
-        ingredientMaterialIds: hasIngredients ? ingredients.map((i) => i.id) : [],
+        ingredientMaterialIds: baseIngredientIds,
+        removableIngredientMaterialIds: nextRemovable,
+        ingredientAdditionals: nextAdditionals,
         imageUrls,
         showOnShowcase: isEdit && product ? product.showOnShowcase : true,
       };
@@ -290,13 +416,12 @@ export function StoreProductFormDialog({
               return (
                 <div key={id} className="space-y-1.5">
                   <Label htmlFor={`product-price-${id}`}>Precio ({label})</Label>
-                  <Input
+                  <NumberField
                     id={`product-price-${id}`}
-                    type="number"
                     min="0.01"
                     step="0.01"
                     value={prices[id] ?? ""}
-                    onChange={(e) => setPrices((prev) => ({ ...prev, [id]: e.target.value }))}
+                    onChange={(next) => setPrices((prev) => ({ ...prev, [id]: next }))}
                     required
                   />
                 </div>
@@ -327,7 +452,12 @@ export function StoreProductFormDialog({
               checked={hasIngredients}
               onCheckedChange={(checked) => {
                 setHasIngredients(checked);
-                if (!checked) setIngredients([]);
+                if (!checked) {
+                  setIngredients([]);
+                  setRemovableIds([]);
+                  setHasAdditionals(false);
+                  setAdditionals([]);
+                }
               }}
             />
           </div>
@@ -339,7 +469,64 @@ export function StoreProductFormDialog({
                 Cargando ingredientes…
               </div>
             ) : (
-              <IngredientMaterialPicker selected={ingredients} onChange={setIngredients} />
+              <>
+                <IngredientMaterialPicker selected={ingredients} onChange={handleIngredientsChange} />
+
+                {showRemovableSection ? (
+                  <div className="space-y-2 rounded-lg border border-border p-3">
+                    <div>
+                      <p className="text-sm font-medium">Ingredientes o materiales a sacar</p>
+                      <p className="text-xs text-muted-foreground">
+                        Elige cuáles de los ya añadidos podrá quitar el cliente.
+                      </p>
+                    </div>
+                    <ProductRemovableIngredientsPicker
+                      options={ingredients}
+                      selectedIds={removableIds}
+                      onChange={(ids) => {
+                        setRemovableIds(ids);
+                        const blocked = new Set(ids);
+                        setAdditionals((prev) =>
+                          prev.filter((a) => !blocked.has(a.ingredientMaterialId)),
+                        );
+                      }}
+                      disabled={saving}
+                    />
+                  </div>
+                ) : ingredients.length === 1 ? (
+                  <p className="text-xs text-muted-foreground px-0.5">
+                    Añade al menos 2 ingredientes o materiales para configurar cuáles se pueden sacar.
+                  </p>
+                ) : null}
+
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="product-has-additionals">Adicionales</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Opcional. Extras con precio; no pueden estar en «a sacar».
+                    </p>
+                  </div>
+                  <Switch
+                    id="product-has-additionals"
+                    checked={hasAdditionals}
+                    disabled={saving || ingredients.length === 0}
+                    onCheckedChange={(checked) => {
+                      setHasAdditionals(checked);
+                      if (!checked) setAdditionals([]);
+                    }}
+                  />
+                </div>
+
+                {hasAdditionals ? (
+                  <ProductIngredientAdditionalsEditor
+                    options={additionalOptions}
+                    value={additionals}
+                    onChange={setAdditionals}
+                    disabled={saving}
+                    currencyLabel={additionalCurrencyLabel}
+                  />
+                ) : null}
+              </>
             )
           ) : null}
 

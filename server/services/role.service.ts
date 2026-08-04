@@ -6,7 +6,7 @@
 import { isImmutableRoleCode } from "@shared/role-definition";
 import { isHiddenCatalogRoleCode } from "@shared/role-permissions";
 import type { IRoleStorage } from "../storage-contracts";
-import type { RoleDefinition, NewRoleDefinition } from "../storage-genfeb";
+import type { RoleDefinition, NewRoleDefinition } from "../storage-applia";
 
 const IMMUTABLE_ROLE_MESSAGE =
   "El rol administrador no puede crearse ni modificarse desde el catálogo.";

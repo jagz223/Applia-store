@@ -33,7 +33,7 @@ const DEFAULT_CENTER: [number, number] = [-0.22, -78.5];
 const DEFAULT_ZOOM = 7;
 
 /** Misma vista entre taxi ↔ delivery (rutas distintas remontan el mapa). */
-const DRIVER_GO_MAP_VIEW_KEY = "genfeb.driverGo.mapView.v1";
+const DRIVER_GO_MAP_VIEW_KEY = "applia.driverGo.mapView.v1";
 
 type PersistedMapView = { lat: number; lng: number; zoom: number; at: number };
 
@@ -338,7 +338,7 @@ function DriverMapRecenterToolbar({
     if (!col) return;
 
     const el = document.createElement("div");
-    el.setAttribute("data-genfeb", "driver-map-recenter");
+    el.setAttribute("data-applia", "driver-map-recenter");
     el.className = "leaflet-control";
 
     let raf = 0;
@@ -546,8 +546,8 @@ export function DriverCargoMap({
       className={
         fullscreen
           ? cn(
-              "genfeb-driver-map-fs relative z-[1] h-full min-h-0 w-full overflow-hidden bg-muted/30",
-              receiving && "genfeb-driver-map-fs-receiving"
+              "applia-driver-map-fs relative z-[1] h-full min-h-0 w-full overflow-hidden bg-muted/30",
+              receiving && "applia-driver-map-fs-receiving"
             )
           : "relative z-[1] w-full overflow-hidden rounded-2xl border border-border ring-2 ring-primary/20 ring-offset-2 ring-offset-background"
       }

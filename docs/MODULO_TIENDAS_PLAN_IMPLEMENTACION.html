@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GenFeb — Módulo Tiendas: plan por prompts</title>
+  <title>Applia — Módulo Tiendas: plan por prompts</title>
   <style>
     :root {
       --bg: #0f1419;
@@ -162,7 +162,7 @@
   <header>
     <h1>Módulo Tiendas — Plan de implementación por prompts</h1>
     <p>
-      Desglose del requerimiento de tiendas online en GenFeb, ordenado de <strong>fundamentos</strong> a <strong>capas superficiales</strong>.
+      Desglose del requerimiento de tiendas online en Applia, ordenado de <strong>fundamentos</strong> a <strong>capas superficiales</strong>.
       Cada bloque es un prompt independiente que puedes pegar al asistente cuando corresponda.
       <strong>No implementar todo en un solo prompt.</strong>
     </p>
@@ -238,7 +238,7 @@ Usuario ──► Configuración ──► "Crear Tienda" ──► Alta (nombre
           <tr><td>10</td><td>Vista pago igual a la existente (QR, transferencia, comprobante)</td><td>3</td></tr>
           <tr><td>11</td><td>Admin: revisar/aprobar/rechazar pagos de tienda</td><td>3</td></tr>
           <tr><td>12</td><td>Rechazo → notificación + opción chat con staff</td><td>3</td></tr>
-          <tr><td>13</td><td>Navbar GenFeb: sección Tiendas, grid de cartas</td><td>7</td></tr>
+          <tr><td>13</td><td>Navbar Applia: sección Tiendas, grid de cartas</td><td>7</td></tr>
           <tr><td>14</td><td>Inactiva sin pago tienda; servicios ocultos sin pago pro</td><td>2, 7</td></tr>
         </tbody>
       </table>
@@ -344,7 +344,7 @@ Usuario ──► Configuración ──► "Crear Tienda" ──► Alta (nombre
       <ul>
         <li>Añadir constantes de colección en <code>FIRESTORE_COLLECTIONS</code>.</li>
         <li>Tipos Zod/shared: <code>Store</code>, <code>StoreProduct</code>, <code>IngredientMaterial</code>.</li>
-        <li>Métodos en <code>storage-genfeb.ts</code> / <code>storage-firestore.ts</code>: crear tienda, obtener por slug, por owner, listar tiendas activas (para fase 7).</li>
+        <li>Métodos en <code>storage-applia.ts</code> / <code>storage-firestore.ts</code>: crear tienda, obtener por slug, por owner, listar tiendas activas (para fase 7).</li>
         <li>API REST (ejemplo):
           <ul>
             <li><code>POST /api/stores</code> — crear (auth)</li>
@@ -358,7 +358,7 @@ Usuario ──► Configuración ──► "Crear Tienda" ──► Alta (nombre
       </ul>
 
       <h3>Texto sugerido para el asistente</h3>
-      <pre class="prompt">Implementa el módulo backend de Tiendas en GenFeb según docs/MODULO_TIENDAS_PLAN_IMPLEMENTACION.html — Prompt 1.
+      <pre class="prompt">Implementa el módulo backend de Tiendas en Applia según docs/MODULO_TIENDAS_PLAN_IMPLEMENTACION.html — Prompt 1.
 
 Incluye colecciones Firestore (stores, store_products, ingredients_materials), tipos shared, storage y rutas API mínimas. Un usuario solo puede tener una tienda. Ingredientes/materiales son globales con paginación de 20 y búsqueda por nombre. No hagas UI todavía.</pre>
 
@@ -581,7 +581,7 @@ Incluye colecciones Firestore (stores, store_products, ingredients_materials), t
   </main>
 
   <footer>
-    GenFeb · <code>docs/MODULO_TIENDAS_PLAN_IMPLEMENTACION.html</code> · Plan de prompts para módulo Tiendas
+    Applia · <code>docs/MODULO_TIENDAS_PLAN_IMPLEMENTACION.html</code> · Plan de prompts para módulo Tiendas
   </footer>
 </body>
 </html>

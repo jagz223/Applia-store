@@ -51,7 +51,7 @@ function getTitle(notification: { type: string; data?: any }): string {
     return getPublicPromoNotificationTitle(notification.type, data);
   }
   if (notification.type === "message") return "Nuevo mensaje";
-  if (notification.type === "admin" && data?.type === "go_panic") return "Pánico Genfeb Go";
+  if (notification.type === "admin" && data?.type === "go_panic") return "Pánico Applia Go";
   if (notification.type === "admin") return "Aviso del administrador";
   if (notification.type === "booking") return "Actualización de reserva";
   if (notification.type === "verification_result") return "Resultado de verificación";

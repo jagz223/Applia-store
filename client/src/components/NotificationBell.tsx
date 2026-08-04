@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Bell, MessageSquare, Calendar, Shield, Trash2, BellRing, Loader2, Building2, Ticket, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Badge } from "@/components/ui/badge";
 import { useSocket } from "@/hooks/use-socket";
 import { Link, useLocation } from "wouter";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useConversations } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
 import {
   NOTIFICATION_TYPE_CENTRAL_AFFILIATION,
   NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED,
@@ -636,131 +636,145 @@ export function NotificationBell() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className={`h-5 w-5 ${unreadCount > 0 ? "text-primary" : "text-foreground"}`} />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
+        <button
+          type="button"
+          className={cn(
+            "relative inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted/70 text-foreground transition-colors",
+            "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary/40",
+            unreadCount > 0 && "text-secondary",
+          )}
+          aria-label={unreadCount > 0 ? `${unreadCount} notificaciones sin leer` : "Notificaciones"}
+        >
+          <Bell className="h-4 w-4" />
+          {unreadCount > 0 ? (
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-secondary px-1 text-[0.6rem] font-bold text-secondary-foreground">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
-          )}
-          {isConnected && (
-            <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-green-500" />
-          )}
-        </Button>
+          ) : null}
+          {isConnected ? (
+            <span className="absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-2 ring-card" />
+          ) : null}
+        </button>
       </PopoverTrigger>
-      <PopoverContent className="w-80" align="end" sideOffset={8}>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-semibold">Notificaciones</h3>
-          {visibleNotifications.length > 0 && (
+      <PopoverContent
+        className="w-[21.5rem] overflow-hidden rounded-2xl border border-border/70 bg-card p-0 shadow-xl"
+        align="end"
+        sideOffset={10}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-gradient-to-r from-primary/8 via-secondary/8 to-accent/8 px-4 py-3.5">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Notificaciones</h3>
+            <p className="text-xs text-muted-foreground">
+              {unreadCount > 0 ? `${unreadCount} sin leer` : "Todo al día"}
+            </p>
+          </div>
+          {visibleNotifications.length > 0 ? (
             <Button
               variant="ghost"
               size="sm"
               onClick={clearNotifications}
-              className="text-xs text-muted-foreground hover:text-destructive"
+              className="h-8 rounded-full text-xs text-muted-foreground hover:text-destructive"
             >
-              <Trash2 className="h-3 w-3 mr-1" />
+              <Trash2 className="mr-1 h-3 w-3" />
               Limpiar
             </Button>
-          )}
+          ) : null}
         </div>
 
         {visibleNotifications.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Bell className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No hay notificaciones</p>
-            <p className="text-xs">Te avisaremos cuando haya novedades</p>
+          <div className="px-5 py-10 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
+              <Bell className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium">No hay notificaciones</p>
+            <p className="mt-1 text-xs text-muted-foreground">Te avisaremos cuando haya novedades</p>
           </div>
         ) : (
-          <div className="space-y-2 max-h-96 overflow-y-auto">
+          <div className="max-h-96 space-y-2 overflow-y-auto px-3 py-3">
             {pageNotifications.map((notification) => {
               const isPromo = isPublicPromoNotificationType(notification.type);
               const title = getTitle(notification.type, notification.data);
               const description = getDescription(notification.type, notification.data);
               return (
-              <button
-                key={notification.id}
-                type="button"
-                onClick={() => handleNotificationClick(notification)}
-                className={getNotificationCardClassName({ read: notification.read })}
-              >
-                <div className="flex items-start gap-2">
-                  {getIcon(notification.type)}
-                  <div className="flex-1 min-w-0">
-                    <p className={getNotificationTitleClassName()}>{title}</p>
-                    {description && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {description}
+                <button
+                  key={notification.id}
+                  type="button"
+                  onClick={() => handleNotificationClick(notification)}
+                  className={getNotificationCardClassName({ read: notification.read })}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted">
+                      {getIcon(notification.type)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className={getNotificationTitleClassName()}>{title}</p>
+                      {description ? (
+                        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+                      ) : null}
+                      {isPromo ? (
+                        <p className={getNotificationAccentCtaClassName()}>{PUBLIC_PROMO_NOTIFICATION_CTA}</p>
+                      ) : null}
+                      <p className="mt-1 text-[0.65rem] text-muted-foreground/80">
+                        {notification.timestamp instanceof Date
+                          ? notification.timestamp.toLocaleString()
+                          : new Date(notification.timestamp).toLocaleString()}
                       </p>
-                    )}
-                    {isPromo && (
-                      <p className={getNotificationAccentCtaClassName()}>{PUBLIC_PROMO_NOTIFICATION_CTA}</p>
-                    )}
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {notification.timestamp instanceof Date
-                        ? notification.timestamp.toLocaleString()
-                        : new Date(notification.timestamp).toLocaleString()}
-                    </p>
+                    </div>
+                    {!notification.read ? <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-secondary" /> : null}
                   </div>
-                  {!notification.read && (
-                    <Badge variant="default" className="h-2 w-2 p-0 rounded-full" />
-                  )}
-                </div>
-              </button>
-            );
+                </button>
+              );
             })}
           </div>
         )}
 
-        {visibleNotifications.length > PAGE_SIZE && currentPage === 1 && (
-          <div className="mt-2 flex items-center justify-center">
+        {visibleNotifications.length > PAGE_SIZE && currentPage === 1 ? (
+          <div className="flex items-center justify-center px-3 pb-2">
             <button
               type="button"
               onClick={() => setPage(2)}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
+              className="text-xs text-muted-foreground underline transition-colors hover:text-foreground"
               aria-label="Ver mas notificaciones"
             >
               +{visibleNotifications.length - PAGE_SIZE} notificaciones mas
             </button>
           </div>
-        )}
+        ) : null}
 
-        {visibleNotifications.length > PAGE_SIZE && totalPages > 1 && (
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
+        {visibleNotifications.length > PAGE_SIZE && totalPages > 1 ? (
+          <div className="flex items-center justify-between gap-2 border-t border-border/60 px-3 py-2">
+            <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
               Anterior
             </Button>
             <span className="text-xs text-muted-foreground">
-              Pagina {currentPage}/{totalPages}
+              {currentPage}/{totalPages}
             </span>
-            <Button variant="ghost" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+            <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
               Siguiente
             </Button>
           </div>
-        )}
+        ) : null}
 
-        {currentPage > 1 && (
-          <div className="mt-2 flex items-center justify-center">
-            <Button variant="ghost" size="sm" className="text-xs" onClick={() => setPage(1)}>
-              Limpiar filtro (volver a las nuevas)
+        {currentPage > 1 ? (
+          <div className="flex items-center justify-center px-3 pb-2">
+            <Button variant="ghost" size="sm" className="rounded-full text-xs" onClick={() => setPage(1)}>
+              Volver a las nuevas
             </Button>
           </div>
-        )}
+        ) : null}
 
-        <div className="mt-3">
+        <div className="space-y-1.5 border-t border-border/60 bg-muted/30 px-3 py-3">
           <Link
             href="/notifications"
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
+            className="block rounded-xl px-3 py-2 text-center text-xs font-medium text-primary transition-colors hover:bg-card"
             onClick={() => setOpen(false)}
           >
             Ver historial completo
           </Link>
-        </div>
-
-        <div className="mt-4 pt-3 border-t border-border">
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground font-normal"
+            className="h-auto w-full justify-start rounded-xl px-3 py-2 font-normal text-muted-foreground hover:text-foreground"
             onClick={() => push.register()}
             disabled={
               !push.isSupported ||
@@ -769,17 +783,19 @@ export function NotificationBell() {
             }
           >
             {push.isRegistering ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : push.permission === "granted" && push.token ? (
-              <Bell className="h-4 w-4 mr-2 text-green-500" />
+              <Bell className="mr-2 h-4 w-4 text-emerald-500" />
             ) : (
-              <BellRing className="h-4 w-4 mr-2" />
+              <BellRing className="mr-2 h-4 w-4" />
             )}
-            {push.isRegistering
-              ? "Activando..."
-              : push.permission === "granted" && push.token
-                ? "Avisos en el navegador activos"
-                : "Recibir avisos en el navegador"}
+            <span className="text-xs">
+              {push.isRegistering
+                ? "Activando..."
+                : push.permission === "granted" && push.token
+                  ? "Avisos en el navegador activos"
+                  : "Recibir avisos en el navegador"}
+            </span>
           </Button>
         </div>
       </PopoverContent>

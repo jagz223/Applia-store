@@ -1,6 +1,6 @@
 /**
  * Implementación de almacenamiento con Firestore
- * GenFeb
+ * Applia
  * 
  * Este módulo proporciona una implementación de IStorage usando
  * Google Cloud Firestore como base de datos.
@@ -12,7 +12,7 @@ import {
   initializeFirebase,
 } from "./firebase-admin";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
-import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
+import { getAppliaStatsMonthKey } from "@shared/ecuador-calendar";
 import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
 import type { 
   Category, 
@@ -28,7 +28,7 @@ import type {
 } from "@shared/schema";
 import type { InsertProviderVehicle } from "@shared/vehicle-schema";
 import { SYSTEM_ROLE_CATALOG_DEFAULTS } from "@shared/role-definition";
-import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-genfeb";
+import type { IStorage, RoleDefinition, NewRoleDefinition } from "./storage-applia";
 import { calcCommission, calcProviderNet, roundToCents } from "@shared/platform-commission";
 import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shared/wallet-limits";
 import { getPlatformCommissionRate } from "./platform-commission-rate";
@@ -60,7 +60,10 @@ import {
   INGREDIENTS_MATERIALS_PAGE_SIZE,
   normalizeStoreLocation,
   normalizeStoreCurrencyFields,
+  normalizeStoreDeliveryFares,
+  normalizeStoreProductIngredientOptions,
   resolveStoreProductPriceFields,
+  DEFAULT_STORE_DELIVERY_FARES,
   type Store,
   type IngredientMaterial,
   type InsertStore,
@@ -1401,7 +1404,7 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) return;
     const id = subcategoryId != null ? Number(subcategoryId) : NaN;
     if (!Number.isFinite(id) || id <= 0) return;
-    const monthKey = getGenfebStatsMonthKey();
+    const monthKey = getAppliaStatsMonthKey();
     const coll = this.db.collection(FIRESTORE_COLLECTIONS.STATS_SUBCATEGORY_BOOKINGS_MONTHLY);
     const docRef = coll.doc(monthKey);
     const field = `c_${id}`;
@@ -1420,7 +1423,7 @@ class FirestoreStorageImpl implements IStorage {
     limit: number
   ): Promise<{ subcategoryId: number; count: number }[]> {
     if (!this.db) return [];
-    const safeMonth = /^[0-9]{4}-[0-9]{2}$/.test(monthKey) ? monthKey : getGenfebStatsMonthKey();
+    const safeMonth = /^[0-9]{4}-[0-9]{2}$/.test(monthKey) ? monthKey : getAppliaStatsMonthKey();
     const lim = Math.min(50, Math.max(1, Math.floor(limit)));
     const doc = await this.db.collection(FIRESTORE_COLLECTIONS.STATS_SUBCATEGORY_BOOKINGS_MONTHLY).doc(safeMonth).get();
     if (!doc.exists) return [];
@@ -1863,7 +1866,7 @@ class FirestoreStorageImpl implements IStorage {
       } else if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
         if (!canAffordOffPlatformCommission(providerWallet, commission)) {
           throw new Error(
-            `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo GenFeb.`
+            `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo Applia.`
           );
         }
         t.update(providerUserRef, { 
@@ -1912,7 +1915,7 @@ class FirestoreStorageImpl implements IStorage {
     riderUserId: string;
     driverUserId: string;
     estimatedUsd: number;
-    paymentMethod: "genfeb" | "cash" | "bank_transfer";
+    paymentMethod: "applia" | "cash" | "bank_transfer";
   }): Promise<void> {
     if (!this.db) throw new Error("Firestore no configurado");
     const cost = roundToCents(
@@ -1937,7 +1940,7 @@ class FirestoreStorageImpl implements IStorage {
     const now = new Date();
     const refId = `cargo:${input.rideId}`;
 
-    if (input.paymentMethod === "genfeb") {
+    if (input.paymentMethod === "applia") {
       const transferId1 = await this.getNextId("wallet_transfers");
       const transferId2 = await this.getNextId("wallet_transfers");
       const transferId3 = await this.getNextId("wallet_transfers");
@@ -1951,7 +1954,7 @@ class FirestoreStorageImpl implements IStorage {
         if (!adminSnap2.exists) throw new Error("Admin no encontrado");
         const rData = riderSnap.data() as { wallet?: number };
         const riderWallet = typeof rData.wallet === "number" ? rData.wallet : 0;
-        if (riderWallet < cost) throw new Error("Saldo insuficiente del pasajero (Saldo GenFeb).");
+        if (riderWallet < cost) throw new Error("Saldo insuficiente del pasajero (Saldo Applia).");
         const dData = driverSnap.data() as { wallet?: number; totalEarnings?: number; completedTrips?: number };
         const dWallet = typeof dData.wallet === "number" ? dData.wallet : 0;
         const dEarnings = typeof dData.totalEarnings === "number" ? dData.totalEarnings : 0;
@@ -1969,7 +1972,7 @@ class FirestoreStorageImpl implements IStorage {
         t.update(adminRef, { wallet: aWallet + commission, totalEarnings: aEarnings + commission, updatedAt: now });
         t.set(transfersColl.doc(String(transferId1)), {
           id: transferId1, userId: input.riderUserId, fromUserId: null, amount: cost,
-          transferType: "payment", status: "completed", description: "Pago viaje Car Go (Saldo GenFeb)",
+          transferType: "payment", status: "completed", description: "Pago viaje Car Go (Saldo Applia)",
           referenceId: refId, currency: "USD", createdAt: now,
         });
         t.set(transfersColl.doc(String(transferId2)), {
@@ -1979,7 +1982,7 @@ class FirestoreStorageImpl implements IStorage {
         });
         t.set(transfersColl.doc(String(transferId3)), {
           id: transferId3, userId: adminUserId, fromUserId: null, amount: commission,
-          transferType: "service_payment", status: "completed", description: "Comisión de plataforma (Car Go, genfeb)",
+          transferType: "service_payment", status: "completed", description: "Comisión de plataforma (Car Go, applia)",
           referenceId: refId, currency: "USD", createdAt: now,
         });
       });
@@ -2015,7 +2018,7 @@ class FirestoreStorageImpl implements IStorage {
       const dTrips = typeof dData.completedTrips === "number" ? dData.completedTrips : 0;
       if (!canAffordOffPlatformCommission(dWallet, commission)) {
         throw new Error(
-          `No se puede completar: la comisión te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Acepta viajes con Saldo GenFeb o recarga.`
+          `No se puede completar: la comisión te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Acepta viajes con Saldo Applia o recarga.`
         );
       }
       const aData = adminSnap2.data() as { wallet?: number; totalEarnings?: number };
@@ -2144,7 +2147,7 @@ class FirestoreStorageImpl implements IStorage {
       const clientWallet = typeof clientData.wallet === "number" ? clientData.wallet : 0;
       const clientPending = typeof clientData.pendingBalance === "number" ? clientData.pendingBalance : 0;
       if (clientWallet < cost) {
-        throw new Error("Saldo insuficiente. Añade saldo a tu Saldo Genfeb para confirmar el pago.");
+        throw new Error("Saldo insuficiente. Añade saldo a tu Saldo Applia para confirmar el pago.");
       }
 
       t.update(clientRef, {
@@ -4303,6 +4306,7 @@ class FirestoreStorageImpl implements IStorage {
       coverImageUrl: null,
       location: null,
       fulfillmentOptions: [],
+      deliveryFares: { ...DEFAULT_STORE_DELIVERY_FARES },
       currencyExtras: [],
       currencyVisualId: STORE_CURRENCY_USD_ID,
       currencyAcceptedPaymentIds: [STORE_CURRENCY_USD_ID],
@@ -4330,6 +4334,9 @@ class FirestoreStorageImpl implements IStorage {
     }
     if (input.fulfillmentOptions !== undefined) {
       patch.fulfillmentOptions = normalizeStoreFulfillmentOptions(input.fulfillmentOptions);
+    }
+    if (input.deliveryFares !== undefined) {
+      patch.deliveryFares = normalizeStoreDeliveryFares(input.deliveryFares);
     }
     if (input.location !== undefined) {
       patch.location =
@@ -4406,6 +4413,7 @@ class FirestoreStorageImpl implements IStorage {
     return stores.slice(0, limit);
   }
 
+  /** Tienda principal del sistema: la de menor id (tienda nº 1). */
   async getOldestStore(): Promise<Store | undefined> {
     if (!this.db) return undefined;
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.STORES).limit(500).get();
@@ -4413,10 +4421,7 @@ class FirestoreStorageImpl implements IStorage {
       .map((doc) => this.mapStoreDoc(doc.id, doc.data()))
       .filter((store): store is Store => store != null);
     if (stores.length === 0) return undefined;
-    stores.sort(
-      (a, b) =>
-        this.timestampToMs(a.createdAt) - this.timestampToMs(b.createdAt) || a.id - b.id,
-    );
+    stores.sort((a, b) => a.id - b.id);
     return stores[0];
   }
 
@@ -4600,6 +4605,7 @@ class FirestoreStorageImpl implements IStorage {
       input,
       store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
     );
+    const ingredientOptions = normalizeStoreProductIngredientOptions(input);
     const payload: StoreProduct = {
       id,
       storeId,
@@ -4608,7 +4614,7 @@ class FirestoreStorageImpl implements IStorage {
       price,
       pricesByCurrency,
       categoryIds: input.categoryIds ?? [],
-      ingredientMaterialIds: input.ingredientMaterialIds ?? [],
+      ...ingredientOptions,
       imageUrls: input.imageUrls ?? [],
       showOnShowcase: input.showOnShowcase ?? true,
       createdAt: now,
@@ -4643,7 +4649,21 @@ class FirestoreStorageImpl implements IStorage {
       patch.pricesByCurrency = priceFields.pricesByCurrency;
     }
     if (input.categoryIds !== undefined) patch.categoryIds = input.categoryIds;
-    if (input.ingredientMaterialIds !== undefined) patch.ingredientMaterialIds = input.ingredientMaterialIds;
+    if (
+      input.ingredientMaterialIds !== undefined ||
+      input.removableIngredientMaterialIds !== undefined ||
+      input.ingredientAdditionals !== undefined
+    ) {
+      const ingredientOptions = normalizeStoreProductIngredientOptions({
+        ingredientMaterialIds: input.ingredientMaterialIds ?? existing.ingredientMaterialIds,
+        removableIngredientMaterialIds:
+          input.removableIngredientMaterialIds ?? existing.removableIngredientMaterialIds,
+        ingredientAdditionals: input.ingredientAdditionals ?? existing.ingredientAdditionals,
+      });
+      patch.ingredientMaterialIds = ingredientOptions.ingredientMaterialIds;
+      patch.removableIngredientMaterialIds = ingredientOptions.removableIngredientMaterialIds;
+      patch.ingredientAdditionals = ingredientOptions.ingredientAdditionals;
+    }
     if (input.imageUrls !== undefined) patch.imageUrls = input.imageUrls;
     if (input.showOnShowcase !== undefined) patch.showOnShowcase = input.showOnShowcase;
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS).doc(String(productId)).update(patch);
@@ -5013,8 +5033,8 @@ class FirestoreStorageImpl implements IStorage {
           : storeOrderStatusSchema.safeParse(data.status).success
             ? (data.status as StoreOrder["status"])
             : "pagado",
-      createdAt: data.createdAt ?? new Date(),
-      updatedAt: data.updatedAt ?? new Date(),
+      createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
+      updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
     };
   }
 
@@ -5075,6 +5095,18 @@ class FirestoreStorageImpl implements IStorage {
           kind: "product" as const,
           productId: item.productId,
           quantity: Math.max(1, Math.min(9999, Math.floor(item.quantity))),
+          removedIngredientMaterialIds: Array.isArray(item.removedIngredientMaterialIds)
+            ? item.removedIngredientMaterialIds
+                .map((n) => Number(n))
+                .filter((n) => Number.isFinite(n) && n > 0)
+                .sort((a, b) => a - b)
+            : [],
+          additionalIngredientMaterialIds: Array.isArray(item.additionalIngredientMaterialIds)
+            ? item.additionalIngredientMaterialIds
+                .map((n) => Number(n))
+                .filter((n) => Number.isFinite(n) && n > 0)
+                .sort((a, b) => a - b)
+            : [],
         };
       }
       return {
@@ -5102,7 +5134,25 @@ class FirestoreStorageImpl implements IStorage {
         if (kind === "product") {
           const productId = Number(r.productId);
           if (!Number.isFinite(productId) || productId <= 0) return null;
-          return { kind: "product" as const, productId, quantity: Math.floor(quantity) };
+          const removedIngredientMaterialIds = Array.isArray(r.removedIngredientMaterialIds)
+            ? r.removedIngredientMaterialIds
+                .map((n) => Number(n))
+                .filter((n) => Number.isFinite(n) && n > 0)
+                .sort((a, b) => a - b)
+            : [];
+          const additionalIngredientMaterialIds = Array.isArray(r.additionalIngredientMaterialIds)
+            ? r.additionalIngredientMaterialIds
+                .map((n) => Number(n))
+                .filter((n) => Number.isFinite(n) && n > 0)
+                .sort((a, b) => a - b)
+            : [];
+          return {
+            kind: "product" as const,
+            productId,
+            quantity: Math.floor(quantity),
+            removedIngredientMaterialIds,
+            additionalIngredientMaterialIds,
+          };
         }
         const promotionId = Number(r.promotionId);
         if (!Number.isFinite(promotionId) || promotionId <= 0) return null;
@@ -5234,6 +5284,11 @@ class FirestoreStorageImpl implements IStorage {
       price: Number(data.price ?? 0),
       pricesByCurrency: data.pricesByCurrency,
     });
+    const ingredientOptions = normalizeStoreProductIngredientOptions({
+      ingredientMaterialIds: data.ingredientMaterialIds,
+      removableIngredientMaterialIds: data.removableIngredientMaterialIds,
+      ingredientAdditionals: data.ingredientAdditionals,
+    });
     return {
       id,
       storeId: Number(data.storeId),
@@ -5244,9 +5299,7 @@ class FirestoreStorageImpl implements IStorage {
       categoryIds: Array.isArray(data.categoryIds)
         ? data.categoryIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
         : [],
-      ingredientMaterialIds: Array.isArray(data.ingredientMaterialIds)
-        ? data.ingredientMaterialIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
-        : [],
+      ...ingredientOptions,
       imageUrls: Array.isArray(data.imageUrls)
         ? data.imageUrls.map((x) => String(x).trim()).filter((u) => u.length > 0).slice(0, 4)
         : [],
@@ -5281,6 +5334,7 @@ class FirestoreStorageImpl implements IStorage {
         : null,
       location: normalizeStoreLocation(data.location),
       fulfillmentOptions: normalizeStoreFulfillmentOptions(data.fulfillmentOptions),
+      deliveryFares: normalizeStoreDeliveryFares(data.deliveryFares),
       currencyExtras: currency.currencyExtras,
       currencyVisualId: currency.currencyVisualId,
       currencyAcceptedPaymentIds: currency.currencyAcceptedPaymentIds,
@@ -5302,13 +5356,38 @@ class FirestoreStorageImpl implements IStorage {
 
   private readFirestoreDate(raw: unknown): Date | null {
     if (raw == null) return null;
-    if (raw instanceof Date) return raw;
-    if (typeof raw === "object" && raw !== null && typeof (raw as { toDate?: () => Date }).toDate === "function") {
-      try {
-        const d = (raw as { toDate: () => Date }).toDate();
-        return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
-      } catch {
-        return null;
+    if (raw instanceof Date) {
+      return Number.isNaN(raw.getTime()) ? null : raw;
+    }
+    if (typeof raw === "object" && raw !== null) {
+      const o = raw as {
+        toDate?: () => Date;
+        toMillis?: () => number;
+        seconds?: number;
+        _seconds?: number;
+        nanoseconds?: number;
+        _nanoseconds?: number;
+      };
+      if (typeof o.toDate === "function") {
+        try {
+          const d = o.toDate();
+          return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
+        } catch {
+          return null;
+        }
+      }
+      if (typeof o.toMillis === "function") {
+        try {
+          const ms = o.toMillis();
+          return Number.isFinite(ms) ? new Date(ms) : null;
+        } catch {
+          return null;
+        }
+      }
+      const sec = o.seconds ?? o._seconds;
+      if (typeof sec === "number" && Number.isFinite(sec)) {
+        const nano = o.nanoseconds ?? o._nanoseconds ?? 0;
+        return new Date(sec * 1000 + (typeof nano === "number" ? nano / 1e6 : 0));
       }
     }
     if (typeof raw === "string") {
@@ -5375,8 +5454,8 @@ export async function initializeFirestoreStorage(): Promise<FirestoreStorage> {
   if (!initialized) {
     console.log("⚠️ Usando almacenamiento en memoria (Firebase no configurado)");
     // Retorna el storage en memoria
-    const { genFebStorage } = await import("./storage-genfeb");
-    return genFebStorage as unknown as FirestoreStorage;
+    const { appliaStorage } = await import("./storage-applia");
+    return appliaStorage as unknown as FirestoreStorage;
   }
   
   return getFirestoreStorage();

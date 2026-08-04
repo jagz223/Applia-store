@@ -1,5 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 
+export type StoreShowcaseIngredient = {
+  id: number;
+  name: string;
+};
+
+export type StoreShowcaseAdditional = {
+  id: number;
+  name: string;
+  price: number;
+};
+
 export type StoreShowcaseProduct = {
   id: number;
   name: string;
@@ -10,6 +21,9 @@ export type StoreShowcaseProduct = {
   displayCurrencyLabel?: string;
   imageUrls: string[];
   categoryIds: number[];
+  ingredients?: StoreShowcaseIngredient[];
+  removableIngredients?: StoreShowcaseIngredient[];
+  additionals?: StoreShowcaseAdditional[];
 };
 
 export type StoreShowcaseCategory = {
@@ -28,9 +42,7 @@ export type StoreShowcasePromotion = {
   name: string;
   description: string | null;
   price: number;
-  /** Imagen resuelta (propia o fallback del pack). */
   imageUrl: string | null;
-  /** Imagen subida específicamente para la promoción. */
   promotionImageUrl?: string | null;
   items: StoreShowcasePromotionItem[];
 };

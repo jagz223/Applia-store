@@ -8,7 +8,7 @@ const GEOAPIFY_BASE = "https://api.geoapify.com/v1";
 
 const MAPS_USER_AGENT =
   process.env.MAPS_HTTP_USER_AGENT ||
-  "GenFeb-CarGo/1.0 (mapa taxi; contacto: soporte genfeb)";
+  "Applia-CarGo/1.0 (mapa taxi; contacto: soporte applia)";
 
 const MAPS_FETCH_TIMEOUT_MS = Number(process.env.MAPS_FETCH_TIMEOUT_MS || 11_000);
 

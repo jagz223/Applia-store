@@ -12,7 +12,7 @@ import {
   type MobilityRideHistoryRecord,
 } from "@shared/mobility-ride-history";
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 
 const COLLECTION = FIRESTORE_COLLECTIONS.MOBILITY_RIDE_HISTORY;
 
@@ -69,8 +69,8 @@ function docToRecord(id: string, data: Record<string, unknown>): MobilityRideHis
   };
 }
 
-function mapPayment(method: string): "genfeb" | "cash" | "bank_transfer" {
-  if (method === "genfeb") return "genfeb";
+function mapPayment(method: string): "applia" | "cash" | "bank_transfer" {
+  if (method === "applia") return "applia";
   if (method === "bank_transfer") return "bank_transfer";
   return "cash";
 }
@@ -107,7 +107,7 @@ function toListItem(r: MobilityRideHistoryRecord): MobilityRideHistoryListItem {
 }
 
 async function resolveDisplayName(userId: string): Promise<string> {
-  const u = (await genFebStorage.getUserById(userId)) as Record<string, unknown> | undefined;
+  const u = (await appliaStorage.getUserById(userId)) as Record<string, unknown> | undefined;
   if (!u) return "Usuario";
   const fn = String(u.firstName ?? u.name ?? "").trim();
   const ln = String(u.lastName ?? "").trim();
@@ -283,7 +283,7 @@ export async function getDispatchCompanyDriverUserIds(companyId: string): Promis
   const cid = String(companyId ?? "").trim();
   const ids = new Set<string>();
   if (!cid) return ids;
-  const providers = await genFebStorage.getAllProviders();
+  const providers = await appliaStorage.getAllProviders();
   for (const p of providers ?? []) {
     if (String((p as { dispatchCompanyId?: string }).dispatchCompanyId ?? "") !== cid) continue;
     const uid = String((p as { userId?: string }).userId ?? "").trim();

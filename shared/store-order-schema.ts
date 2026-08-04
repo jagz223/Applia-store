@@ -362,7 +362,8 @@ export function getAllowedStoreOrderStatuses(order: Pick<StoreOrder, "status" | 
 
   }
 
-  if (status === "listo_para_envio") return ["confirmado", "rechazado"];
+  // La tienda gestiona el envío: puede marcar enviado y luego completado.
+  if (status === "listo_para_envio") return ["enviado", "confirmado", "rechazado"];
 
 
 

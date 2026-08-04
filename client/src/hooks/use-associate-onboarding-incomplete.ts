@@ -22,7 +22,7 @@ export function useAssociateOnboardingIncomplete() {
     bump();
     const unsubBump = subscribeAssociateOnboardingBump(bump);
     const onStorage = (e: StorageEvent) => {
-      if (e.key === null || e.key === "genfeb_associate_onboarding_started") bump();
+      if (e.key === null || e.key === "applia_associate_onboarding_started") bump();
     };
     window.addEventListener("storage", onStorage);
     return () => {

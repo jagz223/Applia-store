@@ -23,7 +23,7 @@ function formatMoney(n: number): string {
 }
 
 function paymentLabel(p: CargoDriverTripLog["payment"]): string {
-  if (p === "genfeb") return "Saldo GenFeb";
+  if (p === "applia") return "Saldo Applia";
   if (p === "bank_transfer") return "Transferencia bancaria";
   return "Efectivo";
 }

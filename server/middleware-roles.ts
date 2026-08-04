@@ -1,5 +1,5 @@
 import { hasAdminPrivileges, isFullAdmin } from "@shared/roles";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 
 /**
  * Admin o Soporte TI: siempre toma el rol desde la BD (fuente de verdad).
@@ -13,7 +13,7 @@ export function requireStaffFromDb(req: any, res: any, next: any): void {
         res.status(401).json({ message: "Unauthorized" });
         return;
       }
-      const user = await genFebStorage.getUserById(id);
+      const user = await appliaStorage.getUserById(id);
       if (!user) {
         res.status(401).json({ message: "Unauthorized" });
         return;
@@ -44,7 +44,7 @@ export function requireAdminStaff(req: any, res: any, next: any): void {
         res.status(401).json({ message: "Unauthorized" });
         return;
       }
-      const user = await genFebStorage.getUserById(id);
+      const user = await appliaStorage.getUserById(id);
       if (!user) {
         res.status(401).json({ message: "Unauthorized" });
         return;
@@ -75,7 +75,7 @@ export function requireFullAdmin(req: any, res: any, next: any): void {
         res.status(401).json({ message: "Unauthorized" });
         return;
       }
-      const user = await genFebStorage.getUserById(id);
+      const user = await appliaStorage.getUserById(id);
       if (!user) {
         res.status(401).json({ message: "Unauthorized" });
         return;

@@ -6,7 +6,7 @@
 
 import type { Server as SocketIOServer } from "socket.io";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
-import type { IStorage } from "./storage-genfeb";
+import type { IStorage } from "./storage-applia";
 
 export const SERVICE_BOOKING_CHAT_USER_GRACE_MS = 24 * 60 * 60 * 1000;
 

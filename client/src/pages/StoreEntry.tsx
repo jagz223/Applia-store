@@ -4,25 +4,13 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
-
-type PrimaryStore = {
-  id: number;
-  name: string;
-  slug: string;
-};
-
-async function fetchPrimaryStore(): Promise<PrimaryStore | null> {
-  const res = await fetch("/api/stores/primary");
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as { message?: string }).message ?? "No se pudo cargar la tienda");
-  }
-  const data = (await res.json()) as { store: PrimaryStore | null };
-  return data.store;
-}
+import {
+  fetchPrimaryStore,
+  getPrimaryStoreVitrinaHref,
+} from "@/hooks/use-primary-store";
 
 /**
- * Entrada a la tienda: redirige a la vitrina principal.
+ * Entrada a la tienda: redirige a la vitrina de la tienda nº 1 (menor id).
  * Admin/dueño ven la misma vitrina con panel de configuración (en StorePage).
  */
 export default function StoreEntry() {
@@ -39,7 +27,7 @@ export default function StoreEntry() {
         const store = await fetchPrimaryStore();
         if (cancelled) return;
         if (store?.slug) {
-          setLocation(`/tienda/${encodeURIComponent(store.slug)}`);
+          setLocation(getPrimaryStoreVitrinaHref(store));
           return;
         }
         setEmpty(true);

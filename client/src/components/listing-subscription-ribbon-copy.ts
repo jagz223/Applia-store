@@ -39,6 +39,6 @@ export function urgentListingDefaultDetailShort(monthlyUsdLabel: string): string
 /** @deprecated Usar {@link EDIT_SERVICE_SUBSCRIPTION_LOCKED_BANNER} en `@shared/provider-listing-owner-messages`. */
 export { EDIT_SERVICE_SUBSCRIPTION_LOCKED_BANNER as listingUnpublishedEditBannerCopy } from "@shared/provider-listing-owner-messages";
 
-/** Ficha conductor en Mis servicios (Genfeb Go). */
+/** Ficha conductor en Mis servicios (Applia Go). */
 export const goMobilitySubscriptionInactiveCta =
   "Activa tu suscripción para poder recibir servicios de movilidad (taxi y delivery).";

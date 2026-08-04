@@ -60,7 +60,7 @@ export function GoDriverCentralAffiliationFields({
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">Empresa despachadora (central)</p>
           <p className="text-xs text-muted-foreground">
-            Elige la central a la que quieres solicitar afiliación. Deberán aprobar tu solicitud; tu cuenta Genfeb sigue
+            Elige la central a la que quieres solicitar afiliación. Deberán aprobar tu solicitud; tu cuenta Applia sigue
             siendo tuya.
           </p>
         </div>

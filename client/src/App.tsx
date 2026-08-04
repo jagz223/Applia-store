@@ -1,4 +1,3 @@
-import { lazy, Suspense } from "react";
 import { Switch, Route, useLocation, Redirect } from "wouter";
 import { FEATURE_WALLET_RECHARGE_UI_ENABLED } from "@shared/feature-flags";
 import { AdminRechargeRoute } from "@/components/AdminRechargeRoute";
@@ -7,7 +6,6 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navigation } from "@/components/Navigation";
-import { Footer } from "@/components/Footer";
 import { PushForegroundHandler } from "@/components/PushForegroundHandler";
 import { TwaTouchGuard } from "@/components/TwaTouchGuard";
 import { PushAutoRegister } from "@/components/PushAutoRegister";
@@ -20,20 +18,13 @@ import { RatingGate } from "@/components/RatingGate";
 
 import HomePage from "@/pages/Home";
 import TaxiRide from "@/pages/TaxiRide";
-import DriverGoGenfeb, { DriverGoGenfebWithGoChat } from "@/pages/DriverGoGenfeb";
+import DriverGoApplia, { DriverGoAppliaWithGoChat } from "@/pages/DriverGoApplia";
 import CargoDriverSettings from "@/pages/CargoDriverSettings";
 import Dashboard from "@/pages/Dashboard";
 import BecomeDriver from "@/pages/BecomeDriver";
 import Chat from "@/pages/Chat";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
-import CreateRole from "@/pages/CreateRole";
-import EditUser from "@/pages/EditUser";
-import AdminCreateUser from "@/pages/AdminCreateUser";
-import AdminProviderDetailPage from "@/pages/AdminProviderDetailPage";
-import { AccessGateLoading } from "@/components/AccessGateLoading";
-
-const Admin = lazy(() => import("@/pages/Admin"));
 import PaymentVoucher from "@/pages/PaymentVoucher";
 import Recharge from "@/pages/Recharge";
 import RechargeConfirm from "@/pages/RechargeConfirm";
@@ -82,8 +73,8 @@ function MainRouter() {
       <Route path="/central">{() => <Redirect to="/" />}</Route>
 
       <Route path="/taxi">{() => <TaxiRide />}</Route>
-      <Route path="/driver/go-genfeb" component={DriverGoGenfebWithGoChat} />
-      <Route path="/driver/go-genfeb/configuracion" component={CargoDriverSettings} />
+      <Route path="/driver/go-applia" component={DriverGoAppliaWithGoChat} />
+      <Route path="/driver/go-applia/configuracion" component={CargoDriverSettings} />
       <Route path="/login" component={Login} />
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/register" component={Register} />
@@ -91,17 +82,11 @@ function MainRouter() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/become-driver" component={BecomeDriver} />
       <Route path="/chat" component={Chat} />
-      <Route path="/admin/users/create" component={AdminCreateUser} />
-      <Route path="/admin/users/:id/edit" component={EditUser} />
-      <Route path="/admin/create-role" component={CreateRole} />
-      <Route path="/admin/providers/:providerId" component={AdminProviderDetailPage} />
-      <Route path="/admin">
-        {() => (
-          <Suspense fallback={<AccessGateLoading message="Cargando panel de administración…" />}>
-            <Admin />
-          </Suspense>
-        )}
-      </Route>
+      <Route path="/admin/users/create">{() => <Redirect to="/" />}</Route>
+      <Route path="/admin/users/:id/edit">{() => <Redirect to="/" />}</Route>
+      <Route path="/admin/create-role">{() => <Redirect to="/" />}</Route>
+      <Route path="/admin/providers/:providerId">{() => <Redirect to="/" />}</Route>
+      <Route path="/admin">{() => <Redirect to="/" />}</Route>
       <Route path="/payment-voucher">{() => <PaymentVoucher />}</Route>
       <Route path="/recharge">
         {() => (
@@ -145,7 +130,7 @@ function GoRouter() {
       <TaxiRide />
     </GoCategoryGate>
   );
-  const GoUnifiedDriver = () => <DriverGoGenfeb />;
+  const GoUnifiedDriver = () => <DriverGoApplia />;
   const GoUnifiedDriverSettings = () => <CargoDriverSettings />;
   const GoCargoDriver = () => <Redirect to="/go/driver" />;
   const GoCargoDriverSettings = () => <Redirect to="/go/driver/settings" />;
@@ -186,10 +171,6 @@ function App() {
     !pathnameForShell.startsWith("/go/shop/");
   const pathname = location.split("?")[0] ?? location;
   const isStoreVitrinaPage = /^\/tienda\/[^/]+$/.test(pathname);
-  const showGlobalFooter =
-    pathname !== "/chat" &&
-    pathname !== "/pedidos-tienda" &&
-    !isStoreVitrinaPage;
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -212,12 +193,17 @@ function App() {
                 <GoRouter />
               </GoShellLayout>
             ) : (
-              <div className="flex min-h-screen flex-col bg-background font-sans">
+              <div
+                className={
+                  isStoreVitrinaPage
+                    ? "flex h-dvh max-h-dvh flex-col overflow-hidden bg-background font-sans"
+                    : "flex min-h-screen flex-col bg-background font-sans"
+                }
+              >
                 <Navigation />
-                <main className="flex min-h-0 flex-1 flex-col">
+                <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <MainRouter />
                 </main>
-                {showGlobalFooter ? <Footer /> : null}
               </div>
             )}
             <Toaster />

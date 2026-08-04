@@ -507,7 +507,7 @@ export function buildAssociateDashboardActivity(
         kind: "payment",
         brand: brand === "unknown" ? "car_go" : brand,
         title: isCarGoWalletTransaction(t) ? "Pago de viaje Car Go" : "Pago de servicio",
-        subtitle: desc || "Cargo en Saldo GenFeb",
+        subtitle: desc || "Cargo en Saldo Applia",
         dateIso,
         status: String(t.status ?? "completed"),
         displayAmountUsd: Number.isFinite(amt) ? Math.abs(amt) : null,

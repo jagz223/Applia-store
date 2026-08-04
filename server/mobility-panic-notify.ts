@@ -1,5 +1,5 @@
 import { getIO, sendNotificationToAdmins } from "./socket";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getFullAdminUsers } from "./staff-users";
 import { notificationService } from "./services/notification.service";
 
@@ -69,7 +69,7 @@ export async function notifyGoPanicAdmins(params: {
 
   const details = detailLines.join("\n");
   const bodyPush = detailLines.join(" · ").slice(0, 380);
-  const title = `Pánico Genfeb Go · ${moduleLabel}`;
+  const title = `Pánico Applia Go · ${moduleLabel}`;
 
   const io = getIO();
   if (io) {
@@ -94,7 +94,7 @@ export async function notifyGoPanicAdmins(params: {
   }
 
   try {
-    const admins = await getFullAdminUsers(genFebStorage);
+    const admins = await getFullAdminUsers(appliaStorage);
     await Promise.all(
       (admins ?? []).map((admin: { id?: string }) => {
         const aid = admin?.id != null ? String(admin.id) : "";

@@ -162,7 +162,6 @@ export function StoreProductPhotosPicker({
         />
         <Button
           type="button"
-          variant="secondary"
           className="shrink-0 gap-1.5"
           disabled={disabled || urlLoading || slotsLeft <= 0 || !urlInput.trim()}
           onClick={() => void handleAddUrl()}
@@ -186,6 +185,7 @@ export function StoreProductPhotosPicker({
           type="button"
           variant="outline"
           size="sm"
+          className="border-primary/40 text-primary hover:bg-primary/10 hover:text-primary"
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
         >

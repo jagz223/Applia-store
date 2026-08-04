@@ -160,8 +160,9 @@ export function StoreLocationConfigCard({
           {savedLocation ? (
             <Button
               type="button"
-              variant="ghost"
-              className="text-destructive hover:text-destructive"
+              variant="outline"
+              size="sm"
+              className="rounded-full border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive"
               disabled={saving || disabled}
               onClick={() => void handleClear()}
             >

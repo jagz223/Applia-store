@@ -232,7 +232,7 @@ export const api = {
       },
     }
   },
-  genfeb: {
+  applia: {
     bookings: {
       list: {
         method: 'GET' as const,
@@ -350,7 +350,7 @@ export const api = {
             providerWalletFloorUsd: z.number().optional().default(-20),
             /**
              * True si alcanzaste o superas el piso: no aceptar más servicios en efectivo/transfer
-             * (solo Saldo GenFeb) hasta recargar o bajar deuda.
+             * (solo Saldo Applia) hasta recargar o bajar deuda.
              */
             isProviderDebtCapped: z.boolean().optional().default(false),
           }),

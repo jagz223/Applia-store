@@ -145,7 +145,7 @@ export function ProfessionalCentralAffiliationPanel() {
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
             <Building2 className="h-5 w-5 text-primary" aria-hidden />
-            Tu central (Genfeb Go)
+            Tu central (Applia Go)
           </CardTitle>
           <CardDescription className="text-xs sm:text-sm">
             Solicitudes de afiliación a una empresa despachadora. Si la central pide datos adicionales, puedes
@@ -213,7 +213,7 @@ export function ProfessionalCentralAffiliationPanel() {
             <div className="space-y-3 rounded-lg border border-dashed border-border/80 bg-muted/15 p-4">
               <p className="text-sm font-medium text-foreground">Solicitar afiliación a una central</p>
               <p className="text-xs text-muted-foreground">
-                Si trabajas con una empresa despachadora, elige su nombre y envía la solicitud. Tu cuenta Genfeb sigue siendo
+                Si trabajas con una empresa despachadora, elige su nombre y envía la solicitud. Tu cuenta Applia sigue siendo
                 tuya.
               </p>
               <RequestCentralAffiliationForm />
@@ -240,7 +240,7 @@ export function ProfessionalCentralAffiliationPanel() {
                 <p className="font-medium text-foreground">Consideraciones</p>
                 <ul className="list-disc pl-4">
                   <li>Esos datos dejan de estar ocultos solo para esa central.</li>
-                  <li>Tu correo y contraseña de acceso a Genfeb siguen siendo tuyos; la central no los modifica desde su panel.</li>
+                  <li>Tu correo y contraseña de acceso a Applia siguen siendo tuyos; la central no los modifica desde su panel.</li>
                 </ul>
               </div>
             </AlertDialogDescription>

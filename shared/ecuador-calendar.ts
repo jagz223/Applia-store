@@ -1,5 +1,5 @@
 /** Zona horaria usada para períodos de negocio (mes calendario en Ecuador). */
-export const GENFEB_STATS_MONTH_TIMEZONE = "America/Guayaquil";
+export const APPLIA_STATS_MONTH_TIMEZONE = "America/Guayaquil";
 
 /**
  * Clave `YYYY-MM` del mes calendario en la zona indicada (p. ej. conteos mensuales de reservas).
@@ -12,6 +12,6 @@ export function getCalendarMonthKeyInTimeZone(date: Date, timeZone: string): str
   return `${y}-${m}`;
 }
 
-export function getGenfebStatsMonthKey(date = new Date()): string {
-  return getCalendarMonthKeyInTimeZone(date, GENFEB_STATS_MONTH_TIMEZONE);
+export function getAppliaStatsMonthKey(date = new Date()): string {
+  return getCalendarMonthKeyInTimeZone(date, APPLIA_STATS_MONTH_TIMEZONE);
 }

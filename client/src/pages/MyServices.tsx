@@ -205,7 +205,7 @@ export default function MyServices() {
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <Car className="h-5 w-5 text-primary" />
-                  Vista previa — Conductor (Genfeb Go)
+                  Vista previa — Conductor (Applia Go)
                 </CardTitle>
                 <CardDescription>
                   Así se resume tu perfil de taxi y delivery para la app. Completa el registro si falta algún módulo o el

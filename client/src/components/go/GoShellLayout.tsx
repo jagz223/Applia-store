@@ -173,13 +173,13 @@ export function GoShellLayout({ children }: { children: ReactNode }) {
                         El hijo de asChild debe heredar solo tamaño del botón; sin h-full/w-full en el `<a>`
                         para evitar resolver el % contra el `main` y ver el logo a pantalla completa.
                       */}
-                      <Link href="/" aria-label="Inicio GenFeb">
+                      <Link href="/" aria-label="Inicio Applia">
                         <span
                           className="mx-auto flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border/55"
                           aria-hidden
                         >
                           <img
-                            src="/genfeb-logo-new.png"
+                            src="/applia-logo-new.png"
                             alt=""
                             className="size-full object-contain"
                             width={28}

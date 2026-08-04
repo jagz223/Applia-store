@@ -178,7 +178,7 @@ export function SettingsAvatarEditor({
       <div className="space-y-2 border-t border-border/50 pt-3">
         <Label className="text-sm">Enlace de imagen externa (opcional)</Label>
         <p className="text-xs text-muted-foreground">
-          Solo para fotos alojadas fuera de GenFeb (no uses enlaces de Firebase ni de la base de datos).
+          Solo para fotos alojadas fuera de Applia (no uses enlaces de Firebase ni de la base de datos).
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input

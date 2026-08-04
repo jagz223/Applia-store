@@ -26,6 +26,11 @@ export function hasAdminRole(user: { role?: string } | null): boolean {
   return hasAdminPrivileges(user?.role);
 }
 
+/** Pedidos de tienda como comprador: solo rol cliente. */
+export function isClientRole(user: { role?: string } | null | undefined): boolean {
+  return normalizeRoleCode(user?.role) === "client";
+}
+
 /** Solo administrador (no Soporte TI): pestañas financieras y verificación de asociados. */
 export function hasFullAdminRole(user: { role?: string } | null): boolean {
   return isFullAdmin(user?.role);

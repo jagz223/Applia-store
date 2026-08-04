@@ -6,7 +6,7 @@ import {
 
 export { GO_CHAT_QUERY_PARAM, isGoMobilityShellPath };
 
-export const GO_OPEN_CHAT_EVENT = "genfeb:open-go-chat";
+export const GO_OPEN_CHAT_EVENT = "applia:open-go-chat";
 
 export function dispatchOpenGoChat(conversationId: number): void {
   if (typeof window === "undefined") return;

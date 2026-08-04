@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
+import qrAppliaUrl from "@/assets/images/applia_qr.png";
 
 const BANK_ACCOUNT_NUMBER = "7700896747";
 
@@ -324,7 +324,7 @@ export default function StoreSubscriptionPayment() {
             </CardHeader>
             <CardContent className="flex flex-col items-center">
               <div className="rounded-xl border p-4 mb-6 bg-muted/30">
-                <img src={qrGenfebUrl} alt="QR bancario GenFeb" className="w-48 h-48 object-contain" />
+                <img src={qrAppliaUrl} alt="QR bancario Applia" className="w-48 h-48 object-contain" />
               </div>
               <div className="w-full flex items-center gap-2 rounded-lg border px-4 py-3">
                 <span className="font-mono text-lg font-semibold flex-1">{BANK_ACCOUNT_NUMBER}</span>

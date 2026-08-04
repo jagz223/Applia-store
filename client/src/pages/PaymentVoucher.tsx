@@ -184,7 +184,7 @@ export function PaymentVoucher({ amount = 0, serviceName = "Servicio", onSuccess
               </p>
               <p className="text-xl font-mono tracking-wider">{selectedBankData.account}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Titular: GenFeb | RUC: 0999999999001
+                Titular: Applia | RUC: 0999999999001
               </p>
             </div>
           )}
@@ -308,7 +308,7 @@ export function PaymentVoucher({ amount = 0, serviceName = "Servicio", onSuccess
           {/* Información de contacto para soporte */}
           <div className="text-center text-sm text-muted-foreground pt-4 border-t">
             <p>¿Necesitas ayuda? Contáctanos:</p>
-            <p className="font-medium">📞 +593 99 123 4567 | 📧 soporte@genfeb.com</p>
+            <p className="font-medium">📞 +593 99 123 4567 | 📧 soporte@applia.com</p>
           </div>
         </CardContent>
       </Card>

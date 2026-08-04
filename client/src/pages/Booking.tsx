@@ -333,8 +333,8 @@ export default function Booking() {
     }
     if (FEATURE_WALLET_RECHARGE_UI_ENABLED && walletLoading) {
       toast({
-        title: "Validando Saldo Genfeb",
-        description: "Estamos cargando tu Saldo Genfeb, intenta de nuevo en un momento.",
+        title: "Validando Saldo Applia",
+        description: "Estamos cargando tu Saldo Applia, intenta de nuevo en un momento.",
       });
       return;
     }
@@ -413,9 +413,9 @@ export default function Booking() {
         <AlertDialog open={insufficientFundsOpen} onOpenChange={setInsufficientFundsOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Saldo Genfeb insuficiente</AlertDialogTitle>
+              <AlertDialogTitle>Saldo Applia insuficiente</AlertDialogTitle>
               <AlertDialogDescription>
-                No tienes suficiente Saldo Genfeb para pedir este servicio. Añade saldo para continuar.
+                No tienes suficiente Saldo Applia para pedir este servicio. Añade saldo para continuar.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -442,7 +442,7 @@ export default function Booking() {
               <br />
               <span className="text-sm text-muted-foreground">
                 {FEATURE_WALLET_RECHARGE_UI_ENABLED
-                  ? `Saldo Genfeb: retención en la plataforma hasta confirmar. Efectivo o transferencia: pago acordado fuera de la app con el asociado.${
+                  ? `Saldo Applia: retención en la plataforma hasta confirmar. Efectivo o transferencia: pago acordado fuera de la app con el asociado.${
                       FEATURE_OFF_PLATFORM_COMMISSION_ENABLED
                         ? " La comisión de la plataforma aplica al completar el servicio en efectivo o transferencia."
                         : ""
@@ -458,8 +458,8 @@ export default function Booking() {
               className="h-16 text-lg font-semibold flex flex-col gap-1"
               onClick={() => confirmBookingWithMethod("wallet")}
             >
-              <span>Pagar con Saldo Genfeb</span>
-              <span className="text-xs font-normal opacity-80">Saldo Genfeb: ${walletBalance.toFixed(2)}</span>
+              <span>Pagar con Saldo Applia</span>
+              <span className="text-xs font-normal opacity-80">Saldo Applia: ${walletBalance.toFixed(2)}</span>
             </Button>
             )}
             <Button 
@@ -969,7 +969,7 @@ export default function Booking() {
                   <div className="p-3 rounded-lg bg-accent/5 border border-accent/20">
                     <p className="text-sm font-medium mb-1">📞 Línea de Ayuda</p>
                     <p className="text-xs text-muted-foreground">
-                      Ecuador: 1800 GENFEB (436333)
+                      Ecuador: 1800 APPLIA (436333)
                     </p>
                     <p className="text-xs text-muted-foreground">
                       WhatsApp: +593 99 123 4567

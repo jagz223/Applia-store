@@ -108,7 +108,7 @@ export function DriverFloatingBubble() {
       onPointerCancel={onPointerUp}
     >
       <img
-        src="/genfeb-logo-new.png"
+        src="/applia-logo-new.png"
         alt=""
         className="h-full w-full object-cover"
         width={BUBBLE_SIZE}

@@ -1,8 +1,8 @@
-# GenFeb - Google Cloud Compute Engine Deployment Guide
+# Applia - Google Cloud Compute Engine Deployment Guide
 
 > **Version:** 1.0  
 > **Last Updated:** 2026-02-25  
-> **Project:** GenFeb - Plataforma de Servicios  
+> **Project:** Applia - Plataforma de Servicios  
 > **Stack:** React + Express.js + TypeScript + PostgreSQL + Drizzle ORM
 
 ---
@@ -32,7 +32,7 @@
 flowchart TB
     subgraph "Google Cloud Platform"
         subgraph "VPC Network"
-            subgraph "GenFeb VM"
+            subgraph "Applia VM"
                 Nginx["Nginx<br/>Reverse Proxy<br/>:80, :443"]
                 PM2["PM2<br/>Process Manager"]
                 NodeJS["Node.js/Express<br/>:5000"]
@@ -74,7 +74,7 @@ flowchart TB
 ### Required Accounts and Tools
 
 - [ ] Google Cloud Platform account with billing enabled
-- [ ] Domain name registered (e.g., `genfeb.com`)
+- [ ] Domain name registered (e.g., `applia.com`)
 - [ ] gcloud CLI installed locally
 - [ ] SSH key pair for VM access
 
@@ -96,10 +96,10 @@ gcloud config set project PROJECT_ID
 
 ```bash
 # Create project
-gcloud projects create genfeb-production --name="GenFeb Production"
+gcloud projects create applia-production --name="Applia Production"
 
 # Set as default
-gcloud config set project genfeb-production
+gcloud config set project applia-production
 
 # Enable billing (via GCP Console)
 ```
@@ -136,7 +136,7 @@ For **small traffic (up to 100 concurrent users)**:
 
 ```bash
 # Create VM instance
-gcloud compute instances create genfeb-server \
+gcloud compute instances create applia-server \
     --machine-type=e2-standard-2 \
     --zone=us-central1-a \
     --boot-disk-size=20GB \
@@ -156,7 +156,7 @@ Create a `startup.sh` file:
 #!/bin/bash
 set -e
 
-echo "=== GenFeb Server Startup Script ==="
+echo "=== Applia Server Startup Script ==="
 echo "Starting at $(date)"
 
 # Update system
@@ -174,12 +174,12 @@ apt-get install -y nodejs
 npm install -g pm2
 
 # Create application directory
-mkdir -p /var/www/genfeb
-mkdir -p /var/log/genfeb
+mkdir -p /var/www/applia
+mkdir -p /var/log/applia
 
 # Set permissions
-chown -R $USER:$USER /var/www/genfeb
-chmod -R 755 /var/www/genfeb
+chown -R $USER:$USER /var/www/applia
+chmod -R 755 /var/www/applia
 
 echo "=== Startup script completed ==="
 ```
@@ -194,7 +194,7 @@ Cloud SQL provides managed PostgreSQL with automatic backups, high availability,
 
 ```bash
 # Create Cloud SQL instance
-gcloud sql instances create genfeb-db \
+gcloud sql instances create applia-db \
     --database-version=POSTGRES_16 \
     --tier=db-f1-micro \
     --zone=us-central1-a \
@@ -203,19 +203,19 @@ gcloud sql instances create genfeb-db \
     --enable-google-owned-connection-plugin
 
 # Create database
-gcloud sql databases create mango_db --instance=genfeb-db
+gcloud sql databases create mango_db --instance=applia-db
 
 # Create user
-gcloud sql users create mango --instance=genfeb-db --password=mango_pass_strong
+gcloud sql users create mango --instance=applia-db --password=mango_pass_strong
 
 # Get connection string
-gcloud sql instances describe genfeb-db
+gcloud sql instances describe applia-db
 # Note: Connection string format: /cloudsql/PROJECT_ID:REGION:INSTANCE_NAME
 ```
 
 **Connection String (for .env):**
 ```
-postgresql://mango:mango_pass_strong@/mango_db?host=/cloudsql/PROJECT_ID:us-central1-a:genfeb-db
+postgresql://mango:mango_pass_strong@/mango_db?host=/cloudsql/PROJECT_ID:us-central1-a:applia-db
 ```
 
 ### Option B: Self-Hosted PostgreSQL on VM
@@ -224,7 +224,7 @@ If you prefer self-hosted (lower cost):
 
 ```bash
 # SSH into VM
-gcloud compute ssh genfeb-server --zone=us-central1-a
+gcloud compute ssh applia-server --zone=us-central1-a
 
 # Install PostgreSQL
 sudo apt-get update
@@ -253,12 +253,12 @@ postgresql://mango:mango_pass_strong@localhost:5432/mango_db
 
 ### Create Nginx Configuration
 
-Create `/etc/nginx/sites-available/genfeb`:
+Create `/etc/nginx/sites-available/applia`:
 
 ```nginx
 server {
     listen 80;
-    server_name genfeb.com www.genfeb.com;
+    server_name applia.com www.applia.com;
 
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -267,7 +267,7 @@ server {
 
     # Static files (React build)
     location / {
-        root /var/www/genfeb/dist/public;
+        root /var/www/applia/dist/public;
         index index.html;
         try_files $uri $uri/ /index.html;
         
@@ -331,7 +331,7 @@ server {
 
 ```bash
 # Create symbolic link
-sudo ln -s /etc/nginx/sites-available/genfeb /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/applia /etc/nginx/sites-enabled/
 
 # Test configuration
 sudo nginx -t
@@ -351,7 +351,7 @@ sudo systemctl restart nginx
 sudo apt-get install -y certbot python3-certbot-nginx
 
 # Obtain SSL certificate
-sudo certbot --nginx -d genfeb.com -d www.genfeb.com
+sudo certbot --nginx -d applia.com -d www.applia.com
 
 # Follow prompts:
 # - Enter email address
@@ -388,24 +388,24 @@ pm2 startup
 
 ### Create Ecosystem File
 
-Create `/var/www/genfeb/ecosystem.config.js`:
+Create `/var/www/applia/ecosystem.config.js`:
 
 ```javascript
 module.exports = {
   apps: [
     {
-      name: 'genfeb-server',
+      name: 'applia-server',
       script: 'dist/index.cjs',
-      cwd: '/var/www/genfeb',
+      cwd: '/var/www/applia',
       instances: 1,
       exec_mode: 'cluster',
       env: {
         NODE_ENV: 'production',
         PORT: 5000
       },
-      error_file: '/var/log/genfeb/error.log',
-      out_file: '/var/log/genfeb/out.log',
-      log_file: '/var/log/genfeb/combined.log',
+      error_file: '/var/log/applia/error.log',
+      out_file: '/var/log/applia/out.log',
+      log_file: '/var/log/applia/combined.log',
       time: true,
       autorestart: true,
       watch: false,
@@ -424,7 +424,7 @@ module.exports = {
 
 ```bash
 # Start application
-cd /var/www/genfeb
+cd /var/www/applia
 pm2 start ecosystem.config.js
 
 # Save PM2 process list
@@ -434,13 +434,13 @@ pm2 save
 pm2 status
 
 # View logs
-pm2 logs genfeb-server
+pm2 logs applia-server
 
 # Restart
-pm2 restart genfeb-server
+pm2 restart applia-server
 
 # Stop
-pm2 stop genfeb-server
+pm2 stop applia-server
 
 # View monit
 pm2 monit
@@ -498,11 +498,11 @@ sudo ufw status
 
 ```bash
 # Create static IP
-gcloud compute addresses create genfeb-ip \
+gcloud compute addresses create applia-ip \
     --region=us-central1
 
 # Get the IP
-gcloud compute addresses describe genfeb-ip --region=us-central1
+gcloud compute addresses describe applia-ip --region=us-central1
 # Note: IP address (e.g., 34.123.45.67)
 ```
 
@@ -520,20 +520,20 @@ In your domain registrar (GoDaddy, Namecheap, etc.) or GCP Cloud DNS:
 
 ```bash
 # Create managed zone
-gcloud dns managed-zones create genfeb-zone \
-    --dns-name=genfeb.com \
-    --description="GenFeb Production Zone"
+gcloud dns managed-zones create applia-zone \
+    --dns-name=applia.com \
+    --description="Applia Production Zone"
 
 # Add record set
-gcloud dns record-sets create genfeb.com \
-    --zone=genfeb-zone \
+gcloud dns record-sets create applia.com \
+    --zone=applia-zone \
     --type=A \
     --ttl=300 \
     --rrdatas=34.123.45.67
 
 # Add www record
-gcloud dns record-sets create www.genfeb.com \
-    --zone=genfeb-zone \
+gcloud dns record-sets create www.applia.com \
+    --zone=applia-zone \
     --type=A \
     --ttl=300 \
     --rrdatas=34.123.45.67
@@ -545,15 +545,15 @@ gcloud dns record-sets create www.genfeb.com \
 
 ### Production .env File
 
-Create `/var/www/genfeb/.env`:
+Create `/var/www/applia/.env`:
 
 ```bash
 # ===========================================
-# GENFEB - PRODUCTION ENVIRONMENT
+# APPLIA - PRODUCTION ENVIRONMENT
 # ===========================================
 
 # Database - Cloud SQL
-DATABASE_URL=postgresql://mango:mango_pass_strong@/mango_db?host=/cloudsql/PROJECT_ID:us-central1-a:genfeb-db
+DATABASE_URL=postgresql://mango:mango_pass_strong@/mango_db?host=/cloudsql/PROJECT_ID:us-central1-a:applia-db
 
 # Enable PostgreSQL
 ENABLE_DATABASE=true
@@ -571,8 +571,8 @@ STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
 VITE_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
 
 # Firebase Admin (Production)
-FIREBASE_PROJECT_ID=genfeb-sas
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@genfeb-sas.iam.gserviceaccount.com
+FIREBASE_PROJECT_ID=applia-sas
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@applia-sas.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
 
 # PayPal (Production)
@@ -581,7 +581,7 @@ PAYPAL_CLIENT_SECRET=your_paypal_client_secret
 PAYPAL_MODE=live
 
 # Frontend URL (Production Domain)
-FRONTEND_URL=https://genfeb.com
+FRONTEND_URL=https://applia.com
 
 # Node Environment
 NODE_ENV=production
@@ -619,7 +619,7 @@ ls -la dist/
 
 ```bash
 # Create archive
-tar -czvf genfeb-deploy.tar.gz \
+tar -czvf applia-deploy.tar.gz \
     dist/ \
     package.json \
     package-lock.json \
@@ -627,20 +627,20 @@ tar -czvf genfeb-deploy.tar.gz \
     .env
 
 # Upload to VM
-gcloud compute scp genfeb-deploy.tar.gz genfeb-server:/var/www/genfeb/ \
+gcloud compute scp applia-deploy.tar.gz applia-server:/var/www/applia/ \
     --zone=us-central1-a
 
 # SSH into VM
-gcloud compute ssh genfeb-server --zone=us-central1-a
+gcloud compute ssh applia-server --zone=us-central1-a
 ```
 
 ### Step 3: Install Dependencies on VM
 
 ```bash
-cd /var/www/genfeb
+cd /var/www/applia
 
 # Extract files
-tar -xzvf genfeb-deploy.tar.gz
+tar -xzvf applia-deploy.tar.gz
 
 # Install production dependencies
 npm ci --only=production
@@ -660,7 +660,7 @@ npm run db:push
 
 ```bash
 # Start with PM2
-cd /var/www/genfeb
+cd /var/www/applia
 pm2 start ecosystem.config.js
 
 # Verify it's running
@@ -672,10 +672,10 @@ curl http://localhost:5000/api/health
 
 ```bash
 # Test HTTPS
-curl -I https://genfeb.com
+curl -I https://applia.com
 
 # Test SSL certificate
-curl -I -v https://genfeb.com 2>&1 | grep -i "SSL"
+curl -I -v https://applia.com 2>&1 | grep -i "SSL"
 ```
 
 ---
@@ -721,7 +721,7 @@ flowchart LR
 
 1. **Create Instance Template:**
    ```bash
-   gcloud compute instance-templates create genfeb-template \
+   gcloud compute instance-templates create applia-template \
        --machine-type=e2-standard-2 \
        --boot-disk-size=20GB \
        --image-family=ubuntu-2204-lts
@@ -729,9 +729,9 @@ flowchart LR
 
 2. **Create Managed Instance Group:**
    ```bash
-   gcloud compute instance-groups managed create genfeb-group \
+   gcloud compute instance-groups managed create applia-group \
        --size=2 \
-       --template=genfeb-template \
+       --template=applia-template \
        --zone=us-central1-a
    ```
 
@@ -749,7 +749,7 @@ flowchart LR
 
 ```bash
 # Application health endpoint
-curl https://genfeb.com/api/health
+curl https://applia.com/api/health
 
 # PM2 process status
 pm2 status
@@ -763,7 +763,7 @@ sudo systemctl status nginx
 
 ```bash
 # Application logs
-pm2 logs genfeb-server --lines 100
+pm2 logs applia-server --lines 100
 
 # Nginx access logs
 sudo tail -f /var/log/nginx/access.log
@@ -818,10 +818,10 @@ pm2 delete all
 pm2 start ecosystem.config.js
 
 # If needed, revert code
-cd /var/www/genfeb
+cd /var/www/applia
 git checkout PREVIOUS_COMMIT
 npm run build
-pm2 restart genfeb-server
+pm2 restart applia-server
 ```
 
 ---
@@ -862,4 +862,4 @@ pm2 restart genfeb-server
 
 ---
 
-*Generated for GenFeb - GCP Compute Engine Deployment*
+*Generated for Applia - GCP Compute Engine Deployment*

@@ -8,7 +8,6 @@ import type { SelectedEntity } from "@/components/store/StoreEntityMultiPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Command,
   CommandEmpty,
@@ -199,18 +198,21 @@ export function StoreProductCategoryPicker({
       {selected.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {selected.map((item) => (
-            <Badge key={item.id} variant="secondary" className="gap-1 pr-1">
+            <span
+              key={item.id}
+              className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-3 pr-1 py-1 text-xs font-semibold text-foreground"
+            >
               {item.name}
               <button
                 type="button"
-                className="ml-0.5 rounded-sm p-0.5 hover:bg-muted disabled:opacity-50"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
                 aria-label={`Quitar ${item.name}`}
                 disabled={disabled}
                 onClick={() => removeId(item.id)}
               >
-                <X className="h-3 w-3" />
+                <X className="h-3.5 w-3.5" />
               </button>
-            </Badge>
+            </span>
           ))}
         </div>
       ) : (

@@ -1,9 +1,9 @@
 {
-  "name": "gen-feb",
+  "name": "applia",
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",
-  "description": "GENFEB - Plataforma de Servicios GenFeb",
+  "description": "APPLIA - Plataforma de Servicios Applia",
   "scripts": {
     "dev": "cross-env NODE_ENV=development NODE_OPTIONS=--use-system-ca npx tsx server/index.ts",
     "build": "tsx script/build.ts",
@@ -12,8 +12,6 @@
     "test:matching": "cross-env NODE_OPTIONS=--use-system-ca tsx script/simulate-classic-offer-matching.ts",
     "db:push": "drizzle-kit push",
     "seed:firestore": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-firestore.ts",
-    "seed:categories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-categories.ts",
-    "seed:subcategories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-subcategories.ts",
     "migrate:provider-categories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/migrate-provider-categories.ts",
     "migrate:subcategories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/migrate-subcategories-category.ts",
     "migrate:remove-marketplace-go-brands": "cross-env NODE_OPTIONS=--use-system-ca tsx script/migrate-remove-marketplace-from-go-brands.ts",
@@ -22,9 +20,6 @@
     "seed:roles": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-roles.ts",
     "seed:users": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-users.ts",
     "seed:wallet-fields": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-wallet-fields.ts",
-    "seed:wallet-balance": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-wallet-balance.ts",
-    "seed:pending-balance": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-pending-balance.ts",
-    "seed:user-ratings": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-user-ratings.ts",
     "prod": "npm run build && npm run start"
   },
   "dependencies": {

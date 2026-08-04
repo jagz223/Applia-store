@@ -76,6 +76,36 @@ export function canEnableStoreFulfillmentOptions(
   return location != null;
 }
 
+/** Tarifas de delivery propias de la tienda (base + por km). */
+export const DEFAULT_STORE_DELIVERY_FARES = {
+  baseUsd: 1.75,
+  perKmUsd: 0.5,
+} as const;
+
+export const storeDeliveryFaresSchema = z.object({
+  baseUsd: z.number().min(0).max(500),
+  perKmUsd: z.number().min(0).max(50),
+});
+
+export type StoreDeliveryFares = z.infer<typeof storeDeliveryFaresSchema>;
+
+export function normalizeStoreDeliveryFares(value: unknown): StoreDeliveryFares {
+  const parsed = storeDeliveryFaresSchema.safeParse(value);
+  if (!parsed.success) {
+    return { baseUsd: DEFAULT_STORE_DELIVERY_FARES.baseUsd, perKmUsd: DEFAULT_STORE_DELIVERY_FARES.perKmUsd };
+  }
+  return {
+    baseUsd: Math.round((parsed.data.baseUsd + Number.EPSILON) * 100) / 100,
+    perKmUsd: Math.round((parsed.data.perKmUsd + Number.EPSILON) * 100) / 100,
+  };
+}
+
+export function computeStoreDeliveryFeeUsd(fares: StoreDeliveryFares, distanceM: number): number {
+  const km = Math.max(0, (Number(distanceM) || 0) / 1000);
+  const total = Number(fares.baseUsd) + km * Number(fares.perKmUsd);
+  return Math.round((Math.max(0, total) + Number.EPSILON) * 100) / 100;
+}
+
 export type Store = {
   id: number;
   ownerUserId: string;
@@ -91,6 +121,8 @@ export type Store = {
   location: StoreLocation | null;
   /** Modalidades habilitadas para el carrito (delivery, pickup, in_site). */
   fulfillmentOptions: StoreFulfillmentMode[];
+  /** Precio del delivery de la tienda (base + $/km). */
+  deliveryFares: StoreDeliveryFares;
   /** Tasas manuales extra (nombre + valor en Bs), p. ej. Binance. */
   currencyExtras: StoreCurrencyExtra[];
   /** Moneda única mostrada en la vitrina (debe estar en currencyAcceptedPaymentIds). */
@@ -110,6 +142,7 @@ export const updateStoreSchema = z.object({
   coverImageUrl: z.string().trim().min(1).max(2000).nullable().optional(),
   location: storeLocationSchema.nullable().optional(),
   fulfillmentOptions: storeFulfillmentOptionsSchema.optional(),
+  deliveryFares: storeDeliveryFaresSchema.optional(),
   currencyExtras: storeCurrencyExtrasSchema.optional(),
   currencyVisualId: z.string().trim().min(1).max(64).optional(),
   currencyAcceptedPaymentIds: z.array(z.string().trim().min(1).max(64)).max(40).optional(),
@@ -141,6 +174,71 @@ export function normalizeStoreCurrencyFields(input: {
 
 export const STORE_PRODUCT_MAX_IMAGES = 4;
 
+export const storeProductIngredientAdditionalSchema = z.object({
+  ingredientMaterialId: z.number().int().positive(),
+  /** Precio extra en USD (o moneda visual de la tienda) que define el administrador. */
+  price: z.number().positive(),
+});
+
+export type StoreProductIngredientAdditional = z.infer<typeof storeProductIngredientAdditionalSchema>;
+
+export function normalizeStoreProductIngredientAdditionals(
+  value: unknown,
+): StoreProductIngredientAdditional[] {
+  if (!Array.isArray(value)) return [];
+  const out: StoreProductIngredientAdditional[] = [];
+  const seen = new Set<number>();
+  for (const raw of value) {
+    const parsed = storeProductIngredientAdditionalSchema.safeParse(raw);
+    if (!parsed.success) continue;
+    if (seen.has(parsed.data.ingredientMaterialId)) continue;
+    seen.add(parsed.data.ingredientMaterialId);
+    out.push(parsed.data);
+  }
+  return out;
+}
+
+export function normalizePositiveIntIdList(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const raw of value) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0 || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+/**
+ * Normaliza y valida relaciones entre ingredientes base, removibles y adicionales.
+ * Los removibles y adicionales deben pertenecer a la lista base; los adicionales no
+ * pueden coincidir con los removibles.
+ */
+export function normalizeStoreProductIngredientOptions(input: {
+  ingredientMaterialIds?: unknown;
+  removableIngredientMaterialIds?: unknown;
+  ingredientAdditionals?: unknown;
+}): {
+  ingredientMaterialIds: number[];
+  removableIngredientMaterialIds: number[];
+  ingredientAdditionals: StoreProductIngredientAdditional[];
+} {
+  const ingredientMaterialIds = normalizePositiveIntIdList(input.ingredientMaterialIds);
+  const base = new Set(ingredientMaterialIds);
+  const removableIngredientMaterialIds = normalizePositiveIntIdList(
+    input.removableIngredientMaterialIds,
+  ).filter((id) => base.has(id));
+  const removable = new Set(removableIngredientMaterialIds);
+  const ingredientAdditionals = normalizeStoreProductIngredientAdditionals(
+    input.ingredientAdditionals,
+  ).filter(
+    (item) => base.has(item.ingredientMaterialId) && !removable.has(item.ingredientMaterialId),
+  );
+  return { ingredientMaterialIds, removableIngredientMaterialIds, ingredientAdditionals };
+}
+
 export const insertStoreProductSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(5000).optional().nullable(),
@@ -151,6 +249,10 @@ export const insertStoreProductSchema = z.object({
     .default({}),
   categoryIds: z.array(z.number().int().positive()).optional().default([]),
   ingredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
+  /** Subconjunto de ingredientMaterialIds que el cliente puede quitar (≥2 base para usarlo). */
+  removableIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
+  /** Extras opcionales con precio; deben estar en la base y no en removibles. */
+  ingredientAdditionals: z.array(storeProductIngredientAdditionalSchema).optional().default([]),
   imageUrls: z
     .array(z.string().trim().min(1).max(2000))
     .max(STORE_PRODUCT_MAX_IMAGES)
@@ -176,6 +278,8 @@ export type StoreProduct = {
   pricesByCurrency: Record<string, number>;
   categoryIds: number[];
   ingredientMaterialIds: number[];
+  removableIngredientMaterialIds: number[];
+  ingredientAdditionals: StoreProductIngredientAdditional[];
   imageUrls: string[];
   showOnShowcase: boolean;
   createdAt: Date | string;

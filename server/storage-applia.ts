@@ -36,14 +36,17 @@ import { canAffordOffPlatformCommission, PROVIDER_WALLET_FLOOR_USD } from "@shar
 import { isOffPlatformServiceBookingPayment } from "@shared/booking-payment";
 import { FEATURE_OFF_PLATFORM_COMMISSION_ENABLED } from "@shared/feature-flags";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
-import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
+import { getAppliaStatsMonthKey } from "@shared/ecuador-calendar";
 import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
 import { DEFAULT_CATEGORIES } from "@shared/default-categories";
 import {
   INGREDIENTS_MATERIALS_PAGE_SIZE,
   normalizeStoreLocation,
   normalizeStoreCurrencyFields,
+  normalizeStoreDeliveryFares,
+  normalizeStoreProductIngredientOptions,
   resolveStoreProductPriceFields,
+  DEFAULT_STORE_DELIVERY_FARES,
   type Store,
   type IngredientMaterial,
   type InsertStore,
@@ -107,7 +110,7 @@ export interface RoleDefinition {
 export type NewRoleDefinition = Omit<RoleDefinition, "createdAt" | "updatedAt">;
 
 /**
- * Contrato de almacenamiento de dominio - GenFeb
+ * Contrato de almacenamiento de dominio - Applia
  * Implementa segregación de interfaces (SOLID): IUserStorage, IRoleStorage, ICatalogStorage, IBookingStorage
  * están en storage-contracts.ts; IStorage los compone y añade el resto del dominio.
  */
@@ -437,7 +440,7 @@ export interface IStorage
     riderUserId: string;
     driverUserId: string;
     estimatedUsd: number;
-    paymentMethod: "genfeb" | "cash" | "bank_transfer";
+    paymentMethod: "applia" | "cash" | "bank_transfer";
   }): Promise<void>;
 
   // ==================== Tiendas ====================
@@ -449,6 +452,7 @@ export interface IStorage
   storeSlugExists(slug: string): Promise<boolean>;
   listActiveStores(options?: { limit?: number }): Promise<Store[]>;
   /** Tienda más antigua del sistema (cualquier estado). Null si no hay ninguna. */
+  /** Tienda principal: menor id en BD (tienda nº 1). */
   getOldestStore(): Promise<Store | undefined>;
   listIngredientsMaterials(options: {
     q?: string;
@@ -742,7 +746,7 @@ export class InMemoryStorage implements IStorage {
   async incrementSubcategoryMonthlyBookingCount(subcategoryId: number | null | undefined): Promise<void> {
     const id = subcategoryId != null ? Number(subcategoryId) : NaN;
     if (!Number.isFinite(id) || id <= 0) return;
-    const monthKey = getGenfebStatsMonthKey();
+    const monthKey = getAppliaStatsMonthKey();
     let inner = this.subcategoryMonthlyBookingCounts.get(monthKey);
     if (!inner) {
       inner = new Map();
@@ -846,7 +850,7 @@ export class InMemoryStorage implements IStorage {
       if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
         if (!canAffordOffPlatformCommission(providerWallet, commission)) {
           throw new Error(
-            `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo GenFeb.`
+            `No se puede completar: la comisión de plataforma te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Recarga tu saldo o coordina pago con Saldo Applia.`
           );
         }
         (providerUser as { wallet: number }).wallet = providerWallet - commission;
@@ -957,7 +961,7 @@ export class InMemoryStorage implements IStorage {
     riderUserId: string;
     driverUserId: string;
     estimatedUsd: number;
-    paymentMethod: "genfeb" | "cash" | "bank_transfer";
+    paymentMethod: "applia" | "cash" | "bank_transfer";
   }): Promise<void> {
     const cost = roundToCents(
       typeof input.estimatedUsd === "number" ? input.estimatedUsd : Number(input.estimatedUsd) || 0
@@ -983,11 +987,11 @@ export class InMemoryStorage implements IStorage {
     const refId = `cargo:${input.rideId}`;
     const now = new Date();
 
-    if (input.paymentMethod === "genfeb") {
+    if (input.paymentMethod === "applia") {
       const rider = this.users.find((u: { id?: string }) => u.id === input.riderUserId);
       if (!rider) throw new Error("Pasajero no encontrado");
       const riderWallet = typeof (rider as { wallet?: number }).wallet === "number" ? (rider as { wallet: number }).wallet : 0;
-      if (riderWallet < cost) throw new Error("Saldo insuficiente del pasajero (Saldo GenFeb).");
+      if (riderWallet < cost) throw new Error("Saldo insuficiente del pasajero (Saldo Applia).");
       (rider as { wallet: number }).wallet = riderWallet - cost;
       (driverUser as { wallet: number }).wallet = driverWallet + providerNet;
       (driverUser as { totalEarnings: number }).totalEarnings = driverEarnings + providerNet;
@@ -1002,7 +1006,7 @@ export class InMemoryStorage implements IStorage {
         amount: cost,
         transferType: "payment",
         status: "completed",
-        description: "Pago viaje Car Go (Saldo GenFeb)",
+        description: "Pago viaje Car Go (Saldo Applia)",
         referenceId: refId,
         currency: "USD",
         createdAt: now,
@@ -1026,7 +1030,7 @@ export class InMemoryStorage implements IStorage {
         amount: commission,
         transferType: "service_payment",
         status: "completed",
-        description: "Comisión de plataforma (Car Go, genfeb)",
+        description: "Comisión de plataforma (Car Go, applia)",
         referenceId: refId,
         currency: "USD",
         createdAt: now,
@@ -1035,7 +1039,7 @@ export class InMemoryStorage implements IStorage {
       if (FEATURE_OFF_PLATFORM_COMMISSION_ENABLED) {
         if (!canAffordOffPlatformCommission(driverWallet, commission)) {
           throw new Error(
-            `No se puede completar: la comisión te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Acepta viajes con Saldo GenFeb o recarga.`
+            `No se puede completar: la comisión te dejaría por debajo del límite de ${PROVIDER_WALLET_FLOOR_USD} USD. Acepta viajes con Saldo Applia o recarga.`
           );
         }
         (driverUser as { wallet: number }).wallet = driverWallet - commission;
@@ -1172,7 +1176,7 @@ export class InMemoryStorage implements IStorage {
     if (!client) throw new Error("Usuario cliente no encontrado");
     const clientWallet = typeof (client as { wallet?: number }).wallet === "number" ? (client as { wallet: number }).wallet : 0;
     const clientPending = typeof (client as { pendingBalance?: number }).pendingBalance === "number" ? (client as { pendingBalance: number }).pendingBalance : 0;
-    if (clientWallet < cost) throw new Error("Saldo insuficiente. Añade saldo a tu Saldo Genfeb para confirmar el pago.");
+    if (clientWallet < cost) throw new Error("Saldo insuficiente. Añade saldo a tu Saldo Applia para confirmar el pago.");
 
     (client as { wallet: number }).wallet = clientWallet - cost;
     (client as { pendingBalance: number }).pendingBalance = clientPending + cost;
@@ -3209,6 +3213,7 @@ export class InMemoryStorage implements IStorage {
       coverImageUrl: null,
       location: null,
       fulfillmentOptions: [],
+      deliveryFares: { ...DEFAULT_STORE_DELIVERY_FARES },
       currencyExtras: [],
       currencyVisualId: STORE_CURRENCY_USD_ID,
       currencyAcceptedPaymentIds: [STORE_CURRENCY_USD_ID],
@@ -3249,6 +3254,9 @@ export class InMemoryStorage implements IStorage {
             fulfillmentOptions: normalizeStoreFulfillmentOptions(input.fulfillmentOptions),
           }
         : {}),
+      ...(input.deliveryFares !== undefined
+        ? { deliveryFares: normalizeStoreDeliveryFares(input.deliveryFares) }
+        : {}),
       ...(input.location !== undefined
         ? { location: input.location === null ? null : normalizeStoreLocation(input.location) ?? input.location }
         : {}),
@@ -3285,14 +3293,10 @@ export class InMemoryStorage implements IStorage {
       .slice(0, limit);
   }
 
+  /** Tienda principal del sistema: la de menor id (tienda nº 1). */
   async getOldestStore(): Promise<Store | undefined> {
     if (this.stores.length === 0) return undefined;
-    const toMs = (d: unknown) => {
-      if (d instanceof Date) return d.getTime();
-      const t = new Date(String(d ?? 0)).getTime();
-      return Number.isFinite(t) ? t : 0;
-    };
-    return [...this.stores].sort((a, b) => toMs(a.createdAt) - toMs(b.createdAt) || a.id - b.id)[0];
+    return [...this.stores].sort((a, b) => a.id - b.id)[0];
   }
 
   async listIngredientsMaterials(options: {
@@ -3363,6 +3367,7 @@ export class InMemoryStorage implements IStorage {
       input,
       store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
     );
+    const ingredientOptions = normalizeStoreProductIngredientOptions(input);
     const product: StoreProduct = {
       id: this.storeProductIdCounter++,
       storeId,
@@ -3371,7 +3376,7 @@ export class InMemoryStorage implements IStorage {
       price,
       pricesByCurrency,
       categoryIds: input.categoryIds ?? [],
-      ingredientMaterialIds: input.ingredientMaterialIds ?? [],
+      ...ingredientOptions,
       imageUrls: input.imageUrls ?? [],
       showOnShowcase: input.showOnShowcase ?? true,
       createdAt: now,
@@ -3400,6 +3405,12 @@ export class InMemoryStorage implements IStorage {
             store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
           )
         : null;
+    const ingredientOptions = normalizeStoreProductIngredientOptions({
+      ingredientMaterialIds: input.ingredientMaterialIds ?? cur.ingredientMaterialIds,
+      removableIngredientMaterialIds:
+        input.removableIngredientMaterialIds ?? cur.removableIngredientMaterialIds,
+      ingredientAdditionals: input.ingredientAdditionals ?? cur.ingredientAdditionals,
+    });
     const next: StoreProduct = {
       ...cur,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -3408,9 +3419,7 @@ export class InMemoryStorage implements IStorage {
         : {}),
       ...(priceFields ?? {}),
       ...(input.categoryIds !== undefined ? { categoryIds: input.categoryIds } : {}),
-      ...(input.ingredientMaterialIds !== undefined
-        ? { ingredientMaterialIds: input.ingredientMaterialIds }
-        : {}),
+      ...ingredientOptions,
       ...(input.imageUrls !== undefined ? { imageUrls: input.imageUrls } : {}),
       ...(input.showOnShowcase !== undefined ? { showOnShowcase: input.showOnShowcase } : {}),
       updatedAt: new Date(),
@@ -3880,7 +3889,7 @@ export class InMemoryStorage implements IStorage {
 // index.ts lo reemplaza por Firestore.
 let _storage: IStorage = new InMemoryStorage();
 
-export function setGenFebStorage(s: IStorage): void {
+export function setAppliaStorage(s: IStorage): void {
   _storage = s;
 }
 
@@ -3891,4 +3900,4 @@ export const storage: IStorage = new Proxy({} as IStorage, {
 });
 
 // Alias para compatibilidad
-export const genFebStorage = storage;
+export const appliaStorage = storage;

@@ -1,7 +1,7 @@
 /**
  * Capacidades reales de la «burbuja» del conductor según plataforma.
  *
- * En Android (Chrome, PWA o TWA/Bubblewrap `com.genfeb.www.twa`):
+ * En Android (Chrome, PWA o TWA/Bubblewrap `com.applia.www.twa`):
  * - Document Picture-in-Picture NO está implementado en Chromium móvil.
  * - No se puede pedir «mostrar encima de otras apps» desde JavaScript.
  * - Una burbuja tipo Messenger requiere código nativo en el APK (Foreground Service,

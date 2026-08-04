@@ -1,6 +1,6 @@
 /**
  * Integración con PayPal para pagos
- * GenFeb
+ * Applia
  */
 
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || "your-paypal-client-id";
@@ -64,7 +64,7 @@ export async function createPayPalOrder(
         },
       ],
       application_context: {
-        brand_name: "GenFeb",
+        brand_name: "Applia",
         landing_page: "BILLING",
         user_action: "PAY_NOW",
         return_url: `${process.env.FRONTEND_URL || "http://localhost:5000"}/payments/success`,

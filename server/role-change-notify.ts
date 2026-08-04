@@ -1,6 +1,6 @@
 import { getIO } from "./socket";
 import { notificationService } from "./services/notification.service";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import {
   CENTRAL_SETUP_PATH,
   NOTIFICATION_TYPE_ROLE_CHANGED,
@@ -34,7 +34,7 @@ export async function applyRoleChangeSideEffects(
   }
 
   if (Object.keys(patch).length > 0) {
-    await genFebStorage.updateUser(userId, patch as Record<string, unknown>);
+    await appliaStorage.updateUser(userId, patch as Record<string, unknown>);
   }
 
   await notifyUserRoleChanged(userId, prev, next);
@@ -47,7 +47,7 @@ export async function notifyUserRoleChanged(
 ): Promise<void> {
   const prevLabel = roleLabelEs(previousRole || "—");
   const newLabel = roleLabelEs(newRole);
-  const title = "Tu rol en GenFeb cambió";
+  const title = "Tu rol en Applia cambió";
   let bodyText = `Tu rol pasó de «${prevLabel}» a «${newLabel}».`;
   let url = "/settings";
 
@@ -65,7 +65,7 @@ export async function notifyUserRoleChanged(
     title,
   };
 
-  const created = await genFebStorage.createNotification({
+  const created = await appliaStorage.createNotification({
     userId,
     type: NOTIFICATION_TYPE_ROLE_CHANGED,
     data: notifData,

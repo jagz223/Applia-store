@@ -7,7 +7,7 @@ import {
   storeSubscriptionQuoteLabel,
   subscriptionMonthlyUsdForStore,
 } from "@shared/store-subscription-fee";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getSubscriptionFeesByCategorySlug } from "./subscription-fees";
 
 export type StoreSubscriptionQuote = {
@@ -34,7 +34,7 @@ export async function applyStoreSubscriptionPaymentApproval(args: {
   months: number;
   approvedAt?: Date;
 }): Promise<Store> {
-  return genFebStorage.extendStoreVisibilitySubscription({
+  return appliaStorage.extendStoreVisibilitySubscription({
     storeId: args.storeId,
     months: args.months,
     approvalAt: args.approvedAt ?? new Date(),

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Plus, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Plus, Search, X } from "lucide-react";
 import { ingredientMaterialKey } from "@shared/store-slug";
 import { INGREDIENTS_MATERIALS_PAGE_SIZE } from "@shared/store-schema";
 import {
@@ -17,7 +17,6 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -213,17 +212,20 @@ export function IngredientMaterialPicker({
       {selected.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {selected.map((item) => (
-            <Badge key={item.id} variant="secondary" className="gap-1 pr-1">
+            <span
+              key={item.id}
+              className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-3 pr-1 py-1 text-xs font-semibold text-foreground"
+            >
               {item.name}
               <button
                 type="button"
-                className="ml-0.5 rounded-sm p-0.5 hover:bg-muted"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
                 aria-label={`Quitar ${item.name}`}
                 onClick={() => removeId(item.id)}
               >
-                ×
+                <X className="h-3.5 w-3.5" />
               </button>
-            </Badge>
+            </span>
           ))}
         </div>
       ) : (

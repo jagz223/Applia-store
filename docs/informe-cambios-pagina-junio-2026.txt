@@ -1,7 +1,7 @@
 
 ================================================================================
                     INFORME DE CAMBIOS EN LA PÁGINA WEB
-                              PLATAFORMA GENFEB
+                              PLATAFORMA APPLIA
 ================================================================================
 
 Período cubierto : 1 de junio de 2026 al 1 de julio de 2026
@@ -11,7 +11,7 @@ Elaborado        : Informe basado en trabajo diario del período
 1. INTRODUCCIÓN
 ================================================================================
 
-GENFEB es una plataforma en línea que conecta a clientes con profesionales y
+APPLIA es una plataforma en línea que conecta a clientes con profesionales y
 servicios (citas, transporte, tiendas, entre otros). Este documento resume los
 cambios y mejoras realizados en la página web y en la aplicación móvil
 (versión Android) durante el período del 1 de junio al 1 de julio de 2026.
@@ -57,7 +57,7 @@ Durante el período se realizaron mejoras importantes en siete áreas principale
      de tienda (API REST + Firestore + notificaciones).
 
   2. SERVICIO DE TAXI Y DELIVERY (Go — Car Go / Pack Go)
-     Correcciones en TaxiRide, DriverGoGenfeb, negociación, cancelaciones con
+     Correcciones en TaxiRide, DriverGoApplia, negociación, cancelaciones con
      feedback y APIs mobility-rides / pack-rides.
 
   3. NOTIFICACIONES
@@ -114,7 +114,7 @@ Detalle técnico (código) — commit "market place" (~60 archivos, +8544 línea
     - routes-stores.ts ampliado (CRUD tienda, pedidos, showcase, categorías).
     - store-order-schema.ts, store-cart-schema.ts, store-fulfillment.ts (shared).
     - store-order-delivery.ts, store-delivery-quote.ts, store-order-notifications.ts.
-    - storage-firestore.ts / storage-genfeb.ts: persistencia pedidos y tiendas.
+    - storage-firestore.ts / storage-applia.ts: persistencia pedidos y tiendas.
     - pack-rides.ts: integración reparto delivery tienda.
   Shared:
     - Esquemas Zod de pedido, pago y fulfillment para validación end-to-end.
@@ -145,7 +145,7 @@ Para el PASAJERO:
   - Rotación de mapa (bearing) e iconos car/moto/camioneta en TaxiRouteMap.
 
 Para el CONDUCTOR:
-  - DriverGoGenfeb.tsx: ofertas, negociación, historial, alertas sonoras.
+  - DriverGoApplia.tsx: ofertas, negociación, historial, alertas sonoras.
   - Corrección recepción ofertas negociadas (CargoIncomingRideDialog).
 
 Para el ADMINISTRADOR:
@@ -161,7 +161,7 @@ Detalle técnico — cancelaciones Go (23 archivos, +1601 líneas):
     - server/routes-admin.ts — endpoints admin cancelaciones Go.
     - server/go-driver-classic-offer-lock.ts — decline-invite en regateo.
   Cliente:
-    - GoCancellationFeedbackDialog.tsx integrado en TaxiRide y DriverGoGenfeb.
+    - GoCancellationFeedbackDialog.tsx integrado en TaxiRide y DriverGoApplia.
     - TaxiVehicleSearchModal / CargoIncomingRideDialog — validación búsqueda y
       ofertas negociadas vía Socket.IO (cargo:ride:* / pack:ride:*).
 
@@ -201,7 +201,7 @@ Detalle técnico:
 --------------------------------------------------------------------------------
 
   - Fix Twa: Trusted Web Activity para instalar PWA como app nativa.
-  - New APK Update: Genfeb.apk con burbuja y alertas.
+  - New APK Update: Applia.apk con burbuja y alertas.
 
 Detalle técnico:
   - assetlinks.json / manifest TWA, protección táctil en shell móvil.
@@ -220,7 +220,7 @@ Detalle técnico — Map fixes:
   Cliente:
     - live-navigation-route.ts — umbrales desvío (30 m) y recálculo periódico (8 s).
     - ride-location-emit.ts — emisión GPS conductor ~800 ms / 5 m (socket).
-    - TaxiRide.tsx, DriverGoGenfeb.tsx — handleDriverRoutePosition refactorizado.
+    - TaxiRide.tsx, DriverGoApplia.tsx — handleDriverRoutePosition refactorizado.
     - CentralDashboard.tsx + CentralAdminScopeTabs.tsx — vista flota global admin.
     - use-central.ts — useCentralFleetAll(), CENTRAL_FLEET_ALL_QUERY_KEY.
     - Home.tsx / Categories.tsx — carta Shop Go → /tiendas.
@@ -268,7 +268,7 @@ Detalle técnico — Map fixes:
 
   GO TAXI / DELIVERY
     server/mobility-rides.ts, server/pack-rides.ts
-    client/src/pages/TaxiRide.tsx, DriverGoGenfeb.tsx
+    client/src/pages/TaxiRide.tsx, DriverGoApplia.tsx
 
   TIENDAS
     server/routes-stores.ts, shared/store-order-schema.ts

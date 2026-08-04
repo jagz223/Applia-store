@@ -10,7 +10,7 @@ import {
 
 export type ResolvedTheme = "light" | "dark";
 
-export const THEME_STORAGE_KEY = "genfeb-theme";
+export const THEME_STORAGE_KEY = "applia-theme";
 
 function readStoredTheme(): ResolvedTheme {
   try {
@@ -49,7 +49,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
-      meta.setAttribute("content", theme === "dark" ? "#0f172a" : "#fdf8f3");
+      meta.setAttribute("content", theme === "dark" ? "#171412" : "#F5F1EC");
     }
   }, [theme]);
 

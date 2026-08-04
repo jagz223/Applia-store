@@ -6,11 +6,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { useStoreBySlug } from "@/hooks/use-my-store";
-import { useStoreShowcaseProducts } from "@/hooks/use-store-showcase";
+import {
+  useStoreShowcaseProducts,
+  type StoreShowcaseProduct,
+} from "@/hooks/use-store-showcase";
 import { useAddToStoreCart } from "@/hooks/use-store-cart";
 import { StoreShowcaseProductGrid } from "@/components/store/StoreShowcaseProductGrid";
 import { StoreShowcasePromotionGrid } from "@/components/store/StoreShowcasePromotionGrid";
-import { StoreCartPanel } from "@/components/store/StoreCartPanel";
+import { StoreCartPanel, storeCartPanelWidthClass } from "@/components/store/StoreCartPanel";
+import {
+  StoreProductCustomizePanel,
+  type ProductCustomizeSelection,
+} from "@/components/store/StoreProductCustomizePanel";
 import { showcaseCartItemKey } from "@/components/store/StoreShowcaseAddToCartButton";
 import {
   StoreShowcaseFilters,
@@ -28,23 +35,22 @@ type StorePayload = {
 
 function StoreAdminSidePanel({ store }: { store: StorePayload }) {
   return (
-    <div className="flex h-full w-[min(100%,22rem)] flex-col rounded-xl border border-border bg-card shadow-sm">
-      <div className="border-b border-border px-4 py-3">
+    <div className="flex h-0 min-h-0 w-full flex-1 flex-col overflow-hidden rounded-[1.25rem] border border-border/60 bg-white shadow-sm dark:bg-card">
+      <div className="shrink-0 border-b border-border/60 px-4 py-3">
         <p className="text-sm font-semibold text-foreground">Administración</p>
       </div>
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         <Link
           href={`/tienda/${encodeURIComponent(store.slug)}/admin/configuracion`}
           className="group block"
         >
           <div
             className={cn(
-              "flex items-center gap-3 rounded-xl border border-primary/25 p-4",
-              "bg-gradient-to-br from-primary/10 via-background to-accent/10",
-              "transition-colors hover:border-primary/40 hover:bg-primary/5",
+              "flex items-center gap-3 rounded-2xl border border-border p-4",
+              "bg-muted/30 transition-colors hover:bg-muted/50",
             )}
           >
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-foreground text-background">
               <Settings className="h-5 w-5" aria-hidden />
             </div>
             <div className="min-w-0 flex-1">
@@ -54,12 +60,12 @@ function StoreAdminSidePanel({ store }: { store: StorePayload }) {
               </p>
             </div>
             <ChevronRight
-              className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+              className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
               aria-hidden
             />
           </div>
         </Link>
-        <Button variant="outline" className="w-full justify-start gap-2" asChild>
+        <Button variant="outline" className="w-full justify-start gap-2 rounded-full" asChild>
           <Link href={`/tienda/${encodeURIComponent(store.slug)}/admin/productos`}>
             <Settings className="h-4 w-4" aria-hidden />
             Ir al panel de productos
@@ -78,6 +84,7 @@ export default function StorePage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<ShowcaseCategoryFilter>("all");
+  const [selectedProduct, setSelectedProduct] = useState<StoreShowcaseProduct | null>(null);
 
   const { data, isLoading, error } = useStoreBySlug(slug, Boolean(slug));
   const storeId = data?.store?.id ?? 0;
@@ -92,6 +99,7 @@ export default function StorePage() {
   useEffect(() => {
     setSearchQuery("");
     setCategoryFilter("all");
+    setSelectedProduct(null);
   }, [slug]);
 
   const showcaseProducts = showcaseData?.products ?? [];
@@ -155,10 +163,10 @@ export default function StorePage() {
 
   const { store, isOwner } = data;
   const canManageStore = isOwner || isAdmin;
-  /** Misma vitrina para todos; el lateral es carrito (cliente) o configuración (admin/dueño). */
   const showSidePanel = true;
   const showCustomerCart = !canManageStore;
   const cartActionsEnabled = showCustomerCart && isAuthenticated;
+  const customizing = showCustomerCart && selectedProduct != null;
 
   const addToCartBusyKey =
     addToCartMutation.isPending && addToCartMutation.variables
@@ -166,19 +174,6 @@ export default function StorePage() {
         ? showcaseCartItemKey("product", addToCartMutation.variables.productId!)
         : showcaseCartItemKey("promotion", addToCartMutation.variables.promotionId!)
       : null;
-
-  async function handleAddProductToCart(productId: number) {
-    try {
-      await addToCartMutation.mutateAsync({ kind: "product", productId, quantity: 1 });
-      toast({ title: "Añadido al carrito" });
-    } catch (e) {
-      toast({
-        variant: "destructive",
-        title: "No se pudo añadir",
-        description: e instanceof Error ? e.message : "Error desconocido",
-      });
-    }
-  }
 
   async function handleAddPromotionToCart(promotionId: number) {
     try {
@@ -193,11 +188,44 @@ export default function StorePage() {
     }
   }
 
+  function handleSelectProduct(product: StoreShowcaseProduct) {
+    if (!showCustomerCart) return;
+    setSelectedProduct(product);
+  }
+
+  async function handleConfirmCustomize(selection: ProductCustomizeSelection) {
+    if (!cartActionsEnabled) {
+      toast({
+        variant: "destructive",
+        title: "Inicia sesión",
+        description: "Debes iniciar sesión para comprar.",
+      });
+      return;
+    }
+    try {
+      await addToCartMutation.mutateAsync({
+        kind: "product",
+        productId: selection.productId,
+        quantity: selection.quantity,
+        removedIngredientMaterialIds: selection.removedIngredientMaterialIds,
+        additionalIngredientMaterialIds: selection.additionalIngredientMaterialIds,
+      });
+      toast({ title: "Añadido al carrito", description: selection.displayName });
+      setSelectedProduct(null);
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo añadir",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
+    }
+  }
+
   return (
-    <div className="flex w-full flex-1 min-h-0 overflow-hidden bg-muted/20">
-      <div className="flex-1 min-w-0 overflow-y-auto px-4 py-8 sm:px-6 lg:px-10 space-y-6">
+    <div className="flex h-0 min-h-0 w-full flex-1 overflow-hidden bg-background">
+      <div className="min-h-0 flex-1 min-w-0 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6 lg:px-8 space-y-5">
         {store.coverImageUrl ? (
-          <div className="relative mx-auto aspect-[21/9] max-h-56 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-muted/30">
+          <div className="relative mx-auto aspect-[21/9] max-h-48 w-full max-w-3xl overflow-hidden rounded-[1.25rem] bg-muted/40 shadow-sm">
             <img src={store.coverImageUrl} alt="" className="h-full w-full object-cover" />
           </div>
         ) : null}
@@ -208,7 +236,10 @@ export default function StorePage() {
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               categoryFilter={categoryFilter}
-              onCategoryChange={setCategoryFilter}
+              onCategoryChange={(next) => {
+                setCategoryFilter(next);
+                setSelectedProduct(null);
+              }}
               categories={showcaseCategories}
               showPromotionsFilter={showcasePromotions.length > 0}
             />
@@ -235,7 +266,8 @@ export default function StorePage() {
               products={filteredShowcaseProducts}
               isLoading={showcaseLoading}
               error={showcaseError as Error | null}
-              onAddProductToCart={cartActionsEnabled ? handleAddProductToCart : undefined}
+              selectedProductId={selectedProduct?.id ?? null}
+              onSelectProduct={showCustomerCart ? handleSelectProduct : undefined}
               addToCartBusyKey={addToCartBusyKey}
               emptyMessage={
                 showcaseProducts.length === 0
@@ -248,24 +280,40 @@ export default function StorePage() {
           )}
         </section>
 
-        {!isAuthenticated && (
+        {!isAuthenticated && showCustomerCart ? (
           <p className="text-sm text-muted-foreground text-center">
-            <Link href="/login" className="text-primary underline">
+            <Link href="/login" className="text-foreground underline underline-offset-2">
               Inicia sesión
             </Link>{" "}
             para comprar en la tienda.
           </p>
-        )}
+        ) : null}
       </div>
 
       {showSidePanel ? (
-        <div className="shrink-0 flex min-h-0 self-stretch p-3 pr-4 pb-4 pt-3">
+        <aside
+          className={cn(
+            "flex min-h-0 w-full shrink-0 flex-col self-stretch overflow-hidden p-3 pr-4 pb-4 pt-3",
+            storeCartPanelWidthClass,
+          )}
+        >
           {showCustomerCart ? (
-            <StoreCartPanel storeId={store.id} storeName={store.name} enabled />
+            customizing && selectedProduct ? (
+              <StoreProductCustomizePanel
+                key={selectedProduct.id}
+                product={selectedProduct}
+                onClose={() => setSelectedProduct(null)}
+                onConfirm={handleConfirmCustomize}
+                confirming={addToCartMutation.isPending}
+                canAddToCart={cartActionsEnabled}
+              />
+            ) : (
+              <StoreCartPanel storeId={store.id} storeName={store.name} enabled />
+            )
           ) : (
             <StoreAdminSidePanel store={store} />
           )}
-        </div>
+        </aside>
       ) : null}
     </div>
   );

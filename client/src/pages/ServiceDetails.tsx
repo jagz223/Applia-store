@@ -229,7 +229,7 @@ export default function ServiceDetails() {
                   {providerProfile?.isVerified ? (
                     <div className="mt-3 inline-flex max-w-full items-center gap-1.5 rounded-full bg-warning px-3 py-1 text-xs font-semibold text-warning-foreground shadow-sm sm:gap-2 sm:px-3.5 sm:py-1.5 sm:text-sm">
                       <ShieldCheck className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden />
-                      <span className="leading-tight">Verificado por GenFeb</span>
+                      <span className="leading-tight">Verificado por Applia</span>
                     </div>
                   ) : null}
 

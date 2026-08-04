@@ -474,7 +474,7 @@ export default function BecomeDriver() {
         <BecomeDriverMobilityDialog open={mobilityDialogOpen} onOpenChange={setMobilityDialogOpen} />
         <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background py-12 px-4 flex flex-col items-center justify-center gap-3">
           <p className="text-sm text-muted-foreground text-center max-w-md">
-            Ya tienes taxi y delivery activos con vehículo registrado. Usa el diálogo para ir a Genfeb Go o vuelve a Mis
+            Ya tienes taxi y delivery activos con vehículo registrado. Usa el diálogo para ir a Applia Go o vuelve a Mis
             servicios desde el menú.
           </p>
         </div>

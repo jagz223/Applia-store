@@ -14,24 +14,24 @@ export function parseFcmNotificationPayload(payload: {
 }): ParsedFcmNotification {
   const notification = payload.notification || {};
   const data = payload.data || {};
-  const title = notification.title || data.title || "Genfeb";
+  const title = notification.title || data.title || "Applia";
   const body = notification.body || data.body || "Tienes una nueva notificación";
   const url = data.url || "/";
   const offerType = String(data.type || "").toLowerCase();
   const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
   const rideId = data.rideId ? String(data.rideId) : "";
-  const tagType = data.type || data.withdrawalType || data.conversationId || data.transferId || "genfeb";
+  const tagType = data.type || data.withdrawalType || data.conversationId || data.transferId || "applia";
   const tagId =
     rideId ||
     data.bookingId ||
     data.messageId ||
     data.transferId ||
     data.conversationId ||
-    "genfeb";
+    "applia";
   const tag =
     isRideOffer && rideId
-      ? `genfeb-ride-offer-${rideId.replace(/[^a-zA-Z0-9-_]/g, "_")}`
-      : `genfeb-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
+      ? `applia-ride-offer-${rideId.replace(/[^a-zA-Z0-9-_]/g, "_")}`
+      : `applia-${String(tagType).replace(/[^a-zA-Z0-9-_]/g, "_")}-${String(tagId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
   const isPanic = offerType === "go_panic";
   return { title, body, url, tag, isPanic, isRideOffer };
 }
@@ -42,8 +42,8 @@ export async function showSystemNotification(parsed: ParsedFcmNotification): Pro
 
   const options: NotificationOptions = {
     body: parsed.body,
-    icon: "/genfeb-logo-new.png",
-    badge: "/genfeb-logo-new.png",
+    icon: "/applia-logo-new.png",
+    badge: "/applia-logo-new.png",
     tag: parsed.tag,
     data: { url: parsed.url },
     ...(parsed.isPanic

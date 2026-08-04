@@ -9,7 +9,7 @@ import { z } from "zod";
 import { authenticateJWT } from "./routes-auth";
 import { getIO, getUserActivePath, sendNotificationToUser } from "./socket";
 import { shouldSendDriverClassicOfferPush } from "./go-user-presence";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { catalogService } from "./services";
 import { notificationService } from "./services/notification.service";
 import { registerPackNegotiationWithdraw, withdrawDriverNegotiationOffersEverywhere } from "./negotiation-cross-withdraw";
@@ -279,7 +279,7 @@ export function cancelStoreOrderPackSearch(storeOrderId: number): boolean {
     dropPackActiveRide(ride.id);
 
     if (ride.conversationId != null && ride.driverUserId != null) {
-      void onMobilityRideChatCancelled(genFebStorage, {
+      void onMobilityRideChatCancelled(appliaStorage, {
         conversationId: Number(ride.conversationId),
         riderUserId: ride.riderUserId,
         driverUserId: ride.driverUserId,
@@ -566,7 +566,7 @@ async function appendPackRideSystemMessage(conversationId: number | null | undef
   const cid = conversationId == null ? NaN : Number(conversationId);
   if (!Number.isFinite(cid)) return;
   try {
-    await genFebStorage.createMessage({
+    await appliaStorage.createMessage({
       conversationId: cid,
       senderId: CHAT_SYSTEM_SENDER_ID,
       content,
@@ -736,7 +736,7 @@ function releaseClassicOfferFromDriver(rideId: string, ride: RideRecord, driverU
 }
 
 async function buildRiderPublic(riderUserId: string) {
-  const u = await genFebStorage.getUserById(riderUserId);
+  const u = await appliaStorage.getUserById(riderUserId);
   const rec = (u ?? undefined) as Record<string, unknown> | undefined;
   const ln = String(rec?.lastName ?? "").trim();
   const nn = String(rec?.name ?? "").trim();
@@ -758,10 +758,10 @@ async function buildRiderPublic(riderUserId: string) {
 }
 
 async function buildDriverPublic(driverUserId: string) {
-  const u = await genFebStorage.getUserById(driverUserId);
+  const u = await appliaStorage.getUserById(driverUserId);
   const rec = (u ?? undefined) as Record<string, unknown> | undefined;
   const provider = await catalogService.getProviderByUserId(driverUserId);
-  const vehicle = provider ? await genFebStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id) : null;
+  const vehicle = provider ? await appliaStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id) : null;
   const ln = String(rec?.lastName ?? "").trim();
   const nn = String(rec?.name ?? "").trim();
   const fn = String(rec?.firstName ?? "").trim();
@@ -896,7 +896,7 @@ async function broadcastPackNegotiationInvites(
       ? `Orden #${ride.storeOrderId}: envío con monto a negociar.`
       : "Tienes un envío con monto a negociar. Abre para ofertar.";
     if (shouldSendDriverClassicOfferPush(String(driverId)) && shouldSendClassicOfferPushForRide(driverId, ride.id)) {
-      void genFebStorage
+      void appliaStorage
         .createNotification({
           userId: driverId,
           type: "pack_ride_offer",
@@ -980,7 +980,7 @@ async function offerNextDriver(io: SocketIOServer, ride: RideRecord, rider: any)
       ? `Orden #${ride.storeOrderId}: envío disponible. Acepta o rechaza.`
       : "Tienes un envío disponible. Abre para aceptar o rechazar.";
 
-    void genFebStorage
+    void appliaStorage
       .createNotification({
         userId: driverId,
         type: "pack_ride_offer",
@@ -1177,7 +1177,7 @@ export function registerPackMobilitySocket(io: SocketIOServer) {
           (ride.status === "matched" || ride.status === "in_progress")
         ) {
           const provider = await catalogService.getProviderByUserId(user.id);
-          const vehicle = await genFebStorage.getPrimaryVehicleByUserId(user.id);
+          const vehicle = await appliaStorage.getPrimaryVehicleByUserId(user.id);
           presRow = upsertPackDriverPresence({
             userId: user.id,
             receiving: false,
@@ -1413,7 +1413,7 @@ async function runClassicPackOfferPoll(
 }
 
 export function registerPackRideRoutes(app: Express) {
-  void runMobilityRideChatStartupSweep(genFebStorage);
+  void runMobilityRideChatStartupSweep(appliaStorage);
 
   // GET /api/pack/driver/pending-offer - Recupera una oferta pendiente (si existe) para el driver autenticado.
   app.get("/api/pack/driver/pending-offer", authenticateJWT, async (req: any, res) => {
@@ -1566,13 +1566,13 @@ export function registerPackRideRoutes(app: Express) {
   });
 
   const applyUserStars = async (userId: string, stars: number) => {
-    const u = await genFebStorage.getUserById(userId);
+    const u = await appliaStorage.getUserById(userId);
     const currentAvg = typeof (u as any)?.rating === "number" ? (u as any).rating : Number((u as any)?.rating) || 5;
     const currentCount =
       typeof (u as any)?.ratingCount === "number" ? (u as any).ratingCount : Number((u as any)?.ratingCount) || 0;
     const nextCount = Math.max(0, currentCount) + 1;
     const nextAvg = (currentAvg * Math.max(0, currentCount) + stars) / nextCount;
-    await genFebStorage.updateUser(userId, { rating: nextAvg, ratingCount: nextCount });
+    await appliaStorage.updateUser(userId, { rating: nextAvg, ratingCount: nextCount });
   };
 
   const requestSchema = z
@@ -1887,7 +1887,7 @@ export function registerPackRideRoutes(app: Express) {
       const driverLon = pres?.lon;
       let conversationId: number | null = null;
       try {
-        conversationId = await ensureMobilityRideConversation(genFebStorage, {
+        conversationId = await ensureMobilityRideConversation(appliaStorage, {
           rideId: ride.id,
           module: "delivery",
           riderUserId: ride.riderUserId,
@@ -2023,7 +2023,7 @@ export function registerPackRideRoutes(app: Express) {
           const driverLon = pres?.lon;
           let conversationId: number | null = null;
           try {
-            conversationId = await ensureMobilityRideConversation(genFebStorage, {
+            conversationId = await ensureMobilityRideConversation(appliaStorage, {
               rideId: ride.id,
               module: "delivery",
               riderUserId: ride.riderUserId,
@@ -2195,7 +2195,7 @@ export function registerPackRideRoutes(app: Express) {
       const driverLon = pres?.lon;
       let conversationId: number | null = null;
       try {
-        conversationId = await ensureMobilityRideConversation(genFebStorage, {
+        conversationId = await ensureMobilityRideConversation(appliaStorage, {
           rideId: ride.id,
           module: "delivery",
           riderUserId: ride.riderUserId,
@@ -2277,12 +2277,12 @@ export function registerPackRideRoutes(app: Express) {
       io?.to(`user:${driverUserId}`).emit("pack:ride:started", { rideId });
       if (ride.conversationId != null) {
         try {
-          await onMobilityRideChatStarted(genFebStorage, ride.conversationId);
+          await onMobilityRideChatStarted(appliaStorage, ride.conversationId);
         } catch (se) {
           console.error("[pack] ride chat started", se);
         }
         try {
-          await genFebStorage.createMessage({
+          await appliaStorage.createMessage({
             conversationId: ride.conversationId,
             senderId: CHAT_SYSTEM_SENDER_ID,
             content: "Envío en curso. Podéis seguir coordinando por este chat durante el trayecto.",
@@ -2384,7 +2384,7 @@ export function registerPackRideRoutes(app: Express) {
 
       if (ride.conversationId != null && ride.driverUserId) {
         try {
-          await onMobilityRideChatCompleted(genFebStorage, {
+          await onMobilityRideChatCompleted(appliaStorage, {
             conversationId: Number(ride.conversationId),
             riderUserId: ride.riderUserId,
             driverUserId,
@@ -2470,7 +2470,7 @@ export function registerPackRideRoutes(app: Express) {
 
       if (ride.conversationId != null && ride.driverUserId != null) {
         try {
-          await onMobilityRideChatCancelled(genFebStorage, {
+          await onMobilityRideChatCancelled(appliaStorage, {
             conversationId: Number(ride.conversationId),
             riderUserId: ride.riderUserId,
             driverUserId: ride.driverUserId,

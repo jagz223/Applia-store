@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { canAccessCentralPanel, hasAdminPrivileges, isCentralRole } from "@shared/roles";
 import { authenticateJWT } from "./routes-auth";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { catalogService } from "./services";
 import {
   createDispatchCompany,
@@ -72,7 +72,7 @@ async function resolveCompanyIdForRequest(
     return { companyId: cid };
   }
   if (isCentralRole(role)) {
-    const user = (await genFebStorage.getUserById(String(req.user?.id))) as {
+    const user = (await appliaStorage.getUserById(String(req.user?.id))) as {
       dispatchCompanyId?: string;
     } | null;
     const cid = user?.dispatchCompanyId;
@@ -185,7 +185,7 @@ async function buildCentralFleetDriver(userId: string): Promise<Record<string, u
     ? (await getMobilityActiveRideForCentral(userId)) ?? (await getPackActiveRideForCentral(userId))
     : null;
 
-  const user = (await genFebStorage.getUserById(userId)) as {
+  const user = (await appliaStorage.getUserById(userId)) as {
     name?: string;
     lastName?: string;
     avatar?: string;
@@ -193,7 +193,7 @@ async function buildCentralFleetDriver(userId: string): Promise<Record<string, u
     phone?: string | null;
     dispatchCompanyId?: string | null;
   } | null;
-  const vehicle = await genFebStorage.getPrimaryVehicleByUserId(userId);
+  const vehicle = await appliaStorage.getPrimaryVehicleByUserId(userId);
   const provider = await catalogService.getProviderByUserId(userId);
   const dispatchCompanyId =
     String(
@@ -249,7 +249,7 @@ export function registerCentralRoutes(app: Express): void {
     }
     try {
       const { name } = setupCompanySchema.parse(req.body);
-      const user = (await genFebStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
+      const user = (await appliaStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
 
       const existingCompanyId = String(user.dispatchCompanyId ?? "").trim();
@@ -276,7 +276,7 @@ export function registerCentralRoutes(app: Express): void {
         ownerUserId: String(req.user.id),
       });
 
-      await genFebStorage.updateUser(String(req.user.id), {
+      await appliaStorage.updateUser(String(req.user.id), {
         dispatchCompanyId: company.id,
         pendingCentralSetup: false,
       } as Record<string, unknown>);
@@ -377,7 +377,7 @@ export function registerCentralRoutes(app: Express): void {
     const resolved = await resolveCompanyIdForRequest(req, req.query.companyId as string);
     if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
 
-    const providers = await genFebStorage.getAllProviders();
+    const providers = await appliaStorage.getAllProviders();
     const fleet = providers.filter(
       (p) => String((p as { dispatchCompanyId?: string }).dispatchCompanyId ?? "") === resolved.companyId,
     );
@@ -397,7 +397,7 @@ export function registerCentralRoutes(app: Express): void {
     if (!hasAdminPrivileges(req.user?.role)) {
       return res.status(403).json({ message: "Sin acceso" });
     }
-    const providers = await genFebStorage.getAllProviders();
+    const providers = await appliaStorage.getAllProviders();
     const seen = new Set<string>();
     const drivers: unknown[] = [];
     for (const p of providers) {
@@ -503,7 +503,7 @@ export function registerCentralRoutes(app: Express): void {
     if ("error" in resolved) return res.status(resolved.status).json({ message: resolved.error });
 
     const email = body.email.trim().toLowerCase();
-    const existing = await genFebStorage.getUserByEmail(email);
+    const existing = await appliaStorage.getUserByEmail(email);
     if (existing && !(existing as { deletedAt?: unknown }).deletedAt) {
       return res.status(409).json({ message: "El correo ya está registrado." });
     }
@@ -511,7 +511,7 @@ export function registerCentralRoutes(app: Express): void {
     const hashedPassword = await bcrypt.hash(body.password, 10);
     const role = body.memberType === "central" ? "central" : "professional";
 
-    const user = (await genFebStorage.createUser({
+    const user = (await appliaStorage.createUser({
       email,
       password: hashedPassword,
       name: body.name,
@@ -534,7 +534,7 @@ export function registerCentralRoutes(app: Express): void {
       );
       const provider = await catalogService.createProvider({
         userId: user.id,
-        profession: "Conductor Genfeb Go",
+        profession: "Conductor Applia Go",
         bio: "Conductor registrado por central.",
         ...categoryPatch,
       } as Parameters<typeof catalogService.createProvider>[0]);
@@ -542,12 +542,12 @@ export function registerCentralRoutes(app: Express): void {
       await catalogService.updateProvider((provider as { id: number }).id, {
         dispatchCompanyId: resolved.companyId,
         goBrands: ["transport", "delivery"],
-        goDriverOfferTitle: "Conductor Genfeb Go",
+        goDriverOfferTitle: "Conductor Applia Go",
         goDriverOfferDescription:
-          "Servicios de taxi y delivery en Genfeb Go. Registrado por la central de la empresa.",
+          "Servicios de taxi y delivery en Applia Go. Registrado por la central de la empresa.",
       } as Parameters<typeof catalogService.updateProvider>[1]);
 
-      await genFebStorage.createProviderVehicle({
+      await appliaStorage.createProviderVehicle({
         providerId: (provider as { id: number }).id,
         userId: user.id,
         vehicle,
@@ -579,9 +579,9 @@ export function registerCentralRoutes(app: Express): void {
     if (!row || row.dispatchCompanyId !== resolved.companyId) {
       return res.status(404).json({ message: "Solicitud no encontrada" });
     }
-    const applicant = (await genFebStorage.getUserById(row.applicantUserId)) as Record<string, unknown> | null;
-    const vehicle = await genFebStorage.getPrimaryVehicleByUserId(row.applicantUserId);
-    const prof = await genFebStorage.getProfessionalVerificationByUserId(row.applicantUserId);
+    const applicant = (await appliaStorage.getUserById(row.applicantUserId)) as Record<string, unknown> | null;
+    const vehicle = await appliaStorage.getPrimaryVehicleByUserId(row.applicantUserId);
+    const prof = await appliaStorage.getProfessionalVerificationByUserId(row.applicantUserId);
     const shareCompany = String((applicant as { centralDataShareForCompanyId?: string })?.centralDataShareForCompanyId ?? "");
     const dataGranted =
       row.dataAccessStatus === "granted" || shareCompany === resolved.companyId;
@@ -672,10 +672,10 @@ export function registerCentralRoutes(app: Express): void {
       dispatchCompanyId: resolved.companyId,
     } as Parameters<typeof catalogService.updateProvider>[1]);
     await updateCentralAffiliationRequest(id, { status: "approved" });
-    await genFebStorage.updateUser(row.applicantUserId, {
+    await appliaStorage.updateUser(row.applicantUserId, {
       credentialsManagedOutsideCentral: true,
       dispatchCompanyId: resolved.companyId,
-    } as Parameters<typeof genFebStorage.updateUser>[1]);
+    } as Parameters<typeof appliaStorage.updateUser>[1]);
     void refreshMobilityPresenceDispatchCompany(row.applicantUserId);
     void refreshPackPresenceDispatchCompany(row.applicantUserId);
     const company = await getDispatchCompany(resolved.companyId);
@@ -732,7 +732,7 @@ export function registerCentralSocket(io: import("socket.io").Server): void {
     socket.on("central:fleet:subscribe", async (data: { companyId?: string }) => {
       let companyId = data?.companyId;
       if (!hasAdminPrivileges(user.role)) {
-        const u = (await genFebStorage.getUserById(user.id!)) as { dispatchCompanyId?: string };
+        const u = (await appliaStorage.getUserById(user.id!)) as { dispatchCompanyId?: string };
         companyId = u?.dispatchCompanyId;
       }
       if (!companyId) return;

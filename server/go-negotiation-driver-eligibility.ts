@@ -1,5 +1,5 @@
 import { catalogService } from "./services";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { NEGOTIATION_MATCH_MAP_CARGO, NEGOTIATION_MATCH_MAP_PACK } from "@shared/go-negotiation-board-segments";
 
 export type NegotiationVehicleMatchOptions = {
@@ -39,10 +39,10 @@ export async function resolveDriverPrimaryVehicleForNegotiation(
 ): Promise<DriverPrimaryVehicleSnapshot | null> {
   const provider = await catalogService.getProviderByUserId(driverUserId);
   if (provider) {
-    const v = await genFebStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id);
+    const v = await appliaStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id);
     if (v) return { vehicle_type: v.vehicle_type, is_pet_friendly: v.is_pet_friendly };
   }
-  const byUser = await genFebStorage.getPrimaryVehicleByUserId(driverUserId);
+  const byUser = await appliaStorage.getPrimaryVehicleByUserId(driverUserId);
   if (byUser) return { vehicle_type: byUser.vehicle_type, is_pet_friendly: byUser.is_pet_friendly };
   return null;
 }

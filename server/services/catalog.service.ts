@@ -4,9 +4,9 @@
  */
 
 import type { ICatalogStorage, ProviderUpdate, ServiceUpdate } from "../storage-contracts";
-import type { IStorage } from "../storage-genfeb";
+import type { IStorage } from "../storage-applia";
 import type { Category, InsertProvider, InsertService } from "@shared/schema";
-import { getGenfebStatsMonthKey } from "@shared/ecuador-calendar";
+import { getAppliaStatsMonthKey } from "@shared/ecuador-calendar";
 import { excludeLegacySubcategoryCategoryDocuments } from "@shared/catalog-category-utils";
 import { computeListingPublished } from "@shared/professional-listing-subscription";
 import { DEFAULT_CATEGORIES, filterCategoriesExcludedFromPublicApi } from "@shared/default-categories";
@@ -230,7 +230,7 @@ export class CatalogService {
     monthKey: string;
     items: { subcategoryId: number; count: number }[];
   }> {
-    const monthKey = getGenfebStatsMonthKey();
+    const monthKey = getAppliaStatsMonthKey();
     const lim = Math.min(50, Math.max(1, Math.floor(limit)));
     const items = await this.storage.getMonthlyPopularSubcategoryBookingCounts(monthKey, lim);
     return { monthKey, items };

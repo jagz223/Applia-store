@@ -9,7 +9,7 @@ import { z } from "zod";
 import { authenticateJWT } from "./routes-auth";
 import { requireFullAdmin } from "./middleware-roles";
 import { roleService } from "./services";
-import type { NewRoleDefinition } from "./storage-genfeb";
+import type { NewRoleDefinition } from "./storage-applia";
 import {
   createRoleCatalogSchema,
   updateRoleCatalogSchema,

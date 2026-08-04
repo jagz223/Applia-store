@@ -129,7 +129,6 @@ export function StoreCoverPhotoPicker({
         />
         <Button
           type="button"
-          variant="secondary"
           className="shrink-0 gap-1.5"
           disabled={disabled || urlLoading || !urlInput.trim()}
           onClick={() => void handleAddUrl()}
@@ -144,6 +143,7 @@ export function StoreCoverPhotoPicker({
           type="button"
           variant="outline"
           size="sm"
+          className="border-primary/40 text-primary hover:bg-primary/10 hover:text-primary"
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
         >

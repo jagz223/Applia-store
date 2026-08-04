@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { isCentralRole } from "@shared/roles";
 import type { CentralMemberSummary, CentralMemberType } from "@shared/central-member";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getDispatchCompany } from "./dispatch-companies";
 
 type UserRow = {
@@ -42,14 +42,14 @@ export async function memberBelongsToCompany(
   userId: string,
   companyId: string,
 ): Promise<{ ok: true; memberType: CentralMemberType } | { ok: false }> {
-  const user = (await genFebStorage.getUserById(userId)) as UserRow | null;
+  const user = (await appliaStorage.getUserById(userId)) as UserRow | null;
   if (!user || user.deletedAt) return { ok: false };
 
   if (isCentralRole(user.role) && String(user.dispatchCompanyId ?? "") === companyId) {
     return { ok: true, memberType: "central" };
   }
 
-  const provider = (await genFebStorage.getProviderByUserId(userId)) as ProviderRow | null;
+  const provider = (await appliaStorage.getProviderByUserId(userId)) as ProviderRow | null;
   if (provider && String(provider.dispatchCompanyId ?? "") === companyId) {
     return { ok: true, memberType: "driver" };
   }
@@ -60,7 +60,7 @@ export async function memberBelongsToCompany(
 export async function listCompanyMembers(companyId: string): Promise<CentralMemberSummary[]> {
   const byUserId = new Map<string, CentralMemberSummary>();
 
-  const { users } = await genFebStorage.getUsers({ page: 1, limit: 50_000 });
+  const { users } = await appliaStorage.getUsers({ page: 1, limit: 50_000 });
   for (const raw of users) {
     const u = raw as UserRow;
     if (u.deletedAt) continue;
@@ -80,16 +80,16 @@ export async function listCompanyMembers(companyId: string): Promise<CentralMemb
     });
   }
 
-  const providers = await genFebStorage.getAllProviders();
+  const providers = await appliaStorage.getAllProviders();
   for (const p of providers) {
     if (String((p as ProviderRow).dispatchCompanyId ?? "") !== companyId) continue;
     const userId = String((p as { userId?: string }).userId ?? "");
     if (!userId) continue;
 
-    const user = (await genFebStorage.getUserById(userId)) as UserRow | null;
+    const user = (await appliaStorage.getUserById(userId)) as UserRow | null;
     if (!user || user.deletedAt) continue;
 
-    const vehicle = await genFebStorage.getPrimaryVehicleByUserId(userId);
+    const vehicle = await appliaStorage.getPrimaryVehicleByUserId(userId);
     byUserId.set(userId, {
       userId,
       memberType: "driver",
@@ -117,7 +117,7 @@ export async function listCompanyMembers(companyId: string): Promise<CentralMemb
 /** Usuarios operadores de central (`role=central`) asignados a la empresa. */
 export async function listCentralOperatorUserIds(companyId: string): Promise<string[]> {
   const ids: string[] = [];
-  const { users } = await genFebStorage.getUsers({ page: 1, limit: 50_000 });
+  const { users } = await appliaStorage.getUsers({ page: 1, limit: 50_000 });
   for (const raw of users) {
     const u = raw as UserRow;
     if (u.deletedAt) continue;
@@ -128,7 +128,7 @@ export async function listCentralOperatorUserIds(companyId: string): Promise<str
   const company = await getDispatchCompany(companyId);
   const ownerId = company?.ownerUserId;
   if (ownerId && !ids.includes(ownerId)) {
-    const owner = (await genFebStorage.getUserById(ownerId)) as UserRow | null;
+    const owner = (await appliaStorage.getUserById(ownerId)) as UserRow | null;
     if (owner && !owner.deletedAt) ids.push(ownerId);
   }
   return ids;
@@ -142,7 +142,7 @@ export async function patchCompanyMember(
   const belongs = await memberBelongsToCompany(userId, companyId);
   if (!belongs.ok) return { ok: false, error: "Usuario no pertenece a esta empresa", status: 404 };
 
-  const userRow = (await genFebStorage.getUserById(userId)) as { credentialsManagedOutsideCentral?: boolean } | null;
+  const userRow = (await appliaStorage.getUserById(userId)) as { credentialsManagedOutsideCentral?: boolean } | null;
   if (
     userRow?.credentialsManagedOutsideCentral &&
     (patch.email != null || patch.phone != null || patch.newPassword != null)
@@ -156,24 +156,24 @@ export async function patchCompanyMember(
 
   if (patch.email) {
     const email = patch.email.trim().toLowerCase();
-    const existing = (await genFebStorage.getUserByEmail(email)) as UserRow | null | undefined;
+    const existing = (await appliaStorage.getUserByEmail(email)) as UserRow | null | undefined;
     if (existing?.id && existing.id !== userId && !existing.deletedAt) {
       return { ok: false, error: "El correo ya está registrado.", status: 409 };
     }
-    await genFebStorage.updateUser(userId, { email } as Parameters<typeof genFebStorage.updateUser>[1]);
+    await appliaStorage.updateUser(userId, { email } as Parameters<typeof appliaStorage.updateUser>[1]);
   }
 
   if (patch.phone) {
-    const existingPhone = (await genFebStorage.getUserByPhone(patch.phone.trim())) as UserRow | null | undefined;
+    const existingPhone = (await appliaStorage.getUserByPhone(patch.phone.trim())) as UserRow | null | undefined;
     if (existingPhone?.id && existingPhone.id !== userId) {
       return { ok: false, error: "El teléfono ya está registrado.", status: 409 };
     }
-    await genFebStorage.updateUser(userId, { phone: patch.phone.trim() } as Parameters<typeof genFebStorage.updateUser>[1]);
+    await appliaStorage.updateUser(userId, { phone: patch.phone.trim() } as Parameters<typeof appliaStorage.updateUser>[1]);
   }
 
   if (patch.newPassword) {
     const hashed = await bcrypt.hash(patch.newPassword, 10);
-    await genFebStorage.updateUserPassword(userId, hashed);
+    await appliaStorage.updateUserPassword(userId, hashed);
   }
 
   return { ok: true };

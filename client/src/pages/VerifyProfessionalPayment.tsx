@@ -47,7 +47,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { SubscriptionPromoCodeApply } from "@/components/subscription/SubscriptionPromoCodeApply";
 import type { RedeemPromotionalCodeDiscount, RedeemPromotionalCodeFreeMonths } from "@shared/promotional-code-schema";
-import qrGenfebUrl from "@/assets/images/genfeb_qr.png";
+import qrAppliaUrl from "@/assets/images/applia_qr.png";
 
 const BANK_ACCOUNT_NUMBER = "7700896747";
 const DEFAULT_VERIFY_AMOUNT_USD = 15;
@@ -446,7 +446,7 @@ export default function VerifyProfessionalPayment() {
             <CardContent className="flex flex-col items-center">
               <div className="rounded-xl border border-border bg-muted/30 p-4 mb-6">
                 <img
-                  src={qrGenfebUrl}
+                  src={qrAppliaUrl}
                   alt="QR para transferencia bancaria"
                   className="w-48 h-48 sm:w-56 sm:h-56 object-contain"
                 />

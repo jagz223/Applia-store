@@ -85,7 +85,7 @@ export function HomeVideoCarousel({ videos }: HomeVideoCarouselProps) {
           <div className="flex items-center justify-between gap-3 mb-3 sm:mb-4">
             <div>
               <p className="mt-2 text-sm sm:text-base text-muted-foreground">
-                Mira cómo funciona GenFeb en segundos.
+                Mira cómo funciona Applia en segundos.
               </p>
             </div>
             <div className="hidden sm:flex items-center gap-2">

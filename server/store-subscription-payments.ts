@@ -3,7 +3,7 @@
  */
 import { getIO } from "./socket";
 import { notificationService } from "./services/notification.service";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getFullAdminUsers } from "./staff-users";
 import { getSubscriptionFeesByCategorySlug } from "./subscription-fees";
 import { applyStoreSubscriptionPaymentApproval } from "./store-subscription";
@@ -38,11 +38,11 @@ export async function submitStoreSubscriptionPayment(args: {
   storeId: number;
   body: StoreSubscriptionPaymentBody;
 }): Promise<{ reportId: number | string; store: Store }> {
-  const store = await genFebStorage.getStoreById(args.storeId);
+  const store = await appliaStorage.getStoreById(args.storeId);
   if (!store) throw new Error("STORE_NOT_FOUND");
   if (store.ownerUserId !== args.userId) throw new Error("STORE_FORBIDDEN");
 
-  const pending = await genFebStorage.findPendingStoreSubscriptionReport(args.storeId);
+  const pending = await appliaStorage.findPendingStoreSubscriptionReport(args.storeId);
   if (pending) throw new Error("STORE_PAYMENT_ALREADY_PENDING");
 
   const fees = await getSubscriptionFeesByCategorySlug();
@@ -50,7 +50,7 @@ export async function submitStoreSubscriptionPayment(args: {
   const months = Math.max(1, Math.min(12, Math.trunc(args.body.subscriptionMonths ?? 1)));
   const amountUsd = (Math.round(monthlyUsd * months * 100) / 100).toFixed(2);
 
-  const report = await genFebStorage.createFinancialReport({
+  const report = await appliaStorage.createFinancialReport({
     userId: args.userId,
     storeId: args.storeId,
     storeSlug: store.slug,
@@ -73,8 +73,8 @@ export async function submitStoreSubscriptionPayment(args: {
   });
 
   try {
-    const admins = await getFullAdminUsers(genFebStorage);
-    const user = await genFebStorage.getUserById(args.userId);
+    const admins = await getFullAdminUsers(appliaStorage);
+    const user = await appliaStorage.getUserById(args.userId);
     const u = user as { firstName?: string; lastName?: string; name?: string; email?: string } | undefined;
     const name =
       u != null
@@ -86,7 +86,7 @@ export async function submitStoreSubscriptionPayment(args: {
     });
     for (const admin of admins) {
       const adminId = String(admin.id);
-      await genFebStorage.createNotification({
+      await appliaStorage.createNotification({
         userId: adminId,
         type: "admin_store_subscription_payment",
         data: {
@@ -141,11 +141,11 @@ export type StoreSubscriptionPaymentAdminRow = {
 export async function listStoreSubscriptionPaymentsForAdmin(
   status?: "pending" | "completed" | "rejected",
 ): Promise<StoreSubscriptionPaymentAdminRow[]> {
-  const reports = await genFebStorage.listStoreSubscriptionFinancialReports(status);
+  const reports = await appliaStorage.listStoreSubscriptionFinancialReports(status);
   const rows: StoreSubscriptionPaymentAdminRow[] = [];
   for (const r of reports) {
     const userId = String(r.userId ?? "");
-    const user = userId ? await genFebStorage.getUserById(userId) : undefined;
+    const user = userId ? await appliaStorage.getUserById(userId) : undefined;
     const u = user as { firstName?: string; lastName?: string; name?: string; email?: string } | undefined;
     const userName =
       u != null
@@ -176,14 +176,14 @@ export async function reviewStoreSubscriptionPayment(args: {
   adminUserId: string;
   review: StoreSubscriptionPaymentReviewBody;
 }): Promise<{ ok: true; store?: Store }> {
-  const report = await genFebStorage.getFinancialReport(args.reportId);
+  const report = await appliaStorage.getFinancialReport(args.reportId);
   if (!report || report.type !== STORE_SUBSCRIPTION_FEE_REPORT_TYPE) {
     throw new Error("REPORT_NOT_FOUND");
   }
   if (report.status !== "pending") throw new Error("REPORT_NOT_PENDING");
 
   const storeId = Number(report.storeId);
-  const store = await genFebStorage.getStoreById(storeId);
+  const store = await appliaStorage.getStoreById(storeId);
   if (!store) throw new Error("STORE_NOT_FOUND");
 
   const userId = String(report.userId ?? "");
@@ -205,20 +205,20 @@ export async function reviewStoreSubscriptionPayment(args: {
         months,
         approvedAt: approvalAtForStoreSubscription(txDate),
       });
-      await genFebStorage.patchStoreSubscriptionPaymentMeta(storeId, {
+      await appliaStorage.patchStoreSubscriptionPaymentMeta(storeId, {
         visibilitySubscriptionLastPaymentKey: paymentKey || null,
         visibilitySubscriptionLastPaymentApprovedAt: new Date().toISOString(),
         visibilitySubscriptionLastPaymentApprovedBy: args.adminUserId,
       });
     }
-    await genFebStorage.updateFinancialReportStatus(args.reportId, "completed");
+    await appliaStorage.updateFinancialReportStatus(args.reportId, "completed");
 
-    const otherPending = (await genFebStorage.listStoreSubscriptionFinancialReports("pending")).filter(
+    const otherPending = (await appliaStorage.listStoreSubscriptionFinancialReports("pending")).filter(
       (r) => Number(r.storeId) === storeId && String(r.id) !== String(args.reportId),
     );
     for (const dup of otherPending) {
       try {
-        await genFebStorage.updateFinancialReportStatus(dup.id, "completed");
+        await appliaStorage.updateFinancialReportStatus(dup.id, "completed");
       } catch (err) {
         console.error("[store-subscription] close duplicate pending", dup.id, err);
       }
@@ -245,7 +245,7 @@ export async function reviewStoreSubscriptionPayment(args: {
   const rejectReason = String(args.review.reason ?? "").trim();
   if (rejectReason.length < 3) throw new Error("REJECT_REASON_REQUIRED");
 
-  await genFebStorage.updateFinancialReportStatus(args.reportId, "rejected");
+  await appliaStorage.updateFinancialReportStatus(args.reportId, "rejected");
 
   const copy = buildStoreSubscriptionRejectedNotification({
     storeName: store.name,
@@ -275,7 +275,7 @@ async function notifyStorePaymentResult(
   data: Record<string, unknown>,
 ) {
   if (!userId) return;
-  await genFebStorage.createNotification({
+  await appliaStorage.createNotification({
     userId,
     type: "store_subscription_result",
     data,
@@ -297,23 +297,23 @@ async function notifyStorePaymentResult(
 }
 
 export async function storeHasPendingSubscriptionPayment(storeId: number): Promise<boolean> {
-  const store = await genFebStorage.getStoreById(storeId);
+  const store = await appliaStorage.getStoreById(storeId);
   if (store && isStoreVisibilityActive(store)) {
     await reconcileStalePendingStoreSubscriptionReports(storeId);
     return false;
   }
-  const pending = await genFebStorage.findPendingStoreSubscriptionReport(storeId);
+  const pending = await appliaStorage.findPendingStoreSubscriptionReport(storeId);
   return pending != null;
 }
 
 /** Cierra comprobantes pending obsoletos cuando la suscripción de tienda ya está activa. */
 async function reconcileStalePendingStoreSubscriptionReports(storeId: number): Promise<void> {
-  const pendingList = (await genFebStorage.listStoreSubscriptionFinancialReports("pending")).filter(
+  const pendingList = (await appliaStorage.listStoreSubscriptionFinancialReports("pending")).filter(
     (r) => Number(r.storeId) === storeId,
   );
   for (const report of pendingList) {
     try {
-      await genFebStorage.updateFinancialReportStatus(report.id, "completed");
+      await appliaStorage.updateFinancialReportStatus(report.id, "completed");
     } catch (err) {
       console.error("[store-subscription] reconcile stale pending", report.id, err);
     }
@@ -327,7 +327,7 @@ export async function repairStoreSubscriptionVisibilityIfNeeded(store: Store): P
   if (isStoreVisibilityActive(store)) return store;
   if (await storeHasPendingSubscriptionPayment(store.id)) return store;
 
-  const reports = await genFebStorage.listStoreSubscriptionFinancialReports("completed");
+  const reports = await appliaStorage.listStoreSubscriptionFinancialReports("completed");
   const latest = reports.find((r) => Number(r.storeId) === store.id);
   if (!latest) return store;
 

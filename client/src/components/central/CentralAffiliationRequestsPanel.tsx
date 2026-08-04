@@ -152,7 +152,7 @@ export function CentralAffiliationRequestsPanel({
           Solicitudes de conductores
         </CardTitle>
         <CardDescription>
-          Conductores que se registraron en Genfeb Go y pidieron pertenecer a tu central. Puedes aprobar, rechazar o
+          Conductores que se registraron en Applia Go y pidieron pertenecer a tu central. Puedes aprobar, rechazar o
           solicitar acceso a datos de contacto (con consentimiento del usuario).
         </CardDescription>
       </CardHeader>

@@ -6,7 +6,7 @@ export function useNoIndex() {
     const meta = document.createElement("meta");
     meta.name = "robots";
     meta.content = "noindex, nofollow";
-    meta.setAttribute("data-genfeb-seo", "noindex");
+    meta.setAttribute("data-applia-seo", "noindex");
     document.head.appendChild(meta);
     return () => {
       meta.remove();

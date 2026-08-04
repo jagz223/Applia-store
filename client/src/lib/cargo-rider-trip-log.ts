@@ -10,7 +10,7 @@ export type CargoRiderTripLog = {
   endedAt: string;
   durationMin: number;
   amountUsd: number;
-  payment: "genfeb" | "cash" | "bank_transfer";
+  payment: "applia" | "cash" | "bank_transfer";
   driverName: string;
   /** Módulo: taxi (`cargo`) o delivery (`pack`). */
   goSlug?: "cargo" | "pack";
@@ -44,7 +44,7 @@ function parseRiderTripLogRaw(raw: string | null): CargoRiderTripLog[] {
         typeof x.endedAt === "string" &&
         typeof x.durationMin === "number" &&
         typeof x.amountUsd === "number" &&
-        (x.payment === "genfeb" || x.payment === "cash" || x.payment === "bank_transfer") &&
+        (x.payment === "applia" || x.payment === "cash" || x.payment === "bank_transfer") &&
         typeof x.driverName === "string" &&
         (x.goSlug === undefined || x.goSlug === "cargo" || x.goSlug === "pack")
       );

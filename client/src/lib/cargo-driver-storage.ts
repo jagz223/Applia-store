@@ -20,7 +20,7 @@ export type CargoDriverTripLog = {
   endedAt: string;
   durationMin: number;
   amountUsd: number;
-  payment: "genfeb" | "cash" | "bank_transfer";
+  payment: "applia" | "cash" | "bank_transfer";
   /** Módulo Go: transport (Car Go) o delivery (Pack Go). */
   goSlug?: "cargo" | "pack";
   outcome?: "completed" | "cancelled" | "expired";
@@ -173,7 +173,7 @@ function parseTripLogRaw(raw: string | null): CargoDriverTripLog[] {
         typeof (t as CargoDriverTripLog).id === "string" &&
         typeof (t as CargoDriverTripLog).durationMin === "number" &&
         typeof (t as CargoDriverTripLog).amountUsd === "number" &&
-        ((t as CargoDriverTripLog).payment === "genfeb" ||
+        ((t as CargoDriverTripLog).payment === "applia" ||
           (t as CargoDriverTripLog).payment === "cash" ||
           (t as CargoDriverTripLog).payment === "bank_transfer") &&
         ((t as CargoDriverTripLog).goSlug === undefined ||

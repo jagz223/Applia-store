@@ -1,4 +1,4 @@
-# Guía de Despliegue GenFeb en Hostinger
+# Guía de Despliegue Applia en Hostinger
 
 ## Opciones de Despliegue en Hostinger
 
@@ -20,7 +20,7 @@ Hostinger ofrece Node.js en sus planes Premium y Business.
    Asegúrate de tener en la raíz:
    ```json
    {
-     "name": "genfeb",
+     "name": "applia",
      "version": "1.0.0",
      "main": "index.js",
      "scripts": {
@@ -60,15 +60,15 @@ Si tienes un VPS en Hostinger:
 
 3. **Sube los archivos**
    ```bash
-   scp -r ./mango-genfeb/dist usuario@tu-servidor:/var/www/genfeb/
-   scp ./mango-genfeb/.env usuario@tu-servidor:/var/www/genfeb/
+   scp -r ./mango-applia/dist usuario@tu-servidor:/var/www/applia/
+   scp ./mango-applia/.env usuario@tu-servidor:/var/www/applia/
    ```
 
 4. **Instala dependencias y ejecuta**
    ```bash
-   cd /var/www/genfeb
+   cd /var/www/applia
    npm install --production
-   pm2 start index.js --name genfeb
+   pm2 start index.js --name applia
    pm2 save
    ```
 
@@ -144,10 +144,10 @@ VITE_GOOGLE_MAPS_API_KEY=AIza...
 npm start
 
 # Ver logs
-pm2 logs genfeb
+pm2 logs applia
 
 # Reiniciar
-pm2 restart genfeb
+pm2 restart applia
 ```
 
 ## Soporte

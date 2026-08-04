@@ -98,6 +98,24 @@ export function StoreProductDetailDialog({
                 : "Ninguno"}
             </dd>
           </div>
+          {(product.removableIngredientMaterialIds?.length ?? 0) > 0 ? (
+            <div>
+              <dt className="font-medium text-muted-foreground">Se pueden sacar</dt>
+              <dd>{product.removableIngredientMaterialIds!.length} seleccionado(s)</dd>
+            </div>
+          ) : null}
+          {(product.ingredientAdditionals?.length ?? 0) > 0 ? (
+            <div>
+              <dt className="font-medium text-muted-foreground">Adicionales</dt>
+              <dd className="space-y-1">
+                {product.ingredientAdditionals!.map((a) => (
+                  <p key={a.ingredientMaterialId}>
+                    Item #{a.ingredientMaterialId}: {formatPrice(a.price, product.displayCurrencyLabel)}
+                  </p>
+                ))}
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </DialogContent>
     </Dialog>

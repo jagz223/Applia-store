@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { registerWebPush } from "@/lib/register-web-push";
 
 const AUTO_REGISTER_DELAY_MS = 1500;
-const SESSION_ATTEMPT_KEY = "genfeb_push_auto_register_attempted";
+const SESSION_ATTEMPT_KEY = "applia_push_auto_register_attempted";
 
 /**
  * Tras iniciar sesión, pide permiso (si aún no se decidió) y registra el token FCM web.

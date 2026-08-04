@@ -2,7 +2,7 @@ import type { Server as SocketIOServer } from "socket.io";
 import { CHAT_SYSTEM_SENDER_ID } from "@shared/chat-constants";
 import { SUPPORT_CONVERSATION_KIND, formatSupportConsultationLabel } from "@shared/support-chat";
 import { isFullAdmin, normalizeRoleCode } from "@shared/roles";
-import type { IStorage } from "./storage-genfeb";
+import type { IStorage } from "./storage-applia";
 import { getAdminAndSupportUsers } from "./staff-users";
 import { connectedUsers, getIO } from "./socket";
 
@@ -126,7 +126,7 @@ export async function ensureSupportConversation(
   await appendSupportSystemMessage(
     storage,
     convId,
-    `Mensaje del sistema: ${formatSupportConsultationLabel(consultationNumber) ?? "Consulta de ayuda"} abierta. Un asesor de GenFeb te atenderá por aquí.`,
+    `Mensaje del sistema: ${formatSupportConsultationLabel(consultationNumber) ?? "Consulta de ayuda"} abierta. Un asesor de Applia te atenderá por aquí.`,
   );
   return { conversationId: convId, adminId: staffUserId, created: true, consultationNumber };
 }

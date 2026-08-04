@@ -20,7 +20,7 @@ import { StoreAdminOrdersPanel } from "@/components/store/StoreAdminOrdersPanel"
 import { StoreAdminComingSoon } from "@/components/store/StoreAdminComingSoon";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
 import type { StoreCurrencyExtra } from "@shared/store-currency-schema";
-import type { StoreLocation } from "@shared/store-schema";
+import type { StoreDeliveryFares, StoreLocation } from "@shared/store-schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { hasAdminRole } from "@/lib/auth-utils";
@@ -31,6 +31,7 @@ function sectionPanel(
     id: number;
     slug: string;
     fulfillmentOptions?: StoreFulfillmentMode[];
+    deliveryFares?: StoreDeliveryFares;
     location?: StoreLocation | null;
     currencyExtras?: StoreCurrencyExtra[];
     currencyVisualId?: string;
@@ -53,7 +54,6 @@ function sectionPanel(
     return (
       <StoreAdminOrdersPanel
         storeId={store.id}
-        storeSlug={store.slug}
         storeLocation={store.location ?? null}
       />
     );
@@ -75,6 +75,7 @@ function sectionPanel(
         storeId={store.id}
         slug={store.slug}
         initialFulfillmentOptions={store.fulfillmentOptions ?? []}
+        initialDeliveryFares={store.deliveryFares}
         initialLocation={store.location ?? null}
       />
     );

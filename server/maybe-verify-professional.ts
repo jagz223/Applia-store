@@ -1,5 +1,5 @@
 import { isVisibilitySubscriptionWindowActive } from "@shared/professional-listing-subscription";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { getIO } from "./socket";
 import { notificationService } from "./services/notification.service";
 
@@ -11,10 +11,10 @@ import { notificationService } from "./services/notification.service";
  * Los meses gratis no marcan `transacction_verified`; el cuadro de cuota queda en `visibilitySubscription*`.
  */
 export async function maybeVerifyProfessional(userId: string): Promise<void> {
-  const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+  const st = await appliaStorage.getVerifyingStatusByUserId(userId);
   if (!st) return;
 
-  const provider = await genFebStorage.getProviderByUserId(userId);
+  const provider = await appliaStorage.getProviderByUserId(userId);
   if (!provider) return;
 
   if ((provider as { isVerified?: boolean }).isVerified === true) return;
@@ -29,11 +29,11 @@ export async function maybeVerifyProfessional(userId: string): Promise<void> {
   if (!idOk) return;
   if (!txOk && !promoFundedActive) return;
 
-  await genFebStorage.updateProvider((provider as { id: number }).id, { isVerified: true } as any);
+  await appliaStorage.updateProvider((provider as { id: number }).id, { isVerified: true } as any);
 
   try {
-    const msg = "¡Felicidades! Ahora eres un Asociado verificado de GenFeb. ¡Bienvenido!";
-    await genFebStorage.createNotification({
+    const msg = "¡Felicidades! Ahora eres un Asociado verificado de Applia. ¡Bienvenido!";
+    await appliaStorage.createNotification({
       userId,
       type: "verification_welcome",
       data: { message: msg, url: "/professional-dashboard" },

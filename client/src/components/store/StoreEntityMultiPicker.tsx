@@ -11,7 +11,6 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
 
 export type SelectedEntity = { id: number; name: string };
 
@@ -118,18 +117,18 @@ export function StoreEntityMultiPicker({
           {selected.map((item) => (
             <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
               <span className="truncate">{item.name}</span>
-              <button
+              <Button
                 type="button"
-                className={cn(
-                  "shrink-0 rounded-full p-1 text-muted-foreground hover:text-foreground hover:bg-muted",
-                  disabled && "opacity-50 pointer-events-none",
-                )}
-                aria-label={`Quitar ${item.name}`}
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0 rounded-full border-destructive/35 px-3 text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive"
                 disabled={disabled}
                 onClick={() => remove(item.id)}
+                aria-label={`Quitar ${item.name}`}
               >
-                <X className="h-4 w-4" />
-              </button>
+                <X className="mr-1 h-3.5 w-3.5" />
+                Quitar
+              </Button>
             </li>
           ))}
         </ul>

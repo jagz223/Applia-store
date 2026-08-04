@@ -6,6 +6,6 @@ export function isOffPlatformServiceBookingPayment(method: string | undefined | 
 export function serviceBookingPaymentLabel(method: string | undefined | null): string {
   if (method === "cash") return "Efectivo";
   if (method === "bank_transfer") return "Transferencia bancaria";
-  if (method === "wallet") return "Saldo Genfeb";
-  return "Saldo Genfeb";
+  if (method === "wallet") return "Saldo Applia";
+  return "Saldo Applia";
 }

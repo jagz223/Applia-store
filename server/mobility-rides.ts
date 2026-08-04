@@ -10,7 +10,7 @@ import { z } from "zod";
 import { authenticateJWT } from "./routes-auth";
 import { getIO, getUserActivePath } from "./socket";
 import { shouldSendDriverClassicOfferPush } from "./go-user-presence";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 import { catalogService } from "./services";
 import { notificationService } from "./services/notification.service";
 import {
@@ -368,7 +368,7 @@ async function appendMobilityRideSystemMessage(conversationId: number | null | u
   const cid = conversationId == null ? NaN : Number(conversationId);
   if (!Number.isFinite(cid)) return;
   try {
-    await genFebStorage.createMessage({
+    await appliaStorage.createMessage({
       conversationId: cid,
       senderId: CHAT_SYSTEM_SENDER_ID,
       content,
@@ -664,7 +664,7 @@ function isStandardOffer(offerUsd: number, suggestedUsd: number): boolean {
 }
 
 async function buildRiderPublic(riderUserId: string) {
-  const u = await genFebStorage.getUserById(riderUserId);
+  const u = await appliaStorage.getUserById(riderUserId);
   const rec = (u ?? undefined) as Record<string, unknown> | undefined;
   const fn = String(rec?.firstName ?? "").trim();
   const ln = String(rec?.lastName ?? "").trim();
@@ -687,11 +687,11 @@ async function buildRiderPublic(riderUserId: string) {
 }
 
 async function buildDriverPublic(driverUserId: string) {
-  const u = await genFebStorage.getUserById(driverUserId);
+  const u = await appliaStorage.getUserById(driverUserId);
   const rec = (u ?? undefined) as Record<string, unknown> | undefined;
   const provider = await catalogService.getProviderByUserId(driverUserId);
   const vehicle = provider
-    ? await genFebStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id)
+    ? await appliaStorage.getPrimaryVehicleByProviderId((provider as { id: number }).id)
     : null;
   const fn = String(rec?.firstName ?? "").trim();
   const ln = String(rec?.lastName ?? "").trim();
@@ -1055,7 +1055,7 @@ async function runClassicCargoOfferPoll(
 }
 
 export function registerMobilityRideRoutes(app: Express) {
-  void runMobilityRideChatStartupSweep(genFebStorage);
+  void runMobilityRideChatStartupSweep(appliaStorage);
 
   app.get("/api/mobility/rides/history", authenticateJWT, async (req: any, res) => {
     try {
@@ -1237,12 +1237,12 @@ export function registerMobilityRideRoutes(app: Express) {
   });
 
   const applyUserStars = async (userId: string, stars: number) => {
-    const u = await genFebStorage.getUserById(userId);
+    const u = await appliaStorage.getUserById(userId);
     const currentAvg = typeof (u as any)?.rating === "number" ? (u as any).rating : Number((u as any)?.rating) || 5;
     const currentCount = typeof (u as any)?.ratingCount === "number" ? (u as any).ratingCount : Number((u as any)?.ratingCount) || 0;
     const nextCount = Math.max(0, currentCount) + 1;
     const nextAvg = (currentAvg * Math.max(0, currentCount) + stars) / nextCount;
-    await genFebStorage.updateUser(userId, { rating: nextAvg, ratingCount: nextCount });
+    await appliaStorage.updateUser(userId, { rating: nextAvg, ratingCount: nextCount });
   };
 
   app.post("/api/mobility/rides/request", authenticateJWT, async (req: any, res) => {
@@ -1568,7 +1568,7 @@ export function registerMobilityRideRoutes(app: Express) {
       const driverLon = pres?.lon;
       let conversationId: number | null = null;
       try {
-        conversationId = await ensureMobilityRideConversation(genFebStorage, {
+        conversationId = await ensureMobilityRideConversation(appliaStorage, {
           rideId: ride.id,
           module: "taxi",
           riderUserId: ride.riderUserId,
@@ -1707,7 +1707,7 @@ export function registerMobilityRideRoutes(app: Express) {
           const driverLon = pres?.lon;
           let conversationId: number | null = null;
           try {
-            conversationId = await ensureMobilityRideConversation(genFebStorage, {
+            conversationId = await ensureMobilityRideConversation(appliaStorage, {
               rideId: ride.id,
               module: "taxi",
               riderUserId: ride.riderUserId,
@@ -1883,7 +1883,7 @@ export function registerMobilityRideRoutes(app: Express) {
       const driverLon = pres?.lon;
       let conversationId: number | null = null;
       try {
-        conversationId = await ensureMobilityRideConversation(genFebStorage, {
+        conversationId = await ensureMobilityRideConversation(appliaStorage, {
           rideId: ride.id,
           module: "taxi",
           riderUserId: ride.riderUserId,
@@ -1983,7 +1983,7 @@ export function registerMobilityRideRoutes(app: Express) {
 
       if (ride.conversationId != null && ride.driverUserId != null) {
         try {
-          await onMobilityRideChatCancelled(genFebStorage, {
+          await onMobilityRideChatCancelled(appliaStorage, {
             conversationId: Number(ride.conversationId),
             riderUserId: ride.riderUserId,
             driverUserId: ride.driverUserId,
@@ -2017,12 +2017,12 @@ export function registerMobilityRideRoutes(app: Express) {
       commitCargoRide(ride);
       if (ride.conversationId != null) {
         try {
-          await onMobilityRideChatStarted(genFebStorage, ride.conversationId);
+          await onMobilityRideChatStarted(appliaStorage, ride.conversationId);
         } catch (se) {
           console.error("[mobility] ride chat started", se);
         }
         try {
-          await genFebStorage.createMessage({
+          await appliaStorage.createMessage({
             conversationId: ride.conversationId,
             senderId: CHAT_SYSTEM_SENDER_ID,
             content: "Viaje iniciado. Podéis seguir coordinando por este chat durante el trayecto.",
@@ -2143,7 +2143,7 @@ export function registerMobilityRideRoutes(app: Express) {
 
       if (ride.conversationId != null && ride.driverUserId) {
         try {
-          await onMobilityRideChatCompleted(genFebStorage, {
+          await onMobilityRideChatCompleted(appliaStorage, {
             conversationId: Number(ride.conversationId),
             riderUserId: ride.riderUserId,
             driverUserId,
@@ -2453,7 +2453,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
           (ride.status === "matched" || ride.status === "in_progress")
         ) {
           const provider = await catalogService.getProviderByUserId(user.id);
-          const vehicle = await genFebStorage.getPrimaryVehicleByUserId(user.id);
+          const vehicle = await appliaStorage.getPrimaryVehicleByUserId(user.id);
           presRow = upsertCargoDriverPresence({
             userId: user.id,
             receiving: false,

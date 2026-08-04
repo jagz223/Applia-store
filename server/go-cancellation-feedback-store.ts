@@ -8,7 +8,7 @@ import {
   resolveGoCancellationReasonLabel,
 } from "@shared/go-cancellation-feedback";
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 
 const COLLECTION = FIRESTORE_COLLECTIONS.GO_CANCELLATION_FEEDBACK;
 const memoryRows = new Map<string, GoCancellationFeedbackRecord>();
@@ -87,8 +87,8 @@ export async function createGoCancellationFeedback(input: {
       reasonCode: input.reasonCode,
     }) ?? input.reasonCode;
 
-  const canceller = await genFebStorage.getUserById(input.cancellerUserId);
-  const other = input.otherPartyUserId ? await genFebStorage.getUserById(input.otherPartyUserId) : null;
+  const canceller = await appliaStorage.getUserById(input.cancellerUserId);
+  const other = input.otherPartyUserId ? await appliaStorage.getUserById(input.otherPartyUserId) : null;
   const cancellerName = canceller
     ? [canceller.name, canceller.lastName].filter(Boolean).join(" ").trim() || canceller.name
     : "Usuario";
@@ -187,13 +187,13 @@ export async function reviewGoCancellationFeedback(input: {
     const amt = Number(input.penaltyAmount);
     if (!Number.isFinite(amt) || amt <= 0) throw new Error("Indica un monto válido para restar");
     penaltyAmount = Math.round(amt * 100) / 100;
-    const user = await genFebStorage.getUserById(row.cancellerUserId);
+    const user = await appliaStorage.getUserById(row.cancellerUserId);
     const current =
       typeof (user as { rating?: unknown })?.rating === "number"
         ? (user as { rating: number }).rating
         : Number((user as { rating?: unknown })?.rating) || 5;
     const nextRating = Math.round((current - penaltyAmount) * 100) / 100;
-    await genFebStorage.updateUser(row.cancellerUserId, { rating: nextRating });
+    await appliaStorage.updateUser(row.cancellerUserId, { rating: nextRating });
   }
 
   const patch: Partial<GoCancellationFeedbackRecord> = {

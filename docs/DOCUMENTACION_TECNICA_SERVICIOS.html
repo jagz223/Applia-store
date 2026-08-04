@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GenFeb — Documentación técnica de servicios y stack</title>
+  <title>Applia — Documentación técnica de servicios y stack</title>
   <style>
     :root {
       --bg: #0f1419;
@@ -93,7 +93,7 @@
 </head>
 <body>
   <header>
-    <h1>GenFeb — Documentación técnica (stack, APIs y arquitectura)</h1>
+    <h1>Applia — Documentación técnica (stack, APIs y arquitectura)</h1>
     <p>
       Documento orientado a equipos técnicos: lenguajes en front y back, frameworks y su relación con el lenguaje,
       APIs externas integradas y visión de arquitectura del monorepositorio.
@@ -104,7 +104,7 @@
     <section id="resumen">
       <h2>Resumen ejecutivo</h2>
       <p>
-        <strong>GenFeb</strong> es una plataforma web de servicios y reservas. El núcleo de la aplicación está escrito en
+        <strong>Applia</strong> es una plataforma web de servicios y reservas. El núcleo de la aplicación está escrito en
         <strong>TypeScript</strong>: un cliente <strong>React</strong> empaquetado con <strong>Vite</strong> y un servidor
         <strong>Node.js</strong> con <strong>Express</strong>. La base de datos documentada para este stack es
         <strong>Firebase</strong> en modo <strong>NoSQL</strong> (<strong>Cloud Firestore</strong>), junto con Auth y
@@ -296,7 +296,7 @@
 
       <h3>Contenido remoto</h3>
       <ul>
-        <li><strong>Unsplash u otras URLs HTTPS</strong> — imágenes de ejemplo en seeds/catálogo (<code>server/storage-genfeb.ts</code>, etc.).</li>
+        <li><strong>Unsplash u otras URLs HTTPS</strong> — imágenes de ejemplo en seeds/catálogo (<code>server/storage-applia.ts</code>, etc.).</li>
       </ul>
     </section>
 
@@ -332,7 +332,7 @@
 
       <h3>Árbol de carpetas (resumido)</h3>
       <pre class="tree">
-genfeb/
+applia/
 ├── client/                 # Front-end React + Vite + Tailwind
 │   ├── index.html
 │   ├── public/             # Estáticos (PWA, offline, etc.)
@@ -368,7 +368,7 @@ genfeb/
   </main>
 
   <footer>
-    GenFeb — documento generado como referencia técnica. Última revisión de stack según <code>package.json</code> y estructura del repo.
+    Applia — documento generado como referencia técnica. Última revisión de stack según <code>package.json</code> y estructura del repo.
   </footer>
 </body>
 </html>

@@ -306,7 +306,7 @@ export default function Settings() {
       
       toast({ 
         title: "Cuenta eliminada", 
-        description: "Tu cuenta ha sido eliminada. Te esperamos luego en GenFeb para que sigas recibiendo y brindando los mejores servicios." 
+        description: "Tu cuenta ha sido eliminada. Te esperamos luego en Applia para que sigas recibiendo y brindando los mejores servicios." 
       });
       
       // Cerrar sesión y redirigir
@@ -352,7 +352,7 @@ export default function Settings() {
             <div className="p-4 rounded-xl bg-destructive/5 border border-destructive/10 space-y-3">
               <div className="flex items-center gap-2 text-destructive font-semibold">
                 <Trash2 className="h-4 w-4" />
-                <span>Eliminación de cuenta en GenFeb</span>
+                <span>Eliminación de cuenta en Applia</span>
               </div>
               <div className="text-sm text-muted-foreground leading-relaxed space-y-2">
                 <p>
@@ -368,7 +368,7 @@ export default function Settings() {
                 </div>
               </div>
               <a 
-                href="mailto:thebiglion2528@gmail.com?subject=Solicitud de eliminación de cuenta GenFeb" 
+                href="mailto:thebiglion2528@gmail.com?subject=Solicitud de eliminación de cuenta Applia" 
                 className="block w-full p-3 text-center bg-white dark:bg-zinc-900 border border-destructive/20 rounded-lg text-destructive font-bold hover:bg-destructive/5 transition-all shadow-sm active:scale-95 mt-4"
               >
                 Solicitar por correo electrónico

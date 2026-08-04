@@ -529,7 +529,7 @@ function AdminWithdrawalsTab({
             title: pendingAction === "approve" ? "Pago aprobado" : "Retiro rechazado",
             description: pendingAction === "approve"
               ? "El retiro fue registrado y el asociado será notificado."
-              : "Los fondos fueron devueltos al Saldo Genfeb del usuario.",
+              : "Los fondos fueron devueltos al Saldo Applia del usuario.",
           });
         },
         onError: (err: Error) => {
@@ -674,7 +674,7 @@ function AdminWithdrawalsTab({
           <DialogDescription>
             {pendingAction === "approve"
               ? "Confirma que realizaste la transferencia bancaria al asociado. El usuario recibirá una notificación sin que se muestre tu nombre."
-              : "Los fondos volverán al Saldo Genfeb del usuario. Opcionalmente indica el motivo (ej. datos bancarios incorrectos, banco en mantenimiento)."}
+              : "Los fondos volverán al Saldo Applia del usuario. Opcionalmente indica el motivo (ej. datos bancarios incorrectos, banco en mantenimiento)."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
@@ -2171,7 +2171,7 @@ export default function AdminPanel() {
             <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-mango-orange shrink-0" />
             <div className="min-w-0">
               <h1 className="text-base sm:text-2xl font-bold leading-snug">Panel de Administración</h1>
-              <p className="text-muted-foreground text-xs sm:text-sm">GenFeb</p>
+              <p className="text-muted-foreground text-xs sm:text-sm">Applia</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
@@ -4905,7 +4905,7 @@ export default function AdminPanel() {
             <DialogHeader>
               <DialogTitle>Comisión de plataforma</DialogTitle>
               <DialogDescription>
-                Porcentaje que retiene GenFeb sobre el monto acordado cuando el cliente completa el pago y el servicio se marca como finalizado (entre 1% y 50%).
+                Porcentaje que retiene Applia sobre el monto acordado cuando el cliente completa el pago y el servicio se marca como finalizado (entre 1% y 50%).
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-5 py-2">

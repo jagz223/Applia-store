@@ -228,7 +228,7 @@ export function buildPublicPromoExpiryBanner(
 
 export function buildPublicPromoNewPushCopy(): { title: string; body: string } {
   return {
-    title: "¡Nueva promo en GenFeb!",
+    title: "¡Nueva promo en Applia!",
     body: "Hay un código promocional disponible — entra a Promociones para verlo y canjearlo antes de que expire.",
   };
 }

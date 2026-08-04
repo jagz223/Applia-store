@@ -6,6 +6,7 @@ vite.config.ts.*
 *.tar.gz
 # Firebase credentials (keep local only)
 firebase-creds.json
+*-firebase-adminsdk-*.json
 *.log
 .env
 .env.*

@@ -80,37 +80,23 @@ export const SYSTEM_ROLE_CATALOG_DEFAULTS: RoleDefinitionDetail[] = [
   systemDetail(
     "admin",
     "Administrador",
-    "Control total de la plataforma GenFeb.",
+    "Control total de la plataforma Applia.",
     "Supervisa operación, finanzas, verificación y configuración global.",
     1
   ),
   systemDetail(
-    "professional",
-    "Profesional / Asociado",
-    "Proveedor de servicios en el marketplace.",
-    "Ofrece servicios y gestiona reservas como asociado.",
+    "tiSupport",
+    "Soporte",
+    "Personal interno con acceso administrativo limitado.",
+    "Atiende usuarios y soporte operativo sin acceso financiero completo.",
     2
   ),
   systemDetail(
     "client",
     "Cliente",
-    "Usuario que contrata servicios en GenFeb.",
-    "Busca y reserva servicios en la plataforma.",
+    "Usuario que compra en la tienda Applia.",
+    "Navega la vitrina, compra productos y gestiona sus pedidos.",
     3
-  ),
-  systemDetail(
-    "tiSupport",
-    "Soporte TI",
-    "Personal interno con acceso administrativo limitado.",
-    "Soporte a usuarios sin acceso financiero ni gestión de roles.",
-    4
-  ),
-  systemDetail(
-    "central",
-    "Central",
-    "Empresa despachadora de conductores (Genfeb Go).",
-    "Administra su empresa y conductores vinculados.",
-    5
   ),
 ];
 

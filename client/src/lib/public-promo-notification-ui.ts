@@ -45,7 +45,7 @@ export function getPublicPromoNotificationTitle(type: string, _data?: Record<str
     case NOTIFICATION_TYPE_PUBLIC_PROMO_REMINDER:
       return "Recuerda tu promo activa";
     default:
-      return "Promoción GenFeb";
+      return "Promoción Applia";
   }
 }
 

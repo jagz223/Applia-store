@@ -1,7 +1,7 @@
 /** Marca que el usuario abrió el flujo de alta como asociado (sin tener aún perfil en API). */
-export const ASSOCIATE_ONBOARDING_STARTED_KEY = "genfeb_associate_onboarding_started";
+export const ASSOCIATE_ONBOARDING_STARTED_KEY = "applia_associate_onboarding_started";
 
-const BUMP_EVENT = "genfeb-associate-onboarding-started";
+const BUMP_EVENT = "applia-associate-onboarding-started";
 
 export function markAssociateOnboardingStarted(): void {
   try {

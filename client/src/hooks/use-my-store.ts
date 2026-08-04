@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
-import type { StoreLocation } from "@shared/store-schema";
+import type { StoreDeliveryFares, StoreLocation } from "@shared/store-schema";
 
 export type MyStoreSummary = {
   id: number;
@@ -13,6 +13,7 @@ export type MyStoreSummary = {
   coverImageUrl?: string | null;
   location?: StoreLocation | null;
   fulfillmentOptions?: StoreFulfillmentMode[];
+  deliveryFares?: StoreDeliveryFares;
   currencyExtras?: import("@shared/store-currency-schema").StoreCurrencyExtra[];
   currencyVisualId?: string;
   currencyAcceptedPaymentIds?: string[];

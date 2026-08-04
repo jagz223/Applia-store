@@ -9,7 +9,7 @@ import {
   isAssociateOnboardingVerificationDocsComplete,
   type PrefundPromoProviderSlice,
 } from "@shared/professional-verification";
-import { genFebStorage } from "./storage-genfeb";
+import { appliaStorage } from "./storage-applia";
 
 const FREE_MONTHS_RECEIPT_PREFIX = "MES-GRATIS:";
 
@@ -26,12 +26,12 @@ function todayYyyyMmDdUtc(): string {
  * deja el “comprobante” simbólico y la transacción en revisión para el panel admin.
  */
 export async function ensurePromoPrefundedOnboardingQueuedForAdmin(userId: string): Promise<void> {
-  const provider = await genFebStorage.getProviderByUserId(userId);
-  const prof = await genFebStorage.getProfessionalVerificationByUserId(userId);
-  const st = await genFebStorage.getVerifyingStatusByUserId(userId);
+  const provider = await appliaStorage.getProviderByUserId(userId);
+  const prof = await appliaStorage.getProfessionalVerificationByUserId(userId);
+  const st = await appliaStorage.getVerifyingStatusByUserId(userId);
 
   if (isAssociateOnboardingDossierComplete(prof)) {
-    await genFebStorage.clearVerifyingStatusPrefundPromoAwaitingDossier(userId);
+    await appliaStorage.clearVerifyingStatusPrefundPromoAwaitingDossier(userId);
     return;
   }
 
@@ -40,12 +40,12 @@ export async function ensurePromoPrefundedOnboardingQueuedForAdmin(userId: strin
 
   const existingReceipt = String(prof?.transferReceiptCode ?? "").trim();
   if (existingReceipt && !existingReceipt.startsWith(FREE_MONTHS_RECEIPT_PREFIX)) {
-    await genFebStorage.clearVerifyingStatusPrefundPromoAwaitingDossier(userId);
+    await appliaStorage.clearVerifyingStatusPrefundPromoAwaitingDossier(userId);
     return;
   }
 
   if (st?.transacction_verified === "pending" || st?.transacction_verified === "verified") {
-    await genFebStorage.clearVerifyingStatusPrefundPromoAwaitingDossier(userId);
+    await appliaStorage.clearVerifyingStatusPrefundPromoAwaitingDossier(userId);
     return;
   }
 
@@ -60,12 +60,12 @@ export async function ensurePromoPrefundedOnboardingQueuedForAdmin(userId: strin
 
   const day = todayYyyyMmDdUtc();
   const receiptCode = `${FREE_MONTHS_RECEIPT_PREFIX}${promoCode || "PROMO"} — ${promoMonths} mes${promoMonths === 1 ? "" : "es"} gratis (ticket promocional)`;
-  await genFebStorage.mergeProfessionalVerificationFreeMonthsPrefundPlaceholder(userId, {
+  await appliaStorage.mergeProfessionalVerificationFreeMonthsPrefundPlaceholder(userId, {
     transferReceiptCode: receiptCode,
     transferDate: day,
     subscriptionMonths: promoMonths,
     promotionalCode: promoCode || null,
   });
-  await genFebStorage.upsertVerifyingStatusTransactionPending(userId, day, "onboarding");
-  await genFebStorage.clearVerifyingStatusPrefundPromoAwaitingDossier(userId);
+  await appliaStorage.upsertVerifyingStatusTransactionPending(userId, day, "onboarding");
+  await appliaStorage.clearVerifyingStatusPrefundPromoAwaitingDossier(userId);
 }

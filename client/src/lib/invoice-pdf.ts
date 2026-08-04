@@ -20,7 +20,7 @@ export interface UserForInvoice {
 
 /** Etiquetas de tipo de transferencia para listados y facturas. */
 export const TRANSFER_TYPE_LABELS: Record<string, string> = {
-  recharge: "Abono a saldo GenFeb",
+  recharge: "Abono a saldo Applia",
   service_payment: "Ingreso por servicio",
   payment: "Pago de servicio",
   withdrawal: "Cobro a tu cuenta registrada",
@@ -57,7 +57,7 @@ export async function downloadInvoicePdf(
     } else if (transfer.transferType === "verification_fee" || transfer.description?.toLowerCase().includes("verificaci")) {
       body.reportId = transfer.reportId || transfer.id;
     } else {
-      // Fallback: si no sabemos qué es, probamos como transferId si es un movimiento de Saldo Genfeb
+      // Fallback: si no sabemos qué es, probamos como transferId si es un movimiento de Saldo Applia
       body.transferId = transfer.id;
     }
 
@@ -80,7 +80,7 @@ export async function downloadInvoicePdf(
     
     // Obtener el nombre del archivo del header Content-Disposition si es posible
     const contentDisposition = response.headers.get("Content-Disposition");
-    let fileName = `Factura_GENFEB_${transfer.id}.pdf`;
+    let fileName = `Factura_APPLIA_${transfer.id}.pdf`;
     if (contentDisposition && contentDisposition.includes("filename=")) {
       fileName = contentDisposition.split("filename=")[1].replace(/"/g, "");
     }
