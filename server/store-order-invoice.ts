@@ -77,52 +77,68 @@ export async function generateStoreOrderInvoicePdf(input: {
 
       doc.moveTo(48, 130).lineTo(547, 130).strokeColor("#E5E0DA").stroke();
 
-      let y = 148;
-      doc
-        .fontSize(11)
-        .font("Helvetica-Bold")
-        .fillColor(charcoal)
-        .text("CLIENTE", 48, y)
-        .font("Helvetica")
-        .fontSize(10)
-        .fillColor(muted);
-      y += 18;
-      doc.fillColor(charcoal).text(customer.name || "Cliente", 48, y);
-      y += 14;
+      const lineGap = 4;
+      const drawBlock = (
+        text: string,
+        x: number,
+        atY: number,
+        opts: { width?: number; color?: string; font?: string; size?: number } = {},
+      ) => {
+        const width = opts.width ?? 220;
+        const font = opts.font ?? "Helvetica";
+        const size = opts.size ?? 10;
+        doc.font(font).fontSize(size).fillColor(opts.color ?? muted);
+        const height = Math.max(
+          size + 2,
+          doc.heightOfString(text, { width, lineGap: 2 }),
+        );
+        doc.text(text, x, atY, { width, lineGap: 2 });
+        return atY + height + lineGap;
+      };
+
+      let leftY = 148;
+      leftY = drawBlock("CLIENTE", 48, leftY, {
+        font: "Helvetica-Bold",
+        size: 11,
+        color: charcoal,
+        width: 230,
+      });
+      leftY = drawBlock(customer.name || "Cliente", 48, leftY, {
+        color: charcoal,
+        width: 230,
+      });
       if (customer.email) {
-        doc.fillColor(muted).text(customer.email, 48, y);
-        y += 14;
+        leftY = drawBlock(customer.email, 48, leftY, { width: 230 });
       }
       if (customer.phone) {
-        doc.fillColor(muted).text(String(customer.phone), 48, y);
-        y += 14;
+        leftY = drawBlock(String(customer.phone), 48, leftY, { width: 230 });
       }
 
-      y = 148;
-      doc
-        .fontSize(11)
-        .font("Helvetica-Bold")
-        .fillColor(charcoal)
-        .text("PAGO Y ENTREGA", 300, y)
-        .font("Helvetica")
-        .fontSize(10)
-        .fillColor(muted);
-      y += 18;
-      doc
-        .fillColor(charcoal)
-        .text(order.paymentMethodName || "Método de pago", 300, y, { width: 247 });
-      y += 14;
-      if (order.paymentMethodAccountNumber) {
-        doc.fillColor(muted).text(`Cuenta: ${order.paymentMethodAccountNumber}`, 300, y, { width: 247 });
-        y += 14;
+      let rightY = 148;
+      rightY = drawBlock("PAGO Y ENTREGA", 300, rightY, {
+        font: "Helvetica-Bold",
+        size: 11,
+        color: charcoal,
+        width: 247,
+      });
+      rightY = drawBlock(order.paymentMethodName || "Método de pago", 300, rightY, {
+        color: charcoal,
+        width: 247,
+      });
+      const paymentDetails = String(order.paymentMethodAccountNumber ?? "").trim();
+      if (paymentDetails) {
+        // Puede traer varios campos (Número, Banco, Rif…) separados por saltos de línea.
+        rightY = drawBlock(paymentDetails, 300, rightY, { width: 247 });
       }
-      doc.fillColor(muted).text(`Ref: ${order.reference || "—"}`, 300, y, { width: 247 });
-      y += 14;
-      doc
-        .fillColor(muted)
-        .text(`Entrega: ${fulfillmentLabel(order.fulfillmentMode)}`, 300, y, { width: 247 });
+      rightY = drawBlock(`Ref: ${order.reference || "—"}`, 300, rightY, { width: 247 });
+      rightY = drawBlock(
+        `Entrega: ${fulfillmentLabel(order.fulfillmentMode)}`,
+        300,
+        rightY,
+        { width: 247 },
+      );
 
-      y = Math.max(y, 220) + 16;
+      let y = Math.max(leftY, rightY, 220) + 16;
       doc.moveTo(48, y).lineTo(547, y).strokeColor("#E5E0DA").stroke();
       y += 16;
 
