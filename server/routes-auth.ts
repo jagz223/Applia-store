@@ -455,31 +455,19 @@ export async function registerAuthRoutes(
       const current = (await appliaStorage.getUserById(req.user.id, true)) as any;
       if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
 
-      const grants = (current.profileEditGrants ?? {}) as { email?: boolean; name?: boolean; phone?: boolean };
       const wantsEmail = typeof data.email !== "undefined" && data.email !== (current.email ?? "");
-      const wantsName =
-        (typeof data.name !== "undefined" && data.name !== (current.name ?? "")) ||
-        (typeof data.lastName !== "undefined" && data.lastName !== (current.lastName ?? ""));
       const wantsPhone = typeof data.phone !== "undefined" && data.phone !== (current.phone ?? "");
 
-      // Bloqueos por defecto: solo con grant aprobado.
-      if (wantsEmail && grants.email !== true) {
-        return res.status(403).json({ message: "Para cambiar tu correo, debes enviar una petición y esperar aprobación.", field: "email" });
-      }
-      if (wantsName && grants.name !== true) {
-        return res.status(403).json({ message: "Para cambiar tu nombre, debes enviar una petición y esperar aprobación.", field: "name" });
-      }
-      if (wantsPhone && grants.phone !== true) {
-        return res.status(403).json({ message: "Para cambiar tu teléfono, debes enviar una petición y esperar aprobación.", field: "phone" });
+      // El correo no se puede cambiar desde el perfil.
+      if (wantsEmail) {
+        return res.status(403).json({
+          message: "El correo no se puede cambiar desde la configuración.",
+          field: "email",
+        });
       }
 
-      // Unicidad: email / phone
-      if (wantsEmail) {
-        const existing = await appliaStorage.getUserByEmail(String(data.email), true);
-        if (existing && String((existing as any).id) !== String(req.user.id) && !(existing as any).deletedAt) {
-          return res.status(409).json({ message: DUPLICATE_EMAIL_MESSAGE, field: "email" });
-        }
-      }
+      // Nombre, apellido y teléfono se pueden editar libremente.
+
       if (wantsPhone) {
         const existing = await appliaStorage.getUserByPhone(String(data.phone), true);
         if (existing && String((existing as any).id) !== String(req.user.id) && !(existing as any).deletedAt) {
@@ -487,13 +475,8 @@ export async function registerAuthRoutes(
         }
       }
 
-      const patch: any = { ...data };
-      // Consumir grants usados (una sola vez).
-      const nextGrants = { ...grants };
-      if (wantsEmail) nextGrants.email = false;
-      if (wantsName) nextGrants.name = false;
-      if (wantsPhone) nextGrants.phone = false;
-      if (wantsEmail || wantsName || wantsPhone) patch.profileEditGrants = nextGrants;
+      const { email: _ignoredEmail, ...rest } = data;
+      const patch: any = { ...rest };
 
       const updatedUser = await appliaStorage.updateUser(req.user.id, patch);
       

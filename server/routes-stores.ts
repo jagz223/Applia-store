@@ -94,7 +94,7 @@ import {
   removeStoreCartItemSchema,
   updateStoreCartFulfillmentSchema,
 } from "@shared/store-cart-schema";
-import { submitStoreCheckoutSchema, updateStoreOrderStatusSchema, canTransitionStoreOrderStatus, STORE_ORDER_STATUS_LABELS, fulfillmentLabel, getAllowedStoreOrderStatuses, getStoreOrderStatusTransitionLabel, storeOrderStatusSchema, parseStoreOrderDateFilter, type StoreOrder } from "@shared/store-order-schema";
+import { submitStoreCheckoutSchema, updateStoreOrderStatusSchema, canTransitionStoreOrderStatus, STORE_ORDER_STATUS_LABELS, fulfillmentLabel, getAllowedStoreOrderStatuses, getStoreOrderStatusTransitionLabel, storeOrderStatusSchema, parseStoreOrderDateFilter, canGenerateStoreOrderInvoice, type StoreOrder } from "@shared/store-order-schema";
 import {
   insertStorePaymentMethodSchema,
   updateStorePaymentMethodSchema,
@@ -453,7 +453,7 @@ export function registerStoreRoutes(app: Express): void {
         return res.status(502).json({ message: "No se pudieron obtener las tasas BCV." });
       }
       const [usdJson, eurJson] = await Promise.all([usdRes.json(), eurRes.json()]);
-      const dollar = parseDolarApiRate(usdJson, "USD", "Dollar");
+      const dollar = parseDolarApiRate(usdJson, "USD", "REF");
       const euro = parseDolarApiRate(eurJson, "EUR", "Euro");
       if (!dollar || !euro) {
         return res.status(502).json({ message: "Respuesta inválida de DolarApi." });
@@ -1418,6 +1418,59 @@ export function registerStoreRoutes(app: Express): void {
       }
       console.error("[stores] get order", e);
       return res.status(500).json({ message: "No se pudo cargar la orden." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/orders/:orderId/invoice.pdf", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      const order = await appliaStorage.getStoreOrder(storeId, orderId);
+      if (!order) return res.status(404).json({ message: "Orden no encontrada." });
+      if (!canGenerateStoreOrderInvoice(order.status)) {
+        return res.status(400).json({
+          message: "La factura solo está disponible cuando la orden está confirmada o en un estado posterior.",
+        });
+      }
+
+      const store = await appliaStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const user = (await appliaStorage.getUserById(order.userId)) as
+        | { name?: string; firstName?: string; lastName?: string; email?: string; phone?: string }
+        | undefined;
+      const customerName = user
+        ? [user.name ?? user.firstName, user.lastName].filter(Boolean).join(" ").trim() || "Cliente"
+        : "Cliente";
+
+      const { generateStoreOrderInvoicePdf } = await import("./store-order-invoice");
+      const pdf = await generateStoreOrderInvoicePdf({
+        order,
+        store,
+        customer: {
+          name: customerName,
+          email: user?.email ?? null,
+          phone: user?.phone ?? null,
+        },
+      });
+
+      const fileName = `factura-orden-${order.id}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+      res.setHeader("Content-Length", String(pdf.length));
+      return res.send(pdf);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_NOT_OWNER") {
+        return res.status(403).json({ message: "No tienes permiso para ver esta factura." });
+      }
+      console.error("[stores] order invoice pdf", e);
+      return res.status(500).json({ message: "No se pudo generar la factura." });
     }
   });
 

@@ -3,8 +3,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useSearch } from "wouter";
-import { ArrowLeft, Car, Loader2, User, Building2, Trash2 } from "lucide-react";
+import { Link, useSearch } from "wouter";
+import { ArrowLeft, Car, Loader2, ShoppingBag, User } from "lucide-react";
 import { isGoVehicleProvider } from "@shared/provider-car-go";
 import { SETTINGS_VEHICLE_SECTION_QUERY_KEY } from "@shared/settings-notification-urls";
 import { useCategories, useCurrentProvider } from "@/hooks/use-mango-data";
@@ -12,7 +12,6 @@ import { resolveVehicleKind } from "@/components/driver/cargo-map-markers";
 import { ProviderVehicleChangeRequestDialog } from "@/components/provider/ProviderVehicleChangeRequestDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Form,
   FormControl,
@@ -21,30 +20,17 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import { SettingsChangePasswordCard } from "@/components/settings/SettingsChangePasswordCard";
-import { SettingsAvatarEditor } from "@/components/settings/SettingsAvatarEditor";
-import { StoreSettingsCta } from "@/components/store/StoreSettingsCta";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { cn } from "@/lib/utils";
+import { getPrimaryStoreVitrinaHref, usePrimaryStore } from "@/hooks/use-primary-store";
 
-/** Solo permite dígitos, espacios y guiones en número de cuenta. */
 function sanitizeAccountNumber(value: string): string {
   return value.replace(/[^\d\s\-]/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** Etiqueta corta para tipo de unidad en resúmenes de configuración. */
 const GO_VEHICLE_TYPE_LABELS: Record<string, string> = {
   motorcycle: "Moto",
   car: "Carro",
@@ -58,7 +44,7 @@ function isMeaningfulProviderVehicleRow(row: Record<string, unknown> | null | un
     (row.license_plate && String(row.license_plate).trim()) ||
       (row.brand && String(row.brand).trim()) ||
       (row.model && String(row.model).trim()) ||
-      (row.vehicle_type && String(row.vehicle_type).trim())
+      (row.vehicle_type && String(row.vehicle_type).trim()),
   );
 }
 
@@ -77,17 +63,25 @@ const profileSchema = z.object({
 
 type ProfileForm = z.infer<typeof profileSchema>;
 
+const fieldClass =
+  "h-11 rounded-2xl border-border/80 bg-muted/40 px-4 shadow-none focus-visible:ring-secondary dark:focus-visible:ring-primary";
+
+const panelClass =
+  "rounded-[1.5rem] border border-border/70 bg-card/90 p-5 shadow-sm backdrop-blur-sm sm:p-6";
+
 export default function Settings() {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [, setLocation] = useLocation();
   const searchQs = useSearch();
+  const { data: primaryStore } = usePrimaryStore(isAuthenticated);
+  const tiendaHref = getPrimaryStoreVitrinaHref(primaryStore);
+
   const settingsBackHref = useMemo(() => {
     try {
       const qp = new URLSearchParams(searchQs || "");
       const raw = qp.get("return");
-      if (!raw) return "/dashboard";
+      if (!raw) return tiendaHref;
       let decoded = raw;
       try {
         decoded = decodeURIComponent(raw);
@@ -100,16 +94,9 @@ export default function Settings() {
     } catch {
       /* noop */
     }
-    return "/dashboard";
-  }, [searchQs]);
-  
-  const [showFirstConfirm, setShowFirstConfirm] = useState(false);
-  const [showSecondConfirm, setShowSecondConfirm] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [pendingSensitiveSave, setPendingSensitiveSave] = useState<ProfileForm | null>(null);
-  const [changeReqField, setChangeReqField] = useState<"email" | "name" | "phone" | "recovery_questions">("phone");
-  const [changeReqReason, setChangeReqReason] = useState("");
-  const [isSendingRequest, setIsSendingRequest] = useState(false);
+    return tiendaHref;
+  }, [searchQs, tiendaHref]);
+
   const [vehicleChangeOpen, setVehicleChangeOpen] = useState(false);
   const vehicleSettingsSectionRef = useRef<HTMLDivElement | null>(null);
   const [vehicleSectionHighlight, setVehicleSectionHighlight] = useState(false);
@@ -189,32 +176,15 @@ export default function Settings() {
     });
   }, [user, form.reset]);
 
-  const grants = useMemo(() => {
-    const g = (user as any)?.profileEditGrants ?? {};
-    return {
-      email: g.email === true,
-      name: g.name === true,
-      phone: g.phone === true,
-      recoveryQuestions: g.recoveryQuestions === true,
-    };
-  }, [user]);
-
   const recoveryConfigured =
     (user as { recoveryQuestionsConfigured?: boolean } | null)?.recoveryQuestionsConfigured === true;
-
-  const showChangeRequestPanel =
-    !grants.name ||
-    !grants.phone ||
-    !grants.email ||
-    (recoveryConfigured && !grants.recoveryQuestions);
 
   const doSubmit = async (data: ProfileForm) => {
     const token = localStorage.getItem("token");
     const body: Record<string, string | undefined> = {
-      email: grants.email ? (data.email || undefined) : undefined,
-      name: grants.name ? (data.name || undefined) : undefined,
-      lastName: grants.name ? (data.lastName || undefined) : undefined,
-      phone: grants.phone ? (data.phone || undefined) : undefined,
+      name: data.name || undefined,
+      lastName: data.lastName || undefined,
+      phone: data.phone || undefined,
       bankName: data.bankName || undefined,
       accountNumber: data.accountNumber ? sanitizeAccountNumber(data.accountNumber) : undefined,
     };
@@ -233,599 +203,293 @@ export default function Settings() {
       }
       const { user: updatedUser } = await res.json();
       queryClient.setQueryData(["user"], updatedUser);
-      toast({ title: "Perfil actualizado", description: "Los datos se guardaron correctamente." });
+      toast({ title: "Guardado", description: "Tus datos quedaron actualizados." });
     } catch (e: unknown) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: e instanceof Error ? e.message : "No se pudo actualizar el perfil.",
+        title: "No se pudo guardar",
+        description: e instanceof Error ? e.message : "Inténtalo otra vez en un momento.",
       });
-    }
-  };
-
-  const onSubmit = async (data: ProfileForm) => {
-    const sensitive =
-      (grants.email && (data.email ?? "").trim() !== String((user as any)?.email ?? "").trim()) ||
-      (grants.name &&
-        (((data.name ?? "").trim() !== String((user as any)?.name ?? "").trim()) ||
-          ((data.lastName ?? "").trim() !== String((user as any)?.lastName ?? "").trim()))) ||
-      (grants.phone && (data.phone ?? "").trim() !== String((user as any)?.phone ?? "").trim());
-
-    if (sensitive) {
-      setPendingSensitiveSave(data);
-      return;
-    }
-    await doSubmit(data);
-  };
-
-  const sendChangeRequest = async () => {
-    const token = localStorage.getItem("token");
-    const reason = changeReqReason.trim();
-    if (!reason) {
-      toast({ variant: "destructive", title: "Motivo requerido", description: "Escribe un motivo corto para tu solicitud." });
-      return;
-    }
-    setIsSendingRequest(true);
-    try {
-      const res = await fetch("/api/me/account-change-requests", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ field: changeReqField, reason }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "No se pudo enviar la petición");
-      }
-      setChangeReqReason("");
-      toast({ title: "Petición enviada", description: "Un administrador revisará tu solicitud." });
-    } catch (e: unknown) {
-      toast({ variant: "destructive", title: "Error", description: e instanceof Error ? e.message : "No se pudo enviar la petición." });
-    } finally {
-      setIsSendingRequest(false);
-    }
-  };
-
-  const onDeleteAccount = async () => {
-    setIsDeleting(true);
-    const token = localStorage.getItem("token");
-    try {
-      const res = await fetch("/api/auth/account", {
-        method: "DELETE",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "Error al eliminar la cuenta");
-      }
-      
-      toast({ 
-        title: "Cuenta eliminada", 
-        description: "Tu cuenta ha sido eliminada. Te esperamos luego en Applia para que sigas recibiendo y brindando los mejores servicios." 
-      });
-      
-      // Cerrar sesión y redirigir
-      await logout();
-      setLocation("/");
-    } catch (e: unknown) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: e instanceof Error ? e.message : "No se pudo eliminar la cuenta.",
-      });
-      setIsDeleting(false);
     }
   };
 
   if (!isAuthenticated) {
     return (
-      <div className="container max-w-lg mx-auto py-10 px-4">
-        <Card className="border-none shadow-2xl bg-gradient-to-b from-background to-muted/20">
-          <CardHeader className="text-center pb-2">
-            <div className="mx-auto w-12 h-12 bg-mango-orange/10 rounded-full flex items-center justify-center mb-4">
-              <User className="h-6 w-6 text-mango-orange" />
-            </div>
-            <CardTitle className="text-2xl font-bold">Configuración</CardTitle>
-            <CardDescription className="text-base">
-              Inicia sesión para gestionar tu perfil y preferencias.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6 pt-4">
-            <Button asChild className="w-full h-12 text-lg font-semibold shadow-mango-orange/20 shadow-lg">
-              <Link href="/login">Iniciar sesión</Link>
-            </Button>
-            
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-muted" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground font-medium">O otras acciones</span>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-destructive/5 border border-destructive/10 space-y-3">
-              <div className="flex items-center gap-2 text-destructive font-semibold">
-                <Trash2 className="h-4 w-4" />
-                <span>Eliminación de cuenta en Applia</span>
-              </div>
-              <div className="text-sm text-muted-foreground leading-relaxed space-y-2">
-                <p>
-                  Pasos para solicitar la eliminación permanente de tu cuenta sin iniciar sesión:
-                </p>
-                <ol className="list-decimal list-inside ml-1 text-xs space-y-1">
-                  <li>Haz clic en el botón de abajo.</li>
-                  <li>Envía el correo usando la misma dirección de email con la que te registraste.</li>
-                </ol>
-                <div className="text-xs bg-muted/50 p-2 rounded mt-2">
-                  <strong>Qué se borrará:</strong> Todo tu perfil, avatar, ubicación e historial de mensajes.<br/>
-                  <strong>Qué se conservará:</strong> Datos de facturas y reservas pasadas se mantienen por 12 meses para fines contables y prevención de fraude.
-                </div>
-              </div>
-              <a 
-                href="mailto:thebiglion2528@gmail.com?subject=Solicitud de eliminación de cuenta Applia" 
-                className="block w-full p-3 text-center bg-white dark:bg-zinc-900 border border-destructive/20 rounded-lg text-destructive font-bold hover:bg-destructive/5 transition-all shadow-sm active:scale-95 mt-4"
-              >
-                Solicitar por correo electrónico
-              </a>
-              <p className="text-[10px] text-center text-muted-foreground italic">
-                * Tu solicitud de borrado será procesada en un plazo máximo de 48 horas hábiles.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div
+        className={cn(
+          "flex min-h-[calc(100dvh-4rem)] flex-1 items-center justify-center px-4 py-10",
+          "bg-[radial-gradient(ellipse_at_20%_0%,hsl(var(--secondary)/0.14),transparent_50%),radial-gradient(ellipse_at_90%_80%,hsl(var(--primary)/0.06),transparent_45%),hsl(var(--background))]",
+        )}
+      >
+        <div className="w-full max-w-md rounded-[1.75rem] border border-border/70 bg-card/90 p-8 text-center shadow-xl shadow-black/5 backdrop-blur-sm">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+            <ShoppingBag className="h-5 w-5" strokeWidth={2.25} />
+          </div>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Tu cuenta</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Entra para ver y editar tus datos en Applia Store.
+          </p>
+          <Button asChild className="mt-6 h-11 w-full rounded-full font-semibold">
+            <Link href="/login">Iniciar sesión</Link>
+          </Button>
+          <p className="mt-4 text-sm text-muted-foreground">
+            ¿No tienes cuenta?{" "}
+            <Link
+              href="/register"
+              className="font-semibold text-secondary underline-offset-4 hover:underline dark:text-primary"
+            >
+              Crear una
+            </Link>
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto max-w-lg py-8 px-4 sm:px-6 lg:max-w-6xl xl:max-w-7xl">
-      <div className="mb-6 flex items-center gap-4 lg:mb-8">
-        <Button variant="ghost" size="icon" asChild>
-          <Link href={settingsBackHref}>
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold lg:text-3xl">Configuración</h1>
-          <p className="text-sm text-muted-foreground">Gestiona tu perfil y preferencias</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-8">
-        <aside className="flex flex-col gap-6 lg:col-span-4 lg:sticky lg:top-6 lg:self-start">
-          <StoreSettingsCta />
-          <ThemeAppearanceCard />
-          <SettingsChangePasswordCard recoveryConfigured={recoveryConfigured} />
-          <Card>
-            <CardHeader>
-              <CardTitle>Preguntas de recuperación</CardTitle>
-              <CardDescription>
-                Si olvidas tu contraseña, responderás estas preguntas. Para cambiarlas necesitas aprobación del
-                administrador (como con correo o teléfono).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Estado:{" "}
-                <span className="font-medium text-foreground">
-                  {recoveryConfigured ? "Configuradas" : "Pendientes de configurar"}
-                </span>
-              </p>
-              {grants.recoveryQuestions ? (
-                <Button type="button" asChild className="w-full sm:w-auto">
-                  <Link href="/account-recovery/setup?reconfigure=1">Cambiar preguntas y respuestas</Link>
-                </Button>
-              ) : recoveryConfigured ? (
-                <p className="text-xs text-muted-foreground">
-                  Para cambiar tus preguntas, usa «Solicitar cambio de datos» y elige «Preguntas de recuperación».
-                </p>
-              ) : (
-                <Button type="button" asChild variant="outline" className="w-full sm:w-auto">
-                  <Link href="/account-recovery/setup">Configurar preguntas de recuperación</Link>
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        </aside>
-
-        <div className="flex min-w-0 flex-col gap-6 lg:col-span-8">
-      {showGoVehicleCard ? (
-        <>
-          <div
-            ref={vehicleSettingsSectionRef}
-            className={`scroll-mt-24 rounded-xl transition-shadow duration-300 ${
-              vehicleSectionHighlight ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
-            }`}
+    <div
+      className={cn(
+        "relative flex min-h-[calc(100dvh-4rem)] flex-1 flex-col",
+        "bg-[radial-gradient(ellipse_at_15%_0%,hsl(var(--secondary)/0.12),transparent_45%),radial-gradient(ellipse_at_85%_20%,hsl(var(--primary)/0.05),transparent_40%),hsl(var(--background))]",
+      )}
+    >
+      <div className="mx-auto w-full max-w-[100rem] flex-1 px-4 py-8 min-[400px]:px-6 sm:px-8 lg:px-10">
+        <div className="mb-8 flex items-start gap-3 sm:items-center sm:gap-4">
+          <Button
+            variant="outline"
+            size="icon"
+            asChild
+            className="mt-0.5 h-10 w-10 shrink-0 rounded-full border-border/80"
           >
-            <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Car className="h-5 w-5" />
-                Tu vehículo (taxi / delivery / marketplace)
-              </CardTitle>
-              <CardDescription>
-                Si cambias de moto, carro o modalidad (taxi / delivery / marketplace), envía una solicitud. Un administrador debe
-                aprobarla antes de que quede registrada, igual que con el cambio de datos de cuenta.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end lg:gap-6">
-              <div className="space-y-3 min-w-0">
-              {providerVehicleLoading ? (
-                <p className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                  Cargando datos del vehículo…
-                </p>
-              ) : providerVehicleRow &&
-                (providerVehicleRow.license_plate ||
-                  providerVehicleRow.brand ||
-                  providerVehicleRow.model ||
-                  providerVehicleRow.vehicle_type) ? (
-                <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
-                  <p>
-                    <span className="text-muted-foreground">Tipo:</span>{" "}
-                    <span className="font-medium text-foreground">
-                      {GO_VEHICLE_TYPE_LABELS[
-                        resolveVehicleKind(providerVehicleRow.vehicle_type as string | undefined)
-                      ] ?? "Vehículo"}
-                    </span>
-                  </p>
-                  {(String(providerVehicleRow.brand ?? "").trim() ||
-                    String(providerVehicleRow.model ?? "").trim()) ? (
-                    <p>
-                      <span className="text-muted-foreground">Unidad:</span>{" "}
-                      <span className="font-medium text-foreground">
-                        {[providerVehicleRow.brand, providerVehicleRow.model].filter(Boolean).join(" ")}
-                        {providerVehicleRow.model_year != null ? ` · ${String(providerVehicleRow.model_year)}` : ""}
-                      </span>
-                    </p>
-                  ) : null}
-                  {providerVehicleRow.license_plate ? (
-                    <p>
-                      <span className="text-muted-foreground">Placa:</span>{" "}
-                      <span className="font-mono font-medium">{String(providerVehicleRow.license_plate)}</span>
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="text-muted-foreground">
-                  Aún no hay un vehículo registrado o faltan datos. Completa la solicitud para que el equipo pueda
-                  validar tu unidad y puedas operar con normalidad.
-                </p>
-              )}
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full shrink-0 lg:w-auto"
-                onClick={() => setVehicleChangeOpen(true)}
-              >
-                Solicitar cambio de vehículo
-              </Button>
-            </CardContent>
-          </Card>
-          </div>
-          <ProviderVehicleChangeRequestDialog
-            open={vehicleChangeOpen}
-            onOpenChange={setVehicleChangeOpen}
-            vehicleRow={providerVehicleRow ?? null}
-          />
-        </>
-      ) : null}
-
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
-                Datos personales
-              </CardTitle>
-              <CardDescription>
-                Correo, nombre y teléfono se muestran aquí. Para cambiarlos necesitas una petición aprobada.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_min(17rem,34%)] xl:items-start">
-                <div className="space-y-4 min-w-0">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem className="sm:col-span-2">
-                    <FormLabel>Correo</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="email"
-                        placeholder="Tu correo"
-                        {...field}
-                        disabled={!grants.email}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                    {!grants.email ? (
-                      <p className="text-xs text-muted-foreground">Bloqueado. Envía una petición para poder cambiarlo.</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">Aprobado: puedes cambiarlo ahora y guardar.</p>
-                    )}
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nombre</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Tu nombre" {...field} disabled={!grants.name} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="lastName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Apellido</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Tu apellido" {...field} disabled={!grants.name} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="phone"
-                render={({ field }) => (
-                  <FormItem className="sm:col-span-2">
-                    <FormLabel>Teléfono</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ej. +593 99 123 4567" {...field} disabled={!grants.phone} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              </div>
-              {showChangeRequestPanel ? (
-                <div className="rounded-lg border bg-muted/20 p-3">
-                  <p className="text-sm font-medium">Solicitar cambio de datos</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Selecciona qué dato quieres cambiar y explica brevemente el motivo. Un admin revisará la solicitud.
-                  </p>
-                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,40%)] lg:items-end">
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground">Quiero cambiar</p>
-                      <div className="flex flex-wrap gap-2">
-                        {!grants.phone ? (
-                          <Button
-                            type="button"
-                            variant={changeReqField === "phone" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setChangeReqField("phone")}
-                          >
-                            Teléfono
-                          </Button>
-                        ) : null}
-                        {!grants.name ? (
-                          <Button
-                            type="button"
-                            variant={changeReqField === "name" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setChangeReqField("name")}
-                          >
-                            Nombre
-                          </Button>
-                        ) : null}
-                        {!grants.email ? (
-                          <Button
-                            type="button"
-                            variant={changeReqField === "email" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setChangeReqField("email")}
-                          >
-                            Correo
-                          </Button>
-                        ) : null}
-                        {recoveryConfigured && !grants.recoveryQuestions ? (
-                          <Button
-                            type="button"
-                            variant={changeReqField === "recovery_questions" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setChangeReqField("recovery_questions")}
-                          >
-                            Preguntas de recuperación
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground">Motivo (corto)</p>
-                      <Textarea
-                        value={changeReqReason}
-                        onChange={(e) => setChangeReqReason(e.target.value)}
-                        rows={3}
-                        placeholder="Ej.: Cambié de número por pérdida del chip…"
-                      />
-                    </div>
-                    <div className="flex justify-end">
-                      <Button type="button" onClick={sendChangeRequest} disabled={isSendingRequest}>
-                        {isSendingRequest ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Enviando…
-                          </>
-                        ) : (
-                          "Enviar petición"
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-                </div>
-              {user ? (
-                <SettingsAvatarEditor
-                  className="xl:sticky xl:top-6"
-                  name={String((user as { name?: string }).name ?? "")}
-                  lastName={String((user as { lastName?: string }).lastName ?? "")}
-                  avatarUrl={(user as { avatar?: string }).avatar}
-                  avatarLastChangedAt={
-                    (user as { avatarLastChangedAt?: string | null }).avatarLastChangedAt ?? null
-                  }
-                />
-              ) : null}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Sección banco oculta temporalmente */}
-
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" asChild>
-              <Link href="/dashboard">Cancelar</Link>
-            </Button>
-            <Button type="submit" disabled={form.formState.isSubmitting}>
-              {form.formState.isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Guardando…
-                </>
-              ) : (
-                "Guardar cambios"
-              )}
-            </Button>
-          </div>
-        </form>
-      </Form>
-        </div>
-      </div>
-
-      {/* Confirmación: cambios sensibles (una sola vez) */}
-      <AlertDialog
-        open={pendingSensitiveSave != null}
-        onOpenChange={(open) => {
-          if (!open) setPendingSensitiveSave(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Guardar cambio de dato de cuenta</AlertDialogTitle>
-            <AlertDialogDescription>
-              Este cambio no se podrá volver a modificar después. Si necesitas otro cambio, tendrás que enviar una nueva petición.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                const data = pendingSensitiveSave;
-                setPendingSensitiveSave(null);
-                if (data) void doSubmit(data);
-              }}
-            >
-              Guardar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <Card className="mt-8 border-destructive/20 bg-destructive/5 shadow-sm transition-all hover:shadow-md lg:mt-10">
-        <CardContent className="flex flex-col gap-6 p-6 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
-          <div className="min-w-0 flex-1 space-y-3">
-            <div>
-              <CardTitle className="text-destructive flex items-center gap-2 text-lg">
-                <Trash2 className="h-5 w-5 shrink-0" />
-                Zona de Peligro
-              </CardTitle>
-              <CardDescription className="mt-1">
-                Acciones permanentes sobre tu cuenta. Perderás el acceso inmediato a tu panel.
-              </CardDescription>
-            </div>
-            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs leading-relaxed text-muted-foreground">
-              <strong className="text-foreground">Qué se borrará:</strong> Todo tu perfil, avatar, ubicación e historial de mensajes.
-              <strong className="mt-2 block text-foreground">Qué se conservará:</strong> Datos de facturas y reservas pasadas se mantienen por 12 meses por obligaciones fiscales y prevención de fraude en Ecuador.
-            </div>
-            <p className="text-xs text-destructive">
-              * La suspensión es inmediata al confirmar.
+            <Link href={settingsBackHref} aria-label="Volver">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-secondary dark:text-primary">
+              Applia Store
+            </p>
+            <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
+              Mi cuenta
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Datos de contacto, acceso y cómo se ve la app.
             </p>
           </div>
-          <Button
-            variant="destructive"
-            onClick={() => setShowFirstConfirm(true)}
-            className="h-12 w-full shrink-0 rounded-lg bg-destructive px-8 font-medium text-white shadow-lg shadow-destructive/20 hover:bg-destructive/90 sm:w-auto lg:min-w-[12rem]"
-          >
-            Eliminar mi cuenta
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Primer Pop-up de Confirmación */}
-      <AlertDialog open={showFirstConfirm} onOpenChange={setShowFirstConfirm}>
-        <AlertDialogContent className="rounded-xl border-destructive/10">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-lg font-bold">Solicitud de borrado de cuenta</AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground leading-relaxed">
-              Recuerda que al proceder, tu perfil, fotos e historial de chats serán borrados permanentemente. Por normativas legales, los datos de facturas y reservas pasadas se conservarán temporalmente.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="mt-6">
-            <AlertDialogCancel className="rounded-lg">Cancelar</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={() => {
-                setShowFirstConfirm(false);
-                setShowSecondConfirm(true);
-              }}
-              className="bg-destructive hover:bg-destructive/90 text-white rounded-lg px-6"
-            >
-              Continuar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-8">
+          <aside className="flex flex-col gap-5 lg:col-span-4 lg:sticky lg:top-24 lg:self-start">
+            <ThemeAppearanceCard />
+            <SettingsChangePasswordCard recoveryConfigured={recoveryConfigured} />
+          </aside>
 
-      {/* Segundo Pop-up de Confirmación (Explícito) */}
-      <AlertDialog open={showSecondConfirm} onOpenChange={setShowSecondConfirm}>
-        <AlertDialogContent className="rounded-xl border-destructive/20 shadow-2xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-destructive text-lg font-bold">Confirmación Final</AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground leading-relaxed">
-              ¿Estás seguro de finalizar? Todo el proceso de borrado comenzará de forma inmediata y perderás el acceso permanentemente.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="mt-6">
-            <AlertDialogCancel disabled={isDeleting} className="rounded-lg">Regresar</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={(e) => {
-                e.preventDefault();
-                onDeleteAccount();
-              }}
-              disabled={isDeleting}
-              className="bg-destructive hover:bg-destructive/90 text-white rounded-lg font-bold px-8 shadow-lg shadow-destructive/20"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Desactivando...
-                </>
-              ) : (
-                "Confirmar desactivación"
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          <div className="flex min-w-0 flex-col gap-5 lg:col-span-8">
+            {showGoVehicleCard ? (
+              <>
+                <div
+                  ref={vehicleSettingsSectionRef}
+                  className={cn(
+                    "scroll-mt-24 transition-shadow duration-300",
+                    vehicleSectionHighlight && "rounded-[1.5rem] ring-2 ring-primary ring-offset-2 ring-offset-background",
+                  )}
+                >
+                  <section className={panelClass}>
+                    <div className="mb-4 flex items-start gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+                        <Car className="h-4 w-4" aria-hidden />
+                      </span>
+                      <div className="min-w-0">
+                        <h2 className="font-display text-base font-bold tracking-tight text-foreground">
+                          Tu unidad
+                        </h2>
+                        <p className="mt-0.5 text-sm text-muted-foreground">
+                          Si cambias de vehículo o modalidad, envía una solicitud para revisión.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-4 lg:flex lg:items-end lg:justify-between lg:gap-6 lg:space-y-0">
+                      <div className="min-w-0 flex-1 text-sm">
+                        {providerVehicleLoading ? (
+                          <p className="flex items-center gap-2 text-muted-foreground">
+                            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                            Cargando unidad…
+                          </p>
+                        ) : providerVehicleRow &&
+                          (providerVehicleRow.license_plate ||
+                            providerVehicleRow.brand ||
+                            providerVehicleRow.model ||
+                            providerVehicleRow.vehicle_type) ? (
+                          <div className="space-y-2 rounded-2xl border border-border/60 bg-muted/25 p-4">
+                            <p>
+                              <span className="text-muted-foreground">Tipo:</span>{" "}
+                              <span className="font-semibold text-foreground">
+                                {GO_VEHICLE_TYPE_LABELS[
+                                  resolveVehicleKind(providerVehicleRow.vehicle_type as string | undefined)
+                                ] ?? "Vehículo"}
+                              </span>
+                            </p>
+                            {(String(providerVehicleRow.brand ?? "").trim() ||
+                              String(providerVehicleRow.model ?? "").trim()) && (
+                              <p>
+                                <span className="text-muted-foreground">Unidad:</span>{" "}
+                                <span className="font-semibold text-foreground">
+                                  {[providerVehicleRow.brand, providerVehicleRow.model]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  {providerVehicleRow.model_year != null
+                                    ? ` · ${String(providerVehicleRow.model_year)}`
+                                    : ""}
+                                </span>
+                              </p>
+                            )}
+                            {providerVehicleRow.license_plate ? (
+                              <p>
+                                <span className="text-muted-foreground">Placa:</span>{" "}
+                                <span className="font-mono font-semibold">
+                                  {String(providerVehicleRow.license_plate)}
+                                </span>
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground">
+                            Todavía no hay unidad registrada. Completa la solicitud para operar con normalidad.
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 w-full shrink-0 rounded-full px-5 font-semibold lg:w-auto"
+                        onClick={() => setVehicleChangeOpen(true)}
+                      >
+                        Solicitar cambio
+                      </Button>
+                    </div>
+                  </section>
+                </div>
+                <ProviderVehicleChangeRequestDialog
+                  open={vehicleChangeOpen}
+                  onOpenChange={setVehicleChangeOpen}
+                  vehicleRow={providerVehicleRow ?? null}
+                />
+              </>
+            ) : null}
+
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(doSubmit)} className="space-y-5">
+                <section className={panelClass}>
+                  <div className="mb-5 flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-secondary text-secondary-foreground dark:bg-primary dark:text-primary-foreground">
+                      <User className="h-4 w-4" aria-hidden />
+                    </span>
+                    <div className="min-w-0">
+                      <h2 className="font-display text-base font-bold tracking-tight text-foreground">
+                        Datos de contacto
+                      </h2>
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        Nombre y teléfono los puedes editar cuando quieras. El correo queda fijo.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem className="sm:col-span-2">
+                          <FormLabel>Correo</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="email"
+                              className={cn(fieldClass, "opacity-80")}
+                              {...field}
+                              disabled
+                              readOnly
+                            />
+                          </FormControl>
+                          <FormMessage />
+                          <p className="text-xs text-muted-foreground">No editable desde la cuenta.</p>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Nombre</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Tu nombre" className={fieldClass} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="lastName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Apellido</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Tu apellido" className={fieldClass} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="phone"
+                      render={({ field }) => (
+                        <FormItem className="sm:col-span-2">
+                          <FormLabel>Teléfono</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Ej. +58 412 123 4567"
+                              className={fieldClass}
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </section>
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    asChild
+                    className="h-11 rounded-full px-6 font-semibold"
+                  >
+                    <Link href={tiendaHref}>Volver a la tienda</Link>
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={form.formState.isSubmitting}
+                    className="h-11 rounded-full px-6 font-semibold shadow-md shadow-primary/15"
+                  >
+                    {form.formState.isSubmitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Guardando…
+                      </>
+                    ) : (
+                      "Guardar cambios"
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

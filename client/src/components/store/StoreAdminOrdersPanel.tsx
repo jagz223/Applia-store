@@ -1,8 +1,9 @@
 import { useMemo, useState, useEffect } from "react";
-import { ExternalLink, ImageIcon, Loader2, MapPin, Package } from "lucide-react";
+import { ExternalLink, FileText, ImageIcon, Loader2, MapPin, Package } from "lucide-react";
 import {
   STORE_ORDER_STATUS_LABELS,
   STORE_ORDER_STATUSES,
+  canGenerateStoreOrderInvoice,
   type StoreOrderStatus,
 } from "@shared/store-order-schema";
 import {
@@ -40,7 +41,14 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { StoreOrderStatusRoadmap } from "@/components/store/StoreOrderStatusRoadmap";
 import { StoreOrderDeliveryRouteMap } from "@/components/store/StoreOrderDeliveryRouteMap";
+import { StoreOrderInvoicePdfDialog } from "@/components/store/StoreOrderInvoicePdfDialog";
 import type { StoreLocation } from "@shared/store-schema";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
@@ -360,6 +368,7 @@ export function StoreAdminOrdersPanel({
   const [dateFromFilter, setDateFromFilter] = useState("");
   const [dateToFilter, setDateToFilter] = useState("");
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const [invoiceOrderId, setInvoiceOrderId] = useState<number | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -472,10 +481,13 @@ export function StoreAdminOrdersPanel({
                     <TableHead className="text-right">Total tienda</TableHead>
                     <TableHead>Creada</TableHead>
                     <TableHead>Última edición</TableHead>
+                    <TableHead className="text-right">Factura</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orders.map((order) => (
+                  {orders.map((order) => {
+                    const canInvoice = canGenerateStoreOrderInvoice(order.status);
+                    return (
                     <TableRow
                       key={order.id}
                       className="cursor-pointer hover:bg-muted/40"
@@ -494,8 +506,37 @@ export function StoreAdminOrdersPanel({
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {formatDate(order.updatedAt)}
                       </TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <TooltipProvider delayDuration={200}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={!canInvoice}
+                                  className="h-8 rounded-full px-3"
+                                  onClick={() => setInvoiceOrderId(order.id)}
+                                >
+                                  <FileText className="mr-1.5 h-3.5 w-3.5" />
+                                  PDF
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            {!canInvoice ? (
+                              <TooltipContent>
+                                Disponible desde confirmado. No aplica en pagado ni rechazado.
+                              </TooltipContent>
+                            ) : (
+                              <TooltipContent>Ver factura PDF</TooltipContent>
+                            )}
+                          </Tooltip>
+                        </TooltipProvider>
+                      </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -509,6 +550,15 @@ export function StoreAdminOrdersPanel({
         orderId={selectedOrderId}
         open={selectedOrderId != null}
         onOpenChange={closeOrderDialog}
+      />
+
+      <StoreOrderInvoicePdfDialog
+        open={invoiceOrderId != null}
+        onOpenChange={(open) => {
+          if (!open) setInvoiceOrderId(null);
+        }}
+        storeId={storeId}
+        orderId={invoiceOrderId}
       />
     </>
   );

@@ -146,7 +146,7 @@ export function StoreShowcasePromotionGrid({
 
   if (largeCards) {
     return (
-      <div className={cn("grid grid-cols-2 md:grid-cols-3 gap-4", className)}>
+      <div className={cn("grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-4", className)}>
         {promotions.map((promotion) => (
           <ShowcasePromotionCard
             key={promotion.id}
