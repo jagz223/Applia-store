@@ -106,7 +106,7 @@ export function StoreAdminCurrencyPanel({
   const builtinRows = [
     {
       id: STORE_CURRENCY_USD_ID,
-      label: "Dollar",
+      label: "REF",
       rateLabel: dollar ? `${formatBs(dollar.rateBs)} Bs` : "Cargando…",
     },
     {

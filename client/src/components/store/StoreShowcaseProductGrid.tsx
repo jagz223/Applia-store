@@ -47,14 +47,15 @@ function ShowcaseProductCard({
           : undefined
       }
       className={cn(
-        "group flex min-h-[17.5rem] flex-col overflow-hidden rounded-2xl border border-border/80 bg-white shadow-sm",
+        "group flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-white shadow-sm",
+        "min-h-0 sm:min-h-[17.5rem]",
         "transition-all dark:bg-card dark:border-border",
         onSelect && "cursor-pointer hover:border-border hover:shadow-md",
         selected && "border-foreground/40 ring-2 ring-foreground/80 shadow-md",
       )}
     >
-      <div className="relative bg-muted/20 p-3 pb-0">
-        <div className="relative aspect-[5/4] overflow-hidden rounded-xl bg-muted/40">
+      <div className="relative bg-muted/20 p-2 sm:p-3 pb-0">
+        <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-muted/40">
           {imageUrl ? (
             <img
               src={imageUrl}
@@ -63,7 +64,7 @@ function ShowcaseProductCard({
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center">
-              <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
+              <ImageIcon className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground/40" />
             </div>
           )}
           {onAddToCart && !onSelect ? (
@@ -77,13 +78,17 @@ function ShowcaseProductCard({
           ) : null}
         </div>
       </div>
-      <div className="flex flex-1 flex-col gap-1 px-3.5 pb-4 pt-3">
-        <p className="text-sm font-bold leading-snug line-clamp-2 text-foreground">{product.name}</p>
-        <p className="text-sm font-semibold text-foreground">
+      <div className="flex flex-1 flex-col gap-0.5 px-2.5 pb-3 pt-2 sm:gap-1 sm:px-3.5 sm:pb-4 sm:pt-3">
+        <p className="text-[13px] sm:text-sm font-bold leading-snug line-clamp-2 text-foreground">
+          {product.name}
+        </p>
+        <p className="text-[13px] sm:text-sm font-semibold text-foreground">
           {formatPrice(product.price, product.displayCurrencyLabel)}
         </p>
         {product.description ? (
-          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{product.description}</p>
+          <p className="mt-0.5 line-clamp-1 sm:line-clamp-2 text-xs text-muted-foreground">
+            {product.description}
+          </p>
         ) : null}
         {onAddToCart && onSelect ? (
           <div className="mt-auto pt-2" onClick={(e) => e.stopPropagation()}>
@@ -156,10 +161,10 @@ export function StoreShowcaseProductGrid({
   }
 
   const gridClass = largeCards
-    ? "grid grid-cols-2 md:grid-cols-3 gap-4"
+    ? "grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-4"
     : centered
       ? "flex flex-wrap justify-center gap-4 max-w-2xl mx-auto"
-      : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4";
+      : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-4";
 
   return (
     <div className={cn(gridClass, className)}>

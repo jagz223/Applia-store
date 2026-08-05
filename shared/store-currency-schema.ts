@@ -8,7 +8,7 @@ export const STORE_BUILTIN_CURRENCY_IDS = [STORE_CURRENCY_USD_ID, STORE_CURRENCY
 export type StoreBuiltinCurrencyId = (typeof STORE_BUILTIN_CURRENCY_IDS)[number];
 
 export const STORE_BUILTIN_CURRENCY_LABELS: Record<StoreBuiltinCurrencyId, string> = {
-  [STORE_CURRENCY_USD_ID]: "Dollar",
+  [STORE_CURRENCY_USD_ID]: "REF",
   [STORE_CURRENCY_EUR_ID]: "Euro",
 };
 

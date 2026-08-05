@@ -154,9 +154,9 @@ export default function Register() {
 
         <div className="rounded-[1.75rem] border border-border/70 bg-card/90 p-6 shadow-xl shadow-black/5 backdrop-blur-sm sm:p-8">
           <div className="mb-6">
-            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Crear cuenta</h1>
+            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Regístrate</h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Regístrate para pedir en la tienda de forma rápida y sencilla.
+              Crea tu acceso para pedir en la tienda sin complicaciones.
             </p>
           </div>
 
@@ -170,7 +170,7 @@ export default function Register() {
                     <FormItem>
                       <FormLabel className="text-foreground">Nombre</FormLabel>
                       <FormControl>
-                        <Input placeholder="Juan" className={fieldClass} {...field} />
+                        <Input placeholder="Andrés" className={fieldClass} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -183,7 +183,7 @@ export default function Register() {
                     <FormItem>
                       <FormLabel className="text-foreground">Apellido</FormLabel>
                       <FormControl>
-                        <Input placeholder="Pérez" className={fieldClass} {...field} />
+                        <Input placeholder="Rivas" className={fieldClass} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -200,7 +200,7 @@ export default function Register() {
                     <FormControl>
                       <Input
                         type="email"
-                        placeholder="correo@ejemplo.com"
+                        placeholder="andres.rivas@email.com"
                         className={fieldClass}
                         autoComplete="email"
                         {...field}
@@ -300,19 +300,19 @@ export default function Register() {
                 ) : (
                   <>
                     <UserPlus className="h-4 w-4" />
-                    Crear cuenta
+                    Regístrate
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
               </Button>
 
               <p className="pt-1 text-center text-sm text-muted-foreground">
-                ¿Ya tienes cuenta?{" "}
+                ¿Ya estás registrado?{" "}
                 <Link
                   href="/login"
                   className="font-semibold text-secondary underline-offset-4 hover:underline dark:text-primary"
                 >
-                  Inicia sesión
+                  Entra aquí
                 </Link>
               </p>
             </form>

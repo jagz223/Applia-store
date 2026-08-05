@@ -66,6 +66,12 @@ export const STORE_ORDER_STATUS_LABELS: Record<StoreOrderStatus, string> = {
 
 export const STORE_ORDER_TERMINAL_STATUSES: StoreOrderStatus[] = ["completado", "rechazado"];
 
+/** Factura PDF: disponible desde confirmado (bloqueada en pagado y rechazado). */
+export function canGenerateStoreOrderInvoice(status: StoreOrderStatus): boolean {
+  return status !== "pagado" && status !== "rechazado";
+}
+
+
 
 
 /** Órdenes visibles en la cola de delivery de la tienda. */
