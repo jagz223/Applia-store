@@ -9,6 +9,8 @@ import {
 import { useBcvRates, useUpdateStoreCurrencySettings } from "@/hooks/use-store-currency";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -201,12 +203,12 @@ export function StoreAdminCurrencyPanel({
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+    <div className="space-y-4 sm:space-y-6">
+      <Card className={cn(storeAdminSectionCardClass, "overflow-hidden")}>
+        <CardHeader className="flex flex-col gap-3 space-y-0 px-4 pt-5 sm:flex-row sm:items-start sm:justify-between sm:px-6">
           <div className="space-y-1.5">
-            <CardTitle>Moneda</CardTitle>
-            <CardDescription>
+            <CardTitle className="font-display text-xl tracking-tight">Moneda</CardTitle>
+            <CardDescription className="text-sm leading-snug">
               Tasas BCV en bolívares (Bs). Marca una sola moneda para la vitrina y todas las que
               aceptas como pago (definen los precios del producto).
             </CardDescription>
@@ -215,7 +217,7 @@ export function StoreAdminCurrencyPanel({
             type="button"
             variant="outline"
             size="sm"
-            className="gap-1.5 shrink-0"
+            className="h-10 shrink-0 gap-1.5 rounded-full"
             disabled={bcvQuery.isFetching}
             onClick={() => void bcvQuery.refetch()}
           >
@@ -227,7 +229,7 @@ export function StoreAdminCurrencyPanel({
             Actualizar BCV
           </Button>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 px-4 pb-5 sm:px-6">
           {bcvQuery.isError ? (
             <p className="text-sm text-destructive">
               {bcvQuery.error instanceof Error
@@ -237,8 +239,9 @@ export function StoreAdminCurrencyPanel({
           ) : null}
 
           <RadioGroup value={visualCurrencyId} onValueChange={setVisual}>
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[40rem] text-sm">
+            <div className="-mx-1 overflow-x-auto px-1 sm:mx-0 sm:px-0">
+              <div className="overflow-hidden rounded-2xl border border-border/70">
+              <table className="w-full min-w-[36rem] text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/40 text-left">
                     <th className="px-3 py-2.5 font-medium">Moneda</th>
@@ -361,6 +364,7 @@ export function StoreAdminCurrencyPanel({
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </RadioGroup>
 

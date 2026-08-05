@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Info, Loader2 } from "lucide-react";
 import {
+  STORE_FULFILLMENT_CUSTOMER_HINTS,
   STORE_FULFILLMENT_DESCRIPTIONS,
   STORE_FULFILLMENT_LABELS,
   STORE_FULFILLMENT_MODES,
@@ -28,6 +29,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  storeAdminDialogContentClass,
+  storeAdminDialogFooterClass,
+  storeAdminDialogHeaderClass,
+  storeAdminDialogShellClass,
+  storeAdminSectionCardClass,
+} from "@/components/store/store-admin-ui";
+import { cn } from "@/lib/utils";
 
 type StoreFulfillmentConfigCardProps = {
   slug: string;
@@ -185,36 +194,36 @@ export function StoreFulfillmentConfigCard({
 
   return (
     <>
-      <Card>
+      <Card className={cn(storeAdminSectionCardClass, "overflow-hidden")}>
         <CardHeader>
-          <CardTitle>Modalidades de entrega</CardTitle>
+          <CardTitle className="font-display">Modalidades de entrega</CardTitle>
           <CardDescription>
             Elige qué opciones estarán disponibles en el carrito. El cliente solo podrá elegir una.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {!hasStoreLocation ? (
-            <p className="text-xs text-amber-700 dark:text-amber-400 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            <p className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
               Debes registrar la ubicación de la tienda antes de activar modalidades de entrega.
             </p>
           ) : null}
 
           <div className="space-y-3">
             {STORE_FULFILLMENT_MODES.map((mode) => (
-              <div key={mode} className="space-y-3">
-                <div className="flex items-start gap-3 rounded-lg border border-border px-3 py-3">
+              <div key={mode} className="min-w-0 space-y-3">
+                <div className="flex items-start gap-3 rounded-2xl border border-border/70 px-3 py-3">
                   <Checkbox
                     id={`fulfillment-${mode}`}
                     checked={isChecked(mode)}
                     disabled={disabled || saving || (!hasStoreLocation && !isChecked(mode))}
                     onCheckedChange={(v) => handleToggle(mode, v === true)}
                   />
-                  <div className="space-y-1 min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <Label htmlFor={`fulfillment-${mode}`} className="cursor-pointer font-medium">
                       {STORE_FULFILLMENT_LABELS[mode]}
                     </Label>
-                    <p className="text-xs text-muted-foreground line-clamp-2">
-                      {STORE_FULFILLMENT_DESCRIPTIONS[mode]}
+                    <p className="line-clamp-2 text-xs text-muted-foreground">
+                      {STORE_FULFILLMENT_CUSTOMER_HINTS[mode]}
                     </p>
                   </div>
                   <button
@@ -229,13 +238,13 @@ export function StoreFulfillmentConfigCard({
                 </div>
 
                 {mode === "delivery" && deliveryEnabled ? (
-                  <div className="ml-8 space-y-3 rounded-lg border border-border/80 bg-muted/20 p-3.5">
+                  <div className="min-w-0 space-y-3 rounded-2xl border border-border/70 bg-muted/25 p-3.5 sm:ml-6">
                     <p className="text-xs font-medium text-foreground">Precios del delivery</p>
                     <p className="text-xs text-muted-foreground">
                       Se calculará como base + (km × precio por km) según la ruta hasta el cliente.
                     </p>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-1.5">
+                    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="min-w-0 space-y-1.5">
                         <Label htmlFor="delivery-base-usd" className="text-xs">
                           Precio base (USD)
                         </Label>
@@ -249,7 +258,7 @@ export function StoreFulfillmentConfigCard({
                           onChange={setBaseUsd}
                         />
                       </div>
-                      <div className="space-y-1.5">
+                      <div className="min-w-0 space-y-1.5">
                         <Label htmlFor="delivery-per-km-usd" className="text-xs">
                           Precio por km (USD)
                         </Label>
@@ -271,18 +280,29 @@ export function StoreFulfillmentConfigCard({
           </div>
 
           {selected.length === 0 ? (
-            <p className="text-xs text-amber-700 dark:text-amber-400 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            <p className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
               Sin opciones activas, el carrito no mostrará modalidades de entrega.
             </p>
           ) : null}
 
           {dirty ? (
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
-              <Button type="button" disabled={saving} onClick={() => void handleSave()}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+              <Button
+                type="button"
+                className="h-11 rounded-full font-semibold"
+                disabled={saving}
+                onClick={() => void handleSave()}
+              >
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Guardar modalidades
               </Button>
-              <Button type="button" variant="outline" disabled={saving} onClick={discardChanges}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 rounded-full"
+                disabled={saving}
+                onClick={discardChanges}
+              >
                 Descartar
               </Button>
             </div>
@@ -291,21 +311,36 @@ export function StoreFulfillmentConfigCard({
       </Card>
 
       <Dialog open={explainMode != null} onOpenChange={(open) => !open && setExplainMode(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
+        <DialogContent
+          layer="elevated"
+          shellClassName={storeAdminDialogShellClass}
+          className={storeAdminDialogContentClass(
+            "h-auto max-h-[min(92dvh,24rem)] sm:h-auto sm:max-h-[min(85dvh,24rem)]",
+          )}
+        >
+          <DialogHeader className={storeAdminDialogHeaderClass}>
+            <DialogTitle className="pr-8 font-display text-xl tracking-tight">
               {explainMode ? STORE_FULFILLMENT_LABELS[explainMode] : "Modalidad"}
             </DialogTitle>
             <DialogDescription>
               {explainMode ? STORE_FULFILLMENT_DESCRIPTIONS[explainMode] : ""}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" onClick={() => setExplainMode(null)}>
+          <DialogFooter className={storeAdminDialogFooterClass}>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full"
+              onClick={() => setExplainMode(null)}
+            >
               Cerrar
             </Button>
             {explainMode && !isChecked(explainMode) ? (
-              <Button type="button" onClick={confirmEnableMode}>
+              <Button
+                type="button"
+                className="h-11 rounded-full font-semibold"
+                onClick={confirmEnableMode}
+              >
                 Activar esta opción
               </Button>
             ) : null}

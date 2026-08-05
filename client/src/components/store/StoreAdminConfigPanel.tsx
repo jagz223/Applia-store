@@ -20,7 +20,14 @@ export function StoreAdminConfigPanel({
   initialLocation,
 }: StoreAdminConfigPanelProps) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="space-y-1">
+        <h2 className="font-display text-2xl font-bold tracking-tight">Configuración</h2>
+        <p className="text-sm text-muted-foreground">
+          Ubicación, modalidades de entrega y métodos de pago de tu tienda.
+        </p>
+      </div>
+
       <StoreLocationConfigCard slug={slug} initialLocation={initialLocation} />
 
       <StoreFulfillmentConfigCard

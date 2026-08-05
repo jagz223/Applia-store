@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 import {
   STORE_CURRENCY_USD_ID,
   currencyLabelForId,
@@ -126,6 +127,51 @@ function ShowcaseToggle({
   );
 }
 
+function ProductRowActions({
+  onDetail,
+  onEdit,
+  onDelete,
+}: {
+  onDetail: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="Ver detalle"
+        onClick={onDetail}
+      >
+        <Eye className="h-4 w-4" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="Editar"
+        onClick={onEdit}
+      >
+        <Pencil className="h-4 w-4" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-destructive hover:text-destructive"
+        aria-label="Eliminar"
+        onClick={onDelete}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
 export function StoreAdminProductsPanel({
   storeId,
   currencyAcceptedPaymentIds,
@@ -180,13 +226,13 @@ export function StoreAdminProductsPanel({
 
   return (
     <>
-      <Card>
+      <Card className={cn(storeAdminSectionCardClass, "overflow-hidden border-border/70 shadow-sm")}>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
           <div>
-            <CardTitle>Productos</CardTitle>
+            <CardTitle className="font-display">Productos</CardTitle>
             <CardDescription>Administra el catálogo de tu tienda.</CardDescription>
           </div>
-          <Button size="sm" className="gap-1.5 shrink-0" onClick={openCreate}>
+          <Button size="sm" className="h-10 shrink-0 gap-1.5 rounded-full" onClick={openCreate}>
             <Plus className="h-4 w-4" />
             Crear producto
           </Button>
@@ -198,27 +244,56 @@ export function StoreAdminProductsPanel({
             </div>
           ) : error ? (
             <p className="text-sm text-destructive py-6 text-center">{(error as Error).message}</p>
+          ) : products.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Aún no hay productos. Usa «Crear producto» para añadir el primero.
+            </p>
           ) : (
-            <div className="rounded-md border border-border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[72px]">Foto</TableHead>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead className="w-[120px]">Precio</TableHead>
-                    <TableHead className="w-[140px]">Vitrina</TableHead>
-                    <TableHead className="w-[140px] text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {products.length === 0 ? (
+            <>
+              <ul className="grid gap-3 md:hidden">
+                {products.map((product) => (
+                  <li
+                    key={product.id}
+                    className="rounded-2xl border border-border/70 bg-card/95 p-3.5 shadow-sm"
+                  >
+                    <div className="flex gap-3">
+                      <ProductThumbnail imageUrls={product.imageUrls ?? []} />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{product.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatPrice(
+                              product.price,
+                              product.displayCurrencyLabel ??
+                                currencyLabelForId(visualId, extras),
+                            )}
+                          </p>
+                        </div>
+                        <ShowcaseToggle storeId={storeId} product={product} />
+                        <ProductRowActions
+                          onDetail={() => setDetailProduct(product)}
+                          onEdit={() => openEdit(product)}
+                          onDelete={() => setDeleteTarget(product)}
+                        />
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="hidden rounded-2xl border border-border/70 overflow-hidden md:block">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                        Aún no hay productos. Usa «Crear producto» para añadir el primero.
-                      </TableCell>
+                      <TableHead className="w-[72px]">Foto</TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead className="w-[120px]">Precio</TableHead>
+                      <TableHead className="w-[140px]">Vitrina</TableHead>
+                      <TableHead className="w-[140px] text-right">Acciones</TableHead>
                     </TableRow>
-                  ) : (
-                    products.map((product) => (
+                  </TableHeader>
+                  <TableBody>
+                    {products.map((product) => (
                       <TableRow key={product.id}>
                         <TableCell>
                           <ProductThumbnail imageUrls={product.imageUrls ?? []} />
@@ -235,45 +310,18 @@ export function StoreAdminProductsPanel({
                           <ShowcaseToggle storeId={storeId} product={product} />
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              aria-label="Ver detalle"
-                              onClick={() => setDetailProduct(product)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              aria-label="Editar"
-                              onClick={() => openEdit(product)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              aria-label="Eliminar"
-                              onClick={() => setDeleteTarget(product)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          <ProductRowActions
+                            onDetail={() => setDetailProduct(product)}
+                            onEdit={() => openEdit(product)}
+                            onDelete={() => setDeleteTarget(product)}
+                          />
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

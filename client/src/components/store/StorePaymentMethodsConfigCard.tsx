@@ -26,6 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { storeAdminFieldClass, storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 import { cn } from "@/lib/utils";
 
 const NEW_TAB = "_new";
@@ -203,6 +204,7 @@ function PaymentMethodForm({
             maxLength={120}
             disabled={saving || deleting}
             placeholder="Ej. Banco Pichincha, PayPal, Deuna"
+            className={storeAdminFieldClass}
             onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
           />
         </div>
@@ -249,6 +251,7 @@ function PaymentMethodForm({
                       maxLength={80}
                       disabled={saving || deleting}
                       placeholder="Ej. ID, Número, CI"
+                      className={storeAdminFieldClass}
                       onChange={(e) => updateExtraField(field.id, { name: e.target.value })}
                     />
                   </div>
@@ -262,6 +265,7 @@ function PaymentMethodForm({
                       maxLength={200}
                       disabled={saving || deleting}
                       placeholder="Ej. 1234567890"
+                      className={storeAdminFieldClass}
                       onChange={(e) => updateExtraField(field.id, { value: e.target.value })}
                     />
                   </div>
@@ -358,14 +362,14 @@ export function StorePaymentMethodsConfigCard({ storeId }: { storeId: number }) 
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Métodos de pago</CardTitle>
-        <CardDescription>
+    <Card className={cn(storeAdminSectionCardClass, "overflow-hidden")}>
+      <CardHeader className="space-y-1.5 px-4 pt-5 sm:px-6">
+        <CardTitle className="font-display text-xl tracking-tight">Métodos de pago</CardTitle>
+        <CardDescription className="text-sm leading-snug">
           Registra las cuentas o apps con las que tus clientes pueden pagarte. Cada tienda tiene los suyos propios.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-4 pb-5 sm:px-6">
         {isLoading ? (
           <div className="py-10 flex justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -376,17 +380,21 @@ export function StorePaymentMethodsConfigCard({ storeId }: { storeId: number }) 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
             <TabsList
               className={cn(
-                "flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/60 p-1",
+                "flex h-auto w-full flex-wrap justify-start gap-1.5 rounded-2xl bg-muted/60 p-1.5",
               )}
             >
               {methods.map((method) => (
-                <TabsTrigger key={method.id} value={String(method.id)} className="shrink-0">
+                <TabsTrigger
+                  key={method.id}
+                  value={String(method.id)}
+                  className="shrink-0 rounded-full"
+                >
                   {tabLabel(method)}
                 </TabsTrigger>
               ))}
-              <TabsTrigger value={NEW_TAB} className="shrink-0 gap-1">
+              <TabsTrigger value={NEW_TAB} className="shrink-0 gap-1 rounded-full">
                 <Plus className="h-3.5 w-3.5" />
-                Agregar nuevo método
+                Agregar
               </TabsTrigger>
             </TabsList>
 

@@ -21,6 +21,13 @@ export const STORE_FULFILLMENT_DESCRIPTIONS: Record<StoreFulfillmentMode, string
     "Si el cliente selecciona esta opción en el carrito, el cliente consumirá o usará el producto en la tienda. Recomendado para restaurantes.",
 };
 
+/** Textos cortos para el checkout del cliente. */
+export const STORE_FULFILLMENT_CUSTOMER_HINTS: Record<StoreFulfillmentMode, string> = {
+  delivery: "Te lo enviamos a la dirección que indiques.",
+  pickup: "Lo retiras tú en la tienda.",
+  in_site: "Lo consumes o usas en el local.",
+};
+
 export const storeFulfillmentOptionsSchema = z
   .array(storeFulfillmentModeSchema)
   .max(STORE_FULFILLMENT_MODES.length)

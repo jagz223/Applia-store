@@ -325,22 +325,22 @@ export function StoreCheckoutDeliverySection({
     : [origin.lat, origin.lon];
 
   return (
-    <div className="space-y-4 rounded-xl border border-border p-4">
+    <div className="space-y-3 rounded-2xl border border-border/70 bg-card p-3.5 sm:space-y-4 sm:p-4">
       <div>
         <h3 className="text-sm font-semibold">Entrega a domicilio</h3>
-        <p className="text-xs text-muted-foreground mt-1">
-          Origen: {storeLocation.label}. Selecciona dónde recibirás tu pedido.
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Origen: {storeLocation.label}. Indica dónde recibirás el pedido.
         </p>
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <div className="relative flex-1 min-w-0 space-y-2">
+        <div className="relative min-w-0 flex-1 space-y-2">
           <Label htmlFor="checkout-delivery-address">Dirección de entrega</Label>
           <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="checkout-delivery-address"
-              className="pl-10"
+              className="h-11 rounded-2xl pl-10"
               placeholder="Busca una dirección o toca el mapa"
               value={input}
               disabled={disabled}
@@ -348,12 +348,12 @@ export function StoreCheckoutDeliverySection({
               autoComplete="off"
             />
             {suggestions.length > 0 ? (
-              <ul className="absolute z-[3000] top-full mt-1 w-full max-h-44 overflow-auto rounded-md border bg-popover text-sm shadow-md">
+              <ul className="absolute z-[3000] top-full mt-1 max-h-44 w-full overflow-auto rounded-xl border bg-popover text-sm shadow-md">
                 {suggestions.map((h, i) => (
                   <li key={`${h.lat}-${h.lon}-${i}`}>
                     <button
                       type="button"
-                      className="w-full text-left px-3 py-2 hover:bg-muted"
+                      className="w-full px-3 py-2.5 text-left hover:bg-muted"
                       onClick={() => pickHit(h)}
                     >
                       {h.label}
@@ -366,7 +366,7 @@ export function StoreCheckoutDeliverySection({
         </div>
         <Button
           type="button"
-          className="shrink-0 gap-2"
+          className="h-11 shrink-0 gap-2 rounded-full"
           onClick={useGps}
           disabled={disabled || gpsLoading}
         >
@@ -377,7 +377,7 @@ export function StoreCheckoutDeliverySection({
 
       <div
         ref={shellRef}
-        className="relative overflow-hidden rounded-md border border-border min-h-[220px] h-56"
+        className="relative h-48 min-h-[12rem] overflow-hidden rounded-xl border border-border sm:h-56"
       >
         {!ready || !mapEnabled ? (
           <div className="flex h-full items-center justify-center bg-muted/20">

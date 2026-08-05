@@ -5,6 +5,8 @@ import { SingleLocationPicker, type PickedLocation } from "@/components/taxi/Sin
 import { useUpdateStore } from "@/hooks/use-store-settings";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 function toPickedLocation(location: StoreLocation | null): PickedLocation | null {
@@ -111,17 +113,17 @@ export function StoreLocationConfigCard({
   const saving = updateStore.isPending;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+    <Card className={cn(storeAdminSectionCardClass, "overflow-hidden")}>
+      <CardHeader className="space-y-1.5 px-4 pt-5 sm:px-6">
+        <CardTitle className="flex items-center gap-2 font-display text-xl tracking-tight">
           <MapPin className="h-5 w-5" />
           Ubicación de la tienda
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="text-sm leading-snug">
           Indica dónde está tu negocio. Puedes usar tu ubicación actual o señalar un punto en el mapa.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 px-4 pb-5 sm:px-6">
         <SingleLocationPicker
           value={location}
           onChange={setLocation}
@@ -145,14 +147,25 @@ export function StoreLocationConfigCard({
           <p className="text-xs text-muted-foreground">Aún no has registrado la ubicación de la tienda.</p>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+        <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:flex-wrap sm:items-center">
           {dirty ? (
             <>
-              <Button type="button" disabled={saving || disabled} onClick={() => void handleSave()}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              <Button
+                type="button"
+                disabled={saving || disabled}
+                className="h-11 rounded-full font-semibold"
+                onClick={() => void handleSave()}
+              >
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Guardar ubicación
               </Button>
-              <Button type="button" variant="outline" disabled={saving || disabled} onClick={discardChanges}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving || disabled}
+                className="h-11 rounded-full"
+                onClick={discardChanges}
+              >
                 Descartar
               </Button>
             </>
@@ -161,8 +174,7 @@ export function StoreLocationConfigCard({
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              className="rounded-full border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className="h-11 rounded-full border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive"
               disabled={saving || disabled}
               onClick={() => void handleClear()}
             >
