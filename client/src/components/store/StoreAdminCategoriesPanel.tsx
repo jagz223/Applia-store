@@ -27,6 +27,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import { storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 
 export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
   const { toast } = useToast();
@@ -64,13 +66,15 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
 
   return (
     <>
-      <Card>
+      <Card className={cn(storeAdminSectionCardClass, "overflow-hidden border-border/70 shadow-sm")}>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
           <div>
-            <CardTitle>Categorías</CardTitle>
-            <CardDescription>Agrupa productos de tu tienda. Un producto puede estar en varias categorías.</CardDescription>
+            <CardTitle className="font-display">Categorías</CardTitle>
+            <CardDescription>
+              Agrupa productos de tu tienda. Un producto puede estar en varias categorías.
+            </CardDescription>
           </div>
-          <Button size="sm" className="gap-1.5 shrink-0" onClick={openCreate}>
+          <Button size="sm" className="h-10 shrink-0 gap-1.5 rounded-full" onClick={openCreate}>
             <Plus className="h-4 w-4" />
             Crear categoría
           </Button>
@@ -82,29 +86,71 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
             </div>
           ) : error ? (
             <p className="text-sm text-destructive py-6 text-center">{(error as Error).message}</p>
+          ) : categories.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Aún no hay categorías. Usa «Crear categoría» para añadir la primera.
+            </p>
           ) : (
-            <div className="rounded-md border border-border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead className="hidden sm:table-cell">Descripción</TableHead>
-                    <TableHead className="w-[100px]">Productos</TableHead>
-                    <TableHead className="w-[100px] text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {categories.length === 0 ? (
+            <>
+              <ul className="grid gap-3 md:hidden">
+                {categories.map((category) => (
+                  <li
+                    key={category.id}
+                    className="rounded-2xl border border-border/70 bg-card/95 p-3.5 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="font-medium">{category.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {category.productCount}{" "}
+                          {category.productCount === 1 ? "producto" : "productos"}
+                        </p>
+                        <p className="line-clamp-1 text-sm text-muted-foreground">
+                          {category.description?.trim() || "Sin descripción"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          aria-label="Editar"
+                          onClick={() => openEdit(category)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          aria-label="Eliminar"
+                          onClick={() => setDeleteTarget(category)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="hidden rounded-2xl border border-border/70 overflow-hidden md:block">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
-                        Aún no hay categorías. Usa «Crear categoría» para añadir la primera.
-                      </TableCell>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Descripción</TableHead>
+                      <TableHead className="w-[100px]">Productos</TableHead>
+                      <TableHead className="w-[100px] text-right">Acciones</TableHead>
                     </TableRow>
-                  ) : (
-                    categories.map((category) => (
+                  </TableHeader>
+                  <TableBody>
+                    {categories.map((category) => (
                       <TableRow key={category.id}>
                         <TableCell className="font-medium">{category.name}</TableCell>
-                        <TableCell className="hidden sm:table-cell text-muted-foreground text-sm max-w-[240px] truncate">
+                        <TableCell className="text-muted-foreground text-sm max-w-[240px] truncate">
                           {category.description ?? "—"}
                         </TableCell>
                         <TableCell>{category.productCount}</TableCell>
@@ -133,11 +179,11 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

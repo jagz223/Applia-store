@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
@@ -119,6 +120,56 @@ function PromotionStatusToggle({
   );
 }
 
+function PromotionRowActions({
+  storeId,
+  promotion,
+  onDetail,
+  onEdit,
+  onDelete,
+}: {
+  storeId: number;
+  promotion: StorePromotionSummary;
+  onDetail: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="Ver detalle"
+        onClick={onDetail}
+      >
+        <Eye className="h-4 w-4" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="Editar"
+        onClick={onEdit}
+      >
+        <Pencil className="h-4 w-4" />
+      </Button>
+      <PromotionStatusToggle storeId={storeId} promotion={promotion} />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-destructive hover:text-destructive"
+        aria-label="Eliminar"
+        onClick={onDelete}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
 export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
   const { toast } = useToast();
   const { data: promotions = [], isLoading, error } = useStorePromotions(storeId);
@@ -156,13 +207,13 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
 
   return (
     <>
-      <Card>
+      <Card className={cn(storeAdminSectionCardClass, "overflow-hidden border-border/70 shadow-sm")}>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
           <div>
-            <CardTitle>Promociones</CardTitle>
+            <CardTitle className="font-display">Promociones</CardTitle>
             <CardDescription>Combos y packs con varios productos a un precio especial.</CardDescription>
           </div>
-          <Button size="sm" className="gap-1.5 shrink-0" onClick={openCreate}>
+          <Button size="sm" className="h-10 shrink-0 gap-1.5 rounded-full" onClick={openCreate}>
             <Plus className="h-4 w-4" />
             Crear promoción
           </Button>
@@ -174,73 +225,99 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
             </div>
           ) : error ? (
             <p className="text-sm text-destructive py-6 text-center">{(error as Error).message}</p>
+          ) : promotions.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Aún no hay promociones. Usa «Crear promoción» para añadir la primera.
+            </p>
           ) : (
-            <div className="rounded-md border border-border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[72px]">Foto</TableHead>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead className="w-[120px]">Precio</TableHead>
-                    <TableHead className="min-w-[280px] text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {promotions.length === 0 ? (
+            <>
+              <ul className="grid gap-3 md:hidden">
+                {promotions.map((promotion) => (
+                  <li
+                    key={promotion.id}
+                    className="rounded-2xl border border-border/70 bg-card/95 p-3.5 shadow-sm"
+                  >
+                    <div className="flex gap-3">
+                      <PromotionThumbnail imageUrl={promotion.imageUrl} />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{promotion.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatPrice(promotion.price)}
+                          </p>
+                        </div>
+                        <PromotionStatusToggle storeId={storeId} promotion={promotion} />
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label="Ver detalle"
+                            onClick={() => setDetailPromotion(promotion)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label="Editar"
+                            onClick={() => openEdit(promotion)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            aria-label="Eliminar"
+                            onClick={() => setDeleteTarget(promotion)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="hidden rounded-2xl border border-border/70 overflow-hidden md:block">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
-                        Aún no hay promociones. Usa «Crear promoción» para añadir la primera.
-                      </TableCell>
+                      <TableHead className="w-[72px]">Foto</TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead className="w-[120px]">Precio</TableHead>
+                      <TableHead className="w-[180px] text-right">Acciones</TableHead>
                     </TableRow>
-                  ) : (
-                    promotions.map((promotion) => (
+                  </TableHeader>
+                  <TableBody>
+                    {promotions.map((promotion) => (
                       <TableRow key={promotion.id}>
                         <TableCell>
                           <PromotionThumbnail imageUrl={promotion.imageUrl} />
                         </TableCell>
                         <TableCell className="font-medium">{promotion.name}</TableCell>
                         <TableCell>{formatPrice(promotion.price)}</TableCell>
-                        <TableCell className="text-right whitespace-nowrap">
-                          <div className="inline-flex flex-nowrap items-center justify-end gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              aria-label="Ver detalle"
-                              onClick={() => setDetailPromotion(promotion)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              aria-label="Editar"
-                              onClick={() => openEdit(promotion)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <PromotionStatusToggle storeId={storeId} promotion={promotion} />
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              aria-label="Eliminar"
-                              onClick={() => setDeleteTarget(promotion)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                        <TableCell className="text-right">
+                          <PromotionRowActions
+                            storeId={storeId}
+                            promotion={promotion}
+                            onDetail={() => setDetailPromotion(promotion)}
+                            onEdit={() => openEdit(promotion)}
+                            onDelete={() => setDeleteTarget(promotion)}
+                          />
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

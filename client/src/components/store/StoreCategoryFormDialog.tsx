@@ -10,6 +10,14 @@ import { useStoreProducts } from "@/hooks/use-store-products";
 import type { SelectedEntity } from "@/components/store/StoreEntityMultiPicker";
 import { StoreCategoryProductPicker } from "@/components/store/StoreCategoryProductPicker";
 import {
+  storeAdminDialogShellClass,
+  storeAdminDialogContentClass,
+  storeAdminDialogHeaderClass,
+  storeAdminDialogBodyClass,
+  storeAdminDialogFooterClass,
+  storeAdminFieldClass,
+} from "@/components/store/store-admin-ui";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -22,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 export function StoreCategoryFormDialog({
   storeId,
@@ -98,9 +107,15 @@ export function StoreCategoryFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent layer="elevated" className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Editar categoría" : "Crear categoría"}</DialogTitle>
+      <DialogContent
+        layer="elevated"
+        shellClassName={storeAdminDialogShellClass}
+        className={storeAdminDialogContentClass()}
+      >
+        <DialogHeader className={storeAdminDialogHeaderClass}>
+          <DialogTitle className="pr-8 font-display text-xl tracking-tight">
+            {isEdit ? "Editar categoría" : "Crear categoría"}
+          </DialogTitle>
           <DialogDescription>
             {isEdit
               ? "Modifica la categoría y sus productos asociados."
@@ -108,42 +123,52 @@ export function StoreCategoryFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="category-name">Nombre</Label>
-            <Input
-              id="category-name"
-              value={name}
-              maxLength={120}
-              required
-              onChange={(e) => setName(e.target.value)}
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={(e) => void handleSubmit(e)}>
+          <div className={storeAdminDialogBodyClass}>
+            <div className="space-y-2">
+              <Label htmlFor="category-name">Nombre</Label>
+              <Input
+                id="category-name"
+                className={storeAdminFieldClass}
+                value={name}
+                maxLength={120}
+                required
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="category-description">Descripción</Label>
+              <Textarea
+                id="category-description"
+                className={cn(storeAdminFieldClass, "h-auto min-h-[5.5rem] py-3")}
+                value={description}
+                rows={3}
+                maxLength={500}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+
+            <StoreCategoryProductPicker
+              storeId={storeId}
+              selected={selectedProducts}
+              disabled={saving}
+              onChange={setSelectedProducts}
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="category-description">Descripción</Label>
-            <Textarea
-              id="category-description"
-              value={description}
-              rows={3}
-              maxLength={500}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-
-          <StoreCategoryProductPicker
-            storeId={storeId}
-            selected={selectedProducts}
-            disabled={saving}
-            onChange={setSelectedProducts}
-          />
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>
+          <DialogFooter className={storeAdminDialogFooterClass}>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full"
+              disabled={saving}
+              onClick={() => onOpenChange(false)}
+            >
               Cancelar
             </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            <Button type="submit" className="h-11 rounded-full font-semibold" disabled={saving}>
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {isEdit ? "Guardar" : "Crear"}
             </Button>
           </DialogFooter>

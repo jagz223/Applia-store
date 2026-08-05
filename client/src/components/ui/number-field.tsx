@@ -46,14 +46,14 @@ export function NumberField({
   return (
     <div
       className={cn(
-        "flex h-9 w-full items-stretch overflow-hidden rounded-lg border border-input bg-background",
-        "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
+        "flex h-11 w-full min-w-0 items-stretch overflow-hidden rounded-2xl border border-border/80 bg-muted/40",
+        "focus-within:ring-2 focus-within:ring-secondary focus-within:ring-offset-2 focus-within:ring-offset-background dark:focus-within:ring-primary",
         disabled && "cursor-not-allowed opacity-50",
         className,
       )}
     >
       {prefix ? (
-        <span className="flex items-center border-r border-border/70 bg-muted/40 px-2.5 text-sm text-muted-foreground">
+        <span className="flex shrink-0 items-center border-r border-border/70 bg-muted/50 px-2.5 text-sm text-muted-foreground">
           {prefix}
         </span>
       ) : null}
@@ -73,13 +73,13 @@ export function NumberField({
         )}
         {...props}
       />
-      <div className="flex shrink-0 flex-col border-l border-border/70">
+      <div className="flex w-9 shrink-0 flex-col border-l border-border/70">
         <button
           type="button"
           tabIndex={-1}
           disabled={disabled}
           aria-label="Aumentar"
-          className="flex h-1/2 min-h-[1.125rem] items-center justify-center bg-primary/10 px-2 text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+          className="flex h-1/2 min-h-[1.25rem] items-center justify-center bg-primary/10 px-1.5 text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
           onClick={() => nudge(1)}
         >
           <Plus className="h-3 w-3" strokeWidth={2.5} />
@@ -89,7 +89,7 @@ export function NumberField({
           tabIndex={-1}
           disabled={disabled}
           aria-label="Disminuir"
-          className="flex h-1/2 min-h-[1.125rem] items-center justify-center border-t border-border/70 bg-muted/50 px-2 text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+          className="flex h-1/2 min-h-[1.25rem] items-center justify-center border-t border-border/70 bg-muted/50 px-1.5 text-foreground transition-colors hover:bg-muted disabled:opacity-50"
           onClick={() => nudge(-1)}
         >
           <Minus className="h-3 w-3" strokeWidth={2.5} />

@@ -13,6 +13,14 @@ import {
 } from "@/components/store/StorePromotionProductPicker";
 import { StoreCoverPhotoPicker } from "@/components/store/StoreCoverPhotoPicker";
 import {
+  storeAdminDialogShellClass,
+  storeAdminDialogContentClass,
+  storeAdminDialogHeaderClass,
+  storeAdminDialogBodyClass,
+  storeAdminDialogFooterClass,
+  storeAdminFieldClass,
+} from "@/components/store/store-admin-ui";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -28,6 +36,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { uploadStorePromotionImage } from "@/lib/firebase-client";
 import { revokeBlobPreview } from "@/lib/store-image-draft";
+import { cn } from "@/lib/utils";
 
 export function StorePromotionFormDialog({
   storeId,
@@ -154,9 +163,15 @@ export function StorePromotionFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent layer="elevated" className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Editar promoción" : "Crear promoción"}</DialogTitle>
+      <DialogContent
+        layer="elevated"
+        shellClassName={storeAdminDialogShellClass}
+        className={storeAdminDialogContentClass()}
+      >
+        <DialogHeader className={storeAdminDialogHeaderClass}>
+          <DialogTitle className="pr-8 font-display text-xl tracking-tight">
+            {isEdit ? "Editar promoción" : "Crear promoción"}
+          </DialogTitle>
           <DialogDescription>
             {isEdit
               ? "Modifica el combo o promoción y sus productos."
@@ -164,61 +179,73 @@ export function StorePromotionFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="promotion-name">Nombre</Label>
-            <Input
-              id="promotion-name"
-              value={name}
-              maxLength={120}
-              required
-              onChange={(e) => setName(e.target.value)}
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={(e) => void handleSubmit(e)}>
+          <div className={storeAdminDialogBodyClass}>
+            <div className="space-y-2">
+              <Label htmlFor="promotion-name">Nombre</Label>
+              <Input
+                id="promotion-name"
+                className={storeAdminFieldClass}
+                value={name}
+                maxLength={120}
+                required
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="promotion-description">Descripción</Label>
+              <Textarea
+                id="promotion-description"
+                className={cn(storeAdminFieldClass, "h-auto min-h-[5.5rem] py-3")}
+                value={description}
+                rows={3}
+                maxLength={500}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+
+            <StoreCoverPhotoPicker
+              label="Imagen de la promoción"
+              previewUrl={imagePreviewUrl}
+              disabled={saving}
+              onPreviewChange={handleImagePreviewChange}
+            />
+
+            <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+              <div className="space-y-1.5">
+                <Label htmlFor="promotion-price">Precio del pack (USD)</Label>
+                <NumberField
+                  id="promotion-price"
+                  min={0.01}
+                  step="0.01"
+                  value={price}
+                  required
+                  onChange={setPrice}
+                />
+              </div>
+            </div>
+
+            <StorePromotionProductPicker
+              storeId={storeId}
+              selected={selectedProducts}
+              disabled={saving}
+              onChange={setSelectedProducts}
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="promotion-description">Descripción</Label>
-            <Textarea
-              id="promotion-description"
-              value={description}
-              rows={3}
-              maxLength={500}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-
-          <StoreCoverPhotoPicker
-            label="Imagen de la promoción"
-            previewUrl={imagePreviewUrl}
-            disabled={saving}
-            onPreviewChange={handleImagePreviewChange}
-          />
-
-          <div className="space-y-2">
-            <Label htmlFor="promotion-price">Precio del pack (USD)</Label>
-            <NumberField
-              id="promotion-price"
-              min={0.01}
-              step="0.01"
-              value={price}
-              required
-              onChange={setPrice}
-            />
-          </div>
-
-          <StorePromotionProductPicker
-            storeId={storeId}
-            selected={selectedProducts}
-            disabled={saving}
-            onChange={setSelectedProducts}
-          />
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" disabled={saving} onClick={() => handleOpenChange(false)}>
+          <DialogFooter className={storeAdminDialogFooterClass}>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full"
+              disabled={saving}
+              onClick={() => handleOpenChange(false)}
+            >
               Cancelar
             </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            <Button type="submit" className="h-11 rounded-full font-semibold" disabled={saving}>
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {isEdit ? "Guardar" : "Crear"}
             </Button>
           </DialogFooter>

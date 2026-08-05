@@ -38,12 +38,21 @@ import { StoreProductCategoryPicker } from "@/components/store/StoreProductCateg
 import type { SelectedEntity } from "@/components/store/StoreEntityMultiPicker";
 import { categoriesFromIds, useStoreCategories } from "@/hooks/use-store-categories";
 import { StoreProductPhotosPicker } from "@/components/store/StoreProductPhotosPicker";
+import {
+  storeAdminDialogShellClass,
+  storeAdminDialogContentClass,
+  storeAdminDialogHeaderClass,
+  storeAdminDialogBodyClass,
+  storeAdminDialogFooterClass,
+  storeAdminFieldClass,
+} from "@/components/store/store-admin-ui";
 import { uploadStoreProductImage } from "@/lib/firebase-client";
 import {
   draftsFromSavedUrls,
   revokeBlobPreviews,
   type StoreImageDraft,
 } from "@/lib/store-image-draft";
+import { cn } from "@/lib/utils";
 
 async function resolveIngredientNames(ids: number[]): Promise<SelectedIngredient[]> {
   if (ids.length === 0) return [];
@@ -373,169 +382,187 @@ export function StoreProductFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent layer="elevated" className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Editar producto" : "Crear producto"}</DialogTitle>
+      <DialogContent
+        layer="elevated"
+        shellClassName={storeAdminDialogShellClass}
+        className={storeAdminDialogContentClass(
+          "h-[min(92dvh,48rem)] max-h-[min(92dvh,48rem)] sm:max-h-[min(85dvh,48rem)]",
+        )}
+      >
+        <DialogHeader className={storeAdminDialogHeaderClass}>
+          <DialogTitle className="pr-8 font-display text-xl tracking-tight">
+            {isEdit ? "Editar producto" : "Crear producto"}
+          </DialogTitle>
           <DialogDescription>
             {isEdit ? "Modifica los datos del producto." : "Añade un producto al catálogo de tu tienda."}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="product-name">Nombre</Label>
-            <Input
-              id="product-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={200}
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="product-description">Descripción</Label>
-            <Textarea
-              id="product-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              maxLength={5000}
-            />
-          </div>
-
-          <div className="space-y-3 rounded-lg border border-border p-3">
-            <div>
-              <p className="text-sm font-medium">Precios por moneda</p>
-              <p className="text-xs text-muted-foreground">
-                Según las monedas marcadas en «Se acepta como pago».
-              </p>
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={(e) => void handleSubmit(e)}>
+          <div className={storeAdminDialogBodyClass}>
+            <div className="space-y-2">
+              <Label htmlFor="product-name">Nombre</Label>
+              <Input
+                id="product-name"
+                className={storeAdminFieldClass}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={200}
+                required
+              />
             </div>
-            {acceptedPaymentIds.map((id) => {
-              const label = currencyLabelForId(id, currencyExtras);
-              return (
-                <div key={id} className="space-y-1.5">
-                  <Label htmlFor={`product-price-${id}`}>Precio ({label})</Label>
-                  <NumberField
-                    id={`product-price-${id}`}
-                    min="0.01"
-                    step="0.01"
-                    value={prices[id] ?? ""}
-                    onChange={(next) => setPrices((prev) => ({ ...prev, [id]: next }))}
-                    required
-                  />
-                </div>
-              );
-            })}
-          </div>
 
-          <StoreProductPhotosPicker
-            drafts={imageDrafts}
-            onChange={setImageDrafts}
-            disabled={saving}
-          />
-
-          <StoreProductCategoryPicker
-            storeId={storeId}
-            selected={categories}
-            disabled={saving}
-            onChange={setCategories}
-          />
-
-          <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="product-has-ingredients">¿Tiene ingredientes o materiales?</Label>
-              <p className="text-xs text-muted-foreground">Opcional. Selecciona de la lista global.</p>
+            <div className="space-y-2">
+              <Label htmlFor="product-description">Descripción</Label>
+              <Textarea
+                id="product-description"
+                className={cn(storeAdminFieldClass, "h-auto min-h-[5.5rem] py-3")}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                maxLength={5000}
+              />
             </div>
-            <Switch
-              id="product-has-ingredients"
-              checked={hasIngredients}
-              onCheckedChange={(checked) => {
-                setHasIngredients(checked);
-                if (!checked) {
-                  setIngredients([]);
-                  setRemovableIds([]);
-                  setHasAdditionals(false);
-                  setAdditionals([]);
-                }
-              }}
-            />
-          </div>
 
-          {hasIngredients ? (
-            resolving ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Cargando ingredientes…
+            <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+              <div>
+                <p className="text-sm font-medium">Precios por moneda</p>
+                <p className="text-xs text-muted-foreground">
+                  Según las monedas marcadas en «Se acepta como pago».
+                </p>
               </div>
-            ) : (
-              <>
-                <IngredientMaterialPicker selected={ingredients} onChange={handleIngredientsChange} />
-
-                {showRemovableSection ? (
-                  <div className="space-y-2 rounded-lg border border-border p-3">
-                    <div>
-                      <p className="text-sm font-medium">Ingredientes o materiales a sacar</p>
-                      <p className="text-xs text-muted-foreground">
-                        Elige cuáles de los ya añadidos podrá quitar el cliente.
-                      </p>
-                    </div>
-                    <ProductRemovableIngredientsPicker
-                      options={ingredients}
-                      selectedIds={removableIds}
-                      onChange={(ids) => {
-                        setRemovableIds(ids);
-                        const blocked = new Set(ids);
-                        setAdditionals((prev) =>
-                          prev.filter((a) => !blocked.has(a.ingredientMaterialId)),
-                        );
-                      }}
-                      disabled={saving}
+              {acceptedPaymentIds.map((id) => {
+                const label = currencyLabelForId(id, currencyExtras);
+                return (
+                  <div key={id} className="space-y-1.5">
+                    <Label htmlFor={`product-price-${id}`}>Precio ({label})</Label>
+                    <NumberField
+                      id={`product-price-${id}`}
+                      min="0.01"
+                      step="0.01"
+                      value={prices[id] ?? ""}
+                      onChange={(next) => setPrices((prev) => ({ ...prev, [id]: next }))}
+                      required
                     />
                   </div>
-                ) : ingredients.length === 1 ? (
-                  <p className="text-xs text-muted-foreground px-0.5">
-                    Añade al menos 2 ingredientes o materiales para configurar cuáles se pueden sacar.
-                  </p>
-                ) : null}
+                );
+              })}
+            </div>
 
-                <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="product-has-additionals">Adicionales</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Opcional. Extras con precio; no pueden estar en «a sacar».
-                    </p>
-                  </div>
-                  <Switch
-                    id="product-has-additionals"
-                    checked={hasAdditionals}
-                    disabled={saving || ingredients.length === 0}
-                    onCheckedChange={(checked) => {
-                      setHasAdditionals(checked);
-                      if (!checked) setAdditionals([]);
-                    }}
-                  />
+            <StoreProductPhotosPicker
+              drafts={imageDrafts}
+              onChange={setImageDrafts}
+              disabled={saving}
+            />
+
+            <StoreProductCategoryPicker
+              storeId={storeId}
+              selected={categories}
+              disabled={saving}
+              onChange={setCategories}
+            />
+
+            <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+              <div className="space-y-0.5">
+                <Label htmlFor="product-has-ingredients">¿Tiene ingredientes o materiales?</Label>
+                <p className="text-xs text-muted-foreground">Opcional. Selecciona de la lista global.</p>
+              </div>
+              <Switch
+                id="product-has-ingredients"
+                checked={hasIngredients}
+                onCheckedChange={(checked) => {
+                  setHasIngredients(checked);
+                  if (!checked) {
+                    setIngredients([]);
+                    setRemovableIds([]);
+                    setHasAdditionals(false);
+                    setAdditionals([]);
+                  }
+                }}
+              />
+            </div>
+
+            {hasIngredients ? (
+              resolving ? (
+                <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Cargando ingredientes…
                 </div>
+              ) : (
+                <>
+                  <IngredientMaterialPicker selected={ingredients} onChange={handleIngredientsChange} />
 
-                {hasAdditionals ? (
-                  <ProductIngredientAdditionalsEditor
-                    options={additionalOptions}
-                    value={additionals}
-                    onChange={setAdditionals}
-                    disabled={saving}
-                    currencyLabel={additionalCurrencyLabel}
-                  />
-                ) : null}
-              </>
-            )
-          ) : null}
+                  {showRemovableSection ? (
+                    <div className="space-y-2 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+                      <div>
+                        <p className="text-sm font-medium">Ingredientes o materiales a sacar</p>
+                        <p className="text-xs text-muted-foreground">
+                          Elige cuáles de los ya añadidos podrá quitar el cliente.
+                        </p>
+                      </div>
+                      <ProductRemovableIngredientsPicker
+                        options={ingredients}
+                        selectedIds={removableIds}
+                        onChange={(ids) => {
+                          setRemovableIds(ids);
+                          const blocked = new Set(ids);
+                          setAdditionals((prev) =>
+                            prev.filter((a) => !blocked.has(a.ingredientMaterialId)),
+                          );
+                        }}
+                        disabled={saving}
+                      />
+                    </div>
+                  ) : ingredients.length === 1 ? (
+                    <p className="px-0.5 text-xs text-muted-foreground">
+                      Añade al menos 2 ingredientes o materiales para configurar cuáles se pueden sacar.
+                    </p>
+                  ) : null}
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} disabled={saving}>
+                  <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="product-has-additionals">Adicionales</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Opcional. Extras con precio; no pueden estar en «a sacar».
+                      </p>
+                    </div>
+                    <Switch
+                      id="product-has-additionals"
+                      checked={hasAdditionals}
+                      disabled={saving || ingredients.length === 0}
+                      onCheckedChange={(checked) => {
+                        setHasAdditionals(checked);
+                        if (!checked) setAdditionals([]);
+                      }}
+                    />
+                  </div>
+
+                  {hasAdditionals ? (
+                    <ProductIngredientAdditionalsEditor
+                      options={additionalOptions}
+                      value={additionals}
+                      onChange={setAdditionals}
+                      disabled={saving}
+                      currencyLabel={additionalCurrencyLabel}
+                    />
+                  ) : null}
+                </>
+              )
+            ) : null}
+          </div>
+
+          <DialogFooter className={storeAdminDialogFooterClass}>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full"
+              onClick={() => handleOpenChange(false)}
+              disabled={saving}
+            >
               Cancelar
             </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            <Button type="submit" className="h-11 rounded-full font-semibold" disabled={saving}>
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {isEdit ? "Guardar" : "Crear"}
             </Button>
           </DialogFooter>
