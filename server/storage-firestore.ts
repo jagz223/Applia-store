@@ -4492,6 +4492,33 @@ class FirestoreStorageImpl implements IStorage {
     return payload;
   }
 
+  async getIngredientMaterial(id: number): Promise<IngredientMaterial | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS).doc(String(id)).get();
+    if (!doc.exists) return undefined;
+    return this.mapIngredientMaterialDoc(doc.id, doc.data());
+  }
+
+  async updateIngredientMaterial(id: number, input: InsertIngredientMaterial): Promise<IngredientMaterial> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getIngredientMaterial(id);
+    if (!existing) throw new Error("INGREDIENT_MATERIAL_NOT_FOUND");
+    const name = normalizeIngredientMaterialName(input.name);
+    const normalizedName = ingredientMaterialKey(name);
+    const dup = await this.findIngredientMaterialByNormalizedName(normalizedName);
+    if (dup && dup.id !== id) throw new Error("INGREDIENT_MATERIAL_ALREADY_EXISTS");
+    const payload: IngredientMaterial = { ...existing, name, normalizedName };
+    await this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async deleteIngredientMaterial(id: number): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getIngredientMaterial(id);
+    if (!existing) throw new Error("INGREDIENT_MATERIAL_NOT_FOUND");
+    await this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS).doc(String(id)).delete();
+  }
+
   async extendStoreVisibilitySubscription(args: {
     storeId: number;
     months: number;
@@ -4584,7 +4611,10 @@ class FirestoreStorageImpl implements IStorage {
     return snap.docs
       .map((doc) => this.mapStoreProductDoc(doc.id, doc.data()))
       .filter((p): p is StoreProduct => p != null)
-      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+      .sort((a, b) => {
+        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return byDate !== 0 ? byDate : a.id - b.id;
+      });
   }
 
   async getStoreProduct(storeId: number, productId: number): Promise<StoreProduct | undefined> {
@@ -4686,7 +4716,10 @@ class FirestoreStorageImpl implements IStorage {
     return snap.docs
       .map((doc) => this.mapStoreCategoryDoc(doc.id, doc.data()))
       .filter((c): c is StoreCategory => c != null)
-      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+      .sort((a, b) => {
+        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return byDate !== 0 ? byDate : a.id - b.id;
+      });
   }
 
   async getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined> {
@@ -4751,7 +4784,10 @@ class FirestoreStorageImpl implements IStorage {
     return snap.docs
       .map((doc) => this.mapStorePromotionDoc(doc.id, doc.data()))
       .filter((p): p is StorePromotion => p != null)
-      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+      .sort((a, b) => {
+        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return byDate !== 0 ? byDate : a.id - b.id;
+      });
   }
 
   async getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined> {

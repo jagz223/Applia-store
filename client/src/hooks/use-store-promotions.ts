@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InsertStorePromotion, UpdateStorePromotion } from "@shared/store-schema";
+import type { StoreAdminListPage } from "@/hooks/use-store-products";
 
 export type StorePromotionItemSummary = {
   productId: number;
@@ -41,6 +42,52 @@ export function useStorePromotions(storeId: number, enabled = true) {
       }
       const data = (await res.json()) as { promotions: StorePromotionSummary[] };
       return data.promotions;
+    },
+    enabled: enabled && storeId > 0,
+  });
+}
+
+export function useStorePromotionsPage(
+  storeId: number,
+  page: number,
+  limit = 10,
+  enabled = true,
+  search = "",
+) {
+  const safePage = Math.max(1, page);
+  const safeLimit = Math.max(1, limit);
+  const q = search.trim();
+  return useQuery({
+    queryKey: [...storePromotionsQueryKey(storeId), "page", safePage, safeLimit, q || null],
+    queryFn: async (): Promise<StoreAdminListPage<StorePromotionSummary>> => {
+      const params = new URLSearchParams({
+        page: String(safePage),
+        limit: String(safeLimit),
+      });
+      if (q) params.set("q", q);
+      const res = await fetch(`/api/stores/${storeId}/promotions?${params}`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudieron cargar las promociones");
+      }
+      const data = (await res.json()) as {
+        promotions: StorePromotionSummary[];
+        total?: number;
+        page?: number;
+        limit?: number;
+        totalPages?: number;
+      };
+      const total = data.total ?? data.promotions.length;
+      const pageLimit = data.limit ?? safeLimit;
+      return {
+        items: data.promotions,
+        total,
+        page: data.page ?? safePage,
+        limit: pageLimit,
+        totalPages: data.totalPages ?? Math.max(1, Math.ceil(total / pageLimit)),
+      };
     },
     enabled: enabled && storeId > 0,
   });

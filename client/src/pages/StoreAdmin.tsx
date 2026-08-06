@@ -17,6 +17,7 @@ import { StoreAdminPromotionsPanel } from "@/components/store/StoreAdminPromotio
 import { StoreAdminConfigPanel } from "@/components/store/StoreAdminConfigPanel";
 import { StoreAdminCurrencyPanel } from "@/components/store/StoreAdminCurrencyPanel";
 import { StoreAdminOrdersPanel } from "@/components/store/StoreAdminOrdersPanel";
+import { StoreAdminIngredientsPanel } from "@/components/store/StoreAdminIngredientsPanel";
 import { StoreAdminComingSoon } from "@/components/store/StoreAdminComingSoon";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
 import type { StoreCurrencyExtra } from "@shared/store-currency-schema";
@@ -49,6 +50,7 @@ function sectionPanel(
     );
   }
   if (section === "categorias") return <StoreAdminCategoriesPanel storeId={store.id} />;
+  if (section === "ingredientes") return <StoreAdminIngredientsPanel />;
   if (section === "promociones") return <StoreAdminPromotionsPanel storeId={store.id} />;
   if (section === "ordenes") {
     return (

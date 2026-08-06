@@ -461,6 +461,9 @@ export interface IStorage
   }): Promise<{ items: IngredientMaterial[]; total: number; page: number; limit: number }>;
   createIngredientMaterial(input: InsertIngredientMaterial): Promise<IngredientMaterial>;
   findIngredientMaterialByNormalizedName(normalizedName: string): Promise<IngredientMaterial | undefined>;
+  getIngredientMaterial(id: number): Promise<IngredientMaterial | undefined>;
+  updateIngredientMaterial(id: number, input: InsertIngredientMaterial): Promise<IngredientMaterial>;
+  deleteIngredientMaterial(id: number): Promise<void>;
   /** Extiende vigencia tras pago aprobado (Prompt 3). */
   extendStoreVisibilitySubscription(args: {
     storeId: number;
@@ -3347,13 +3350,38 @@ export class InMemoryStorage implements IStorage {
     return item;
   }
 
+  async getIngredientMaterial(id: number): Promise<IngredientMaterial | undefined> {
+    return this.ingredientsMaterials.find((item) => item.id === id);
+  }
+
+  async updateIngredientMaterial(id: number, input: InsertIngredientMaterial): Promise<IngredientMaterial> {
+    const existing = await this.getIngredientMaterial(id);
+    if (!existing) throw new Error("INGREDIENT_MATERIAL_NOT_FOUND");
+    const name = normalizeIngredientMaterialName(input.name);
+    const normalizedName = ingredientMaterialKey(name);
+    const dup = await this.findIngredientMaterialByNormalizedName(normalizedName);
+    if (dup && dup.id !== id) throw new Error("INGREDIENT_MATERIAL_ALREADY_EXISTS");
+    existing.name = name;
+    existing.normalizedName = normalizedName;
+    return existing;
+  }
+
+  async deleteIngredientMaterial(id: number): Promise<void> {
+    const idx = this.ingredientsMaterials.findIndex((item) => item.id === id);
+    if (idx < 0) throw new Error("INGREDIENT_MATERIAL_NOT_FOUND");
+    this.ingredientsMaterials.splice(idx, 1);
+  }
+
   private storeProducts: StoreProduct[] = [];
   private storeProductIdCounter = 1;
 
   async listStoreProducts(storeId: number): Promise<StoreProduct[]> {
     return this.storeProducts
       .filter((p) => p.storeId === storeId)
-      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+      .sort((a, b) => {
+        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return byDate !== 0 ? byDate : a.id - b.id;
+      });
   }
 
   async getStoreProduct(storeId: number, productId: number): Promise<StoreProduct | undefined> {
@@ -3440,7 +3468,10 @@ export class InMemoryStorage implements IStorage {
   async listStoreCategories(storeId: number): Promise<StoreCategory[]> {
     return this.storeCategories
       .filter((c) => c.storeId === storeId)
-      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+      .sort((a, b) => {
+        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return byDate !== 0 ? byDate : a.id - b.id;
+      });
   }
 
   async getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined> {
@@ -3496,7 +3527,10 @@ export class InMemoryStorage implements IStorage {
   async listStorePromotions(storeId: number): Promise<StorePromotion[]> {
     return this.storePromotions
       .filter((p) => p.storeId === storeId)
-      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+      .sort((a, b) => {
+        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return byDate !== 0 ? byDate : a.id - b.id;
+      });
   }
 
   async getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined> {

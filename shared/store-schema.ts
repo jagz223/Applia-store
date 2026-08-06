@@ -319,6 +319,10 @@ export const insertIngredientMaterialSchema = z.object({
 
 export type InsertIngredientMaterial = z.infer<typeof insertIngredientMaterialSchema>;
 
+export const updateIngredientMaterialSchema = insertIngredientMaterialSchema;
+
+export type UpdateIngredientMaterial = z.infer<typeof updateIngredientMaterialSchema>;
+
 export type IngredientMaterial = {
   id: number;
   name: string;
