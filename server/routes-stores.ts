@@ -208,6 +208,7 @@ function serializeStoreCategory(category: StoreCategory, products: StoreProduct[
     storeId: category.storeId,
     name: category.name,
     description: category.description,
+    hideFromShowcaseAll: category.hideFromShowcaseAll === true,
     productIds: ids,
     productCount: ids.length,
     createdAt: serializeDate(category.createdAt),
@@ -310,6 +311,7 @@ function serializeShowcaseCategory(category: StoreCategory) {
   return {
     id: category.id,
     name: category.name,
+    hideFromShowcaseAll: category.hideFromShowcaseAll === true,
   };
 }
 
@@ -899,6 +901,7 @@ export function registerStoreRoutes(app: Express): void {
       const category = await appliaStorage.createStoreCategory(storeId, {
         name: parsed.data.name,
         description: parsed.data.description,
+        hideFromShowcaseAll: parsed.data.hideFromShowcaseAll ?? false,
       });
       await syncCategoryProductMembership(storeId, category.id, productIds);
       const products = await appliaStorage.listStoreProducts(storeId);
@@ -957,6 +960,7 @@ export function registerStoreRoutes(app: Express): void {
       const category = await appliaStorage.updateStoreCategory(storeId, categoryId, {
         name: parsed.data.name,
         description: parsed.data.description,
+        hideFromShowcaseAll: parsed.data.hideFromShowcaseAll,
       });
       if (parsed.data.productIds != null) {
         await syncCategoryProductMembership(storeId, categoryId, parsed.data.productIds);

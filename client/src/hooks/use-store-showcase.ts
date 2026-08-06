@@ -29,6 +29,7 @@ export type StoreShowcaseProduct = {
 export type StoreShowcaseCategory = {
   id: number;
   name: string;
+  hideFromShowcaseAll?: boolean;
 };
 
 export type StoreShowcasePromotionItem = {

@@ -135,7 +135,16 @@ export default function StorePage() {
 
   const filteredShowcaseProducts = useMemo(() => {
     let list = showcaseProducts;
-    if (typeof categoryFilter === "number") {
+    if (categoryFilter === "all") {
+      const exclusiveCategoryIds = new Set(
+        showcaseCategories.filter((c) => c.hideFromShowcaseAll).map((c) => c.id),
+      );
+      if (exclusiveCategoryIds.size > 0) {
+        list = list.filter(
+          (p) => !(p.categoryIds ?? []).some((id) => exclusiveCategoryIds.has(id)),
+        );
+      }
+    } else if (typeof categoryFilter === "number") {
       list = list.filter((p) => (p.categoryIds ?? []).includes(categoryFilter));
     }
     const q = searchQuery.trim().toLowerCase();
@@ -143,7 +152,7 @@ export default function StorePage() {
       list = list.filter((p) => p.name.toLowerCase().includes(q));
     }
     return list;
-  }, [showcaseProducts, categoryFilter, searchQuery]);
+  }, [showcaseProducts, showcaseCategories, categoryFilter, searchQuery]);
 
   const filteredShowcasePromotions = useMemo(() => {
     let list = showcasePromotions;

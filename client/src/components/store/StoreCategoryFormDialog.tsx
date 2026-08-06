@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -49,6 +50,7 @@ export function StoreCategoryFormDialog({
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [hideFromShowcaseAll, setHideFromShowcaseAll] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<SelectedEntity[]>([]);
 
   const createMutation = useCreateStoreCategory(storeId);
@@ -60,9 +62,11 @@ export function StoreCategoryFormDialog({
     if (category) {
       setName(category.name);
       setDescription(category.description ?? "");
+      setHideFromShowcaseAll(category.hideFromShowcaseAll === true);
     } else {
       setName("");
       setDescription("");
+      setHideFromShowcaseAll(false);
       setSelectedProducts([]);
     }
   }, [open, category]);
@@ -85,6 +89,7 @@ export function StoreCategoryFormDialog({
       name: trimmedName,
       description: description.trim() || null,
       productIds,
+      hideFromShowcaseAll,
     };
 
     try {
@@ -146,6 +151,22 @@ export function StoreCategoryFormDialog({
                 rows={3}
                 maxLength={500}
                 onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+              <div className="space-y-0.5">
+                <Label htmlFor="category-hide-from-all">Mostrar solo en categoría</Label>
+                <p className="text-xs text-muted-foreground">
+                  Los productos de esta categoría no aparecen en «Todo» de la vitrina; sí al filtrar
+                  por esta u otras categorías.
+                </p>
+              </div>
+              <Switch
+                id="category-hide-from-all"
+                checked={hideFromShowcaseAll}
+                onCheckedChange={setHideFromShowcaseAll}
+                disabled={saving}
               />
             </div>
 

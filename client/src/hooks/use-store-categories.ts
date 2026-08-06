@@ -10,6 +10,7 @@ export type StoreCategorySummary = {
   storeId: number;
   name: string;
   description: string | null;
+  hideFromShowcaseAll?: boolean;
   productIds: number[];
   productCount: number;
   createdAt: string;
@@ -90,6 +91,12 @@ export function useStoreCategoriesPage(
 function invalidateCategoryQueries(qc: ReturnType<typeof useQueryClient>, storeId: number) {
   void qc.invalidateQueries({ queryKey: storeCategoriesQueryKey(storeId) });
   void qc.invalidateQueries({ queryKey: storeProductsQueryKey(storeId) });
+  void qc.invalidateQueries({
+    predicate: (q) =>
+      Array.isArray(q.queryKey) &&
+      q.queryKey[0] === "/api/stores" &&
+      q.queryKey[2] === "showcase-products",
+  });
 }
 
 export function useCreateStoreCategory(storeId: number) {

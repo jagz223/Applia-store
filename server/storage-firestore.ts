@@ -4743,6 +4743,7 @@ class FirestoreStorageImpl implements IStorage {
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ?? null,
+      hideFromShowcaseAll: input.hideFromShowcaseAll === true,
       createdAt: now,
       updatedAt: now,
     };
@@ -4763,6 +4764,9 @@ class FirestoreStorageImpl implements IStorage {
     if (input.name !== undefined) patch.name = input.name.trim();
     if (input.description !== undefined) {
       patch.description = input.description?.trim() ? input.description.trim() : null;
+    }
+    if (input.hideFromShowcaseAll !== undefined) {
+      patch.hideFromShowcaseAll = input.hideFromShowcaseAll === true;
     }
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(categoryId)).update(patch);
     return { ...existing, ...patch, updatedAt: now } as StoreCategory;
@@ -5304,6 +5308,7 @@ class FirestoreStorageImpl implements IStorage {
       description: data.description != null && String(data.description).trim()
         ? String(data.description).trim()
         : null,
+      hideFromShowcaseAll: data.hideFromShowcaseAll === true,
       createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
       updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
     };
