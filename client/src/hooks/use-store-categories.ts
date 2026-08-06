@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InsertStoreCategory, UpdateStoreCategory } from "@shared/store-schema";
-import { storeProductsQueryKey } from "@/hooks/use-store-products";
+import {
+  storeProductsQueryKey,
+  type StoreAdminListPage,
+} from "@/hooks/use-store-products";
 
 export type StoreCategorySummary = {
   id: number;
@@ -33,6 +36,52 @@ export function useStoreCategories(storeId: number, enabled = true) {
       }
       const data = (await res.json()) as { categories: StoreCategorySummary[] };
       return data.categories;
+    },
+    enabled: enabled && storeId > 0,
+  });
+}
+
+export function useStoreCategoriesPage(
+  storeId: number,
+  page: number,
+  limit = 10,
+  enabled = true,
+  search = "",
+) {
+  const safePage = Math.max(1, page);
+  const safeLimit = Math.max(1, limit);
+  const q = search.trim();
+  return useQuery({
+    queryKey: [...storeCategoriesQueryKey(storeId), "page", safePage, safeLimit, q || null],
+    queryFn: async (): Promise<StoreAdminListPage<StoreCategorySummary>> => {
+      const params = new URLSearchParams({
+        page: String(safePage),
+        limit: String(safeLimit),
+      });
+      if (q) params.set("q", q);
+      const res = await fetch(`/api/stores/${storeId}/categories?${params}`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudieron cargar las categorías");
+      }
+      const data = (await res.json()) as {
+        categories: StoreCategorySummary[];
+        total?: number;
+        page?: number;
+        limit?: number;
+        totalPages?: number;
+      };
+      const total = data.total ?? data.categories.length;
+      const pageLimit = data.limit ?? safeLimit;
+      return {
+        items: data.categories,
+        total,
+        page: data.page ?? safePage,
+        limit: pageLimit,
+        totalPages: data.totalPages ?? Math.max(1, Math.ceil(total / pageLimit)),
+      };
     },
     enabled: enabled && storeId > 0,
   });

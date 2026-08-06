@@ -15,8 +15,9 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 function categoryKey(name: string): string {
   return name.trim().toLowerCase();
@@ -38,7 +39,7 @@ export function StoreProductCategoryPicker({
   const createMutation = useCreateStoreCategory(storeId);
 
   const [search, setSearch] = useState("");
-  const [browseOpen, setBrowseOpen] = useState(false);
+  const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const selectedIds = useMemo(() => new Set(selected.map((s) => s.id)), [selected]);
@@ -50,9 +51,15 @@ export function StoreProductCategoryPicker({
     [selected, searchKey, trimmedSearch],
   );
 
-  const canAdd = trimmedSearch.length > 0 && !alreadySelected;
+  const exactMatch = useMemo(
+    () => (trimmedSearch.length > 0 ? categories.find((c) => categoryKey(c.name) === searchKey) : undefined),
+    [categories, searchKey, trimmedSearch],
+  );
 
-  const filteredBrowse = useMemo(() => {
+  /** Solo desbloquea + cuando el nombre no existe aún. */
+  const canCreate = trimmedSearch.length > 0 && !alreadySelected && !exactMatch;
+
+  const filtered = useMemo(() => {
     const q = trimmedSearch.toLowerCase();
     return categories.filter((c) => {
       if (selectedIds.has(c.id)) return false;
@@ -65,22 +72,15 @@ export function StoreProductCategoryPicker({
     if (selectedIds.has(item.id)) return;
     onChange([...selected, item]);
     setSearch("");
+    setOpen(false);
   }
 
   function removeId(id: number) {
     onChange(selected.filter((s) => s.id !== id));
   }
 
-  async function handleAddOrCreate() {
-    if (!canAdd || creating || disabled) return;
-
-    const existing = categories.find((c) => categoryKey(c.name) === searchKey);
-    if (existing) {
-      addItem({ id: existing.id, name: existing.name });
-      toast({ title: "Añadida", description: `«${existing.name}» seleccionada.` });
-      return;
-    }
-
+  async function handleCreate() {
+    if (!canCreate || creating || disabled) return;
     setCreating(true);
     try {
       const created = await createMutation.mutateAsync({
@@ -104,84 +104,81 @@ export function StoreProductCategoryPicker({
     }
   }
 
+  async function handleEnter() {
+    if (disabled || creating) return;
+    if (exactMatch && !selectedIds.has(exactMatch.id)) {
+      addItem({ id: exactMatch.id, name: exactMatch.name });
+      return;
+    }
+    if (canCreate) await handleCreate();
+  }
+
   return (
     <div className="space-y-2">
       <Label>Categorías del producto</Label>
       <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Escribe para buscar o crear…"
-            className="pl-9"
-            disabled={disabled || isLoading}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void handleAddOrCreate();
-              }
-            }}
-          />
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className="shrink-0"
-          disabled={!canAdd || creating || disabled || isLoading}
-          title={
-            canAdd
-              ? categories.some((c) => categoryKey(c.name) === searchKey)
-                ? `Añadir «${trimmedSearch}»`
-                : `Crear categoría «${trimmedSearch}»`
-              : alreadySelected
-                ? "Ya está en la selección"
-                : "Escribe un nombre"
-          }
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => void handleAddOrCreate()}
+        <Popover
+          open={open && !disabled}
+          onOpenChange={(next) => {
+            if (!disabled) setOpen(next);
+          }}
         >
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-        </Button>
-        <Popover open={browseOpen} onOpenChange={setBrowseOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              className="shrink-0 px-3"
-              disabled={disabled || isLoading}
-            >
-              Lista
-            </Button>
-          </PopoverTrigger>
+          <PopoverAnchor asChild>
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setOpen(true);
+                }}
+                onFocus={() => setOpen(true)}
+                placeholder="Buscar categoría…"
+                className="pl-9"
+                disabled={disabled || isLoading}
+                autoComplete="off"
+                aria-autocomplete="list"
+                aria-expanded={open}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleEnter();
+                  }
+                  if (e.key === "Escape") setOpen(false);
+                }}
+              />
+            </div>
+          </PopoverAnchor>
           <PopoverContent
             layer="modal"
-            className="w-[min(360px,calc(100vw-2rem))] p-0"
-            align="end"
+            className="w-[min(22rem,calc(100vw-3rem))] p-0"
+            align="start"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onCloseAutoFocus={(e) => e.preventDefault()}
           >
             <Command shouldFilter={false}>
               <CommandList className="max-h-56">
                 {isLoading ? (
-                  <div className="py-6 flex justify-center">
+                  <div className="flex justify-center py-6">
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : (
                   <>
                     <CommandEmpty>
                       {trimmedSearch
-                        ? "Sin coincidencias. Usa + para crear la categoría."
-                        : "Escribe arriba o elige de la lista"}
+                        ? canCreate
+                          ? "Sin coincidencias. Usa + para crear esta categoría."
+                          : alreadySelected
+                            ? "Ya está seleccionada."
+                            : "Sin coincidencias."
+                        : "Escribe para filtrar o elige de la lista."}
                     </CommandEmpty>
                     <CommandGroup>
-                      {filteredBrowse.map((item) => (
+                      {filtered.map((item) => (
                         <CommandItem
                           key={item.id}
                           value={String(item.id)}
-                          onSelect={() => {
-                            addItem({ id: item.id, name: item.name });
-                            setBrowseOpen(false);
-                          }}
+                          onSelect={() => addItem({ id: item.id, name: item.name })}
                         >
                           {item.name}
                         </CommandItem>
@@ -193,6 +190,38 @@ export function StoreProductCategoryPicker({
             </Command>
           </PopoverContent>
         </Popover>
+
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className="shrink-0"
+          disabled={!canCreate || creating || disabled || isLoading}
+          title={
+            canCreate
+              ? `Crear categoría «${trimmedSearch}»`
+              : exactMatch
+                ? "Ya existe: elígela en la lista"
+                : alreadySelected
+                  ? "Ya está en la selección"
+                  : "Escribe un nombre nuevo para crear"
+          }
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => void handleCreate()}
+        >
+          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="shrink-0 px-3"
+          disabled={disabled || isLoading}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setOpen(true)}
+        >
+          Lista
+        </Button>
       </div>
 
       {selected.length > 0 ? (
@@ -200,12 +229,15 @@ export function StoreProductCategoryPicker({
           {selected.map((item) => (
             <span
               key={item.id}
-              className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 pl-3 pr-1 py-1 text-xs font-semibold text-foreground"
+              className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 py-1 pl-3 pr-1 text-xs font-semibold text-foreground"
             >
               {item.name}
               <button
                 type="button"
-                className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors",
+                  "hover:bg-destructive/15 hover:text-destructive disabled:opacity-50",
+                )}
                 aria-label={`Quitar ${item.name}`}
                 disabled={disabled}
                 onClick={() => removeId(item.id)}
@@ -217,7 +249,7 @@ export function StoreProductCategoryPicker({
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Escribe un nombre y pulsa + para crear o seleccionar una categoría (ej. Laptop).
+          Escribe para buscar y elige una categoría. El + solo crea una nueva si no existe.
         </p>
       )}
     </div>

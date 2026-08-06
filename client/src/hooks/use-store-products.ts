@@ -30,6 +30,14 @@ export function storeProductsQueryKey(storeId: number) {
   return ["/api/stores", storeId, "products"] as const;
 }
 
+export type StoreAdminListPage<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+};
+
 export function useStoreProducts(storeId: number, enabled = true) {
   return useQuery({
     queryKey: storeProductsQueryKey(storeId),
@@ -41,6 +49,52 @@ export function useStoreProducts(storeId: number, enabled = true) {
       }
       const data = (await res.json()) as { products: StoreProductSummary[] };
       return data.products;
+    },
+    enabled: enabled && storeId > 0,
+  });
+}
+
+export function useStoreProductsPage(
+  storeId: number,
+  page: number,
+  limit = 10,
+  enabled = true,
+  search = "",
+) {
+  const safePage = Math.max(1, page);
+  const safeLimit = Math.max(1, limit);
+  const q = search.trim();
+  return useQuery({
+    queryKey: [...storeProductsQueryKey(storeId), "page", safePage, safeLimit, q || null],
+    queryFn: async (): Promise<StoreAdminListPage<StoreProductSummary>> => {
+      const params = new URLSearchParams({
+        page: String(safePage),
+        limit: String(safeLimit),
+      });
+      if (q) params.set("q", q);
+      const res = await fetch(`/api/stores/${storeId}/products?${params}`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudieron cargar los productos");
+      }
+      const data = (await res.json()) as {
+        products: StoreProductSummary[];
+        total?: number;
+        page?: number;
+        limit?: number;
+        totalPages?: number;
+      };
+      const total = data.total ?? data.products.length;
+      const pageLimit = data.limit ?? safeLimit;
+      return {
+        items: data.products,
+        total,
+        page: data.page ?? safePage,
+        limit: pageLimit,
+        totalPages: data.totalPages ?? Math.max(1, Math.ceil(total / pageLimit)),
+      };
     },
     enabled: enabled && storeId > 0,
   });
@@ -120,32 +174,75 @@ export type IngredientMaterialItem = {
   normalizedName: string;
 };
 
-export function useIngredientsMaterials(search: string, page: number, enabled = true) {
+export type IngredientsMaterialsPage = {
+  items: IngredientMaterialItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages?: number;
+};
+
+async function fetchIngredientsMaterialsPage(options: {
+  q?: string;
+  page: number;
+  limit?: number;
+  /** Si hay texto de filtro, usa el endpoint de búsqueda dedicado. */
+  useSearchEndpoint?: boolean;
+}): Promise<IngredientsMaterialsPage> {
+  const page = Math.max(1, options.page);
+  const limit = options.limit ?? 20;
+  const q = options.q?.trim() ?? "";
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (q) params.set("q", q);
+
+  const path =
+    options.useSearchEndpoint && q
+      ? `/api/ingredients-materials/search?${params}`
+      : `/api/ingredients-materials?${params}`;
+
+  const res = await fetch(path);
+  if (!res.ok) {
+    throw new Error(
+      options.useSearchEndpoint && q
+        ? "No se pudo buscar ingredientes y materiales"
+        : "No se pudieron cargar ingredientes y materiales",
+    );
+  }
+  return res.json() as Promise<IngredientsMaterialsPage>;
+}
+
+export function useIngredientsMaterials(
+  search: string,
+  page: number,
+  enabled = true,
+  limit = 20,
+) {
+  const q = search.trim();
   return useQuery({
-    queryKey: ["/api/ingredients-materials", search, page],
-    queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page) });
-      const q = search.trim();
-      if (q) params.set("q", q);
-      const res = await fetch(`/api/ingredients-materials?${params}`);
-      if (!res.ok) throw new Error("No se pudieron cargar ingredientes y materiales");
-      return res.json() as Promise<{
-        items: IngredientMaterialItem[];
-        total: number;
-        page: number;
-        limit: number;
-      }>;
-    },
+    queryKey: ["/api/ingredients-materials", q || null, page, limit],
+    queryFn: () =>
+      fetchIngredientsMaterialsPage({
+        q: q || undefined,
+        page,
+        limit,
+        useSearchEndpoint: Boolean(q),
+      }),
     enabled,
   });
 }
 
 export async function findIngredientMaterialByName(name: string): Promise<IngredientMaterialItem | null> {
   const key = ingredientMaterialKey(name);
-  const params = new URLSearchParams({ page: "1", q: name.trim() });
-  const res = await fetch(`/api/ingredients-materials?${params}`);
-  if (!res.ok) return null;
-  const data = (await res.json()) as { items: IngredientMaterialItem[] };
+  const data = await fetchIngredientsMaterialsPage({
+    q: name.trim(),
+    page: 1,
+    limit: 50,
+    useSearchEndpoint: true,
+  }).catch(() => null);
+  if (!data) return null;
   return data.items.find((item) => itemMatchesKey(item, key)) ?? null;
 }
 
@@ -184,4 +281,63 @@ export async function createIngredientMaterial(name: string): Promise<Ingredient
   }
   const data = (await res.json()) as { item: IngredientMaterialItem };
   return data.item;
+}
+
+function authIngredientHeaders(): HeadersInit {
+  const token = localStorage.getItem("token");
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    "Content-Type": "application/json",
+  };
+}
+
+export function useUpdateIngredientMaterial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, name }: { id: number; name: string }) => {
+      const res = await fetch(`/api/ingredients-materials/${id}`, {
+        method: "PUT",
+        headers: authIngredientHeaders(),
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudo actualizar");
+      }
+      const data = (await res.json()) as { item: IngredientMaterialItem };
+      return data.item;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["/api/ingredients-materials"] });
+    },
+  });
+}
+
+export function useDeleteIngredientMaterial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/ingredients-materials/${id}`, {
+        method: "DELETE",
+        headers: authIngredientHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudo eliminar");
+      }
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["/api/ingredients-materials"] });
+    },
+  });
+}
+
+export function useCreateIngredientMaterialMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => createIngredientMaterial(name),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["/api/ingredients-materials"] });
+    },
+  });
 }

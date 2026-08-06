@@ -1,6 +1,7 @@
 export const STORE_ADMIN_SECTIONS = [
   { id: "productos", label: "Productos", path: "productos" },
   { id: "categorias", label: "Categorías", path: "categorias" },
+  { id: "ingredientes", label: "Ingredientes", path: "ingredientes" },
   { id: "promociones", label: "Promociones", path: "promociones" },
   { id: "codigos", label: "Códigos de descuento", path: "codigos" },
   { id: "ordenes", label: "Órdenes", path: "ordenes" },

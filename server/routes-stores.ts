@@ -15,14 +15,27 @@
  * # Tienda pública por slug
  * curl -s http://localhost:5000/api/stores/mi-tienda-demo
  *
- * # Listar ingredientes/materiales (página 1, filtro opcional)
- * curl -s "http://localhost:5000/api/ingredients-materials?q=harina&page=1"
+ * # Listar ingredientes/materiales (paginado)
+ * curl -s "http://localhost:5000/api/ingredients-materials?page=1&limit=20"
+ *
+ * # Buscar ingredientes/materiales (filtro + paginación)
+ * curl -s "http://localhost:5000/api/ingredients-materials/search?q=harina&page=1&limit=20"
  *
  * # Crear ingrediente/material global
  * curl -s -X POST http://localhost:5000/api/ingredients-materials \
  *   -H "Authorization: Bearer TOKEN" \
  *   -H "Content-Type: application/json" \
  *   -d '{"name":"Harina de trigo"}'
+ *
+ * # Editar ingrediente/material
+ * curl -s -X PUT http://localhost:5000/api/ingredients-materials/1 \
+ *   -H "Authorization: Bearer TOKEN" \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"name":"Harina integral"}'
+ *
+ * # Eliminar ingrediente/material
+ * curl -s -X DELETE http://localhost:5000/api/ingredients-materials/1 \
+ *   -H "Authorization: Bearer TOKEN"
  *
  * # Cotización mensualidad tienda (público)
  * curl -s http://localhost:5000/api/stores/subscription-quote
@@ -435,7 +448,135 @@ function serializeStore(
 const ingredientsListQuerySchema = z.object({
   q: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(INGREDIENTS_MATERIALS_PAGE_SIZE),
 });
+
+const ingredientsSearchQuerySchema = z.object({
+  q: z.string().trim().min(1, "El término de búsqueda es obligatorio"),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(INGREDIENTS_MATERIALS_PAGE_SIZE),
+});
+
+/** Paginación opcional: sin page/limit se devuelve el listado completo (pickers/forms). */
+const storeAdminOptionalPaginationSchema = z.object({
+  page: z.preprocess(
+    (value) => (value === "" || value === undefined || value === null ? undefined : value),
+    z.coerce.number().int().min(1).optional(),
+  ),
+  limit: z.preprocess(
+    (value) => (value === "" || value === undefined || value === null ? undefined : value),
+    z.coerce.number().int().min(1).max(100).optional(),
+  ),
+});
+
+function hasAdminListPaginationQuery(query: unknown): boolean {
+  if (!query || typeof query !== "object") return false;
+  const q = query as Record<string, unknown>;
+  const page = q.page;
+  const limit = q.limit;
+  return (page != null && page !== "") || (limit != null && limit !== "");
+}
+
+function parseOptionalAdminListPagination(
+  query: unknown,
+): { ok: true; pagination?: { page: number; limit: number } } | { ok: false } {
+  const wantsPagination = hasAdminListPaginationQuery(query);
+  const parsed = storeAdminOptionalPaginationSchema.safeParse(query ?? {});
+  if (!parsed.success) {
+    return wantsPagination ? { ok: false } : { ok: true };
+  }
+  if (parsed.data.page == null && parsed.data.limit == null) {
+    return { ok: true };
+  }
+  return {
+    ok: true,
+    pagination: {
+      page: parsed.data.page ?? 1,
+      limit: parsed.data.limit ?? 10,
+    },
+  };
+}
+
+function parseOptionalAdminListNameQuery(query: unknown): string | undefined {
+  if (!query || typeof query !== "object") return undefined;
+  const raw = (query as Record<string, unknown>).q;
+  if (raw == null) return undefined;
+  const q = String(raw).trim().toLowerCase();
+  return q || undefined;
+}
+
+function filterSerializedListByName<T extends { name: string }>(items: T[], q?: string): T[] {
+  if (!q) return items;
+  return items.filter((item) => item.name.toLowerCase().includes(q));
+}
+
+function paginateSerializedList<T>(
+  items: T[],
+  pagination: { page: number; limit: number },
+): {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+} {
+  const total = items.length;
+  const limit = pagination.limit;
+  const totalPages = Math.max(1, Math.ceil(total / limit) || 1);
+  const page = Math.min(Math.max(1, pagination.page), totalPages);
+  const start = (page - 1) * limit;
+  return {
+    items: items.slice(start, start + limit),
+    total,
+    page,
+    limit,
+    totalPages,
+  };
+}
+
+function serializeIngredientMaterial(item: {
+  id: number;
+  name: string;
+  normalizedName: string;
+  createdAt: Date | string;
+}) {
+  return {
+    id: item.id,
+    name: item.name,
+    normalizedName: item.normalizedName,
+    createdAt: serializeDate(item.createdAt),
+  };
+}
+
+async function respondIngredientsPage(
+  res: import("express").Response,
+  options: { q?: string; page: number; limit: number },
+) {
+  const result = await appliaStorage.listIngredientsMaterials({
+    q: options.q,
+    page: options.page,
+    limit: options.limit,
+  });
+  return res.json({
+    items: result.items.map(serializeIngredientMaterial),
+    total: result.total,
+    page: result.page,
+    limit: result.limit,
+    totalPages: Math.max(1, Math.ceil(result.total / result.limit)),
+  });
+}
 
 const storesCatalogQuerySchema = z.object({
   q: z.string().optional(),
@@ -706,11 +847,30 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
+      const paginationResult = parseOptionalAdminListPagination(req.query);
+      if (!paginationResult.ok) {
+        return res.status(400).json({ message: "Parámetros de paginación inválidos." });
+      }
+      const nameQuery = parseOptionalAdminListNameQuery(req.query);
       const [categories, products] = await Promise.all([
         appliaStorage.listStoreCategories(storeId),
         appliaStorage.listStoreProducts(storeId),
       ]);
-      return res.json({ categories: categories.map((c) => serializeStoreCategory(c, products)) });
+      const serialized = filterSerializedListByName(
+        categories.map((c) => serializeStoreCategory(c, products)),
+        nameQuery,
+      );
+      if (!paginationResult.pagination) {
+        return res.json({ categories: serialized });
+      }
+      const pageResult = paginateSerializedList(serialized, paginationResult.pagination);
+      return res.json({
+        categories: pageResult.items,
+        total: pageResult.total,
+        page: pageResult.page,
+        limit: pageResult.limit,
+        totalPages: pageResult.totalPages,
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -844,11 +1004,30 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       await requireStoreOwner(userId, storeId);
+      const paginationResult = parseOptionalAdminListPagination(req.query);
+      if (!paginationResult.ok) {
+        return res.status(400).json({ message: "Parámetros de paginación inválidos." });
+      }
+      const nameQuery = parseOptionalAdminListNameQuery(req.query);
       const [promotions, products] = await Promise.all([
         appliaStorage.listStorePromotions(storeId),
         appliaStorage.listStoreProducts(storeId),
       ]);
-      return res.json({ promotions: promotions.map((p) => serializeStorePromotion(p, products)) });
+      const serialized = filterSerializedListByName(
+        promotions.map((p) => serializeStorePromotion(p, products)),
+        nameQuery,
+      );
+      if (!paginationResult.pagination) {
+        return res.json({ promotions: serialized });
+      }
+      const pageResult = paginateSerializedList(serialized, paginationResult.pagination);
+      return res.json({
+        promotions: pageResult.items,
+        total: pageResult.total,
+        page: pageResult.page,
+        limit: pageResult.limit,
+        totalPages: pageResult.totalPages,
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -1671,15 +1850,32 @@ export function registerStoreRoutes(app: Express): void {
       await requireStoreOwner(userId, storeId);
       const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const paginationResult = parseOptionalAdminListPagination(req.query);
+      if (!paginationResult.ok) {
+        return res.status(400).json({ message: "Parámetros de paginación inválidos." });
+      }
+      const nameQuery = parseOptionalAdminListNameQuery(req.query);
       const products = await appliaStorage.listStoreProducts(storeId);
       const currency = normalizeStoreCurrencyFields(store);
-      return res.json({
-        products: products.map((p) =>
+      const serialized = filterSerializedListByName(
+        products.map((p) =>
           serializeStoreProduct(p, {
             visualCurrencyId: currency.currencyVisualId,
             currencyExtras: currency.currencyExtras,
           }),
         ),
+        nameQuery,
+      );
+      if (!paginationResult.pagination) {
+        return res.json({ products: serialized });
+      }
+      const pageResult = paginateSerializedList(serialized, paginationResult.pagination);
+      return res.json({
+        products: pageResult.items,
+        total: pageResult.total,
+        page: pageResult.page,
+        limit: pageResult.limit,
+        totalPages: pageResult.totalPages,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1921,25 +2117,35 @@ export function registerStoreRoutes(app: Express): void {
       if (!parsed.success) {
         return res.status(400).json({ message: "Parámetros inválidos.", errors: parsed.error.errors });
       }
-      const result = await appliaStorage.listIngredientsMaterials({
-        q: parsed.data.q,
+      return await respondIngredientsPage(res, {
+        q: parsed.data.q?.trim() || undefined,
         page: parsed.data.page,
-        limit: INGREDIENTS_MATERIALS_PAGE_SIZE,
-      });
-      return res.json({
-        items: result.items.map((item) => ({
-          id: item.id,
-          name: item.name,
-          normalizedName: item.normalizedName,
-          createdAt: serializeDate(item.createdAt),
-        })),
-        total: result.total,
-        page: result.page,
-        limit: result.limit,
+        limit: parsed.data.limit,
       });
     } catch (e) {
       console.error("[ingredients-materials] list", e);
       return res.status(500).json({ message: "No se pudo listar ingredientes y materiales." });
+    }
+  });
+
+  /** Búsqueda paginada (filtro obligatorio). */
+  app.get("/api/ingredients-materials/search", async (req, res) => {
+    try {
+      const parsed = ingredientsSearchQuerySchema.safeParse(req.query ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Parámetros inválidos.",
+          errors: parsed.error.errors,
+        });
+      }
+      return await respondIngredientsPage(res, {
+        q: parsed.data.q,
+        page: parsed.data.page,
+        limit: parsed.data.limit,
+      });
+    } catch (e) {
+      console.error("[ingredients-materials] search", e);
+      return res.status(500).json({ message: "No se pudo buscar ingredientes y materiales." });
     }
   });
 
@@ -1956,14 +2162,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
       const item = await appliaStorage.createIngredientMaterial(parsed.data);
-      return res.status(201).json({
-        item: {
-          id: item.id,
-          name: item.name,
-          normalizedName: item.normalizedName,
-          createdAt: serializeDate(item.createdAt),
-        },
-      });
+      return res.status(201).json({ item: serializeIngredientMaterial(item) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "INGREDIENT_MATERIAL_ALREADY_EXISTS") {
@@ -1971,6 +2170,61 @@ export function registerStoreRoutes(app: Express): void {
       }
       console.error("[ingredients-materials] create", e);
       return res.status(500).json({ message: "No se pudo crear el ingrediente o material." });
+    }
+  });
+
+  async function handleUpdateIngredient(req: any, res: import("express").Response) {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        return res.status(400).json({ message: "ID inválido." });
+      }
+      const parsed = insertIngredientMaterialSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const item = await appliaStorage.updateIngredientMaterial(id, parsed.data);
+      return res.json({ item: serializeIngredientMaterial(item) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "INGREDIENT_MATERIAL_NOT_FOUND") {
+        return res.status(404).json({ message: "Ingrediente o material no encontrado." });
+      }
+      if (msg === "INGREDIENT_MATERIAL_ALREADY_EXISTS") {
+        return res.status(409).json({ message: "Ya existe un ingrediente o material con ese nombre." });
+      }
+      console.error("[ingredients-materials] update", e);
+      return res.status(500).json({ message: "No se pudo actualizar el ingrediente o material." });
+    }
+  }
+
+  app.put("/api/ingredients-materials/:id", authenticateJWT, handleUpdateIngredient);
+  app.patch("/api/ingredients-materials/:id", authenticateJWT, handleUpdateIngredient);
+
+  app.delete("/api/ingredients-materials/:id", authenticateJWT, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        return res.status(400).json({ message: "ID inválido." });
+      }
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      await appliaStorage.deleteIngredientMaterial(id);
+      return res.json({ ok: true, id });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "INGREDIENT_MATERIAL_NOT_FOUND") {
+        return res.status(404).json({ message: "Ingrediente o material no encontrado." });
+      }
+      console.error("[ingredients-materials] delete", e);
+      return res.status(500).json({ message: "No se pudo eliminar el ingrediente o material." });
     }
   });
 }

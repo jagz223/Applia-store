@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Package, Tags, Percent, Ticket, Settings2, ClipboardList, Coins } from "lucide-react";
+import { ArrowLeft, Package, Tags, Percent, Ticket, Settings2, ClipboardList, Coins, Leaf } from "lucide-react";
 import {
   getVisibleStoreAdminSections,
   type StoreAdminSectionId,
@@ -16,6 +16,7 @@ import { StoreAdminDeliveryRatePrompt } from "@/components/store/StoreAdminDeliv
 const SECTION_ICONS: Record<StoreAdminSectionId, typeof Package> = {
   productos: Package,
   categorias: Tags,
+  ingredientes: Leaf,
   promociones: Percent,
   codigos: Ticket,
   ordenes: ClipboardList,

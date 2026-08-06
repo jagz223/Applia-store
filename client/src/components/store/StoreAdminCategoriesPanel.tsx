@@ -1,13 +1,18 @@
-import { useState } from "react";
-import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import {
   useDeleteStoreCategory,
-  useStoreCategories,
+  useStoreCategoriesPage,
   type StoreCategorySummary,
 } from "@/hooks/use-store-categories";
 import { StoreCategoryFormDialog } from "@/components/store/StoreCategoryFormDialog";
+import {
+  STORE_ADMIN_LIST_PAGE_SIZE,
+  StoreAdminListPagination,
+} from "@/components/store/StoreAdminListPagination";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -28,11 +33,32 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
+import { storeAdminFieldClass, storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 
 export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
   const { toast } = useToast();
-  const { data: categories = [], isLoading, error } = useStoreCategories(storeId);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const { data, isLoading, error, isFetching } = useStoreCategoriesPage(
+    storeId,
+    page,
+    STORE_ADMIN_LIST_PAGE_SIZE,
+    true,
+    debouncedSearch,
+  );
+  const categories = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
   const deleteMutation = useDeleteStoreCategory(storeId);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -55,6 +81,7 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
       await deleteMutation.mutateAsync(deleteTarget.id);
       toast({ title: "Categoría eliminada", description: `«${deleteTarget.name}» fue eliminada.` });
       setDeleteTarget(null);
+      if (categories.length <= 1 && page > 1) setPage((p) => Math.max(1, p - 1));
     } catch (e) {
       toast({
         variant: "destructive",
@@ -79,7 +106,18 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
             Crear categoría
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filtrar por nombre…"
+              className={cn(storeAdminFieldClass, "pl-9")}
+              aria-label="Filtrar categorías por nombre"
+            />
+          </div>
+
           {isLoading ? (
             <div className="py-12 flex justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -88,10 +126,17 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
             <p className="text-sm text-destructive py-6 text-center">{(error as Error).message}</p>
           ) : categories.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              Aún no hay categorías. Usa «Crear categoría» para añadir la primera.
+              {debouncedSearch
+                ? "No hay coincidencias con ese filtro."
+                : "Aún no hay categorías. Usa «Crear categoría» para añadir la primera."}
             </p>
           ) : (
             <>
+              <p className="text-xs text-muted-foreground">
+                {total} resultado{total === 1 ? "" : "s"}
+                {isFetching ? " · actualizando…" : ""}
+              </p>
+
               <ul className="grid gap-3 md:hidden">
                 {categories.map((category) => (
                   <li
@@ -183,6 +228,13 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
                   </TableBody>
                 </Table>
               </div>
+
+              <StoreAdminListPagination
+                page={page}
+                totalPages={totalPages}
+                isFetching={isFetching}
+                onPageChange={setPage}
+              />
             </>
           )}
         </CardContent>

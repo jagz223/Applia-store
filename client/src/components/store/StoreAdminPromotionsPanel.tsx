@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
-import { Eye, ImageIcon, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Eye, ImageIcon, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import {
   useDeleteStorePromotion,
-  useStorePromotions,
+  useStorePromotionsPage,
   useUpdateStorePromotion,
   type StorePromotionSummary,
 } from "@/hooks/use-store-promotions";
 import { StorePromotionFormDialog } from "@/components/store/StorePromotionFormDialog";
 import { StorePromotionDetailDialog } from "@/components/store/StorePromotionDetailDialog";
+import {
+  STORE_ADMIN_LIST_PAGE_SIZE,
+  StoreAdminListPagination,
+} from "@/components/store/StoreAdminListPagination";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -32,7 +37,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
+import { storeAdminFieldClass, storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
@@ -172,7 +177,28 @@ function PromotionRowActions({
 
 export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
   const { toast } = useToast();
-  const { data: promotions = [], isLoading, error } = useStorePromotions(storeId);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const { data, isLoading, error, isFetching } = useStorePromotionsPage(
+    storeId,
+    page,
+    STORE_ADMIN_LIST_PAGE_SIZE,
+    true,
+    debouncedSearch,
+  );
+  const promotions = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
   const deleteMutation = useDeleteStorePromotion(storeId);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -196,6 +222,7 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
       await deleteMutation.mutateAsync(deleteTarget.id);
       toast({ title: "Promoción eliminada", description: `«${deleteTarget.name}» fue eliminada.` });
       setDeleteTarget(null);
+      if (promotions.length <= 1 && page > 1) setPage((p) => Math.max(1, p - 1));
     } catch (e) {
       toast({
         variant: "destructive",
@@ -218,7 +245,18 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
             Crear promoción
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filtrar por nombre…"
+              className={cn(storeAdminFieldClass, "pl-9")}
+              aria-label="Filtrar promociones por nombre"
+            />
+          </div>
+
           {isLoading ? (
             <div className="py-12 flex justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -227,10 +265,17 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
             <p className="text-sm text-destructive py-6 text-center">{(error as Error).message}</p>
           ) : promotions.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              Aún no hay promociones. Usa «Crear promoción» para añadir la primera.
+              {debouncedSearch
+                ? "No hay coincidencias con ese filtro."
+                : "Aún no hay promociones. Usa «Crear promoción» para añadir la primera."}
             </p>
           ) : (
             <>
+              <p className="text-xs text-muted-foreground">
+                {total} resultado{total === 1 ? "" : "s"}
+                {isFetching ? " · actualizando…" : ""}
+              </p>
+
               <ul className="grid gap-3 md:hidden">
                 {promotions.map((promotion) => (
                   <li
@@ -317,6 +362,13 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
                   </TableBody>
                 </Table>
               </div>
+
+              <StoreAdminListPagination
+                page={page}
+                totalPages={totalPages}
+                isFetching={isFetching}
+                onPageChange={setPage}
+              />
             </>
           )}
         </CardContent>
