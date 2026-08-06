@@ -217,7 +217,6 @@ export default function MyStoreOrders() {
   const searchQs = useSearch();
   const [statusFilter, setStatusFilter] = useState("all");
   const [orderIdFilter, setOrderIdFilter] = useState("");
-  const [storeFilter, setStoreFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
@@ -226,11 +225,10 @@ export default function MyStoreOrders() {
     () => ({
       status: statusFilter === "all" ? undefined : statusFilter,
       orderId: orderIdFilter.trim() || undefined,
-      storeId: storeFilter === "all" ? undefined : storeFilter,
       dateFrom: dateFrom.trim() || undefined,
       dateTo: dateTo.trim() || undefined,
     }),
-    [statusFilter, orderIdFilter, storeFilter, dateFrom, dateTo],
+    [statusFilter, orderIdFilter, dateFrom, dateTo],
   );
 
   const { data: orders = [], isLoading, error, refetch, isFetching } = useMyStoreOrders(
@@ -247,14 +245,6 @@ export default function MyStoreOrders() {
       setSelectedOrderId(parsed);
     }
   }, [searchQs]);
-
-  const storeOptions = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const o of orders) {
-      if (o.storeId && o.storeName) map.set(o.storeId, o.storeName);
-    }
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], "es"));
-  }, [orders]);
 
   if (authLoading) {
     return (
@@ -287,9 +277,9 @@ export default function MyStoreOrders() {
             asChild
             className="-ml-2 h-9 rounded-full px-3 text-muted-foreground hover:text-foreground"
           >
-            <Link href="/tiendas">
+            <Link href="/tienda">
               <ArrowLeft className="mr-1 h-4 w-4" />
-              Tiendas
+              Tienda
             </Link>
           </Button>
 
@@ -302,14 +292,14 @@ export default function MyStoreOrders() {
                 Mis pedidos
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Consulta el estado de tus compras en todas las tiendas.
+                Consulta el estado de tus compras.
               </p>
             </div>
           </div>
         </div>
 
         <div className="rounded-[1.5rem] border border-border/70 bg-card/90 p-3.5 shadow-sm backdrop-blur-sm sm:p-4">
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <Input
               id="my-order-id"
               aria-label="N.º de pedido"
@@ -327,19 +317,6 @@ export default function MyStoreOrders() {
                 {STATUS_FILTER_OPTIONS.map((opt) => (
                   <SelectItem key={opt.value} value={opt.value}>
                     {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={storeFilter} onValueChange={setStoreFilter}>
-              <SelectTrigger className={fieldClass} aria-label="Tienda">
-                <SelectValue placeholder="Tienda" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las tiendas</SelectItem>
-                {storeOptions.map(([id, name]) => (
-                  <SelectItem key={id} value={String(id)}>
-                    {name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -384,9 +361,9 @@ export default function MyStoreOrders() {
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
                 <Store className="h-6 w-6" />
               </span>
-              <p className="text-sm text-muted-foreground">Aún no tienes pedidos en tiendas.</p>
+              <p className="text-sm text-muted-foreground">Aún no tienes pedidos.</p>
               <Button asChild variant="outline" className="rounded-full">
-                <Link href="/tiendas">Explorar tiendas</Link>
+                <Link href="/tienda">Ir a la tienda</Link>
               </Button>
             </div>
           ) : (
