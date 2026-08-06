@@ -337,6 +337,11 @@ export const insertStoreCategorySchema = z.object({
   name: z.string().trim().min(1, "El nombre es obligatorio").max(120),
   description: z.string().trim().max(500).optional().nullable(),
   productIds: z.array(z.number().int().positive()).optional().default([]),
+  /**
+   * Si true, los productos de esta categoría no aparecen en el filtro «Todo» de la vitrina;
+   * sí al filtrar por esta u otras categorías a las que pertenezcan.
+   */
+  hideFromShowcaseAll: z.boolean().optional().default(false),
 });
 
 export type InsertStoreCategory = z.infer<typeof insertStoreCategorySchema>;
@@ -350,6 +355,7 @@ export type StoreCategory = {
   storeId: number;
   name: string;
   description: string | null;
+  hideFromShowcaseAll: boolean;
   createdAt: Date | string;
   updatedAt: Date | string;
 };

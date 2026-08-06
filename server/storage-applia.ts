@@ -3488,6 +3488,7 @@ export class InMemoryStorage implements IStorage {
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ?? null,
+      hideFromShowcaseAll: input.hideFromShowcaseAll === true,
       createdAt: now,
       updatedAt: now,
     };
@@ -3508,6 +3509,9 @@ export class InMemoryStorage implements IStorage {
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.description !== undefined
         ? { description: input.description?.trim() ? input.description.trim() : null }
+        : {}),
+      ...(input.hideFromShowcaseAll !== undefined
+        ? { hideFromShowcaseAll: input.hideFromShowcaseAll === true }
         : {}),
       updatedAt: new Date(),
     };
