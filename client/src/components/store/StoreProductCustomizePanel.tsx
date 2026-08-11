@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ImageIcon, Loader2, Minus, Plus, ShoppingBag } from "lucide-react";
 import { buildCustomizedProductDisplayName } from "@shared/store-cart-schema";
+import { resolveAdditionalDisplayPrice } from "@shared/store-schema";
 import type { StoreShowcaseProduct } from "@/hooks/use-store-showcase";
 import { Button } from "@/components/ui/button";
 import { StoreSelectableChip } from "@/components/store/StoreSelectableChip";
@@ -16,6 +17,7 @@ function formatPrice(value: number, currencyLabel?: string) {
 
 export function productNeedsCustomization(product: StoreShowcaseProduct): boolean {
   return (
+    (product.sizes?.length ?? 0) > 0 ||
     (product.ingredients?.length ?? 0) > 0 ||
     (product.removableIngredients?.length ?? 0) > 0 ||
     (product.additionals?.length ?? 0) > 0
@@ -25,6 +27,7 @@ export function productNeedsCustomization(product: StoreShowcaseProduct): boolea
 export type ProductCustomizeSelection = {
   productId: number;
   quantity: number;
+  sizeId: string | null;
   removedIngredientMaterialIds: number[];
   additionalIngredientMaterialIds: number[];
   displayName: string;
@@ -46,17 +49,22 @@ export function StoreProductCustomizePanel({
   confirming,
   canAddToCart = true,
 }: StoreProductCustomizePanelProps) {
+  const sizes = product.sizes ?? [];
+  const hasSizes = sizes.length > 0;
+  const [sizeId, setSizeId] = useState<string | null>(hasSizes ? sizes[0]?.id ?? null : null);
   const [removedIds, setRemovedIds] = useState<number[]>([]);
   const [additionalIds, setAdditionalIds] = useState<number[]>([]);
   const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
+    setSizeId(hasSizes ? sizes[0]?.id ?? null : null);
     setRemovedIds([]);
     setAdditionalIds([]);
     setQuantity(1);
   }, [product.id]);
 
   const imageUrl = product.imageUrls[0]?.trim();
+  const description = product.description?.trim() ?? "";
   const removable = product.removableIngredients ?? [];
   const additionals = product.additionals ?? [];
   const additionalIdsSet = useMemo(
@@ -69,6 +77,8 @@ export function StoreProductCustomizePanel({
     [product.ingredients, additionalIdsSet],
   );
   const removableSet = useMemo(() => new Set(removedIds), [removedIds]);
+  const selectedSize = sizes.find((s) => s.id === sizeId) ?? null;
+  const visualCurrencyId = product.displayCurrencyId ?? "usd";
 
   const availableAdditionals = useMemo(
     () => additionals.filter((a) => !removableSet.has(a.id)),
@@ -95,17 +105,32 @@ export function StoreProductCustomizePanel({
     () =>
       additionalIds.reduce((sum, id) => {
         const row = availableAdditionals.find((a) => a.id === id);
-        return sum + (row?.price ?? 0);
+        if (!row) return sum;
+        return (
+          sum +
+          resolveAdditionalDisplayPrice(
+            {
+              ingredientMaterialId: row.id,
+              price: row.price,
+              pricesByCurrency: row.pricesByCurrency ?? {},
+              pricesBySize: row.pricesBySize ?? {},
+            },
+            visualCurrencyId,
+            sizeId,
+          )
+        );
       }, 0),
-    [additionalIds, availableAdditionals],
+    [additionalIds, availableAdditionals, visualCurrencyId, sizeId],
   );
 
-  const unitPrice = product.price + extrasPrice;
+  const basePrice = selectedSize?.price ?? product.price;
+  const unitPrice = basePrice + extrasPrice;
   const lineTotal = unitPrice * quantity;
   const displayName = buildCustomizedProductDisplayName(
     product.name,
     selectedAdditionalNames,
     selectedRemovedNames,
+    selectedSize?.name,
   );
 
   function toggleRemoved(id: number) {
@@ -124,9 +149,11 @@ export function StoreProductCustomizePanel({
   }
 
   async function handleConfirm() {
+    if (hasSizes && !sizeId) return;
     await onConfirm({
       productId: product.id,
       quantity,
+      sizeId: hasSizes ? sizeId : null,
       removedIngredientMaterialIds: [...removedIds].sort((a, b) => a - b),
       additionalIngredientMaterialIds: [...additionalIds].sort((a, b) => a - b),
       displayName,
@@ -165,14 +192,55 @@ export function StoreProductCustomizePanel({
           ) : null}
         </div>
 
-        {product.description ? (
+        {description ? (
           <section className="mt-4 border-t border-border/70 pt-4 space-y-2">
             <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Descripción
             </h3>
             <p className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
-              {product.description}
+              {description}
             </p>
+          </section>
+        ) : null}
+
+        {/* Tamaños: siempre justo debajo de descripción (o del precio si no hay descripción). */}
+        {hasSizes ? (
+          <section className="mt-4 border-t border-border/70 pt-4 space-y-2.5">
+            <div className="space-y-1">
+              <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Tamaño
+              </h3>
+              <p className="text-xs text-muted-foreground">Elige el tamaño del producto.</p>
+            </div>
+            <div className="grid gap-2">
+              {sizes.map((size) => {
+                const active = sizeId === size.id;
+                return (
+                  <button
+                    key={size.id}
+                    type="button"
+                    onClick={() => setSizeId(size.id)}
+                    className={cn(
+                      "flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors",
+                      active
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border bg-background hover:bg-muted/50",
+                    )}
+                    aria-pressed={active}
+                  >
+                    <span className="font-medium">{size.name}</span>
+                    <span
+                      className={cn(
+                        "shrink-0 text-xs font-semibold tabular-nums",
+                        active ? "text-primary" : "text-muted-foreground",
+                      )}
+                    >
+                      {formatPrice(size.price, product.displayCurrencyLabel)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </section>
         ) : null}
 
@@ -230,6 +298,16 @@ export function StoreProductCustomizePanel({
             <div className="grid gap-2">
               {availableAdditionals.map((item) => {
                 const active = additionalIds.includes(item.id);
+                const itemPrice = resolveAdditionalDisplayPrice(
+                  {
+                    ingredientMaterialId: item.id,
+                    price: item.price,
+                    pricesByCurrency: item.pricesByCurrency ?? {},
+                    pricesBySize: item.pricesBySize ?? {},
+                  },
+                  visualCurrencyId,
+                  sizeId,
+                );
                 return (
                   <button
                     key={item.id}
@@ -250,7 +328,7 @@ export function StoreProductCustomizePanel({
                         active ? "text-primary" : "text-muted-foreground",
                       )}
                     >
-                      +{formatPrice(item.price, product.displayCurrencyLabel)}
+                      +{formatPrice(itemPrice, product.displayCurrencyLabel)}
                     </span>
                   </button>
                 );
@@ -297,7 +375,7 @@ export function StoreProductCustomizePanel({
             type="button"
             className="flex-1 h-10 rounded-full"
             onClick={() => void handleConfirm()}
-            disabled={confirming || !canAddToCart}
+            disabled={confirming || !canAddToCart || (hasSizes && !sizeId)}
           >
             {confirming ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Agregar

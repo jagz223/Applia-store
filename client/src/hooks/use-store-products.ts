@@ -2,6 +2,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InsertStoreProduct, UpdateStoreProduct } from "@shared/store-schema";
 import { ingredientMaterialKey } from "@shared/store-slug";
 
+export type StoreProductSizeSummary = {
+  id: string;
+  name: string;
+  pricesByCurrency: Record<string, number>;
+  price?: number;
+};
+
+export type StoreProductAdditionalSummary = {
+  ingredientMaterialId: number;
+  price: number;
+  pricesByCurrency?: Record<string, number>;
+  pricesBySize?: Record<string, Record<string, number>>;
+};
+
 export type StoreProductSummary = {
   id: number;
   storeId: number;
@@ -9,12 +23,13 @@ export type StoreProductSummary = {
   description: string | null;
   price: number;
   pricesByCurrency?: Record<string, number>;
+  sizes?: StoreProductSizeSummary[];
   displayCurrencyId?: string;
   displayCurrencyLabel?: string;
   categoryIds: number[];
   ingredientMaterialIds: number[];
   removableIngredientMaterialIds?: number[];
-  ingredientAdditionals?: { ingredientMaterialId: number; price: number }[];
+  ingredientAdditionals?: StoreProductAdditionalSummary[];
   imageUrls: string[];
   showOnShowcase: boolean;
   createdAt: string;

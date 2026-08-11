@@ -56,22 +56,46 @@ export function StoreProductDetailDialog({
               </dd>
             </div>
           ) : null}
-          <div>
-            <dt className="font-medium text-muted-foreground">Precios</dt>
-            <dd className="space-y-1">
-              {product.pricesByCurrency && Object.keys(product.pricesByCurrency).length > 0 ? (
-                Object.entries(product.pricesByCurrency).map(([id, value]) => (
-                  <p key={id} className="text-base font-semibold">
-                    {formatPrice(value, currencyLabelForId(id, []))}
+          {(product.sizes?.length ?? 0) > 0 ? (
+            <div>
+              <dt className="font-medium text-muted-foreground">Tamaños y precios</dt>
+              <dd className="space-y-3">
+                {product.sizes!.map((size) => (
+                  <div key={size.id} className="space-y-1">
+                    <p className="font-medium">{size.name}</p>
+                    {Object.keys(size.pricesByCurrency ?? {}).length > 0 ? (
+                      Object.entries(size.pricesByCurrency).map(([id, value]) => (
+                        <p key={id} className="text-sm font-semibold">
+                          {formatPrice(value, currencyLabelForId(id, []))}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-sm font-semibold">
+                        {formatPrice(size.price ?? product.price, product.displayCurrencyLabel)}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </dd>
+            </div>
+          ) : (
+            <div>
+              <dt className="font-medium text-muted-foreground">Precios</dt>
+              <dd className="space-y-1">
+                {product.pricesByCurrency && Object.keys(product.pricesByCurrency).length > 0 ? (
+                  Object.entries(product.pricesByCurrency).map(([id, value]) => (
+                    <p key={id} className="text-base font-semibold">
+                      {formatPrice(value, currencyLabelForId(id, []))}
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-base font-semibold">
+                    {formatPrice(product.price, product.displayCurrencyLabel)}
                   </p>
-                ))
-              ) : (
-                <p className="text-base font-semibold">
-                  {formatPrice(product.price, product.displayCurrencyLabel)}
-                </p>
-              )}
-            </dd>
-          </div>
+                )}
+              </dd>
+            </div>
+          )}
           {product.description ? (
             <div>
               <dt className="font-medium text-muted-foreground">Descripción</dt>

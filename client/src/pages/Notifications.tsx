@@ -316,7 +316,7 @@ function getTitle(type: string, data?: any, conversationSenderName?: string): st
     if (d.type === "withdrawal_processed_by_other") {
       return d.action === "rejected" ? "Retiro rechazado por otro admin" : "Retiro aprobado por otro admin";
     }
-    if (d.type === "go_panic") return "Pánico Genfeb Go";
+    if (d.type === "go_panic") return "Pánico Go";
     return "Notificación del administrador";
   }
 
@@ -784,7 +784,7 @@ export default function Notifications() {
         <DialogContent className="max-w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {detailNotification?.data?.type === "go_panic" ? "Pánico Genfeb Go" : "Detalle de la notificación"}
+              {detailNotification?.data?.type === "go_panic" ? "Pánico Go" : "Detalle de la notificación"}
             </DialogTitle>
             <DialogDescription className="sr-only">Contenido íntegro de la alerta seleccionada.</DialogDescription>
           </DialogHeader>
