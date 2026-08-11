@@ -83,11 +83,15 @@ import {
   type StoreCategory,
   type StorePromotion,
   resolveStorePromotionImageUrl,
+  resolveAdditionalDisplayPrice,
   canEnableStoreFulfillmentOptions,
   STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE,
   normalizeStoreLocation,
   normalizeStoreCurrencyFields,
   normalizeStoreDeliveryFares,
+  normalizeStoreProductSizes,
+  type StoreProductSize,
+  type StoreProductIngredientAdditional,
 } from "@shared/store-schema";
 import {
   DOLARAPI_VE_BASE,
@@ -178,13 +182,24 @@ function serializeStoreProduct(
 ) {
   const visualCurrencyId = storeCurrency?.visualCurrencyId ?? STORE_CURRENCY_USD_ID;
   const displayPrice = resolveProductDisplayPrice(product, visualCurrencyId);
+  const sizes = product.sizes ?? [];
+  const description = product.description?.trim() || null;
   return {
     id: product.id,
     storeId: product.storeId,
     name: product.name,
-    description: product.description,
+    description,
     price: displayPrice,
     pricesByCurrency: product.pricesByCurrency ?? {},
+    sizes: sizes.map((s) => ({
+      id: s.id,
+      name: s.name,
+      pricesByCurrency: s.pricesByCurrency ?? {},
+      price: resolveProductDisplayPrice(
+        { price: 0, pricesByCurrency: s.pricesByCurrency },
+        visualCurrencyId,
+      ),
+    })),
     displayCurrencyId: visualCurrencyId,
     displayCurrencyLabel: currencyLabelForId(
       visualCurrencyId,
@@ -267,13 +282,24 @@ function serializeStoreShowcaseProduct(
   const ingredientMaterialIds = product.ingredientMaterialIds ?? [];
   const removableIngredientMaterialIds = product.removableIngredientMaterialIds ?? [];
   const ingredientAdditionals = product.ingredientAdditionals ?? [];
+  const sizes = product.sizes ?? [];
+  const description = product.description?.trim() || null;
   const resolveName = (id: number) => ingredientNameById.get(id) ?? `Item #${id}`;
   return {
     id: product.id,
     name: product.name,
-    description: product.description,
+    description,
     price: displayPrice,
     pricesByCurrency: product.pricesByCurrency ?? {},
+    sizes: sizes.map((s) => ({
+      id: s.id,
+      name: s.name,
+      pricesByCurrency: s.pricesByCurrency ?? {},
+      price: resolveProductDisplayPrice(
+        { price: 0, pricesByCurrency: s.pricesByCurrency },
+        currency.currencyVisualId,
+      ),
+    })),
     displayCurrencyId: currency.currencyVisualId,
     displayCurrencyLabel: currencyLabelForId(currency.currencyVisualId, currency.currencyExtras),
     imageUrls: product.imageUrls ?? [],
@@ -286,7 +312,9 @@ function serializeStoreShowcaseProduct(
     additionals: ingredientAdditionals.map((a) => ({
       id: a.ingredientMaterialId,
       name: resolveName(a.ingredientMaterialId),
-      price: a.price,
+      price: resolveAdditionalDisplayPrice(a, currency.currencyVisualId),
+      pricesByCurrency: a.pricesByCurrency ?? {},
+      pricesBySize: a.pricesBySize ?? {},
     })),
   };
 }
@@ -302,6 +330,59 @@ function assertProductPricesForAcceptedCurrencies(
     if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
       const label = currencyLabelForId(id, currency.currencyExtras);
       return `Falta el precio en ${label}.`;
+    }
+  }
+  return null;
+}
+
+function assertProductSizesAndAdditionalsPrices(
+  store: Store,
+  sizes: StoreProductSize[],
+  basePricesByCurrency: Record<string, number> | undefined,
+  additionals: StoreProductIngredientAdditional[],
+): string | null {
+  const currency = normalizeStoreCurrencyFields(store);
+  const accepted = currency.currencyAcceptedPaymentIds;
+
+  if (sizes.length > 0) {
+    if (sizes.length < 2) {
+      return "Indica al menos 2 tamaños o desactiva «varios tamaños».";
+    }
+    for (const size of sizes) {
+      const err = assertProductPricesForAcceptedCurrencies(store, size.pricesByCurrency);
+      if (err) return `Tamaño «${size.name}»: ${err}`;
+    }
+    for (const additional of additionals) {
+      for (const size of sizes) {
+        const map = additional.pricesBySize?.[size.id] ?? {};
+        for (const currencyId of accepted) {
+          const value = map[currencyId];
+          if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+            const label = currencyLabelForId(currencyId, currency.currencyExtras);
+            return `Adicional: falta precio en ${label} para el tamaño «${size.name}».`;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  const baseErr = assertProductPricesForAcceptedCurrencies(store, basePricesByCurrency);
+  if (baseErr) return baseErr;
+
+  for (const additional of additionals) {
+    const map = additional.pricesByCurrency ?? {};
+    const hasAnyCurrency = accepted.some((id) => typeof map[id] === "number" && map[id]! > 0);
+    if (hasAnyCurrency) {
+      for (const currencyId of accepted) {
+        const value = map[currencyId];
+        if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+          const label = currencyLabelForId(currencyId, currency.currencyExtras);
+          return `Adicional: falta el precio en ${label}.`;
+        }
+      }
+    } else if (!(typeof additional.price === "number" && additional.price > 0)) {
+      return "Adicional: indica un precio válido.";
     }
   }
   return null;
@@ -1317,7 +1398,14 @@ export function registerStoreRoutes(app: Express): void {
       if (parsed.data.quantity > 0) {
         const probe =
           parsed.data.kind === "product"
-            ? { kind: "product" as const, productId: parsed.data.productId!, quantity: parsed.data.quantity }
+            ? {
+                kind: "product" as const,
+                productId: parsed.data.productId!,
+                quantity: parsed.data.quantity,
+                sizeId: parsed.data.sizeId ?? null,
+                removedIngredientMaterialIds: parsed.data.removedIngredientMaterialIds ?? [],
+                additionalIngredientMaterialIds: parsed.data.additionalIngredientMaterialIds ?? [],
+              }
             : { kind: "promotion" as const, promotionId: parsed.data.promotionId!, quantity: parsed.data.quantity };
         await validateCartItemForStore(storeId, probe);
       }
@@ -1906,10 +1994,19 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
-      const priceError = assertProductPricesForAcceptedCurrencies(store, parsed.data.pricesByCurrency);
+      const sizes = normalizeStoreProductSizes(parsed.data.sizes);
+      const priceError = assertProductSizesAndAdditionalsPrices(
+        store,
+        sizes,
+        parsed.data.pricesByCurrency,
+        parsed.data.ingredientAdditionals ?? [],
+      );
       if (priceError) return res.status(400).json({ message: priceError });
       await assertStoreCategoryIds(storeId, parsed.data.categoryIds ?? []);
-      const product = await appliaStorage.createStoreProduct(storeId, parsed.data);
+      const product = await appliaStorage.createStoreProduct(storeId, {
+        ...parsed.data,
+        sizes,
+      });
       const currency = normalizeStoreCurrencyFields(store);
       return res.status(201).json({
         product: serializeStoreProduct(product, {
@@ -1974,24 +2071,36 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
-      if (parsed.data.pricesByCurrency !== undefined || parsed.data.price !== undefined) {
-        const existing = await appliaStorage.getStoreProduct(storeId, productId);
-        if (!existing) return res.status(404).json({ message: "Producto no encontrado." });
-        const mergedPrices = {
-          ...(existing.pricesByCurrency ?? {}),
-          ...(parsed.data.pricesByCurrency ?? {}),
-        };
-        if (parsed.data.price !== undefined && parsed.data.pricesByCurrency === undefined) {
-          const currency = normalizeStoreCurrencyFields(store);
-          mergedPrices[currency.currencyVisualId] = parsed.data.price;
-        }
-        const priceError = assertProductPricesForAcceptedCurrencies(store, mergedPrices);
-        if (priceError) return res.status(400).json({ message: priceError });
+      const existing = await appliaStorage.getStoreProduct(storeId, productId);
+      if (!existing) return res.status(404).json({ message: "Producto no encontrado." });
+      const sizes =
+        parsed.data.sizes !== undefined
+          ? normalizeStoreProductSizes(parsed.data.sizes)
+          : existing.sizes ?? [];
+      const mergedPrices = {
+        ...(existing.pricesByCurrency ?? {}),
+        ...(parsed.data.pricesByCurrency ?? {}),
+      };
+      if (parsed.data.price !== undefined && parsed.data.pricesByCurrency === undefined) {
+        const currency = normalizeStoreCurrencyFields(store);
+        mergedPrices[currency.currencyVisualId] = parsed.data.price;
       }
+      const additionals =
+        parsed.data.ingredientAdditionals ?? existing.ingredientAdditionals ?? [];
+      const priceError = assertProductSizesAndAdditionalsPrices(
+        store,
+        sizes,
+        mergedPrices,
+        additionals,
+      );
+      if (priceError) return res.status(400).json({ message: priceError });
       if (parsed.data.categoryIds != null) {
         await assertStoreCategoryIds(storeId, parsed.data.categoryIds);
       }
-      const product = await appliaStorage.updateStoreProduct(storeId, productId, parsed.data);
+      const product = await appliaStorage.updateStoreProduct(storeId, productId, {
+        ...parsed.data,
+        ...(parsed.data.sizes !== undefined ? { sizes } : {}),
+      });
       const currency = normalizeStoreCurrencyFields(store);
       return res.json({
         product: serializeStoreProduct(product, {

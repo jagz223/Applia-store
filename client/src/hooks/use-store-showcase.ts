@@ -9,6 +9,15 @@ export type StoreShowcaseAdditional = {
   id: number;
   name: string;
   price: number;
+  pricesByCurrency?: Record<string, number>;
+  pricesBySize?: Record<string, Record<string, number>>;
+};
+
+export type StoreShowcaseSize = {
+  id: string;
+  name: string;
+  price: number;
+  pricesByCurrency?: Record<string, number>;
 };
 
 export type StoreShowcaseProduct = {
@@ -17,6 +26,7 @@ export type StoreShowcaseProduct = {
   description: string | null;
   price: number;
   pricesByCurrency?: Record<string, number>;
+  sizes?: StoreShowcaseSize[];
   displayCurrencyId?: string;
   displayCurrencyLabel?: string;
   imageUrls: string[];

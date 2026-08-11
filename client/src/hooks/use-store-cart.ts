@@ -14,6 +14,7 @@ export type StoreCartLine = {
   lineKey: string;
   productId?: number;
   promotionId?: number;
+  sizeId?: string | null;
   name: string;
   price: number;
   quantity: number;

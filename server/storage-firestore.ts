@@ -62,6 +62,8 @@ import {
   normalizeStoreCurrencyFields,
   normalizeStoreDeliveryFares,
   normalizeStoreProductIngredientOptions,
+  normalizeStoreProductSizes,
+  deriveProductPricesFromSizes,
   resolveStoreProductPriceFields,
   DEFAULT_STORE_DELIVERY_FARES,
   type Store,
@@ -4631,9 +4633,12 @@ class FirestoreStorageImpl implements IStorage {
     const id = await this.getNextId("store_products");
     const now = new Date();
     const store = await this.getStoreById(storeId);
+    const visualCurrencyId = store?.currencyVisualId ?? STORE_CURRENCY_USD_ID;
+    const sizes = normalizeStoreProductSizes(input.sizes);
+    const derivedFromSizes = deriveProductPricesFromSizes(sizes, visualCurrencyId);
     const { price, pricesByCurrency } = resolveStoreProductPriceFields(
-      input,
-      store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+      derivedFromSizes ?? input,
+      visualCurrencyId,
     );
     const ingredientOptions = normalizeStoreProductIngredientOptions(input);
     const payload: StoreProduct = {
@@ -4643,6 +4648,7 @@ class FirestoreStorageImpl implements IStorage {
       description: input.description?.trim() ?? null,
       price,
       pricesByCurrency,
+      sizes,
       categoryIds: input.categoryIds ?? [],
       ...ingredientOptions,
       imageUrls: input.imageUrls ?? [],
@@ -4666,14 +4672,37 @@ class FirestoreStorageImpl implements IStorage {
     const patch: Record<string, unknown> = { updatedAt: now };
     if (input.name !== undefined) patch.name = input.name.trim();
     if (input.description !== undefined) patch.description = input.description?.trim() ?? null;
-    if (input.price !== undefined || input.pricesByCurrency !== undefined) {
-      const store = await this.getStoreById(storeId);
+    const store = await this.getStoreById(storeId);
+    const visualCurrencyId = store?.currencyVisualId ?? STORE_CURRENCY_USD_ID;
+    if (input.sizes !== undefined) {
+      const sizes = normalizeStoreProductSizes(input.sizes);
+      patch.sizes = sizes;
+      const derived = deriveProductPricesFromSizes(sizes, visualCurrencyId);
+      if (derived) {
+        patch.price = derived.price;
+        patch.pricesByCurrency = derived.pricesByCurrency;
+      } else if (input.price !== undefined || input.pricesByCurrency !== undefined) {
+        const priceFields = resolveStoreProductPriceFields(
+          {
+            price: input.price ?? existing.price,
+            pricesByCurrency: input.pricesByCurrency ?? existing.pricesByCurrency,
+          },
+          visualCurrencyId,
+        );
+        patch.price = priceFields.price;
+        patch.pricesByCurrency = priceFields.pricesByCurrency;
+      } else {
+        const priceFields = resolveStoreProductPriceFields(existing, visualCurrencyId);
+        patch.price = priceFields.price;
+        patch.pricesByCurrency = priceFields.pricesByCurrency;
+      }
+    } else if (input.price !== undefined || input.pricesByCurrency !== undefined) {
       const priceFields = resolveStoreProductPriceFields(
         {
           price: input.price ?? existing.price,
           pricesByCurrency: input.pricesByCurrency ?? existing.pricesByCurrency,
         },
-        store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+        visualCurrencyId,
       );
       patch.price = priceFields.price;
       patch.pricesByCurrency = priceFields.pricesByCurrency;
@@ -5131,10 +5160,12 @@ class FirestoreStorageImpl implements IStorage {
   private normalizeStoreCartItems(items: StoreCartItem[]): StoreCartItem[] {
     return items.map((item) => {
       if (item.kind === "product") {
+        const sizeId = String(item.sizeId ?? "").trim() || null;
         return {
           kind: "product" as const,
           productId: item.productId,
           quantity: Math.max(1, Math.min(9999, Math.floor(item.quantity))),
+          sizeId,
           removedIngredientMaterialIds: Array.isArray(item.removedIngredientMaterialIds)
             ? item.removedIngredientMaterialIds
                 .map((n) => Number(n))
@@ -5163,8 +5194,8 @@ class FirestoreStorageImpl implements IStorage {
     const storeId = Number(data.storeId);
     if (!userId || !Number.isFinite(storeId)) return undefined;
     const rawItems = Array.isArray(data.items) ? data.items : [];
-    const items: StoreCartItem[] = rawItems
-      .map((row) => {
+    const items = rawItems
+      .map((row): StoreCartItem | null => {
         if (!row || typeof row !== "object") return null;
         const r = row as Record<string, unknown>;
         const kind = r.kind === "promotion" ? "promotion" : r.kind === "product" ? "product" : null;
@@ -5174,6 +5205,7 @@ class FirestoreStorageImpl implements IStorage {
         if (kind === "product") {
           const productId = Number(r.productId);
           if (!Number.isFinite(productId) || productId <= 0) return null;
+          const sizeId = String(r.sizeId ?? "").trim() || null;
           const removedIngredientMaterialIds = Array.isArray(r.removedIngredientMaterialIds)
             ? r.removedIngredientMaterialIds
                 .map((n) => Number(n))
@@ -5190,6 +5222,7 @@ class FirestoreStorageImpl implements IStorage {
             kind: "product" as const,
             productId,
             quantity: Math.floor(quantity),
+            sizeId,
             removedIngredientMaterialIds,
             additionalIngredientMaterialIds,
           };
@@ -5321,10 +5354,14 @@ class FirestoreStorageImpl implements IStorage {
     if (!data) return undefined;
     const id = Number(data.id ?? docId);
     if (!Number.isFinite(id)) return undefined;
-    const { price, pricesByCurrency } = resolveStoreProductPriceFields({
-      price: Number(data.price ?? 0),
-      pricesByCurrency: data.pricesByCurrency,
-    });
+    const sizes = normalizeStoreProductSizes(data.sizes);
+    const derivedFromSizes = deriveProductPricesFromSizes(sizes);
+    const { price, pricesByCurrency } = resolveStoreProductPriceFields(
+      derivedFromSizes ?? {
+        price: Number(data.price ?? 0),
+        pricesByCurrency: data.pricesByCurrency,
+      },
+    );
     const ingredientOptions = normalizeStoreProductIngredientOptions({
       ingredientMaterialIds: data.ingredientMaterialIds,
       removableIngredientMaterialIds: data.removableIngredientMaterialIds,
@@ -5337,6 +5374,7 @@ class FirestoreStorageImpl implements IStorage {
       description: data.description != null ? String(data.description) : null,
       price,
       pricesByCurrency,
+      sizes,
       categoryIds: Array.isArray(data.categoryIds)
         ? data.categoryIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
         : [],

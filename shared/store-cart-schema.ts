@@ -24,24 +24,31 @@ export function normalizeCartCustomizationIds(value: unknown): number[] {
 
 export function storeCartProductLineKey(input: {
   productId: number;
+  sizeId?: string | null;
   removedIngredientMaterialIds?: number[];
   additionalIngredientMaterialIds?: number[];
 }): string {
+  const sizeId = String(input.sizeId ?? "").trim();
   const removed = normalizeCartCustomizationIds(input.removedIngredientMaterialIds ?? []);
   const additionals = normalizeCartCustomizationIds(input.additionalIngredientMaterialIds ?? []);
-  return `p:${input.productId}:r:${removed.join(",")}:a:${additionals.join(",")}`;
+  return `p:${input.productId}:s:${sizeId}:r:${removed.join(",")}:a:${additionals.join(",")}`;
 }
 
-/** Nombre de vitrina/carrito: base + adicionales − ingredientes quitados. */
+/**
+ * Nombre de vitrina/carrito:
+ * `base [tamaño] + adicionales - quitados`
+ */
 export function buildCustomizedProductDisplayName(
   baseName: string,
   additionalNames: string[],
   removedNames: string[] = [],
+  sizeName?: string | null,
 ): string {
   const base = baseName.trim();
+  const size = String(sizeName ?? "").trim();
   const extras = additionalNames.map((n) => n.trim()).filter(Boolean);
   const removed = removedNames.map((n) => n.trim()).filter(Boolean);
-  const parts = [base];
+  const parts = [size ? `${base} ${size}` : base];
   for (const n of extras) parts.push(`+ ${n}`);
   for (const n of removed) parts.push(`- ${n}`);
   return parts.join(" ");
@@ -51,6 +58,8 @@ export const storeCartProductItemSchema = z.object({
   kind: z.literal("product"),
   productId: z.number().int().positive(),
   quantity: z.number().int().positive().max(9999),
+  /** Tamaño elegido (obligatorio si el producto tiene tamaños). */
+  sizeId: z.string().trim().min(1).max(64).optional().nullable(),
   /** Ingredientes/materiales que el cliente eligió quitar. */
   removedIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
   /** Adicionales elegidos (ids de ingredientMaterial). */
@@ -78,6 +87,7 @@ export const addStoreCartItemSchema = z
     productId: z.number().int().positive().optional(),
     promotionId: z.number().int().positive().optional(),
     quantity: z.number().int().positive().max(9999).optional().default(1),
+    sizeId: z.string().trim().min(1).max(64).optional().nullable(),
     removedIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
     additionalIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
   })
@@ -98,6 +108,7 @@ export const updateStoreCartItemSchema = z
     productId: z.number().int().positive().optional(),
     promotionId: z.number().int().positive().optional(),
     quantity: z.number().int().min(0).max(9999),
+    sizeId: z.string().trim().min(1).max(64).optional().nullable(),
     /** Identifica la variante de producto (misma clave que al añadir). */
     removedIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
     additionalIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
@@ -120,6 +131,7 @@ export const removeStoreCartItemSchema = z
     kind: z.enum(["product", "promotion"]),
     productId: z.number().int().positive().optional(),
     promotionId: z.number().int().positive().optional(),
+    sizeId: z.string().trim().min(1).max(64).optional().nullable(),
     removedIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
     additionalIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
     lineKey: z.string().trim().min(1).max(200).optional(),

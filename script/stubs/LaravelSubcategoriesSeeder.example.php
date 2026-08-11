@@ -2,12 +2,12 @@
 
 /**
  * Ejemplo para Laravel (IDs de categoría deben coincidir con tu tabla `categories`).
- * Este proyecto usa Firestore: ejecuta `npm run seed:subcategories` en genfeb.
+ * Este proyecto usa Firestore: ejecuta `npm run seed:subcategories` en store.
  *
  * Man Go unificado: todas las subcategorías de oficios/mantenimiento van bajo `technical`
  * (no uses categoría `maintenance`, retirada del catálogo).
  *
- * php artisan db:seed --class=SubcategoriesFromGenfebSeeder
+ * php artisan db:seed --class=SubcategoriesFromStoreSeeder
  */
 
 namespace Database\Seeders;
@@ -15,7 +15,7 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
-class SubcategoriesFromGenfebSeeder extends Seeder
+class SubcategoriesFromStoreSeeder extends Seeder
 {
     public function run(): void
     {

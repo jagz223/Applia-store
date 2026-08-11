@@ -18,10 +18,14 @@ import {
   type StoreFulfillmentMode,
 } from "@shared/store-fulfillment";
 import type { StoreProduct, StorePromotion, StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
-import { normalizeStoreDeliveryFares, normalizeStoreLocation } from "@shared/store-schema";
-import { resolveStorePromotionImageUrl } from "@shared/store-schema";
+import {
+  normalizeStoreDeliveryFares,
+  normalizeStoreLocation,
+  resolveAdditionalDisplayPrice,
+  resolveStorePromotionImageUrl,
+} from "@shared/store-schema";
 import type { StoreCheckoutPaymentMethod } from "@shared/store-order-schema";
-import { resolveProductDisplayPrice } from "@shared/store-currency-schema";
+import { resolveProductDisplayPrice, STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
 import { appliaStorage } from "./storage-applia";
 
 export type EnrichedStoreCartLine = {
@@ -30,6 +34,7 @@ export type EnrichedStoreCartLine = {
   lineKey: string;
   productId?: number;
   promotionId?: number;
+  sizeId?: string | null;
   name: string;
   price: number;
   quantity: number;
@@ -59,10 +64,12 @@ export type EnrichedStoreCart = {
 
 export function addBodyToCartItem(body: AddStoreCartItem): StoreCartItem {
   if (body.kind === "product") {
+    const sizeId = String(body.sizeId ?? "").trim() || null;
     return {
       kind: "product",
       productId: body.productId!,
       quantity: body.quantity ?? 1,
+      sizeId,
       removedIngredientMaterialIds: normalizeCartCustomizationIds(
         body.removedIngredientMaterialIds ?? [],
       ),
@@ -82,6 +89,7 @@ export function cartLineKey(item: StoreCartItem): string {
   if (item.kind === "promotion") return `m:${item.promotionId}`;
   return storeCartProductLineKey({
     productId: item.productId,
+    sizeId: item.sizeId,
     removedIngredientMaterialIds: item.removedIngredientMaterialIds,
     additionalIngredientMaterialIds: item.additionalIngredientMaterialIds,
   });
@@ -89,6 +97,7 @@ export function cartLineKey(item: StoreCartItem): string {
 
 function productPatchToKey(patch: {
   productId?: number;
+  sizeId?: string | null;
   removedIngredientMaterialIds?: number[];
   additionalIngredientMaterialIds?: number[];
   lineKey?: string;
@@ -97,6 +106,7 @@ function productPatchToKey(patch: {
   if (!patch.productId) return null;
   return storeCartProductLineKey({
     productId: patch.productId,
+    sizeId: patch.sizeId,
     removedIngredientMaterialIds: patch.removedIngredientMaterialIds,
     additionalIngredientMaterialIds: patch.additionalIngredientMaterialIds,
   });
@@ -133,10 +143,13 @@ export function setCartItemQuantity(items: StoreCartItem[], patch: UpdateStoreCa
   const quantity = Math.min(9999, patch.quantity);
   const idx = items.findIndex((i) => cartLineKey(i) === key);
   const existing = idx >= 0 && items[idx]?.kind === "product" ? (items[idx] as StoreCartProductItem) : null;
+  const sizeId =
+    String(existing?.sizeId ?? patch.sizeId ?? "").trim() || null;
   const incoming: StoreCartProductItem = {
     kind: "product",
     productId: existing?.productId ?? patch.productId!,
     quantity,
+    sizeId,
     removedIngredientMaterialIds: normalizeCartCustomizationIds(
       existing?.removedIngredientMaterialIds ?? patch.removedIngredientMaterialIds ?? [],
     ),
@@ -161,13 +174,21 @@ function validateProductCustomization(
   product: StoreProduct,
   item: StoreCartProductItem,
 ): boolean {
+  const sizes = product.sizes ?? [];
+  const sizeId = String(item.sizeId ?? "").trim();
+  if (sizes.length > 0) {
+    if (!sizeId || !sizes.some((s) => s.id === sizeId)) return false;
+  } else if (sizeId) {
+    return false;
+  }
+
   const removed = normalizeCartCustomizationIds(item.removedIngredientMaterialIds ?? []);
   const additionals = normalizeCartCustomizationIds(item.additionalIngredientMaterialIds ?? []);
   const removable = new Set(
     normalizeCartCustomizationIds(product.removableIngredientMaterialIds ?? []),
   );
-  const additionalAllowed = new Map(
-    (product.ingredientAdditionals ?? []).map((a) => [a.ingredientMaterialId, a.price] as const),
+  const additionalAllowed = new Set(
+    (product.ingredientAdditionals ?? []).map((a) => a.ingredientMaterialId),
   );
   for (const id of removed) {
     if (!removable.has(id)) return false;
@@ -246,7 +267,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
   const productById = new Map(products.map((p) => [p.id, p]));
   const promotionById = new Map(promotions.map((p) => [p.id, p]));
   const ingredientNameById = new Map(ingredientsPage.items.map((i) => [i.id, i.name]));
-  const visualCurrencyId = store?.currencyVisualId;
+  const visualCurrencyId = store?.currencyVisualId ?? STORE_CURRENCY_USD_ID;
 
   const items: EnrichedStoreCartLine[] = [];
   let subtotal = 0;
@@ -259,16 +280,21 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     if (line.kind === "product") {
       const product = productById.get(line.productId);
       if (!product) continue;
+      const sizeId = String(line.sizeId ?? "").trim() || null;
+      const size = sizeId ? (product.sizes ?? []).find((s) => s.id === sizeId) : undefined;
       const removed = normalizeCartCustomizationIds(line.removedIngredientMaterialIds ?? []);
       const additionals = normalizeCartCustomizationIds(line.additionalIngredientMaterialIds ?? []);
-      const additionalPriceById = new Map(
-        (product.ingredientAdditionals ?? []).map((a) => [a.ingredientMaterialId, a.price]),
-      );
-      const extrasPrice = additionals.reduce(
-        (sum, id) => sum + (additionalPriceById.get(id) ?? 0),
-        0,
-      );
-      const basePrice = resolveProductDisplayPrice(product, visualCurrencyId);
+      const extrasPrice = additionals.reduce((sum, id) => {
+        const row = (product.ingredientAdditionals ?? []).find((a) => a.ingredientMaterialId === id);
+        if (!row) return sum;
+        return sum + resolveAdditionalDisplayPrice(row, visualCurrencyId, sizeId);
+      }, 0);
+      const basePrice = size
+        ? resolveProductDisplayPrice(
+            { price: 0, pricesByCurrency: size.pricesByCurrency },
+            visualCurrencyId,
+          )
+        : resolveProductDisplayPrice(product, visualCurrencyId);
       const unitPrice = basePrice + extrasPrice;
       const additionalNames = additionals.map(
         (id) => ingredientNameById.get(id) ?? `Item #${id}`,
@@ -280,6 +306,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
         product.name,
         additionalNames,
         removedNames,
+        size?.name,
       );
       const lineTotal = unitPrice * line.quantity;
       subtotal += lineTotal;
@@ -288,6 +315,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
         kind: "product",
         lineKey: cartLineKey(line),
         productId: product.id,
+        sizeId,
         name: displayName,
         price: unitPrice,
         quantity: line.quantity,

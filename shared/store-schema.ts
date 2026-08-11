@@ -173,11 +173,94 @@ export function normalizeStoreCurrencyFields(input: {
 }
 
 export const STORE_PRODUCT_MAX_IMAGES = 4;
+export const STORE_PRODUCT_MAX_SIZES = 20;
+
+export const storeProductSizeSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1).max(80),
+  pricesByCurrency: z.record(z.string().trim().min(1).max(64), z.number().positive()),
+});
+
+export type StoreProductSize = z.infer<typeof storeProductSizeSchema>;
+
+export function normalizeStoreProductSizes(value: unknown): StoreProductSize[] {
+  const list: unknown[] = Array.isArray(value)
+    ? value
+    : value && typeof value === "object"
+      ? Object.values(value as Record<string, unknown>)
+      : [];
+  if (list.length === 0) return [];
+  const out: StoreProductSize[] = [];
+  const seen = new Set<string>();
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const id = String(row.id ?? "").trim();
+    const name = String(row.name ?? "").trim();
+    if (!id || !name || seen.has(id)) continue;
+    const pricesByCurrency = normalizeProductPricesByCurrency(row.pricesByCurrency);
+    if (Object.keys(pricesByCurrency).length === 0) continue;
+    seen.add(id);
+    out.push({ id, name, pricesByCurrency });
+    if (out.length >= STORE_PRODUCT_MAX_SIZES) break;
+  }
+  return out;
+}
+
+/** Precio de listado: el menor entre tamaños en la moneda visual. */
+export function deriveProductPricesFromSizes(
+  sizes: StoreProductSize[],
+  visualCurrencyId: string = STORE_CURRENCY_USD_ID,
+): { price: number; pricesByCurrency: Record<string, number> } | null {
+  if (sizes.length === 0) return null;
+  let best: StoreProductSize | null = null;
+  let bestVisual = Infinity;
+  for (const size of sizes) {
+    const visual = size.pricesByCurrency[visualCurrencyId];
+    const fallback =
+      typeof visual === "number" && visual > 0
+        ? visual
+        : size.pricesByCurrency[STORE_CURRENCY_USD_ID] ??
+          Object.values(size.pricesByCurrency)[0] ??
+          0;
+    if (fallback > 0 && fallback < bestVisual) {
+      bestVisual = fallback;
+      best = size;
+    }
+  }
+  if (!best) {
+    const first = sizes[0];
+    return resolveStoreProductPriceFields(
+      { pricesByCurrency: first.pricesByCurrency },
+      visualCurrencyId,
+    );
+  }
+  return resolveStoreProductPriceFields(
+    { pricesByCurrency: best.pricesByCurrency },
+    visualCurrencyId,
+  );
+}
 
 export const storeProductIngredientAdditionalSchema = z.object({
   ingredientMaterialId: z.number().int().positive(),
-  /** Precio extra en USD (o moneda visual de la tienda) que define el administrador. */
+  /**
+   * Precio en moneda visual (compat / listado).
+   * Con tamaños se deriva del menor o del primer tamaño configurado.
+   */
   price: z.number().positive(),
+  /** Precios por moneda cuando el producto NO tiene tamaños. */
+  pricesByCurrency: z
+    .record(z.string().trim().min(1).max(64), z.number().positive())
+    .optional()
+    .default({}),
+  /** Con tamaños: sizeId → (currencyId → monto). */
+  pricesBySize: z
+    .record(
+      z.string().trim().min(1).max(64),
+      z.record(z.string().trim().min(1).max(64), z.number().positive()),
+    )
+    .optional()
+    .default({}),
 });
 
 export type StoreProductIngredientAdditional = z.infer<typeof storeProductIngredientAdditionalSchema>;
@@ -189,13 +272,72 @@ export function normalizeStoreProductIngredientAdditionals(
   const out: StoreProductIngredientAdditional[] = [];
   const seen = new Set<number>();
   for (const raw of value) {
-    const parsed = storeProductIngredientAdditionalSchema.safeParse(raw);
-    if (!parsed.success) continue;
-    if (seen.has(parsed.data.ingredientMaterialId)) continue;
-    seen.add(parsed.data.ingredientMaterialId);
-    out.push(parsed.data);
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const ingredientMaterialId = Number(row.ingredientMaterialId);
+    if (!Number.isFinite(ingredientMaterialId) || ingredientMaterialId <= 0) continue;
+    if (seen.has(ingredientMaterialId)) continue;
+
+    const pricesByCurrency = normalizeProductPricesByCurrency(row.pricesByCurrency);
+    const pricesBySizeRaw =
+      row.pricesBySize && typeof row.pricesBySize === "object" && !Array.isArray(row.pricesBySize)
+        ? (row.pricesBySize as Record<string, unknown>)
+        : {};
+    const pricesBySize: Record<string, Record<string, number>> = {};
+    for (const [sizeId, currencyMap] of Object.entries(pricesBySizeRaw)) {
+      const id = String(sizeId ?? "").trim();
+      if (!id) continue;
+      const normalized = normalizeProductPricesByCurrency(currencyMap);
+      if (Object.keys(normalized).length === 0) continue;
+      pricesBySize[id] = normalized;
+    }
+
+    let price =
+      typeof row.price === "number"
+        ? row.price
+        : Number.parseFloat(String(row.price ?? ""));
+    if (!Number.isFinite(price) || price <= 0) {
+      const fromCurrency = Object.values(pricesByCurrency)[0];
+      const fromSize = Object.values(pricesBySize)[0];
+      const fromSizeCurrency = fromSize ? Object.values(fromSize)[0] : undefined;
+      price = fromCurrency ?? fromSizeCurrency ?? 0;
+    }
+    if (!Number.isFinite(price) || price <= 0) continue;
+
+    seen.add(ingredientMaterialId);
+    out.push({
+      ingredientMaterialId,
+      price: Math.round(price * 100) / 100,
+      pricesByCurrency,
+      pricesBySize,
+    });
   }
   return out;
+}
+
+/** Resuelve el precio de un adicional en moneda visual, opcionalmente por tamaño. */
+export function resolveAdditionalDisplayPrice(
+  additional: StoreProductIngredientAdditional,
+  visualCurrencyId: string,
+  sizeId?: string | null,
+): number {
+  if (sizeId) {
+    const bySize = additional.pricesBySize?.[sizeId];
+    if (bySize) {
+      const visual = bySize[visualCurrencyId];
+      if (typeof visual === "number" && visual > 0) return visual;
+      const usd = bySize[STORE_CURRENCY_USD_ID];
+      if (typeof usd === "number" && usd > 0) return usd;
+      const first = Object.values(bySize)[0];
+      if (typeof first === "number" && first > 0) return first;
+    }
+  }
+  const map = additional.pricesByCurrency ?? {};
+  const visual = map[visualCurrencyId];
+  if (typeof visual === "number" && visual > 0) return visual;
+  const usd = map[STORE_CURRENCY_USD_ID];
+  if (typeof usd === "number" && usd > 0) return usd;
+  return Number(additional.price) || 0;
 }
 
 export function normalizePositiveIntIdList(value: unknown): number[] {
@@ -247,6 +389,8 @@ export const insertStoreProductSchema = z.object({
     .record(z.string().trim().min(1).max(64), z.number().positive())
     .optional()
     .default({}),
+  /** Tamaños del producto (vacío = un solo precio base). */
+  sizes: z.array(storeProductSizeSchema).max(STORE_PRODUCT_MAX_SIZES).optional().default([]),
   categoryIds: z.array(z.number().int().positive()).optional().default([]),
   ingredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
   /** Subconjunto de ingredientMaterialIds que el cliente puede quitar (≥2 base para usarlo). */
@@ -274,8 +418,10 @@ export type StoreProduct = {
   name: string;
   description: string | null;
   price: number;
-  /** Precio por moneda aceptada como pago (id → monto). */
+  /** Precio por moneda aceptada como pago (id → monto). Sin tamaños, o derivado (mínimo) si hay tamaños. */
   pricesByCurrency: Record<string, number>;
+  /** Tamaños con precio propio por moneda. Vacío = producto sin variantes de tamaño. */
+  sizes: StoreProductSize[];
   categoryIds: number[];
   ingredientMaterialIds: number[];
   removableIngredientMaterialIds: number[];
