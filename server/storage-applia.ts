@@ -45,6 +45,8 @@ import {
   normalizeStoreCurrencyFields,
   normalizeStoreDeliveryFares,
   normalizeStoreProductIngredientOptions,
+  normalizeStoreProductSizes,
+  deriveProductPricesFromSizes,
   resolveStoreProductPriceFields,
   DEFAULT_STORE_DELIVERY_FARES,
   type Store,
@@ -3391,9 +3393,12 @@ export class InMemoryStorage implements IStorage {
   async createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct> {
     const now = new Date();
     const store = await this.getStoreById(storeId);
+    const visualCurrencyId = store?.currencyVisualId ?? STORE_CURRENCY_USD_ID;
+    const sizes = normalizeStoreProductSizes(input.sizes);
+    const derivedFromSizes = deriveProductPricesFromSizes(sizes, visualCurrencyId);
     const { price, pricesByCurrency } = resolveStoreProductPriceFields(
-      input,
-      store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+      derivedFromSizes ?? input,
+      visualCurrencyId,
     );
     const ingredientOptions = normalizeStoreProductIngredientOptions(input);
     const product: StoreProduct = {
@@ -3403,6 +3408,7 @@ export class InMemoryStorage implements IStorage {
       description: input.description?.trim() ?? null,
       price,
       pricesByCurrency,
+      sizes,
       categoryIds: input.categoryIds ?? [],
       ...ingredientOptions,
       imageUrls: input.imageUrls ?? [],
@@ -3423,16 +3429,22 @@ export class InMemoryStorage implements IStorage {
     if (idx === -1) throw new Error("STORE_PRODUCT_NOT_FOUND");
     const cur = this.storeProducts[idx];
     const store = await this.getStoreById(storeId);
+    const visualCurrencyId = store?.currencyVisualId ?? STORE_CURRENCY_USD_ID;
+    const sizes =
+      input.sizes !== undefined ? normalizeStoreProductSizes(input.sizes) : cur.sizes ?? [];
+    const derivedFromSizes =
+      input.sizes !== undefined ? deriveProductPricesFromSizes(sizes, visualCurrencyId) : null;
     const priceFields =
-      input.price !== undefined || input.pricesByCurrency !== undefined
+      derivedFromSizes ??
+      (input.price !== undefined || input.pricesByCurrency !== undefined
         ? resolveStoreProductPriceFields(
             {
               price: input.price ?? cur.price,
               pricesByCurrency: input.pricesByCurrency ?? cur.pricesByCurrency,
             },
-            store?.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+            visualCurrencyId,
           )
-        : null;
+        : null);
     const ingredientOptions = normalizeStoreProductIngredientOptions({
       ingredientMaterialIds: input.ingredientMaterialIds ?? cur.ingredientMaterialIds,
       removableIngredientMaterialIds:
@@ -3446,6 +3458,7 @@ export class InMemoryStorage implements IStorage {
         ? { description: input.description?.trim() ?? null }
         : {}),
       ...(priceFields ?? {}),
+      ...(input.sizes !== undefined ? { sizes } : {}),
       ...(input.categoryIds !== undefined ? { categoryIds: input.categoryIds } : {}),
       ...ingredientOptions,
       ...(input.imageUrls !== undefined ? { imageUrls: input.imageUrls } : {}),

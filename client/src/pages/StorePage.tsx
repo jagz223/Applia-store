@@ -243,6 +243,7 @@ export default function StorePage() {
         kind: "product",
         productId: selection.productId,
         quantity: selection.quantity,
+        sizeId: selection.sizeId,
         removedIngredientMaterialIds: selection.removedIngredientMaterialIds,
         additionalIngredientMaterialIds: selection.additionalIngredientMaterialIds,
       });

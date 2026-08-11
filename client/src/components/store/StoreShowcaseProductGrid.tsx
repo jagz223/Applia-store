@@ -28,6 +28,7 @@ function ShowcaseProductCard({
   selected?: boolean;
 }) {
   const imageUrl = product.imageUrls[0]?.trim();
+  const description = product.description?.trim() ?? "";
   const itemKey = showcaseCartItemKey("product", product.id);
   const busy = addBusyKey === itemKey;
 
@@ -85,9 +86,9 @@ function ShowcaseProductCard({
         <p className="text-[13px] sm:text-sm font-semibold text-foreground">
           {formatPrice(product.price, product.displayCurrencyLabel)}
         </p>
-        {product.description ? (
+        {description ? (
           <p className="mt-0.5 line-clamp-1 sm:line-clamp-2 text-xs text-muted-foreground">
-            {product.description}
+            {description}
           </p>
         ) : null}
         {onAddToCart && onSelect ? (
