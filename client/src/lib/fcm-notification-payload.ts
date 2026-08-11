@@ -14,7 +14,7 @@ export function parseFcmNotificationPayload(payload: {
 }): ParsedFcmNotification {
   const notification = payload.notification || {};
   const data = payload.data || {};
-  const title = notification.title || data.title || "Applia";
+  const title = notification.title || data.title || "Baguette";
   const body = notification.body || data.body || "Tienes una nueva notificación";
   const url = data.url || "/";
   const offerType = String(data.type || "").toLowerCase();

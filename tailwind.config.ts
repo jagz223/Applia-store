@@ -100,10 +100,10 @@ export default {
         ring: "hsl(var(--ring) / <alpha-value>)",
       },
       fontFamily: {
-        sans: ["Plus Jakarta Sans", "system-ui", "sans-serif"],
-        display: ["Plus Jakarta Sans", "system-ui", "sans-serif"],
-        hero: ["Plus Jakarta Sans", "system-ui", "sans-serif"],
-        marketing: ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        sans: ["Outfit", "system-ui", "sans-serif"],
+        display: ["Outfit", "system-ui", "sans-serif"],
+        hero: ["Outfit", "system-ui", "sans-serif"],
+        marketing: ["Outfit", "system-ui", "sans-serif"],
         mono: ["JetBrains Mono", "monospace"],
       },
       boxShadow: {

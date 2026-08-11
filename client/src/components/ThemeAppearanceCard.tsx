@@ -22,7 +22,7 @@ export function ThemeAppearanceCard({ className }: { className?: string }) {
         <div className="min-w-0">
           <h2 className="font-display text-base font-bold tracking-tight text-foreground">Tema</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Elige cómo se ve Applia Store en este dispositivo.
+            Elige cómo se ve Baguette en este dispositivo.
           </p>
         </div>
       </div>

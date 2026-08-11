@@ -213,7 +213,7 @@ export function buildStoreSubscriptionApprovedNotification(input: {
 }): StoreNotificationPayload {
   return {
     title: "Tienda activa",
-    body: `Tu pago de «${input.storeName}» fue verificado. Ya puedes vender en Applia.`,
+    body: `Tu pago de «${input.storeName}» fue verificado. Ya puedes vender en Baguette.`,
     url: storeVitrinaPath(input.storeSlug),
   };
 }

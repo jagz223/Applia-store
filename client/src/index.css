@@ -1,58 +1,59 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* theme-build: applia-coral-v20 — fuerza recarga HMR/caché del CSS */
+/* theme-build: baguette-gold-v2 — oro #FBD55C · fondo blanco · negro */
 
 @layer base {
   /**
-   * Applia Store — tema claro cálido (sin azul).
-   * Primary = carbón cálido; Secondary = coral; Accent = lavado piedra.
+   * Baguette — paleta de marca.
+   * Claro: fondo blanco, negro como primary, oro como acento.
+   * Oscuro: negro de fondo, oro como primary.
    */
   :root {
-    --primary: 25 18% 18%;
+    --primary: 0 0% 6%;
     --primary-foreground: 0 0% 100%;
-    --primary-light: 25 14% 28%;
-    --primary-dark: 25 22% 12%;
+    --primary-light: 0 0% 16%;
+    --primary-dark: 0 0% 0%;
 
-    --secondary: 8 72% 52%;
-    --secondary-foreground: 0 0% 100%;
-    --secondary-light: 8 75% 60%;
-    --secondary-dark: 8 68% 42%;
+    --secondary: 46 95% 67%;
+    --secondary-foreground: 0 0% 6%;
+    --secondary-light: 46 96% 74%;
+    --secondary-dark: 44 80% 52%;
 
-    --accent: 30 18% 92%;
-    --accent-foreground: 25 18% 20%;
-    --accent-light: 30 20% 95%;
-    --accent-dark: 30 14% 86%;
+    --accent: 46 55% 94%;
+    --accent-foreground: 0 0% 10%;
+    --accent-light: 46 50% 97%;
+    --accent-dark: 46 40% 88%;
 
-    --background: 35 22% 96%;
-    --foreground: 25 16% 14%;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 6%;
 
-    --muted: 32 16% 91%;
-    --muted-foreground: 25 10% 40%;
+    --muted: 40 12% 96%;
+    --muted-foreground: 0 0% 38%;
 
-    --card: 40 30% 99%;
-    --card-foreground: 25 16% 14%;
-    --card-border: 30 12% 86%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 6%;
+    --card-border: 40 10% 90%;
 
-    --popover: 40 30% 99%;
-    --popover-foreground: 25 16% 14%;
-    --popover-border: 30 12% 86%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 6%;
+    --popover-border: 40 10% 90%;
 
-    --border: 30 12% 84%;
-    --input: 30 12% 84%;
-    --ring: 8 72% 52%;
+    --border: 40 10% 88%;
+    --input: 40 10% 88%;
+    --ring: 46 95% 67%;
 
-    --sidebar: 35 18% 94%;
-    --sidebar-foreground: 25 16% 14%;
-    --sidebar-border: 30 12% 88%;
-    --sidebar-primary: 25 18% 18%;
+    --sidebar: 40 12% 98%;
+    --sidebar-foreground: 0 0% 6%;
+    --sidebar-border: 40 10% 90%;
+    --sidebar-primary: 0 0% 6%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 8 45% 94%;
-    --sidebar-accent-foreground: 8 55% 34%;
-    --sidebar-ring: 8 72% 52%;
+    --sidebar-accent: 46 55% 94%;
+    --sidebar-accent-foreground: 0 0% 10%;
+    --sidebar-ring: 46 95% 67%;
 
     --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
@@ -60,16 +61,16 @@
     --success: 145 35% 34%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 32 90% 48%;
-    --warning-foreground: 30 40% 12%;
+    --warning: 38 90% 48%;
+    --warning-foreground: 0 0% 8%;
 
     --radius: 1rem;
 
-    --chart-1: 25 18% 18%;
-    --chart-2: 8 72% 52%;
+    --chart-1: 0 0% 6%;
+    --chart-2: 46 95% 67%;
     --chart-3: 145 35% 34%;
-    --chart-4: 32 70% 48%;
-    --chart-5: 15 45% 42%;
+    --chart-4: 38 80% 50%;
+    --chart-5: 40 20% 45%;
 
     --button-outline: rgba(0, 0, 0, 0.1);
     --badge-outline: rgba(0, 0, 0, 0.05);
@@ -79,47 +80,47 @@
   }
 
   .dark {
-    --primary: 8 70% 60%;
-    --primary-foreground: 0 0% 100%;
-    --primary-light: 8 72% 68%;
-    --primary-dark: 8 65% 48%;
+    --primary: 46 95% 67%;
+    --primary-foreground: 0 0% 6%;
+    --primary-light: 46 96% 74%;
+    --primary-dark: 44 80% 52%;
 
-    --secondary: 30 10% 28%;
-    --secondary-foreground: 40 20% 96%;
-    --secondary-light: 30 10% 36%;
-    --secondary-dark: 30 12% 20%;
+    --secondary: 46 95% 67%;
+    --secondary-foreground: 0 0% 6%;
+    --secondary-light: 46 96% 74%;
+    --secondary-dark: 44 80% 52%;
 
-    --accent: 30 10% 18%;
-    --accent-foreground: 40 18% 92%;
-    --accent-light: 30 10% 22%;
-    --accent-dark: 30 10% 14%;
+    --accent: 0 0% 12%;
+    --accent-foreground: 46 40% 88%;
+    --accent-light: 0 0% 16%;
+    --accent-dark: 0 0% 8%;
 
-    --background: 25 12% 8%;
-    --foreground: 35 15% 95%;
+    --background: 0 0% 4%;
+    --foreground: 0 0% 96%;
 
-    --muted: 25 10% 14%;
-    --muted-foreground: 30 8% 62%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 65%;
 
-    --card: 25 12% 11%;
-    --card-foreground: 35 15% 95%;
-    --card-border: 30 8% 20%;
+    --card: 0 0% 8%;
+    --card-foreground: 0 0% 96%;
+    --card-border: 0 0% 18%;
 
-    --popover: 25 12% 11%;
-    --popover-foreground: 35 15% 95%;
-    --popover-border: 30 8% 20%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 96%;
+    --popover-border: 0 0% 18%;
 
-    --border: 30 8% 20%;
-    --input: 30 8% 20%;
-    --ring: 8 70% 60%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 46 95% 67%;
 
-    --sidebar: 25 12% 9%;
-    --sidebar-foreground: 35 15% 95%;
-    --sidebar-border: 30 8% 18%;
-    --sidebar-primary: 8 70% 60%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 30 10% 16%;
-    --sidebar-accent-foreground: 40 18% 90%;
-    --sidebar-ring: 8 70% 60%;
+    --sidebar: 0 0% 6%;
+    --sidebar-foreground: 0 0% 96%;
+    --sidebar-border: 0 0% 16%;
+    --sidebar-primary: 46 95% 67%;
+    --sidebar-primary-foreground: 0 0% 6%;
+    --sidebar-accent: 0 0% 12%;
+    --sidebar-accent-foreground: 46 40% 88%;
+    --sidebar-ring: 46 95% 67%;
 
     --destructive: 0 65% 48%;
     --destructive-foreground: 0 0% 100%;
@@ -127,14 +128,14 @@
     --success: 145 35% 42%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 32 90% 52%;
-    --warning-foreground: 30 40% 12%;
+    --warning: 38 90% 52%;
+    --warning-foreground: 0 0% 8%;
 
-    --chart-1: 8 70% 60%;
-    --chart-2: 30 10% 45%;
+    --chart-1: 46 95% 67%;
+    --chart-2: 43 55% 75%;
     --chart-3: 145 35% 42%;
-    --chart-4: 32 70% 50%;
-    --chart-5: 15 45% 50%;
+    --chart-4: 38 80% 50%;
+    --chart-5: 0 0% 45%;
 
     --button-outline: rgba(255, 255, 255, 0.1);
     --badge-outline: rgba(255, 255, 255, 0.05);
@@ -149,8 +150,8 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground antialiased selection:bg-secondary/20 selection:text-foreground;
-    font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    @apply bg-background text-foreground antialiased selection:bg-secondary/30 selection:text-foreground;
+    font-family: "Outfit", system-ui, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
   
@@ -193,7 +194,7 @@
     @apply bg-card/80 backdrop-blur-xl border border-white/10;
   }
   
-  /* Glow effects (tokens Applia) */
+  /* Glow effects (tokens Baguette) */
   .glow-primary {
     box-shadow:
       0 0 20px hsl(var(--primary) / 0.35),
@@ -484,23 +485,23 @@
     background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
   }
 
-  /** Gradiente marca Applia: carbón → coral (claro); coral → cálido (oscuro). */
+  /** Gradiente marca Baguette: negro → oro (claro); oro → crema (oscuro). */
   .text-gradient-hero {
     @apply bg-clip-text text-transparent;
     background-image: linear-gradient(
       105deg,
       hsl(var(--primary)) 0%,
       hsl(var(--secondary)) 55%,
-      hsl(8 72% 52%) 100%
+      hsl(var(--secondary-dark)) 100%
     );
   }
 
   .dark .text-gradient-hero {
     background-image: linear-gradient(
       105deg,
-      hsl(8 72% 72%) 0%,
-      hsl(var(--primary)) 48%,
-      hsl(30 40% 70%) 100%
+      hsl(var(--primary)) 0%,
+      hsl(var(--secondary)) 55%,
+      hsl(var(--primary-light)) 100%
     );
   }
 

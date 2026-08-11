@@ -10,11 +10,12 @@ import {
 
 export type ResolvedTheme = "light" | "dark";
 
-export const THEME_STORAGE_KEY = "applia-theme";
+export const THEME_STORAGE_KEY = "baguette-theme";
+const LEGACY_THEME_STORAGE_KEY = "applia-theme";
 
 function readStoredTheme(): ResolvedTheme {
   try {
-    const v = localStorage.getItem(THEME_STORAGE_KEY);
+    const v = localStorage.getItem(THEME_STORAGE_KEY) ?? localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
     return v === "dark" ? "dark" : "light";
   } catch {
     return "light";
@@ -49,7 +50,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
-      meta.setAttribute("content", theme === "dark" ? "#171412" : "#F5F1EC");
+      meta.setAttribute("content", theme === "dark" ? "#0A0A0A" : "#FFFFFF");
     }
   }, [theme]);
 

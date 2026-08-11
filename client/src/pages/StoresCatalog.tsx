@@ -111,7 +111,7 @@ export default function StoresCatalogPage() {
       <header className="mb-6 space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Tiendas</h1>
         <p className="text-muted-foreground text-sm">
-          Explora tiendas activas en Applia. Busca por nombre o filtra por rubro.
+          Explora tiendas activas en Baguette. Busca por nombre o filtra por rubro.
         </p>
       </header>
 

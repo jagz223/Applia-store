@@ -1,4 +1,4 @@
-﻿import { Link, useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { isClientRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
@@ -91,16 +91,18 @@ export function Navigation() {
       <nav className="border-b border-border/60 bg-card/95 shadow-[0_1px_0_0_hsl(var(--secondary)/0.18)] backdrop-blur-md supports-[backdrop-filter]:bg-card/90">
         <div className="mx-auto flex h-16 w-full max-w-[100rem] min-w-0 items-center justify-between gap-3 px-3 min-[400px]:px-5 sm:px-6 xl:px-8">
           <div className="flex min-w-0 flex-1 items-center gap-3 lg:gap-8">
-            <Link href={tiendaHref} className="group flex shrink-0 items-center gap-2.5" title="Applia Store">
-              <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:scale-[1.03]">
-                <ShoppingBag className="h-4 w-4" strokeWidth={2.25} />
-              </span>
+            <Link href={tiendaHref} className="group flex shrink-0 items-center gap-3" title="Baguette">
+              <img
+                src="/baguette-logo.png"
+                alt=""
+                className="h-12 w-12 object-contain transition-transform group-hover:scale-[1.03] sm:h-14 sm:w-14"
+              />
               <span className="leading-tight">
                 <span className="block text-base font-bold tracking-tight text-foreground min-[400px]:text-lg">
-                  Applia
+                  Baguette
                 </span>
                 <span className="hidden text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-secondary dark:text-primary min-[400px]:block">
-                  Store
+                  Menú
                 </span>
               </span>
             </Link>
@@ -217,9 +219,18 @@ export function Navigation() {
                 side="right"
                 className="flex h-full w-[min(100%,19rem)] min-h-0 flex-col overflow-hidden border-l border-border bg-card p-0"
               >
-                <div className="border-b border-border/60 px-5 py-5">
-                  <p className="text-lg font-bold tracking-tight">Applia</p>
-                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-secondary">Store</p>
+                <div className="flex items-center gap-3 border-b border-border/60 px-5 py-5">
+                  <img
+                    src="/baguette-logo.png"
+                    alt=""
+                    className="h-14 w-14 object-contain"
+                  />
+                  <div>
+                    <p className="text-lg font-bold tracking-tight">Baguette</p>
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-secondary">
+                      Menú
+                    </p>
+                  </div>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] pt-5">
                   <MobileDarkModePreference />

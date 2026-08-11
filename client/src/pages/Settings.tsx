@@ -227,7 +227,7 @@ export default function Settings() {
           </div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Tu cuenta</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Entra para ver y editar tus datos en Applia Store.
+            Entra para ver y editar tus datos en Baguette.
           </p>
           <Button asChild className="mt-6 h-11 w-full rounded-full font-semibold">
             <Link href="/login">Iniciar sesión</Link>
@@ -267,7 +267,7 @@ export default function Settings() {
           </Button>
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-secondary dark:text-primary">
-              Applia Store
+              Baguette
             </p>
             <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
               Mi cuenta

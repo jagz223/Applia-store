@@ -1,264 +1,237 @@
 import { Link } from "wouter";
-import { motion } from "framer-motion";
-import { ArrowRight, ShoppingBag, Flame } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { Instagram, MessageCircle } from "lucide-react";
 import { getPrimaryStoreVitrinaHref, usePrimaryStore } from "@/hooks/use-primary-store";
 import { cn } from "@/lib/utils";
 
-const HERO_BURGER =
-  "https://static.vecteezy.com/system/resources/previews/047/827/646/non_2x/delicious-fast-food-burger-hamburger-cheeseburger-transparent-background-free-png.png";
+type FeaturedDish = {
+  id: string;
+  name: string;
+  image: string;
+};
 
-/** Imagen anterior del bloque Destacado (se veía mejor ahí). */
-const FEATURED_BURGER =
-  "https://png.pngtree.com/png-clipart/20231017/original/pngtree-burger-food-png-free-download-png-image_13329458.png";
+const HERO_DISH = {
+  category: "Italian",
+  name: "Pasta ai Funghi",
+  description:
+    "Pasta con champiñones, hierbas frescas y el sabor de casa Baguette. Un clásico italiano listo para pedir.",
+  image:
+    "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325645.png",
+};
 
-/** Velocidad media en px/s (sube/baja). */
-const BURGER_FLOAT_SPEED_PX_PER_SEC = 7;
-/** Recorrido máximo hacia arriba (px). */
-const BURGER_FLOAT_AMPLITUDE_PX = 10;
+const CAROUSEL_DISHES: FeaturedDish[] = [
+  {
+    id: "spaghetti",
+    name: "Spaghetti Classico",
+    image:
+      "https://static.vecteezy.com/system/resources/previews/049/159/898/non_2x/italian-food-spaghetti-top-view-transparent-png.png",
+  },
+  {
+    id: "carbonara",
+    name: "Spaghetti Carbonara",
+    image:
+      "https://static.vecteezy.com/system/resources/previews/056/615/020/non_2x/spaghetti-carbonara-top-view-isolate-on-transparent-background-png.png",
+  },
+  {
+    id: "carbonara-basil",
+    name: "Carbonara Basilico",
+    image:
+      "https://static.vecteezy.com/system/resources/previews/056/615/179/non_2x/a-spaghetti-carbonara-top-view-isolate-on-transparent-background-png.png",
+  },
+  {
+    id: "spicy-chicken",
+    name: "Spicy Chicken Pasta",
+    image:
+      "https://static.vecteezy.com/system/resources/previews/068/622/935/non_2x/delicious-spicy-chicken-spaghetti-pasta-in-a-bowl-overhead-shot-png.png",
+  },
+  {
+    id: "chicken-1",
+    name: "Chicken Spaghetti",
+    image:
+      "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325643.png",
+  },
+  {
+    id: "funghi",
+    name: "Pasta ai Funghi",
+    image:
+      "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325645.png",
+  },
+  {
+    id: "mushroom",
+    name: "Mushroom Pasta",
+    image:
+      "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325641.png",
+  },
+  {
+    id: "funghi-extra",
+    name: "Pasta ai Funghi",
+    image:
+      "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325645.png",
+  },
+];
 
-/**
- * Flotado a velocidad media ~speedPxPerSec, con rebote suave (seno):
- * en los extremos la velocidad llega a 0 y vuelve a arrancar.
- */
-function useSoftSpeedFloat(speedPxPerSec: number, amplitudePx: number) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    // Un tramo (0 → amp) dura amplitude/speed; el ciclo completo es ida y vuelta.
-    const halfPeriodSec = amplitudePx / Math.max(speedPxPerSec, 0.001);
-    const periodSec = halfPeriodSec * 2;
-    const start = performance.now();
-    let frame = 0;
-
-    const tick = (now: number) => {
-      const t = (now - start) / 1000;
-      // 0 → amp → 0 con derivada 0 en los extremos (rebote suave)
-      const y = (amplitudePx / 2) * (1 - Math.cos((Math.PI * 2 * t) / periodSec));
-      el.style.transform = `translate3d(0, ${-y}px, 0)`;
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [speedPxPerSec, amplitudePx]);
-
-  return ref;
-}
+/** Placeholders — reemplazar cuando tengamos datos finales de Baguette. */
+const ABOUT = {
+  logoSrc: "/baguette-logo.png",
+  instagramUrl: "https://instagram.com/",
+  instagramHandle: "@baguette",
+  whatsappUrl: "https://wa.me/",
+  whatsappLabel: "WhatsApp",
+  address: "Barquisimeto, Venezuela",
+  addressLine2: "Av. Venezuela esquina calle 33",
+  /** Embed genérico; se puede sustituir por la ubicación real de la tienda. */
+  mapsEmbedUrl:
+    "https://maps.google.com/maps?q=Caracas&t=&z=14&ie=UTF8&iwloc=&output=embed",
+};
 
 export default function HomePage() {
   const { data: primaryStore } = usePrimaryStore();
   const tiendaHref = getPrimaryStoreVitrinaHref(primaryStore);
-  const burgerFloatRef = useSoftSpeedFloat(
-    BURGER_FLOAT_SPEED_PX_PER_SEC,
-    BURGER_FLOAT_AMPLITUDE_PX,
-  );
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-background">
-      {/* Hero Burgee-style: tipografía enorme + burger PNG sin fondo */}
-      <section className="relative isolate min-h-[calc(100dvh-4rem)] overflow-hidden">
+    <div className="flex min-w-0 flex-1 flex-col bg-background text-foreground">
+      <section className="relative isolate flex min-h-[calc(100dvh-4rem)] flex-col overflow-hidden">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_70%_35%,hsl(var(--secondary)/0.16),transparent_55%),radial-gradient(ellipse_at_15%_85%,hsl(var(--primary)/0.06),transparent_45%)]"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_75%_40%,hsl(var(--secondary)/0.18),transparent_55%)]"
         />
 
-        <div className="relative mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-[100rem] flex-col px-4 pt-6 min-[400px]:px-6 sm:px-8 lg:px-10 lg:pt-4">
-          {/* CTAs superiores estilo Burgee */}
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45 }}
-            className="relative z-20 flex flex-wrap items-center justify-end gap-2"
-          >
-            <Link
-              href={tiendaHref}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full border border-border/80 bg-card/80 px-4 py-2",
-                "text-sm font-semibold text-foreground backdrop-blur-sm transition-colors hover:bg-muted",
-              )}
-            >
-              <ShoppingBag className="h-4 w-4 text-secondary dark:text-primary" />
-              Menú
-            </Link>
-            <Link
-              href={tiendaHref}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2",
-                "text-sm font-semibold text-primary-foreground shadow-md shadow-primary/20",
-                "transition-opacity hover:opacity-95",
-              )}
-            >
-              Pedir ahora
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </motion.div>
+        <div className="relative mx-auto grid w-full max-w-[100rem] flex-1 grid-cols-1 items-center gap-6 px-4 pb-6 pt-8 min-[400px]:px-6 sm:px-8 lg:grid-cols-2 lg:gap-10 lg:px-10 lg:pb-4 lg:pt-6">
+          <div className="relative z-20 order-2 max-w-xl lg:order-1">
+            <p className="font-display text-lg font-medium tracking-wide text-muted-foreground sm:text-xl">
+              {HERO_DISH.category}
+            </p>
+            <h1 className="mt-1 font-display text-4xl font-extrabold leading-[1.05] tracking-tight text-foreground sm:text-5xl lg:text-6xl xl:text-7xl">
+              {HERO_DISH.name}
+            </h1>
+            <p className="mt-4 max-w-md text-sm leading-relaxed text-muted-foreground sm:text-base">
+              {HERO_DISH.description}
+            </p>
 
-          {/* Escena central: texto detrás + burger delante */}
-          <div className="relative flex flex-1 flex-col items-center justify-center pb-8 pt-4 lg:pb-12">
-            <motion.div
-              aria-hidden
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.8 }}
-              className={cn(
-                "pointer-events-none absolute left-1/2 top-[8%] z-0 w-[120%] max-w-none -translate-x-1/2 select-none text-center",
-                "font-display font-extrabold uppercase leading-[0.8] tracking-[-0.055em]",
-                "text-foreground/[0.08] dark:text-foreground/[0.11]",
-              )}
-            >
-              <p className="text-[clamp(4rem,15vw,11rem)]">Smoky</p>
-              <p className="text-[clamp(4rem,15vw,11rem)]">Cheesy</p>
-              <p className="text-[clamp(4rem,15vw,11rem)]">Burger</p>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 28, scale: 0.94 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.75, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-              className="relative z-10 w-[min(92vw,28rem)] sm:w-[min(78vw,34rem)] lg:w-[min(52vw,40rem)]"
-            >
-              {/* Sombra estática: animar filtros baja el FPS */}
-              <div
-                aria-hidden
-                className="pointer-events-none absolute bottom-[6%] left-1/2 h-[18%] w-[70%] -translate-x-1/2 rounded-[100%] bg-black/25 blur-2xl dark:bg-black/40"
-              />
-              {/* Float manual: N px/s con requestAnimationFrame */}
-              <div
-                ref={burgerFloatRef}
-                className="will-change-transform [backface-visibility:hidden] [transform:translateZ(0)]"
+            <div className="mt-8 flex flex-wrap items-center gap-4 sm:gap-6">
+              <Link
+                href={tiendaHref}
+                className={cn(
+                  "inline-flex items-center justify-center rounded-full bg-primary px-7 py-3",
+                  "text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20",
+                  "transition-opacity hover:opacity-90",
+                )}
               >
-                <img
-                  src={HERO_BURGER}
-                  alt="Hamburguesa"
-                  className="relative w-full"
-                  decoding="async"
-                  fetchPriority="high"
-                  draggable={false}
-                />
-              </div>
-            </motion.div>
+                Order Food
+              </Link>
+            </div>
+          </div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.28 }}
-              className="relative z-20 mt-2 max-w-lg text-center lg:mt-0 lg:absolute lg:bottom-16 lg:left-0 lg:max-w-sm lg:text-left"
-            >
-              <p className="font-display text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
-                Applia
-              </p>
-              <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.22em] text-secondary dark:text-primary sm:text-sm">
-                Store
-              </p>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground sm:text-base">
-                Buena, jugosa y lista pa&apos; pedir. Comida rápida con sabor, sin vueltas.
-              </p>
-            </motion.div>
+          <div className="relative order-1 mx-auto flex aspect-square w-full max-w-[22rem] items-center justify-center sm:max-w-[26rem] lg:order-2 lg:max-w-none lg:w-full">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-[6%] rounded-full border border-foreground/15"
+            />
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-[14%] rounded-full border border-foreground/12"
+            />
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-[22%] rounded-full border border-foreground/10"
+            />
+
+            <img
+              src={HERO_DISH.image}
+              alt={HERO_DISH.name}
+              className="relative z-20 w-[72%] max-w-[28rem] drop-shadow-2xl"
+              decoding="async"
+              fetchPriority="high"
+              draggable={false}
+            />
+          </div>
+        </div>
+
+        <div className="relative z-20 w-full px-3 pb-8 min-[400px]:px-5 sm:px-8 lg:px-10">
+          <div className="relative mx-auto w-full max-w-[100rem] overflow-hidden rounded-[1.5rem] bg-secondary px-3 py-4 sm:rounded-[1.75rem] sm:px-5 sm:py-5">
+            <div className="flex justify-center gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-4 [&::-webkit-scrollbar]:hidden">
+              {CAROUSEL_DISHES.map((item) => (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "flex w-[7.25rem] shrink-0 flex-col items-center gap-2.5 rounded-2xl bg-white px-2.5 py-3 text-center shadow-md sm:w-[8.5rem] sm:px-3 sm:py-3.5",
+                    "text-black",
+                  )}
+                >
+                  <span className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-[#f4f4f4] sm:h-[4.5rem] sm:w-[4.5rem]">
+                    <img
+                      src={item.image}
+                      alt=""
+                      className="h-[90%] w-[90%] object-contain"
+                      draggable={false}
+                    />
+                  </span>
+                  <span className="line-clamp-2 min-h-[2.4rem] text-[0.7rem] font-bold leading-tight sm:text-xs">
+                    {item.name}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Bento promocional debajo del hero */}
-      <section className="px-4 pb-14 pt-2 min-[400px]:px-6 sm:px-8 lg:px-10">
-        <div className="mx-auto grid w-full max-w-[100rem] gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-5">
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.45 }}
-            className="relative overflow-hidden rounded-[1.75rem] bg-secondary p-6 text-secondary-foreground dark:bg-primary dark:text-primary-foreground md:col-span-2 lg:col-span-2 lg:min-h-[14rem]"
-          >
-            <div className="relative z-10 flex h-full max-w-md flex-col justify-between gap-6">
-              <div>
-                <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] opacity-90">
-                  <Flame className="h-3.5 w-3.5" />
-                  Destacado
-                </p>
-                <h2 className="mt-3 font-display text-2xl font-extrabold leading-tight tracking-tight sm:text-3xl">
-                  Sabor que se nota en cada bocado
-                </h2>
-                <p className="mt-2 text-sm leading-relaxed opacity-90 sm:text-base">
-                  Hamburguesas y Pepitos listos para comer acá o por delivery.
-                </p>
-              </div>
-              <Link
-                href={tiendaHref}
-                className={cn(
-                  "inline-flex w-fit items-center gap-2 rounded-full bg-primary-foreground/95 px-5 py-2.5",
-                  "text-sm font-semibold text-foreground transition-opacity hover:opacity-90",
-                  "dark:bg-background dark:text-foreground",
-                )}
-              >
-                Ver el menú
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
+      {/* Quiénes somos — franja compacta */}
+      <section className="border-t border-border/60 bg-muted/30 px-3 py-8 min-[400px]:px-5 sm:px-8 sm:py-9 lg:px-10">
+        <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-5 lg:flex-row lg:items-center lg:justify-between lg:gap-8">
+          <div className="flex min-w-0 items-center gap-4">
             <img
-              src={FEATURED_BURGER}
-              alt=""
-              aria-hidden
-              className="pointer-events-none absolute -bottom-8 -right-6 w-[min(55%,16rem)] rotate-6 drop-shadow-xl sm:w-[min(48%,20rem)] lg:-right-2 lg:w-64"
+              src={ABOUT.logoSrc}
+              alt="Baguette"
+              className="h-28 w-28 shrink-0 object-contain sm:h-32 sm:w-32"
             />
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.45, delay: 0.06 }}
-            className="flex flex-col justify-between rounded-[1.75rem] bg-primary p-6 text-primary-foreground"
-          >
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary-foreground/70">
-                Promo
+            <div className="min-w-0">
+              <p className="font-display text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+                Baguette
               </p>
-              <h3 className="mt-3 font-display text-xl font-bold leading-snug sm:text-2xl">
-                Pide hoy y disfrúta de una buena comida
-              </h3>
+              <p className="truncate text-sm text-muted-foreground sm:text-base">
+                Cocina italiana · Baguette
+              </p>
             </div>
-            <Link
-              href={tiendaHref}
-              className="mt-8 inline-flex items-center gap-1.5 text-sm font-semibold underline-offset-4 hover:underline"
-            >
-              Ir a la tienda
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </motion.div>
+          </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.45, delay: 0.1 }}
-            className="rounded-[1.75rem] border border-border/70 bg-card p-6 md:col-span-2 lg:col-span-3"
-          >
-            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
-              <div>
-                <h3 className="font-display text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-                  Descubre las mejores hamburguesas del menú
-                </h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Entra a la tienda, escoge tu combo y listo.
-                </p>
-              </div>
-              <Link
-                href={tiendaHref}
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-2 rounded-full bg-secondary px-5 py-2.5",
-                  "text-sm font-semibold text-secondary-foreground dark:bg-primary dark:text-primary-foreground",
-                  "transition-opacity hover:opacity-95",
-                )}
-              >
-                Explorar
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-          </motion.div>
+          <div className="min-w-0 text-sm leading-relaxed text-muted-foreground sm:text-base lg:max-w-[16rem]">
+            <p className="font-medium text-foreground">{ABOUT.address}</p>
+            <p>{ABOUT.addressLine2}</p>
+          </div>
+
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center lg:flex-col lg:items-stretch">
+            <a
+              href={ABOUT.instagramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Instagram"
+              className="inline-flex h-11 min-w-[11rem] items-center justify-center gap-2 rounded-full border border-border bg-card px-4 text-sm font-semibold text-foreground transition-colors hover:bg-background"
+            >
+              <Instagram className="h-4 w-4" />
+              {ABOUT.instagramHandle}
+            </a>
+            <a
+              href={ABOUT.whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="WhatsApp"
+              className="inline-flex h-11 min-w-[11rem] items-center justify-center gap-2 rounded-full border border-border bg-card px-4 text-sm font-semibold text-foreground transition-colors hover:bg-background"
+            >
+              <MessageCircle className="h-4 w-4" />
+              {ABOUT.whatsappLabel}
+            </a>
+          </div>
+
+          <div className="h-48 w-full shrink-0 overflow-hidden rounded-2xl border border-border bg-card sm:h-40 lg:w-[28rem] xl:w-[32rem]">
+            <iframe
+              title="Mapa Baguette"
+              src={ABOUT.mapsEmbedUrl}
+              className="h-full w-full border-0"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              allowFullScreen
+            />
+          </div>
         </div>
       </section>
     </div>

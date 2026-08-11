@@ -4,7 +4,7 @@ import { Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, LogIn, Loader2, ShoppingBag, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, LogIn, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -115,12 +115,12 @@ export default function Login() {
     >
       <div className="relative z-10 w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
-            <ShoppingBag className="h-5 w-5" strokeWidth={2.25} />
+          <div className="mx-auto mb-4 flex justify-center">
+            <img src="/baguette-logo.png" alt="" className="h-16 w-16 object-contain" />
           </div>
-          <p className="font-display text-3xl font-extrabold tracking-tight text-foreground">Applia</p>
+          <p className="font-display text-3xl font-extrabold tracking-tight text-foreground">Baguette</p>
           <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.2em] text-secondary dark:text-primary">
-            Store
+            Menú
           </p>
         </div>
 

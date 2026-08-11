@@ -1,16 +1,16 @@
 {
-  "name": "Applia",
-  "short_name": "Applia",
-  "description": "Applia conecta clientes con asociados verificados: servicios profesionales, taxi, envíos, reservas y chat.",
+  "name": "Baguette",
+  "short_name": "Baguette",
+  "description": "Baguette — pizza, pasta, panini y pastelería italiana. Pide online de forma simple y rápida.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#F5F1EC",
-  "theme_color": "#2E2A27",
+  "background_color": "#FFFFFF",
+  "theme_color": "#000000",
   "orientation": "portrait-primary",
-  "lang": "es-EC",
+  "lang": "es",
   "dir": "ltr",
-  "categories": ["business", "productivity", "finance"],
+  "categories": ["food", "shopping"],
   "prefer_related_applications": false,
   "icons": [
     {
@@ -34,31 +34,17 @@
   ],
   "shortcuts": [
     {
-      "name": "Categorías y reservas",
-      "short_name": "Categorías",
-      "description": "Explora categorías; taxi, envíos y servicios profesionales.",
-      "url": "/categories",
-      "icons": [{ "src": "/applia-logo-new.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Pedir taxi",
-      "short_name": "Taxi",
-      "description": "Mapa para solicitar un viaje en taxi.",
-      "url": "/go/taxi",
+      "name": "Menú",
+      "short_name": "Menú",
+      "description": "Ver el menú de Baguette.",
+      "url": "/",
       "icons": [{ "src": "/applia-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Notificaciones",
       "short_name": "Notificaciones",
-      "description": "Alertas y avisos de tu cuenta.",
+      "description": "Alertas y avisos de tu pedido.",
       "url": "/notifications",
-      "icons": [{ "src": "/applia-logo-new.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Mensajes",
-      "short_name": "Chat",
-      "description": "Chats con asociados y soporte.",
-      "url": "/chat",
       "icons": [{ "src": "/applia-logo-new.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
