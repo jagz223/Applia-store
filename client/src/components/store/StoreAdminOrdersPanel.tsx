@@ -10,6 +10,7 @@ import {
   useStoreOrderDetail,
   useStoreOrders,
   useUpdateStoreOrderStatus,
+  useUpdateStoreOrderBranch,
 } from "@/hooks/use-store-orders";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,7 +43,8 @@ import { useToast } from "@/hooks/use-toast";
 import { StoreOrderStatusRoadmap } from "@/components/store/StoreOrderStatusRoadmap";
 import { StoreOrderDeliveryRouteMap } from "@/components/store/StoreOrderDeliveryRouteMap";
 import { StoreOrderInvoicePdfDialog } from "@/components/store/StoreOrderInvoicePdfDialog";
-import type { StoreLocation } from "@shared/store-schema";
+import { StoreAdminOrderCustomerChatPanel } from "@/components/store/StoreAdminOrderCustomerChatPanel";
+import type { StoreBranch, StoreLocation } from "@shared/store-schema";
 import {
   Tooltip,
   TooltipContent,
@@ -100,14 +102,22 @@ function OrderDetailContent({
   storeId,
   orderId,
   storeLocation,
+  branches,
+  canFilterOrdersByBranch,
+  employeeBranchId,
 }: {
   storeId: number;
   orderId: number;
   storeLocation: StoreLocation | null;
+  branches: StoreBranch[];
+  canFilterOrdersByBranch: boolean;
+  employeeBranchId: string | null;
 }) {
   const { toast } = useToast();
   const { data: order, isLoading, error } = useStoreOrderDetail(storeId, orderId);
   const updateMutation = useUpdateStoreOrderStatus(storeId);
+  const branchMutation = useUpdateStoreOrderBranch(storeId);
+  const [targetBranchId, setTargetBranchId] = useState("");
 
   if (isLoading) {
     return (
@@ -142,7 +152,33 @@ function OrderDetailContent({
     }
   }
 
+  async function reassignBranch(branchId: string) {
+    if (!order || !branchId.trim()) return;
+    try {
+      await branchMutation.mutateAsync({ orderId: order.id, branchId: branchId.trim() });
+      toast({
+        title: "Sucursal actualizada",
+        description: `La orden #${order.id} fue reasignada.`,
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo reasignar",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
+    }
+  }
+
   const originLocation = order.storeLocation ?? storeLocation;
+  const reassignOptions = canFilterOrdersByBranch
+    ? branches
+    : employeeBranchId
+      ? branches.filter((b) => b.id === employeeBranchId)
+      : [];
+  const canReassign =
+    reassignOptions.length > 0 &&
+    (canFilterOrdersByBranch || (employeeBranchId != null && order.branchId !== employeeBranchId));
+  const selectedBranchId = targetBranchId || reassignOptions[0]?.id || "";
 
   return (
     <div className="space-y-6">
@@ -184,6 +220,7 @@ function OrderDetailContent({
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Cliente</p>
           <p className="font-medium">{order.customerName ?? "—"}</p>
           <p className="text-sm text-muted-foreground">{order.customerEmail ?? "—"}</p>
+          <p className="text-sm text-muted-foreground">{order.customerPhone ?? "—"}</p>
         </div>
         <div className="rounded-lg border border-border p-4 space-y-1">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Montos</p>
@@ -213,6 +250,57 @@ function OrderDetailContent({
         <div className="rounded-lg border border-border p-4 space-y-1">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Recibo</p>
           <p className="font-medium">{order.fulfillmentLabel}</p>
+          {order.branchName ? (
+            <p className="text-sm text-muted-foreground">{order.branchName}</p>
+          ) : null}
+          {order.customerNote?.trim() ? (
+            <div className="pt-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Indicaciones del pedido
+              </p>
+              <p className="text-sm whitespace-pre-wrap">{order.customerNote.trim()}</p>
+            </div>
+          ) : null}
+          {canReassign ? (
+            <div className="pt-3 space-y-2">
+              <p className="text-xs font-semibold">Reasignar sucursal</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {canFilterOrdersByBranch ? (
+                  <Select value={selectedBranchId} onValueChange={setTargetBranchId}>
+                    <SelectTrigger className={`${storeAdminFieldClass} min-w-[180px]`}>
+                      <SelectValue placeholder="Sucursal" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {reassignOptions.map((branch) => (
+                        <SelectItem key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    {reassignOptions[0]?.name ?? "Tu sucursal"}
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={branchMutation.isPending || !selectedBranchId}
+                  onClick={() => void reassignBranch(selectedBranchId)}
+                >
+                  {branchMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : canFilterOrdersByBranch ? (
+                    "Aplicar"
+                  ) : (
+                    "Asignar a mi sucursal"
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -221,14 +309,14 @@ function OrderDetailContent({
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Entrega a domicilio</p>
             <p className="text-sm text-muted-foreground">
-              Ruta desde la tienda hasta la ubicación indicada por el cliente.
+              Ruta desde la sucursal asignada hasta la ubicación indicada por el cliente.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-md border border-border bg-muted/20 p-3 space-y-1">
               <p className="text-xs font-semibold text-primary flex items-center gap-1">
                 <MapPin className="h-3.5 w-3.5" />
-                Inicio (tienda)
+                Inicio ({order.branchName?.trim() || "tienda"})
               </p>
               {originLocation ? (
                 <>
@@ -338,6 +426,13 @@ function OrderDetailContent({
           </TableBody>
         </Table>
       </div>
+
+      <StoreAdminOrderCustomerChatPanel
+        storeId={storeId}
+        orderId={order.id}
+        branchName={order.branchName}
+        customerName={order.customerName}
+      />
     </div>
   );
 }
@@ -346,12 +441,18 @@ function OrderDetailDialog({
   storeId,
   orderId,
   storeLocation,
+  branches,
+  canFilterOrdersByBranch,
+  employeeBranchId,
   open,
   onOpenChange,
 }: {
   storeId: number;
   orderId: number | null;
   storeLocation: StoreLocation | null;
+  branches: StoreBranch[];
+  canFilterOrdersByBranch: boolean;
+  employeeBranchId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -372,7 +473,14 @@ function OrderDetailDialog({
         </DialogHeader>
         <div className={storeAdminDialogBodyClass}>
           {orderId != null ? (
-            <OrderDetailContent storeId={storeId} orderId={orderId} storeLocation={storeLocation} />
+            <OrderDetailContent
+              storeId={storeId}
+              orderId={orderId}
+              storeLocation={storeLocation}
+              branches={branches}
+              canFilterOrdersByBranch={canFilterOrdersByBranch}
+              employeeBranchId={employeeBranchId}
+            />
           ) : null}
         </div>
       </DialogContent>
@@ -420,14 +528,21 @@ function OrderInvoiceButton({
 export function StoreAdminOrdersPanel({
   storeId,
   storeLocation,
+  branches,
+  canFilterOrdersByBranch,
+  employeeBranchId,
 }: {
   storeId: number;
   storeLocation: StoreLocation | null;
+  branches: StoreBranch[];
+  canFilterOrdersByBranch: boolean;
+  employeeBranchId: string | null;
 }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [orderIdFilter, setOrderIdFilter] = useState("");
   const [dateFromFilter, setDateFromFilter] = useState("");
   const [dateToFilter, setDateToFilter] = useState("");
+  const [branchFilter, setBranchFilter] = useState("all");
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [invoiceOrderId, setInvoiceOrderId] = useState<number | null>(null);
 
@@ -452,11 +567,17 @@ export function StoreAdminOrdersPanel({
       orderId: orderIdFilter.trim() || undefined,
       dateFrom: dateFromFilter.trim() || undefined,
       dateTo: dateToFilter.trim() || undefined,
+      branchId:
+        canFilterOrdersByBranch && branchFilter !== "all" ? branchFilter : undefined,
     }),
-    [statusFilter, orderIdFilter, dateFromFilter, dateToFilter],
+    [statusFilter, orderIdFilter, dateFromFilter, dateToFilter, branchFilter, canFilterOrdersByBranch],
   );
 
-  const { data: orders = [], isLoading, error } = useStoreOrders(storeId, filters);
+  const { data: ordersData, isLoading, error } = useStoreOrders(storeId, filters);
+  const orders = ordersData?.orders ?? [];
+  const branchFilterLocked = ordersData?.branchFilterLocked ?? !canFilterOrdersByBranch;
+  const lockedBranchName =
+    branches.find((b) => b.id === (ordersData?.employeeBranchId ?? employeeBranchId))?.name ?? null;
 
   function closeOrderDialog(open: boolean) {
     if (!open) setSelectedOrderId(null);
@@ -523,7 +644,38 @@ export function StoreAdminOrdersPanel({
                 onChange={(e) => setDateToFilter(e.target.value)}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="order-branch-filter">Sucursal</Label>
+              {canFilterOrdersByBranch ? (
+                <Select value={branchFilter} onValueChange={setBranchFilter}>
+                  <SelectTrigger id="order-branch-filter" className={storeAdminFieldClass}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas las sucursales</SelectItem>
+                    {branches.map((branch) => (
+                      <SelectItem key={branch.id} value={branch.id}>
+                        {branch.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="order-branch-filter"
+                  className={storeAdminFieldClass}
+                  value={lockedBranchName ?? "Tu sucursal"}
+                  readOnly
+                  disabled
+                />
+              )}
+            </div>
           </div>
+          {branchFilterLocked && lockedBranchName ? (
+            <p className="text-xs text-muted-foreground">
+              Mostrando solo pedidos de: <span className="font-medium text-foreground">{lockedBranchName}</span>
+            </p>
+          ) : null}
 
           {isLoading ? (
             <div className="py-12 flex justify-center">
@@ -614,7 +766,14 @@ export function StoreAdminOrdersPanel({
                           <TableCell>
                             <Badge variant={statusBadgeVariant(order.status)}>{order.statusLabel}</Badge>
                           </TableCell>
-                          <TableCell className="text-sm">{order.fulfillmentLabel}</TableCell>
+                          <TableCell className="text-sm">
+                            <span>{order.fulfillmentLabel}</span>
+                            {order.branchName ? (
+                              <span className="mt-0.5 block text-xs text-muted-foreground">
+                                {order.branchName}
+                              </span>
+                            ) : null}
+                          </TableCell>
                           <TableCell className="text-right">{formatPrice(order.amountDue)}</TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                             {formatDate(order.createdAt)}
@@ -642,6 +801,9 @@ export function StoreAdminOrdersPanel({
       <OrderDetailDialog
         storeId={storeId}
         storeLocation={storeLocation}
+        branches={branches}
+        canFilterOrdersByBranch={canFilterOrdersByBranch}
+        employeeBranchId={employeeBranchId}
         orderId={selectedOrderId}
         open={selectedOrderId != null}
         onOpenChange={closeOrderDialog}

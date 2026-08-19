@@ -60,6 +60,8 @@ export type StorePaymentMethod = {
   extraFields: StorePaymentMethodExtraField[];
   /** Imagen opcional (p. ej. código QR). */
   imageUrl: string | null;
+  /** Método de sistema (p. ej. cashea); no editable desde el panel normal. */
+  systemKind?: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };

@@ -30,7 +30,12 @@ const FIRESTORE_METHODS = new Set([
   // Chat: debe persistir en Firestore para auditoría/admin.
   "getConversationsByUser", "createConversation", "getMessagesByConversation", "getLastMessageByConversation", "getUnreadCountByConversation",
   "createMessage", "markMessageAsRead", "markConversationAsRead", "hideConversationForUsers",
-  "patchConversation", "findConversationForServiceBooking", "findConversationForMobilityRide", "listConversationsForAdmin", "sweepStaleMobilityRideChats",
+  "patchConversation", "findConversationForServiceBooking", "findConversationForMobilityRide",
+  "findStoreOrderCustomerConversation", "findStoreBranchCoordinationConversation",
+  "findStoreBranchPairConversation", "listStoreBranchPairConversations", "listStoreOrderCustomerConversations",
+  "getConversationById",
+  "findStoreStaffMembershipForUser",
+  "listConversationsForAdmin", "sweepStaleMobilityRideChats",
 ]);
 
 /** Delegador Firestore/memoria alineado con {@link IStorage} en tiempo de ejecución. */
@@ -205,6 +210,27 @@ export class HybridStorage {
   }
   findConversationForMobilityRide(params: { rideId: string }) {
     return this.delegate("findConversationForMobilityRide", [params]);
+  }
+  findStoreOrderCustomerConversation(storeOrderId: number) {
+    return this.delegate("findStoreOrderCustomerConversation", [storeOrderId]);
+  }
+  findStoreBranchCoordinationConversation(storeId: number) {
+    return this.delegate("findStoreBranchCoordinationConversation", [storeId]);
+  }
+  findStoreBranchPairConversation(storeId: number, branchIdA: string, branchIdB: string) {
+    return this.delegate("findStoreBranchPairConversation", [storeId, branchIdA, branchIdB]);
+  }
+  listStoreBranchPairConversations(storeId: number) {
+    return this.delegate("listStoreBranchPairConversations", [storeId]);
+  }
+  listStoreOrderCustomerConversations(storeId: number) {
+    return this.delegate("listStoreOrderCustomerConversations", [storeId]);
+  }
+  getConversationById(conversationId: number) {
+    return this.delegate("getConversationById", [conversationId]);
+  }
+  findStoreStaffMembershipForUser(userId: string) {
+    return this.delegate("findStoreStaffMembershipForUser", [userId]);
   }
   listConversationsForAdmin(opts?: { limit?: number }) {
     return this.delegate("listConversationsForAdmin", [opts]);

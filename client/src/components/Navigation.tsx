@@ -3,14 +3,15 @@ import { useAuth } from "@/hooks/use-auth";
 import { isClientRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import {
+  LayoutDashboard,
   LogOut,
   Menu,
+  MessageCircle,
   User,
   Settings,
   ShoppingBag,
   Store,
-} from "lucide-react";
-import {
+} from "lucide-react";import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -18,14 +19,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { useState, type ReactNode } from "react";
-import { NotificationBell } from "@/components/NotificationBell";
+import { useState, useMemo, type ReactNode } from "react";import { NotificationBell } from "@/components/NotificationBell";
 import { ThemeToggleHeaderButton } from "@/components/ThemeToggle";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getPrimaryStoreVitrinaHref, usePrimaryStore } from "@/hooks/use-primary-store";
-import { cn } from "@/lib/utils";
+import {
+  getMyStoreChatNavHref,
+  getMyStoreNavHref,
+  getStoreAdminChatHref,
+  useMyStaffStore,
+  useMyStore,
+} from "@/hooks/use-my-store";import { cn } from "@/lib/utils";
 
 function MobileDarkModePreference() {
   const { theme, setTheme } = useTheme();
@@ -74,17 +80,58 @@ function NavPill({
   );
 }
 
+type NavSection = "home" | "tienda" | "chat" | "admin";
+
+function resolveNavSection(
+  location: string,
+  options: { storeChatHref: string | null; storeAdminHref: string | null },
+): NavSection | null {
+  const path = location.split("?")[0];
+  if (path === "/") return "home";
+  if (
+    options.storeChatHref &&
+    (path === options.storeChatHref || path.startsWith(`${options.storeChatHref}/`))
+  ) {
+    return "chat";
+  }
+  if (
+    options.storeAdminHref &&
+    (path === options.storeAdminHref || path.startsWith(`${options.storeAdminHref}/`))
+  ) {
+    return "admin";
+  }
+  if (path.startsWith("/tienda")) return "tienda";
+  return null;
+}
+
 export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const isActive = (path: string) => location === path || location.startsWith(path + "/");
   const showMyOrders = isAuthenticated && isClientRole(user);
   const { data: primaryStore } = usePrimaryStore();
+  const { data: myStore } = useMyStore(isAuthenticated);
+  const { data: staffStore } = useMyStaffStore(isAuthenticated);
+  const storeAdminHref =
+    getMyStoreNavHref(myStore) ??
+    (staffStore?.store.slug ? getMyStoreNavHref(staffStore.store) : null);
+  const storeChatHref =
+    getMyStoreChatNavHref(myStore) ??
+    (staffStore?.store.slug ? getStoreAdminChatHref(staffStore.store.slug) : null);
+  const showStoreStaffNav = Boolean(storeAdminHref);
   const tiendaHref = getPrimaryStoreVitrinaHref(primaryStore);
-  const tiendaActive = isActive("/tienda");
-  const homeActive = isActive("/") && location.split("?")[0] === "/";
+
+  const navSection = useMemo(
+    () => resolveNavSection(location, { storeChatHref, storeAdminHref }),
+    [location, storeChatHref, storeAdminHref],
+  );
+
+  const homeActive = navSection === "home";
+  const tiendaActive = navSection === "tienda";
+  const chatActive = navSection === "chat";
+  const adminActive = navSection === "admin";
+  const isActive = (path: string) => location === path || location.startsWith(path + "/");
 
   return (
     <header className="sticky top-0 z-50 w-full shrink-0">
@@ -112,6 +159,16 @@ export function Navigation() {
               <NavPill href={tiendaHref} active={tiendaActive}>
                 Tienda
               </NavPill>
+              {showStoreStaffNav && storeAdminHref ? (
+                <NavPill href={storeAdminHref} active={adminActive}>
+                  Panel de administración
+                </NavPill>
+              ) : null}
+              {showStoreStaffNav && storeChatHref ? (
+                <NavPill href={storeChatHref} active={chatActive}>
+                  Chat
+                </NavPill>
+              ) : null}
             </div>
           </div>
 
@@ -159,6 +216,32 @@ export function Navigation() {
                         </span>
                       </Link>
                     </DropdownMenuItem>
+                    {showStoreStaffNav && storeAdminHref ? (
+                      <DropdownMenuItem
+                        asChild
+                        className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-secondary/10 focus:text-secondary"
+                      >
+                        <Link href={storeAdminHref} className="flex w-full items-center justify-between gap-2">
+                          <span className="flex items-center gap-2.5">
+                            <LayoutDashboard className="h-4 w-4 text-primary" />
+                            Panel de administración
+                          </span>
+                        </Link>
+                      </DropdownMenuItem>
+                    ) : null}
+                    {showStoreStaffNav && storeChatHref ? (
+                      <DropdownMenuItem
+                        asChild
+                        className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-secondary/10 focus:text-secondary"
+                      >
+                        <Link href={storeChatHref} className="flex w-full items-center justify-between gap-2">
+                          <span className="flex items-center gap-2.5">
+                            <MessageCircle className="h-4 w-4 text-primary" />
+                            Chat
+                          </span>
+                        </Link>
+                      </DropdownMenuItem>
+                    ) : null}
                     {showMyOrders ? (
                       <DropdownMenuItem
                         asChild
@@ -230,6 +313,16 @@ export function Navigation() {
                     <NavPill href={tiendaHref} active={tiendaActive} onClick={() => setMobileOpen(false)}>
                       Tienda
                     </NavPill>
+                    {showStoreStaffNav && storeAdminHref ? (
+                      <NavPill href={storeAdminHref} active={adminActive} onClick={() => setMobileOpen(false)}>
+                        Panel de administración
+                      </NavPill>
+                    ) : null}
+                    {showStoreStaffNav && storeChatHref ? (
+                      <NavPill href={storeChatHref} active={chatActive} onClick={() => setMobileOpen(false)}>
+                        Chat
+                      </NavPill>
+                    ) : null}
                     {isAuthenticated ? (
                       <>
                         {showMyOrders ? (

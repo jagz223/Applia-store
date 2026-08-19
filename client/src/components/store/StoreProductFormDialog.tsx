@@ -54,11 +54,13 @@ import {
   type StoreImageDraft,
 } from "@/lib/store-image-draft";
 import { cn } from "@/lib/utils";
+import { STORE_PRODUCT_MAX_IMAGES, normalizeWeightKg } from "@shared/store-schema";
 
 type SizeDraft = {
   id: string;
   name: string;
   prices: Record<string, string>;
+  weight: string;
 };
 
 async function resolveIngredientNames(ids: number[]): Promise<SelectedIngredient[]> {
@@ -105,6 +107,10 @@ function parsePositivePrice(raw: string): number | null {
   return n;
 }
 
+function parseWeightKg(raw: string): number {
+  return normalizeWeightKg(String(raw).trim().replace(",", "."));
+}
+
 function resizeSizeDrafts(
   prev: SizeDraft[],
   count: number,
@@ -113,9 +119,10 @@ function resizeSizeDrafts(
   const next = prev.slice(0, count).map((s) => ({
     ...s,
     prices: { ...emptyPrices(acceptedPaymentIds), ...s.prices },
+    weight: s.weight ?? "",
   }));
   while (next.length < count) {
-    next.push({ id: newSizeId(), name: "", prices: emptyPrices(acceptedPaymentIds) });
+    next.push({ id: newSizeId(), name: "", prices: emptyPrices(acceptedPaymentIds), weight: "" });
   }
   return next;
 }
@@ -178,6 +185,8 @@ export function StoreProductFormDialog({
   const [hasSizes, setHasSizes] = useState(false);
   const [sizeCountInput, setSizeCountInput] = useState("2");
   const [sizeDrafts, setSizeDrafts] = useState<SizeDraft[]>([]);
+  const [hasWeight, setHasWeight] = useState(false);
+  const [productWeight, setProductWeight] = useState("");
   const [prices, setPrices] = useState<Record<string, string>>(() => emptyPrices(acceptedPaymentIds));
   const [hasIngredients, setHasIngredients] = useState(false);
   const [ingredients, setIngredients] = useState<SelectedIngredient[]>([]);
@@ -234,7 +243,12 @@ export function StoreProductFormDialog({
             for (const id of acceptedPaymentIds) {
               if (saved[id] != null) nextPrices[id] = String(saved[id]);
             }
-            return { id: s.id, name: s.name, prices: nextPrices };
+            return {
+              id: s.id,
+              name: s.name,
+              prices: nextPrices,
+              weight: s.weight != null && s.weight > 0 ? String(s.weight) : "",
+            };
           }),
         );
         setPrices(emptyPrices(acceptedPaymentIds));
@@ -254,6 +268,10 @@ export function StoreProductFormDialog({
         }
         setPrices(nextPrices);
       }
+      setHasWeight(product.hasWeight === true);
+      setProductWeight(
+        product.hasWeight === true && (product.weight ?? 0) > 0 ? String(product.weight) : "",
+      );
       const ids = product.ingredientMaterialIds ?? [];
       const removable = product.removableIngredientMaterialIds ?? [];
       const savedAdditionals = product.ingredientAdditionals ?? [];
@@ -296,6 +314,8 @@ export function StoreProductFormDialog({
       setHasSizes(false);
       setSizeCountInput("2");
       setSizeDrafts([]);
+      setHasWeight(false);
+      setProductWeight("");
       setPrices(emptyPrices(acceptedPaymentIds));
       setHasIngredients(false);
       setIngredients([]);
@@ -404,7 +424,7 @@ export function StoreProductFormDialog({
         urls.push(draft.previewUrl);
       }
     }
-    return urls.slice(0, 4);
+    return urls.slice(0, STORE_PRODUCT_MAX_IMAGES);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -416,7 +436,7 @@ export function StoreProductFormDialog({
     }
 
     let pricesByCurrency: Record<string, number> = {};
-    let sizesPayload: { id: string; name: string; pricesByCurrency: Record<string, number> }[] = [];
+    let sizesPayload: { id: string; name: string; pricesByCurrency: Record<string, number>; weight: number }[] = [];
 
     if (hasSizes) {
       if (sizeCount < 2 || sizeCount > 20 || sizeDrafts.length !== sizeCount) {
@@ -450,7 +470,12 @@ export function StoreProductFormDialog({
           }
           sizePrices[id] = n;
         }
-        sizesPayload.push({ id: draft.id, name: sizeName, pricesByCurrency: sizePrices });
+        sizesPayload.push({
+          id: draft.id,
+          name: sizeName,
+          pricesByCurrency: sizePrices,
+          weight: hasWeight ? parseWeightKg(draft.weight) : 0,
+        });
       }
       // Precio de listado = mínimo en moneda visual
       let minVisual = Infinity;
@@ -574,6 +599,8 @@ export function StoreProductFormDialog({
         price: visualPrice,
         pricesByCurrency,
         sizes: hasSizes ? sizesPayload : [],
+        hasWeight,
+        weight: hasWeight && !hasSizes ? parseWeightKg(productWeight) : 0,
         categoryIds: categories.map((c) => c.id),
         ingredientMaterialIds: baseIngredientIds,
         removableIngredientMaterialIds: nextRemovable,
@@ -678,6 +705,21 @@ export function StoreProductFormDialog({
               />
             </div>
 
+            <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+              <div className="space-y-0.5">
+                <Label htmlFor="product-has-weight">¿Tiene peso?</Label>
+                <p className="text-xs text-muted-foreground">
+                  Si está activo, el peso entra en el cálculo de delivery. Si no, cuenta como 0 kg.
+                </p>
+              </div>
+              <Switch
+                id="product-has-weight"
+                checked={hasWeight}
+                disabled={saving}
+                onCheckedChange={setHasWeight}
+              />
+            </div>
+
             {hasSizes ? (
               <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
                 <div className="space-y-1.5">
@@ -779,6 +821,26 @@ export function StoreProductFormDialog({
                         </div>
                       );
                     })}
+                    {hasWeight ? (
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`product-weight-${draft.id}`}>Peso (kg)</Label>
+                        <NumberField
+                          id={`product-weight-${draft.id}`}
+                          min="0"
+                          step="0.001"
+                          value={draft.weight}
+                          onChange={(next) =>
+                            setSizeDrafts((prev) =>
+                              prev.map((s) => (s.id === draft.id ? { ...s, weight: next } : s)),
+                            )
+                          }
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Vacío o 0 = este tamaño no suma peso al delivery.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })
@@ -806,6 +868,22 @@ export function StoreProductFormDialog({
                     </div>
                   );
                 })}
+                {hasWeight ? (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="product-weight">Peso (kg)</Label>
+                    <NumberField
+                      id="product-weight"
+                      min="0"
+                      step="0.001"
+                      value={productWeight}
+                      onChange={setProductWeight}
+                      disabled={saving}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Vacío o 0 = este producto no suma peso al delivery.
+                    </p>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 

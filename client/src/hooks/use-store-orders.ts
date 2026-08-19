@@ -18,13 +18,17 @@ export type StoreOrderSummary = {
   userId: string;
   customerName: string | null;
   customerEmail: string | null;
+  customerPhone: string | null;
   paymentMethodId: number;
   paymentMethodName: string;
   paymentMethodAccountNumber: string;
   fulfillmentMode: StoreFulfillmentMode | null;
   fulfillmentLabel: string;
+  branchId?: string;
+  branchName?: string;
   reference: string;
   proofImageUrl: string;
+  customerNote: string;
   amountDue: number;
   amountPaid: number;
   deliveryFee: number;
@@ -56,6 +60,14 @@ export type StoreOrderListFilters = {
   dateFrom?: string;
   dateTo?: string;
   deliveryQueue?: boolean;
+  branchId?: string;
+};
+
+export type StoreOrdersListResponse = {
+  orders: StoreOrderSummary[];
+  branchFilterLocked: boolean;
+  employeeBranchId: string | null;
+  canFilterOrdersByBranch: boolean;
 };
 
 export function storeOrdersQueryKey(storeId: number, filters?: StoreOrderListFilters) {
@@ -69,13 +81,14 @@ export function storeOrderDetailQueryKey(storeId: number, orderId: number) {
 export function useStoreOrders(storeId: number, filters?: StoreOrderListFilters, enabled = true) {
   return useQuery({
     queryKey: storeOrdersQueryKey(storeId, filters),
-    queryFn: async (): Promise<StoreOrderSummary[]> => {
+    queryFn: async (): Promise<StoreOrdersListResponse> => {
       const params = new URLSearchParams();
       if (filters?.status?.trim()) params.set("status", filters.status.trim());
       if (filters?.orderId?.trim()) params.set("orderId", filters.orderId.trim());
       if (filters?.dateFrom?.trim()) params.set("dateFrom", filters.dateFrom.trim());
       if (filters?.dateTo?.trim()) params.set("dateTo", filters.dateTo.trim());
       if (filters?.deliveryQueue) params.set("deliveryQueue", "true");
+      if (filters?.branchId?.trim()) params.set("branchId", filters.branchId.trim());
       const qs = params.toString();
       const res = await fetch(`/api/stores/${storeId}/orders${qs ? `?${qs}` : ""}`, {
         headers: authHeaders(),
@@ -84,8 +97,18 @@ export function useStoreOrders(storeId: number, filters?: StoreOrderListFilters,
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { message?: string }).message ?? "No se pudieron cargar las órdenes");
       }
-      const data = (await res.json()) as { orders: StoreOrderSummary[] };
-      return data.orders;
+      const data = (await res.json()) as {
+        orders: StoreOrderSummary[];
+        branchFilterLocked?: boolean;
+        employeeBranchId?: string | null;
+        canFilterOrdersByBranch?: boolean;
+      };
+      return {
+        orders: data.orders,
+        branchFilterLocked: Boolean(data.branchFilterLocked),
+        employeeBranchId: data.employeeBranchId ?? null,
+        canFilterOrdersByBranch: Boolean(data.canFilterOrdersByBranch),
+      };
     },
     enabled: enabled && storeId > 0,
   });
@@ -199,6 +222,29 @@ export function useUpdateStoreOrderStatus(storeId: number) {
     onSuccess: (order) => {
       void qc.invalidateQueries({ queryKey: ["/api/stores", storeId, "orders"] });
       void qc.invalidateQueries({ queryKey: storeDeliveryNotificationsKey(storeId) });
+      void qc.invalidateQueries({ queryKey: storeOrderDetailQueryKey(storeId, order.id) });
+    },
+  });
+}
+
+export function useUpdateStoreOrderBranch(storeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, branchId }: { orderId: number; branchId: string }) => {
+      const res = await fetch(`/api/stores/${storeId}/orders/${orderId}/branch`, {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ branchId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudo reasignar la sucursal");
+      }
+      const data = (await res.json()) as { order: StoreOrderDetail };
+      return data.order;
+    },
+    onSuccess: (order) => {
+      void qc.invalidateQueries({ queryKey: ["/api/stores", storeId, "orders"] });
       void qc.invalidateQueries({ queryKey: storeOrderDetailQueryKey(storeId, order.id) });
     },
   });

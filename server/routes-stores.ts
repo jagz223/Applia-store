@@ -86,13 +86,26 @@ import {
   resolveAdditionalDisplayPrice,
   canEnableStoreFulfillmentOptions,
   STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE,
+  STORE_PRIMARY_BRANCH_ID,
+  defaultStoreBranchName,
   normalizeStoreLocation,
+  normalizeStoreBranches,
+  storeHasConfiguredLocation,
+  findNearestStoreBranch,
+  resolveStoreBranch,
+  storeBranchesWithLocation,
   normalizeStoreCurrencyFields,
   normalizeStoreDeliveryFares,
   normalizeStoreProductSizes,
+  PRIMARY_STORE_ID,
   type StoreProductSize,
   type StoreProductIngredientAdditional,
 } from "@shared/store-schema";
+import {
+  insertStoreShowcaseAdItemSchema,
+  type StoreShowcaseAdItem,
+  type StoreShowcaseAdKind,
+} from "@shared/store-showcase-ads-schema";
 import {
   DOLARAPI_VE_BASE,
   currencyLabelForId,
@@ -103,7 +116,34 @@ import {
 import { storeSubscriptionPaymentBodySchema } from "@shared/store-subscription-payment";
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { filterStoresByCatalogQuery, getStoreRubroLabel } from "@shared/store-rubros";
-import { parsePositiveIntParam, requireStoreOwner, viewerCanManageStore } from "./store-product-auth";
+import { parsePositiveIntParam, requireStoreAccess, requireStoreOwner, requireStoreStaffManagement, resolveStoreAccess, viewerCanManageStore, type StoreAccessContext } from "./store-product-auth";
+import { buildStoreStaffDirectory } from "./store-staff-directory";
+import {
+  appendStoreBranchTransferSystemMessage,
+  broadcastStoreBranchChatActivity,
+  broadcastStoreOrderCustomerChatActivity,
+  buildStoreChatList,
+  canAccessStoreBranchChat,
+  canAccessStoreConversation,
+  canAccessStoreOrderCustomerChat,
+  ensureAllStoreBranchPairConversations,
+  ensureStoreBranchCoordinationConversation,
+  ensureStoreOrderCustomerConversation,
+  syncStoreOrderCustomerChatLock,
+} from "./store-order-chat";
+import { storeChatSendMessageSchema, storeStartCustomerChatSchema, STORE_BRANCH_PAIR_CHAT_KIND, STORE_ORDER_CUSTOMER_CHAT_KIND } from "@shared/store-chat-schema";
+import {
+  buildStoreWhatsappUrl,
+  formatStoreWhatsappDisplay,
+  normalizeStoreWhatsappPhone,
+} from "@shared/store-whatsapp";
+import { isCasheaPaymentMethod } from "@shared/store-cashea";
+import { syncStoreCasheaPaymentMethod } from "./store-cashea";
+import {
+  storeStaffListQuerySchema,
+  updateStoreStaffMemberSchema,
+} from "@shared/store-staff-schema";
+import type { StoreOrderListFilters } from "@shared/store-order-schema";
 import { hasAdminPrivileges } from "@shared/roles";
 import {
   addStoreCartItemSchema,
@@ -111,7 +151,7 @@ import {
   removeStoreCartItemSchema,
   updateStoreCartFulfillmentSchema,
 } from "@shared/store-cart-schema";
-import { submitStoreCheckoutSchema, updateStoreOrderStatusSchema, canTransitionStoreOrderStatus, STORE_ORDER_STATUS_LABELS, fulfillmentLabel, getAllowedStoreOrderStatuses, getStoreOrderStatusTransitionLabel, storeOrderStatusSchema, parseStoreOrderDateFilter, canGenerateStoreOrderInvoice, type StoreOrder } from "@shared/store-order-schema";
+import { submitStoreCheckoutSchema, updateStoreOrderStatusSchema, updateStoreOrderBranchSchema, canTransitionStoreOrderStatus, STORE_ORDER_STATUS_LABELS, fulfillmentLabel, getAllowedStoreOrderStatuses, getStoreOrderStatusTransitionLabel, storeOrderStatusSchema, parseStoreOrderDateFilter, canGenerateStoreOrderInvoice, type StoreOrder } from "@shared/store-order-schema";
 import {
   insertStorePaymentMethodSchema,
   updateStorePaymentMethodSchema,
@@ -131,6 +171,8 @@ import {
   validateCheckoutFulfillment,
   validateCheckoutPaymentMethod,
 } from "./store-cart";
+
+import { buildStoreStats } from "./store-stats";
 
 function serializeDate(value: Date | string | number | null | undefined | unknown): string | null {
   if (value == null) return null;
@@ -199,6 +241,7 @@ function serializeStoreProduct(
         { price: 0, pricesByCurrency: s.pricesByCurrency },
         visualCurrencyId,
       ),
+      weight: s.weight ?? 0,
     })),
     displayCurrencyId: visualCurrencyId,
     displayCurrencyLabel: currencyLabelForId(
@@ -211,6 +254,8 @@ function serializeStoreProduct(
     ingredientAdditionals: product.ingredientAdditionals ?? [],
     imageUrls: product.imageUrls ?? [],
     showOnShowcase: product.showOnShowcase !== false,
+    hasWeight: product.hasWeight === true,
+    weight: product.hasWeight === true ? product.weight ?? 0 : 0,
     createdAt: serializeDate(product.createdAt),
     updatedAt: serializeDate(product.updatedAt),
   };
@@ -396,6 +441,19 @@ function serializeShowcaseCategory(category: StoreCategory) {
   };
 }
 
+function serializeShowcaseAdItem(item: StoreShowcaseAdItem) {
+  return {
+    id: item.id,
+    storeId: item.storeId,
+    kind: item.kind,
+    imageUrl: item.imageUrl,
+    linkUrl: item.linkUrl,
+    sortOrder: item.sortOrder,
+    createdAt: serializeDate(item.createdAt),
+    updatedAt: serializeDate(item.updatedAt),
+  };
+}
+
 function serializeStoreShowcasePromotion(promotion: StorePromotion, products: StoreProduct[]) {
   const productById = new Map(products.map((p) => [p.id, p]));
   const imageUrl = resolveStorePromotionImageUrl(promotion, products);
@@ -437,6 +495,7 @@ function serializeStorePaymentMethod(method: StorePaymentMethod) {
     accountNumber: method.accountNumber,
     extraFields: method.extraFields ?? [],
     imageUrl: method.imageUrl ?? null,
+    systemKind: method.systemKind ?? null,
     createdAt: serializeDate(method.createdAt),
     updatedAt: serializeDate(method.updatedAt),
   };
@@ -448,10 +507,22 @@ async function serializeStoreOrder(
   storeOverride?: Store | null,
 ) {
   const user = (await appliaStorage.getUserById(order.userId)) as
-    | { name?: string; firstName?: string; lastName?: string; email?: string }
+    | { name?: string; firstName?: string; lastName?: string; email?: string; phone?: string }
     | undefined;
   const store = storeOverride ?? (await appliaStorage.getStoreById(order.storeId));
-  const storeLocation = normalizeStoreLocation(store?.location ?? null);
+  const branches = normalizeStoreBranches(store?.branches, store?.location ?? null);
+  const assignedBranch =
+    resolveStoreBranch(branches, order.branchId) ??
+    branches.find((b) => b.id === STORE_PRIMARY_BRANCH_ID) ??
+    branches[0] ??
+    null;
+  const storeLocation =
+    normalizeStoreLocation(order.storeLocation) ??
+    assignedBranch?.location ??
+    normalizeStoreLocation(store?.location ?? null);
+  const branchName =
+    (order.branchName ?? "").trim() || assignedBranch?.name || defaultStoreBranchName(0);
+  const branchId = (order.branchId ?? "").trim() || assignedBranch?.id || STORE_PRIMARY_BRANCH_ID;
   const customerName = user
     ? [user.name ?? user.firstName, user.lastName].filter(Boolean).join(" ").trim() || null
     : null;
@@ -463,14 +534,18 @@ async function serializeStoreOrder(
     userId: order.userId,
     customerName,
     customerEmail: user?.email ?? null,
+    customerPhone: user?.phone?.trim() ? user.phone.trim() : null,
     storeLocation,
     paymentMethodId: order.paymentMethodId,
     paymentMethodName: order.paymentMethodName,
     paymentMethodAccountNumber: order.paymentMethodAccountNumber,
     fulfillmentMode: order.fulfillmentMode,
     fulfillmentLabel: fulfillmentLabel(order.fulfillmentMode),
+    branchId,
+    branchName,
     reference: order.reference,
     proofImageUrl: order.proofImageUrl,
+    customerNote: order.customerNote ?? "",
     amountDue: order.amountDue,
     amountPaid: order.amountPaid,
     deliveryFee: order.deliveryFee ?? 0,
@@ -495,6 +570,45 @@ async function serializeStoreOrder(
   };
 }
 
+function parseStoreOrderListFiltersFromQuery(
+  query: Record<string, unknown>,
+  access: StoreAccessContext,
+): StoreOrderListFilters {
+  const statusRaw = typeof query.status === "string" ? query.status.trim() : "";
+  const orderIdRaw = typeof query.orderId === "string" ? query.orderId.trim() : "";
+  const dateFromRaw = typeof query.dateFrom === "string" ? query.dateFrom.trim() : "";
+  const dateToRaw = typeof query.dateTo === "string" ? query.dateTo.trim() : "";
+  const branchIdRaw = typeof query.branchId === "string" ? query.branchId.trim() : "";
+  const deliveryQueue = query.deliveryQueue === "1" || query.deliveryQueue === "true";
+  const orderId = orderIdRaw ? Number.parseInt(orderIdRaw, 10) : undefined;
+  const statusParsed = statusRaw ? storeOrderStatusSchema.safeParse(statusRaw) : null;
+
+  let branchId = branchIdRaw || undefined;
+  if (access.isEmployee && !access.canFilterOrdersByBranch) {
+    branchId = access.employeeBranchId ?? undefined;
+  }
+
+  return {
+    status: statusParsed?.success ? statusParsed.data : undefined,
+    orderId: Number.isFinite(orderId) ? orderId : undefined,
+    dateFrom: parseStoreOrderDateFilter(dateFromRaw),
+    dateTo: parseStoreOrderDateFilter(dateToRaw),
+    deliveryQueue: deliveryQueue || undefined,
+    branchId,
+  };
+}
+
+function assertStoreOrderVisibleToAccess(order: StoreOrder, access: StoreAccessContext): void {
+  if (access.canFilterOrdersByBranch) return;
+  if (!access.isEmployee || !access.employeeBranchId) {
+    throw new Error("STORE_FORBIDDEN");
+  }
+  const orderBranch = (order.branchId ?? STORE_PRIMARY_BRANCH_ID).trim() || STORE_PRIMARY_BRANCH_ID;
+  if (orderBranch !== access.employeeBranchId) {
+    throw new Error("STORE_ORDER_FORBIDDEN");
+  }
+}
+
 function serializeStore(
   store: Store,
   extra?: { hasPendingSubscriptionPayment?: boolean; isOwner?: boolean },
@@ -509,6 +623,7 @@ function serializeStore(
     rubroLabel: getStoreRubroLabel(store.rubro),
     coverImageUrl: store.coverImageUrl ?? null,
     location: store.location ?? null,
+    branches: normalizeStoreBranches(store.branches, store.location ?? null),
     fulfillmentOptions: normalizeStoreFulfillmentOptions(store.fulfillmentOptions),
     deliveryFares: normalizeStoreDeliveryFares(store.deliveryFares),
     ...(() => {
@@ -519,6 +634,10 @@ function serializeStore(
         currencyAcceptedPaymentIds: currency.currencyAcceptedPaymentIds,
       };
     })(),
+    whatsappPhone: store.whatsappPhone ?? null,
+    whatsappDisplay: formatStoreWhatsappDisplay(store.whatsappPhone),
+    whatsappUrl: buildStoreWhatsappUrl(store.whatsappPhone),
+    casheaEnabled: store.casheaEnabled === true,
     visibilitySubscriptionEndsAt: serializeDate(store.visibilitySubscriptionEndsAt),
     visibilityActive: isStoreVisibilityActive(store),
     hasPendingSubscriptionPayment: extra?.hasPendingSubscriptionPayment ?? false,
@@ -726,24 +845,12 @@ export function registerStoreRoutes(app: Express): void {
         return res.status(403).json({ message: "Solo un administrador puede crear la tienda." });
       }
 
-      const existing = await appliaStorage.getOldestStore();
-      if (existing) {
-        return res.status(409).json({
-          message: "Ya existe una tienda en el sistema.",
-          store: serializeStoreCatalogItem(existing),
-        });
-      }
-
       const store = await appliaStorage.createStore({
         ownerUserId: userId,
         name: parsed.data.name,
       });
       return res.status(201).json({ store: serializeStore(store) });
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "STORE_ALREADY_EXISTS") {
-        return res.status(409).json({ message: "Ya tienes una tienda registrada." });
-      }
       console.error("[stores] create", e);
       return res.status(500).json({ message: "No se pudo crear la tienda." });
     }
@@ -760,7 +867,7 @@ export function registerStoreRoutes(app: Express): void {
           hasAdminPrivileges(req.user?.role) ||
           hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
         if (admin) {
-          store = (await appliaStorage.getOldestStore()) ?? undefined;
+          store = (await appliaStorage.getStoreById(PRIMARY_STORE_ID)) ?? undefined;
         }
       }
       if (!store) return res.status(404).json({ message: "Aún no tienes una tienda." });
@@ -775,6 +882,32 @@ export function registerStoreRoutes(app: Express): void {
     }
   });
 
+  /** Tienda donde el usuario es empleado (para navbar / acceso rápido). */
+  app.get("/api/stores/my-staff-store", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const membership = await appliaStorage.findStoreStaffMembershipForUser(userId);
+      if (!membership) {
+        return res.status(404).json({ message: "No eres empleado de ninguna tienda." });
+      }
+      const store = await appliaStorage.getStoreById(membership.storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      return res.json({
+        store: {
+          id: store.id,
+          name: store.name,
+          slug: store.slug,
+        },
+        branchId: membership.branchId,
+        isEmployee: true,
+      });
+    } catch (e) {
+      console.error("[stores] my-staff-store", e);
+      return res.status(500).json({ message: "No se pudo cargar tu tienda de trabajo." });
+    }
+  });
+
   app.patch("/api/stores/mine", authenticateJWT, async (req: any, res) => {
     try {
       const userId = String(req.user?.id ?? "");
@@ -786,7 +919,7 @@ export function registerStoreRoutes(app: Express): void {
           hasAdminPrivileges(req.user?.role) ||
           hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
         if (admin) {
-          store = (await appliaStorage.getOldestStore()) ?? undefined;
+          store = (await appliaStorage.getStoreById(PRIMARY_STORE_ID)) ?? undefined;
         }
       }
       if (!store) return res.status(404).json({ message: "Aún no tienes una tienda." });
@@ -805,13 +938,24 @@ export function registerStoreRoutes(app: Express): void {
           : normalizeStoreFulfillmentOptions(store.fulfillmentOptions);
       const nextLocation =
         parsed.data.location !== undefined ? parsed.data.location : store.location;
-      if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation)) {
+      const nextBranches =
+        parsed.data.branches !== undefined ? parsed.data.branches : store.branches;
+      if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation, nextBranches)) {
         return res.status(400).json({ message: STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE });
       }
       const updated = await appliaStorage.updateStore(store.id, parsed.data);
-      const hasPending = await storeHasPendingSubscriptionPayment(updated.id);
+      if (parsed.data.casheaEnabled !== undefined) {
+        await syncStoreCasheaPaymentMethod(appliaStorage, store.id, parsed.data.casheaEnabled);
+      }
+      const freshStore =
+        (await appliaStorage.getStoreById(store.id)) ??
+        updated;
+      if (parsed.data.branches !== undefined) {
+        void ensureAllStoreBranchPairConversations(appliaStorage, freshStore);
+      }
+      const hasPending = await storeHasPendingSubscriptionPayment(freshStore.id);
       return res.json({
-        store: serializeStore(updated, { hasPendingSubscriptionPayment: hasPending, isOwner: true }),
+        store: serializeStore(freshStore, { hasPendingSubscriptionPayment: hasPending, isOwner: true }),
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -839,10 +983,10 @@ export function registerStoreRoutes(app: Express): void {
     }
   });
 
-  /** Tienda única del sistema: la de menor id en BD (tienda nº 1), o null si no hay ninguna. */
+  /** Tienda principal del sistema: id fijo en PRIMARY_STORE_ID. */
   app.get("/api/stores/primary", async (_req, res) => {
     try {
-      const store = await appliaStorage.getOldestStore();
+      const store = await appliaStorage.getStoreById(PRIMARY_STORE_ID);
       if (!store) return res.json({ store: null });
       return res.json({ store: serializeStoreCatalogItem(store) });
     } catch (e) {
@@ -873,11 +1017,24 @@ export function registerStoreRoutes(app: Express): void {
           : normalizeStoreFulfillmentOptions(existing.fulfillmentOptions);
       const nextLocation =
         parsed.data.location !== undefined ? parsed.data.location : existing.location;
-      if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation)) {
+      const nextBranches =
+        parsed.data.branches !== undefined ? parsed.data.branches : existing.branches;
+      if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation, nextBranches)) {
         return res.status(400).json({ message: STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE });
       }
-      const store = await appliaStorage.updateStore(storeId, parsed.data);
-      return res.json({ store: serializeStore(store, { isOwner: true }) });
+      const patchBody = { ...parsed.data };
+      if (patchBody.whatsappPhone !== undefined) {
+        patchBody.whatsappPhone = normalizeStoreWhatsappPhone(patchBody.whatsappPhone);
+      }
+      const store = await appliaStorage.updateStore(storeId, patchBody);
+      if (parsed.data.casheaEnabled !== undefined) {
+        await syncStoreCasheaPaymentMethod(appliaStorage, storeId, parsed.data.casheaEnabled);
+      }
+      const freshStore = (await appliaStorage.getStoreById(storeId)) ?? store;
+      if (parsed.data.branches !== undefined) {
+        void ensureAllStoreBranchPairConversations(appliaStorage, freshStore);
+      }
+      return res.json({ store: serializeStore(freshStore, { isOwner: true }) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -1278,6 +1435,12 @@ export function registerStoreRoutes(app: Express): void {
       const paymentMethodId = parsePositiveIntParam(req.params.paymentMethodId);
       if (!storeId || !paymentMethodId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
+      const existingMethod = await appliaStorage.getStorePaymentMethod(storeId, paymentMethodId);
+      if (existingMethod && isCasheaPaymentMethod(existingMethod)) {
+        return res.status(400).json({
+          message: "Este método se gestiona desde «Activar Cashea» en la configuración de la tienda.",
+        });
+      }
       const parsed = updateStorePaymentMethodSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         return res.status(400).json({
@@ -1307,6 +1470,12 @@ export function registerStoreRoutes(app: Express): void {
       const paymentMethodId = parsePositiveIntParam(req.params.paymentMethodId);
       if (!storeId || !paymentMethodId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
+      const existingMethod = await appliaStorage.getStorePaymentMethod(storeId, paymentMethodId);
+      if (existingMethod && isCasheaPaymentMethod(existingMethod)) {
+        return res.status(400).json({
+          message: "Este método se gestiona desde «Activar Cashea» en la configuración de la tienda.",
+        });
+      }
       await appliaStorage.deleteStorePaymentMethod(storeId, paymentMethodId);
       return res.status(204).send();
     } catch (e: unknown) {
@@ -1518,6 +1687,12 @@ export function registerStoreRoutes(app: Express): void {
       if (!paymentMethod) {
         return res.status(400).json({ message: "Método de pago no válido." });
       }
+      if (isCasheaPaymentMethod(paymentMethod)) {
+        return res.status(400).json({
+          message:
+            "Cashea se gestiona por WhatsApp. Confirma tu pedido desde la vitrina con el método Cashea.",
+        });
+      }
 
       const orderItems = enriched.items.map((line) => ({
         kind: line.kind,
@@ -1535,23 +1710,40 @@ export function registerStoreRoutes(app: Express): void {
       const deliveryLocation =
         fulfillmentMode === "delivery" ? (parsed.data.deliveryLocation ?? null) : null;
 
+      const branches = normalizeStoreBranches(store.branches, store.location ?? null);
+      const locatedBranches = storeBranchesWithLocation(branches);
+      if (!storeHasConfiguredLocation(branches, store.location) || locatedBranches.length === 0) {
+        return res.status(400).json({
+          message: "La tienda no tiene una sucursal con ubicación configurada.",
+        });
+      }
+
+      let assignedBranch = locatedBranches[0];
       if (fulfillmentMode === "delivery") {
-        const storeLocation = normalizeStoreLocation(store.location);
-        if (!storeLocation) {
-          return res.status(400).json({
-            message: "La tienda no tiene ubicación configurada para delivery.",
-          });
-        }
         if (!deliveryLocation) {
           return res.status(400).json({ message: "Selecciona la ubicación de entrega." });
         }
+        assignedBranch =
+          findNearestStoreBranch(branches, deliveryLocation) ?? assignedBranch;
         const quote = await computeStoreDeliveryQuote(
-          storeLocation,
+          assignedBranch.location,
           deliveryLocation,
           store.deliveryFares,
+          { itemCount: enriched.itemCount, cartWeightKg: enriched.cartWeightKg },
         );
         deliveryFee = quote.deliveryFee;
         deliveryDistanceM = quote.distanceM;
+      } else {
+        const requested = resolveStoreBranch(branches, parsed.data.branchId);
+        if (!requested?.location) {
+          if (locatedBranches.length === 1) {
+            assignedBranch = locatedBranches[0];
+          } else {
+            return res.status(400).json({ message: "Selecciona la sucursal." });
+          }
+        } else {
+          assignedBranch = requested as typeof assignedBranch;
+        }
       }
 
       const amountDue =
@@ -1567,8 +1759,12 @@ export function registerStoreRoutes(app: Express): void {
           paymentMethod.accountNumber ||
           "",
         fulfillmentMode,
+        branchId: assignedBranch.id,
+        branchName: assignedBranch.name,
+        storeLocation: assignedBranch.location,
         reference: parsed.data.reference.trim(),
         proofImageUrl: parsed.data.proofImageUrl.trim(),
+        customerNote: parsed.data.customerNote?.trim() ?? "",
         amountDue,
         amountPaid: parsed.data.amountPaid,
         deliveryFee,
@@ -1617,35 +1813,57 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      await requireStoreOwner(userId, storeId);
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
 
-      const statusRaw = typeof req.query.status === "string" ? req.query.status.trim() : "";
-      const orderIdRaw = typeof req.query.orderId === "string" ? req.query.orderId.trim() : "";
-      const dateFromRaw = typeof req.query.dateFrom === "string" ? req.query.dateFrom.trim() : "";
-      const dateToRaw = typeof req.query.dateTo === "string" ? req.query.dateTo.trim() : "";
-      const deliveryQueue =
-        req.query.deliveryQueue === "1" || req.query.deliveryQueue === "true";
-      const orderId = orderIdRaw ? Number.parseInt(orderIdRaw, 10) : undefined;
-      const statusParsed = statusRaw ? storeOrderStatusSchema.safeParse(statusRaw) : null;
-
-      const orders = await appliaStorage.listStoreOrders(storeId, {
-        status: statusParsed?.success ? statusParsed.data : undefined,
-        orderId: Number.isFinite(orderId) ? orderId : undefined,
-        dateFrom: parseStoreOrderDateFilter(dateFromRaw),
-        dateTo: parseStoreOrderDateFilter(dateToRaw),
-        deliveryQueue: deliveryQueue || undefined,
-      });
+      const orders = await appliaStorage.listStoreOrders(
+        storeId,
+        parseStoreOrderListFiltersFromQuery(req.query ?? {}, access),
+      );
 
       const store = await appliaStorage.getStoreById(storeId);
       const serialized = await Promise.all(orders.map((o) => serializeStoreOrder(o, false, store)));
-      return res.json({ orders: serialized });
+      return res.json({
+        orders: serialized,
+        branchFilterLocked: access.isEmployee && !access.canFilterOrdersByBranch,
+        employeeBranchId: access.employeeBranchId,
+        canFilterOrdersByBranch: access.canFilterOrdersByBranch,
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "STORE_NOT_OWNER") {
+      if (msg === "STORE_FORBIDDEN") {
         return res.status(403).json({ message: "No tienes permiso para ver las órdenes." });
       }
       console.error("[stores] list orders", e);
       return res.status(500).json({ message: "No se pudieron cargar las órdenes." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/stats", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      if (!access.isOwner && !access.isPlatformAdmin) {
+        return res.status(403).json({ message: "No tienes permiso para ver estadísticas." });
+      }
+
+      const stats = await buildStoreStats({
+        storeId,
+        access,
+        rawQuery: req.query ?? {},
+      });
+
+      return res.json({ stats });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso." });
+      console.error("[stores] stats", e);
+      return res.status(500).json({ message: "No se pudieron cargar las estadísticas." });
     }
   });
 
@@ -1655,12 +1873,14 @@ export function registerStoreRoutes(app: Express): void {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      await requireStoreOwner(userId, storeId);
-      const summary = await getStoreDeliveryNotificationsSummary(storeId);
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      const branchId =
+        access.isEmployee && !access.canFilterOrdersByBranch ? access.employeeBranchId : null;
+      const summary = await getStoreDeliveryNotificationsSummary(storeId, branchId);
       return res.json(summary);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "STORE_NOT_OWNER") {
+      if (msg === "STORE_FORBIDDEN") {
         return res.status(403).json({ message: "No tienes permiso." });
       }
       console.error("[stores] delivery notifications summary", e);
@@ -1675,16 +1895,17 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       const orderId = parsePositiveIntParam(req.params.orderId);
       if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
-      await requireStoreOwner(userId, storeId);
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
 
       const order = await appliaStorage.getStoreOrder(storeId, orderId);
       if (!order) return res.status(404).json({ message: "Orden no encontrada." });
+      assertStoreOrderVisibleToAccess(order, access);
 
       const store = await appliaStorage.getStoreById(storeId);
       return res.json({ order: await serializeStoreOrder(order, true, store) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "STORE_NOT_OWNER") {
+      if (msg === "STORE_FORBIDDEN" || msg === "STORE_ORDER_FORBIDDEN") {
         return res.status(403).json({ message: "No tienes permiso para ver esta orden." });
       }
       console.error("[stores] get order", e);
@@ -1699,10 +1920,11 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       const orderId = parsePositiveIntParam(req.params.orderId);
       if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
-      await requireStoreOwner(userId, storeId);
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
 
       const order = await appliaStorage.getStoreOrder(storeId, orderId);
       if (!order) return res.status(404).json({ message: "Orden no encontrada." });
+      assertStoreOrderVisibleToAccess(order, access);
       if (!canGenerateStoreOrderInvoice(order.status)) {
         return res.status(400).json({
           message: "La factura solo está disponible cuando la orden está confirmada o en un estado posterior.",
@@ -1737,7 +1959,7 @@ export function registerStoreRoutes(app: Express): void {
       return res.send(pdf);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "STORE_NOT_OWNER") {
+      if (msg === "STORE_FORBIDDEN" || msg === "STORE_ORDER_FORBIDDEN") {
         return res.status(403).json({ message: "No tienes permiso para ver esta factura." });
       }
       console.error("[stores] order invoice pdf", e);
@@ -1752,7 +1974,7 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       const orderId = parsePositiveIntParam(req.params.orderId);
       if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
-      await requireStoreOwner(userId, storeId);
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
 
       const parsed = updateStoreOrderStatusSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -1764,6 +1986,7 @@ export function registerStoreRoutes(app: Express): void {
 
       const existing = await appliaStorage.getStoreOrder(storeId, orderId);
       if (!existing) return res.status(404).json({ message: "Orden no encontrada." });
+      assertStoreOrderVisibleToAccess(existing, access);
 
       if (!canTransitionStoreOrderStatus(existing, parsed.data.status)) {
         return res.status(400).json({ message: "No puedes cambiar a ese estado desde el estado actual." });
@@ -1789,13 +2012,16 @@ export function registerStoreRoutes(app: Express): void {
       }
 
       const order = await appliaStorage.updateStoreOrderStatus(storeId, orderId, parsed.data.status);
+      void syncStoreOrderCustomerChatLock(appliaStorage, order).catch((err) =>
+        console.error("[stores] sync order customer chat lock", err),
+      );
       void notifyCustomerStoreOrderStatusChanged(order, store).catch((err) =>
         console.error("[stores] notify customer order status", err),
       );
       return res.json({ order: await serializeStoreOrder(order, true, store) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "STORE_NOT_OWNER") {
+      if (msg === "STORE_FORBIDDEN" || msg === "STORE_ORDER_FORBIDDEN") {
         return res.status(403).json({ message: "No tienes permiso para actualizar esta orden." });
       }
       if (msg === "STORE_ORDER_NOT_FOUND") {
@@ -1833,13 +2059,16 @@ export function registerStoreRoutes(app: Express): void {
         const storeId = parsePositiveIntParam(req.params.storeId);
         const orderId = parsePositiveIntParam(req.params.orderId);
         if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
-        await requireStoreOwner(userId, storeId);
+        const access = await requireStoreAccess(userId, storeId, req.user?.role);
+        const existing = await appliaStorage.getStoreOrder(storeId, orderId);
+        if (!existing) return res.status(404).json({ message: "Orden no encontrada." });
+        assertStoreOrderVisibleToAccess(existing, access);
         const order = await appliaStorage.resetStoreOrderDeliveryUnread(storeId, orderId);
         const store = await appliaStorage.getStoreById(storeId);
         return res.json({ order: await serializeStoreOrder(order, false, store) });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg === "STORE_NOT_OWNER") {
+        if (msg === "STORE_FORBIDDEN" || msg === "STORE_ORDER_FORBIDDEN") {
           return res.status(403).json({ message: "No tienes permiso." });
         }
         if (msg === "STORE_ORDER_NOT_FOUND") {
@@ -1858,10 +2087,11 @@ export function registerStoreRoutes(app: Express): void {
       const storeId = parsePositiveIntParam(req.params.storeId);
       const orderId = parsePositiveIntParam(req.params.orderId);
       if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
-      await requireStoreOwner(userId, storeId);
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
 
       const order = await appliaStorage.getStoreOrder(storeId, orderId);
       if (!order) return res.status(404).json({ message: "Orden no encontrada." });
+      assertStoreOrderVisibleToAccess(order, access);
       if (order.fulfillmentMode !== "delivery") {
         return res.status(400).json({ message: "Esta orden no es delivery." });
       }
@@ -1877,11 +2107,689 @@ export function registerStoreRoutes(app: Express): void {
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "STORE_NOT_OWNER") {
+      if (msg === "STORE_FORBIDDEN" || msg === "STORE_ORDER_FORBIDDEN") {
         return res.status(403).json({ message: "No tienes permiso." });
       }
       console.error("[stores] order delivery detail", e);
       return res.status(500).json({ message: "No se pudo cargar el delivery." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/orders/:orderId/branch", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+
+      const parsed = updateStoreOrderBranchSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const existing = await appliaStorage.getStoreOrder(storeId, orderId);
+      if (!existing) return res.status(404).json({ message: "Orden no encontrada." });
+      assertStoreOrderVisibleToAccess(existing, access);
+
+      const store = await appliaStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const branches = normalizeStoreBranches(store.branches, store.location ?? null);
+      const targetBranch = resolveStoreBranch(branches, parsed.data.branchId);
+      if (!targetBranch) {
+        return res.status(400).json({ message: "Sucursal no válida." });
+      }
+
+      if (access.isEmployee && !access.canFilterOrdersByBranch) {
+        if (parsed.data.branchId !== access.employeeBranchId) {
+          return res.status(403).json({
+            message: "Solo puedes reasignar pedidos a tu sucursal asignada.",
+          });
+        }
+      }
+
+      const fromBranchId = (existing.branchId ?? "").trim();
+      const fromBranchName = (existing.branchName ?? "").trim() || resolveStoreBranch(branches, fromBranchId)?.name;
+
+      const order = await appliaStorage.patchStoreOrder(storeId, orderId, {
+        branchId: targetBranch.id,
+        branchName: targetBranch.name,
+        storeLocation: targetBranch.location,
+      });
+
+      void appendStoreBranchTransferSystemMessage({
+        storage: appliaStorage,
+        store,
+        orderId,
+        actorUserId: userId,
+        fromBranchId,
+        fromBranchName,
+        toBranchId: targetBranch.id,
+        toBranchName: targetBranch.name,
+      }).catch((err) => console.error("[stores] branch transfer chat message", err));
+
+      const customerConv = await appliaStorage.findStoreOrderCustomerConversation(orderId);
+      if (customerConv) {
+        await appliaStorage.patchConversation(Number((customerConv as { id: number }).id), {
+          branchId: targetBranch.id,
+          branchName: targetBranch.name,
+        });
+      }
+
+      return res.json({ order: await serializeStoreOrder(order, true, store) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_FORBIDDEN" || msg === "STORE_ORDER_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para reasignar esta orden." });
+      }
+      if (msg === "STORE_ORDER_NOT_FOUND") {
+        return res.status(404).json({ message: "Orden no encontrada." });
+      }
+      console.error("[stores] patch order branch", e);
+      return res.status(500).json({ message: "No se pudo reasignar la sucursal." });
+    }
+  });
+
+  // ==================== Chat tienda (sucursales + cliente por pedido) ====================
+
+  type StoreChatWhatsappFields = {
+    whatsappPhone: string | null;
+    whatsappDisplay: string | null;
+    whatsappUrl: string | null;
+  };
+
+  const EMPTY_STORE_CHAT_WHATSAPP: StoreChatWhatsappFields = {
+    whatsappPhone: null,
+    whatsappDisplay: null,
+    whatsappUrl: null,
+  };
+
+  function staffCustomerChatWhatsappFields(
+    orderId: number,
+    customerPhoneRaw: string | null | undefined,
+  ): StoreChatWhatsappFields {
+    const normalized = normalizeStoreWhatsappPhone(customerPhoneRaw);
+    if (!normalized) return EMPTY_STORE_CHAT_WHATSAPP;
+    return {
+      whatsappPhone: normalized,
+      whatsappDisplay: formatStoreWhatsappDisplay(normalized),
+      whatsappUrl: buildStoreWhatsappUrl(normalized, `Hola, escribo sobre el pedido #${orderId}`),
+    };
+  }
+
+  async function loadStoreChatSession(
+    store: StoreAccessContext["store"],
+    conversationId: number,
+    userId: string,
+    access: StoreAccessContext,
+  ) {
+    const conv = await appliaStorage.getConversationById(conversationId);
+    if (!conv) return null;
+    const allowed = await canAccessStoreConversation(appliaStorage, userId, store, conv as any, access);
+    if (!allowed) return null;
+    const { messages, hasMore } = await appliaStorage.getMessagesByConversation(conversationId, { limit: 50 });
+    const row = conv as {
+      kind?: string;
+      storeOrderId?: number;
+      branchName?: string | null;
+      branchNameA?: string;
+      branchNameB?: string;
+      messagesLocked?: boolean;
+    };
+    let customerName: string | null = null;
+    let branchName = row.branchName ?? null;
+    let whatsappFields: StoreChatWhatsappFields = EMPTY_STORE_CHAT_WHATSAPP;
+    if (row.kind === STORE_ORDER_CUSTOMER_CHAT_KIND && row.storeOrderId) {
+      const order = await appliaStorage.getStoreOrder(store.id, Number(row.storeOrderId));
+      if (order) {
+        const customer = (await appliaStorage.getUserById(order.userId)) as
+          | { name?: string; firstName?: string; lastName?: string; email?: string; phone?: string }
+          | undefined;
+        customerName =
+          [customer?.name ?? customer?.firstName, customer?.lastName].filter(Boolean).join(" ").trim() ||
+          customer?.email ||
+          null;
+        branchName = branchName ?? order.branchName ?? null;
+        whatsappFields = staffCustomerChatWhatsappFields(order.id, customer?.phone);
+      }
+    }
+    if (row.kind === STORE_BRANCH_PAIR_CHAT_KIND) {
+      branchName = [row.branchNameA, row.branchNameB].filter(Boolean).join(" ↔ ") || null;
+    }
+    return {
+      conversationId,
+      messages,
+      hasMore,
+      chatLocked: row.messagesLocked === true,
+      chatAvailable: true,
+      customerName,
+      branchName,
+      ...whatsappFields,
+    };
+  }
+
+  app.get("/api/stores/:storeId/chats", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      if (!canAccessStoreBranchChat(access)) {
+        return res.status(403).json({ message: "No tienes permiso para ver los chats." });
+      }
+      const chats = await buildStoreChatList(appliaStorage, access.store, access, userId);
+      return res.json({ chats });
+    } catch (e) {
+      console.error("[stores] chats list", e);
+      return res.status(500).json({ message: "No se pudo cargar la lista de chats." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/chats/:conversationId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const conversationId = parsePositiveIntParam(req.params.conversationId);
+      if (!storeId || !conversationId) return res.status(400).json({ message: "ID inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      if (!canAccessStoreBranchChat(access)) {
+        return res.status(403).json({ message: "No tienes permiso para ver este chat." });
+      }
+      const session = await loadStoreChatSession(access.store, conversationId, userId, access);
+      if (!session) return res.status(404).json({ message: "Chat no encontrado." });
+      return res.json(session);
+    } catch (e) {
+      console.error("[stores] chat get", e);
+      return res.status(500).json({ message: "No se pudo cargar el chat." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/chats/:conversationId/messages", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const conversationId = parsePositiveIntParam(req.params.conversationId);
+      if (!storeId || !conversationId) return res.status(400).json({ message: "ID inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      if (!canAccessStoreBranchChat(access)) {
+        return res.status(403).json({ message: "No tienes permiso para escribir en este chat." });
+      }
+      const conv = await appliaStorage.getConversationById(conversationId);
+      if (!conv) return res.status(404).json({ message: "Chat no encontrado." });
+      const allowed = await canAccessStoreConversation(appliaStorage, userId, access.store, conv as any, access);
+      if (!allowed) return res.status(403).json({ message: "No tienes permiso para este chat." });
+      if ((conv as { messagesLocked?: boolean }).messagesLocked === true) {
+        return res.status(403).json({ message: "Este chat está cerrado." });
+      }
+      const parsed = storeChatSendMessageSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const message = await appliaStorage.createMessage({
+        conversationId,
+        senderId: userId,
+        content: parsed.data.content,
+        type: parsed.data.type,
+        status: "sent",
+      });
+      const preview = String(message.content ?? "").slice(0, 120);
+      const kind = String((conv as { kind?: string }).kind ?? "");
+      const { getIO } = await import("./socket");
+      const io = getIO();
+      if (io) {
+        if (kind === "store_branch_pair") {
+          await broadcastStoreBranchChatActivity(io, appliaStorage, storeId, conversationId, preview);
+        } else if (kind === "store_order_customer") {
+          const orderId = Number((conv as { storeOrderId?: number }).storeOrderId);
+          const order = await appliaStorage.getStoreOrder(storeId, orderId);
+          if (order) {
+            await broadcastStoreOrderCustomerChatActivity(
+              io,
+              appliaStorage,
+              access.store,
+              order,
+              conversationId,
+              preview,
+              userId,
+            );
+          }
+        }
+      }
+      return res.status(201).json({ message, conversationId });
+    } catch (e) {
+      console.error("[stores] chat send", e);
+      return res.status(500).json({ message: "No se pudo enviar el mensaje." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/chats/customer/start", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      if (!canAccessStoreBranchChat(access)) {
+        return res.status(403).json({ message: "No tienes permiso para iniciar chats." });
+      }
+      const parsed = storeStartCustomerChatSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const order = await appliaStorage.getStoreOrder(storeId, parsed.data.orderId);
+      if (!order) return res.status(404).json({ message: "Pedido no encontrado." });
+
+      const branches = normalizeStoreBranches(access.store.branches, access.store.location ?? null);
+      let branchIdOverride = parsed.data.branchId?.trim() || null;
+
+      if (access.isEmployee && access.employeeBranchId) {
+        branchIdOverride = access.employeeBranchId;
+      } else if (
+        !branchIdOverride &&
+        branches.length > 1 &&
+        (access.isOwner || access.isPlatformAdmin)
+      ) {
+        return res.status(400).json({
+          message: "Selecciona la sucursal desde la que quieres escribir al cliente.",
+          code: "BRANCH_REQUIRED",
+        });
+      } else if (!branchIdOverride && branches.length === 1) {
+        branchIdOverride = branches[0]?.id ?? order.branchId ?? null;
+      } else if (!branchIdOverride) {
+        branchIdOverride = (order.branchId ?? "").trim() || null;
+      }
+
+      if (branchIdOverride && !resolveStoreBranch(branches, branchIdOverride)) {
+        return res.status(400).json({ message: "Sucursal inválida." });
+      }
+
+      if (access.isEmployee && access.employeeBranchId && branchIdOverride !== access.employeeBranchId) {
+        return res.status(403).json({ message: "Solo puedes escribir desde tu sucursal asignada." });
+      }
+
+      const chat = await ensureStoreOrderCustomerConversation(appliaStorage, access.store, order, {
+        branchIdOverride,
+        allowStaffInitiated: true,
+      });
+      const session = await loadStoreChatSession(access.store, chat.id, userId, access);
+      const chats = await buildStoreChatList(appliaStorage, access.store, access, userId);
+      return res.status(chat.created ? 201 : 200).json({
+        conversationId: chat.id,
+        created: chat.created,
+        session,
+        chats,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_ORDER_CHAT_UNAVAILABLE") {
+        return res.status(400).json({ message: "El chat no está disponible para este pedido." });
+      }
+      console.error("[stores] customer chat start", e);
+      return res.status(500).json({ message: "No se pudo iniciar el chat con el cliente." });
+    }
+  });
+
+  /** @deprecated Usar GET /api/stores/:storeId/chats */
+  app.get("/api/stores/:storeId/branch-chat", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      if (!canAccessStoreBranchChat(access)) {
+        return res.status(403).json({ message: "No tienes permiso para ver este chat." });
+      }
+      const store = access.store;
+      const { id: conversationId } = await ensureStoreBranchCoordinationConversation(appliaStorage, store);
+      const { messages, hasMore } = await appliaStorage.getMessagesByConversation(conversationId, { limit: 50 });
+      const conv = await appliaStorage.getConversationById(conversationId);
+      return res.json({
+        conversationId,
+        messages,
+        hasMore,
+        chatLocked: (conv as { messagesLocked?: boolean } | null)?.messagesLocked === true,
+        // En chats entre sucursales no ofrecemos redirección directa a WhatsApp.
+        whatsappPhone: null,
+        whatsappDisplay: null,
+        whatsappUrl: null,
+      });
+    } catch (e) {
+      console.error("[stores] branch chat get", e);
+      return res.status(500).json({ message: "No se pudo cargar el chat." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/branch-chat/messages", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      if (!canAccessStoreBranchChat(access)) {
+        return res.status(403).json({ message: "No tienes permiso para escribir en este chat." });
+      }
+      const parsed = storeChatSendMessageSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const { id: conversationId } = await ensureStoreBranchCoordinationConversation(
+        appliaStorage,
+        access.store,
+      );
+      const conv = await appliaStorage.getConversationById(conversationId);
+      if ((conv as { messagesLocked?: boolean } | null)?.messagesLocked === true) {
+        return res.status(403).json({ message: "Este chat está cerrado." });
+      }
+      const message = await appliaStorage.createMessage({
+        conversationId,
+        senderId: userId,
+        content: parsed.data.content,
+        type: parsed.data.type,
+        status: "sent",
+      });
+      const preview = String(message.content ?? "").slice(0, 120);
+      const { getIO } = await import("./socket");
+      const io = getIO();
+      if (io) {
+        await broadcastStoreBranchChatActivity(io, appliaStorage, storeId, conversationId, preview);
+      }
+      return res.status(201).json({ message, conversationId });
+    } catch (e) {
+      console.error("[stores] branch chat send", e);
+      return res.status(500).json({ message: "No se pudo enviar el mensaje." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/orders/:orderId/customer-chat", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      const order = await appliaStorage.getStoreOrder(storeId, orderId);
+      if (!order) return res.status(404).json({ message: "Orden no encontrada." });
+      const allowed = await canAccessStoreOrderCustomerChat(appliaStorage, userId, access.store, order, access);
+      if (!allowed) return res.status(403).json({ message: "No tienes permiso para ver este chat." });
+      const chat = await ensureStoreOrderCustomerConversation(appliaStorage, access.store, order, {
+        allowStaffInitiated: access.isOwner || access.isPlatformAdmin || access.isEmployee,
+      });
+      const { messages, hasMore } = await appliaStorage.getMessagesByConversation(chat.id, { limit: 50 });
+      const customer = (await appliaStorage.getUserById(order.userId)) as
+        | { name?: string; firstName?: string; lastName?: string; email?: string; phone?: string }
+        | undefined;
+      const whatsappFields = staffCustomerChatWhatsappFields(order.id, customer?.phone);
+      return res.json({
+        conversationId: chat.id,
+        messages,
+        hasMore,
+        chatLocked: chat.chatLocked,
+        chatAvailable: true,
+        customerName:
+          [customer?.name ?? customer?.firstName, customer?.lastName].filter(Boolean).join(" ").trim() ||
+          customer?.email ||
+          null,
+        branchName: order.branchName ?? null,
+        ...whatsappFields,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_ORDER_CHAT_UNAVAILABLE") {
+        return res.status(400).json({ message: "El chat no está disponible para este pedido." });
+      }
+      console.error("[stores] order customer chat get", e);
+      return res.status(500).json({ message: "No se pudo cargar el chat." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/orders/:orderId/customer-chat/messages", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!storeId || !orderId) return res.status(400).json({ message: "ID inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      const order = await appliaStorage.getStoreOrder(storeId, orderId);
+      if (!order) return res.status(404).json({ message: "Orden no encontrada." });
+      const allowed = await canAccessStoreOrderCustomerChat(appliaStorage, userId, access.store, order, access);
+      if (!allowed) return res.status(403).json({ message: "No tienes permiso para escribir en este chat." });
+      const parsed = storeChatSendMessageSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const chat = await ensureStoreOrderCustomerConversation(appliaStorage, access.store, order, {
+        allowStaffInitiated: access.isOwner || access.isPlatformAdmin || access.isEmployee,
+      });
+      if (chat.chatLocked) {
+        return res.status(403).json({ message: "Este chat está cerrado." });
+      }
+      const message = await appliaStorage.createMessage({
+        conversationId: chat.id,
+        senderId: userId,
+        content: parsed.data.content,
+        type: parsed.data.type,
+        status: "sent",
+      });
+      const preview = String(message.content ?? "").slice(0, 120);
+      const { getIO } = await import("./socket");
+      const io = getIO();
+      if (io) {
+        await broadcastStoreOrderCustomerChatActivity(
+          io,
+          appliaStorage,
+          access.store,
+          order,
+          chat.id,
+          preview,
+          userId,
+        );
+      }
+      return res.status(201).json({ message, conversationId: chat.id });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_ORDER_CHAT_UNAVAILABLE") {
+        return res.status(400).json({ message: "El chat no está disponible para este pedido." });
+      }
+      console.error("[stores] order customer chat send", e);
+      return res.status(500).json({ message: "No se pudo enviar el mensaje." });
+    }
+  });
+
+  app.get("/api/me/store-orders/:orderId/chat", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!orderId) return res.status(400).json({ message: "ID inválido." });
+      const order = await appliaStorage.getStoreOrderForUser(userId, orderId);
+      if (!order) return res.status(404).json({ message: "Pedido no encontrado." });
+      const store = await appliaStorage.getStoreById(order.storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const chat = await ensureStoreOrderCustomerConversation(appliaStorage, store, order);
+      const { messages, hasMore } = await appliaStorage.getMessagesByConversation(chat.id, { limit: 50 });
+      return res.json({
+        conversationId: chat.id,
+        messages,
+        hasMore,
+        chatLocked: chat.chatLocked,
+        chatAvailable: true,
+        branchName: order.branchName ?? null,
+        storeName: store.name,
+        whatsappPhone: store.whatsappPhone ?? null,
+        whatsappDisplay: formatStoreWhatsappDisplay(store.whatsappPhone),
+        whatsappUrl: buildStoreWhatsappUrl(
+          store.whatsappPhone,
+          `Hola, escribo sobre mi pedido #${order.id}`,
+        ),
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_ORDER_CHAT_UNAVAILABLE") {
+        return res.status(400).json({ message: "El chat no está disponible para este pedido." });
+      }
+      console.error("[stores] my order chat get", e);
+      return res.status(500).json({ message: "No se pudo cargar el chat." });
+    }
+  });
+
+  app.post("/api/me/store-orders/:orderId/chat/messages", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const orderId = parsePositiveIntParam(req.params.orderId);
+      if (!orderId) return res.status(400).json({ message: "ID inválido." });
+      const order = await appliaStorage.getStoreOrderForUser(userId, orderId);
+      if (!order) return res.status(404).json({ message: "Pedido no encontrado." });
+      const store = await appliaStorage.getStoreById(order.storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const parsed = storeChatSendMessageSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const chat = await ensureStoreOrderCustomerConversation(appliaStorage, store, order);
+      if (chat.chatLocked) {
+        return res.status(403).json({ message: "Este chat está cerrado." });
+      }
+      const message = await appliaStorage.createMessage({
+        conversationId: chat.id,
+        senderId: userId,
+        content: parsed.data.content,
+        type: parsed.data.type,
+        status: "sent",
+      });
+      const preview = String(message.content ?? "").slice(0, 120);
+      const { getIO } = await import("./socket");
+      const io = getIO();
+      if (io) {
+        await broadcastStoreOrderCustomerChatActivity(
+          io,
+          appliaStorage,
+          store,
+          order,
+          chat.id,
+          preview,
+          userId,
+        );
+      }
+      return res.status(201).json({ message, conversationId: chat.id });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_ORDER_CHAT_UNAVAILABLE") {
+        return res.status(400).json({ message: "El chat no está disponible para este pedido." });
+      }
+      console.error("[stores] my order chat send", e);
+      return res.status(500).json({ message: "No se pudo enviar el mensaje." });
+    }
+  });
+
+  // ==================== Personal / usuarios de tienda ====================
+  app.get("/api/stores/:storeId/staff", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      const access = await requireStoreAccess(userId, storeId, req.user?.role);
+      if (!access.isOwner && !access.isPlatformAdmin && !access.isEmployee) {
+        return res.status(403).json({ message: "No tienes permiso para ver los usuarios." });
+      }
+
+      const parsed = storeStaffListQuerySchema.safeParse(req.query ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Parámetros inválidos.", errors: parsed.error.errors });
+      }
+
+      const members = await buildStoreStaffDirectory(access.store, {
+        email: parsed.data.email,
+        phone: parsed.data.phone,
+        name: parsed.data.name,
+        role: parsed.data.role,
+        branchId: parsed.data.branchId,
+      });
+
+      return res.json({ members });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para ver los usuarios." });
+      }
+      console.error("[stores] list staff", e);
+      return res.status(500).json({ message: "No se pudieron cargar los usuarios." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/staff/:memberUserId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const memberUserId = String(req.params.memberUserId ?? "").trim();
+      if (!storeId || !memberUserId) return res.status(400).json({ message: "ID inválido." });
+      const access = await requireStoreStaffManagement(userId, storeId, req.user?.role);
+
+      const parsed = updateStoreStaffMemberSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const memberUser = await appliaStorage.getUserById(memberUserId);
+      if (!memberUser) return res.status(404).json({ message: "Usuario no encontrado." });
+      if (memberUserId === access.store.ownerUserId && parsed.data.role === "employee") {
+        return res.status(400).json({ message: "El dueño de la tienda no puede ser empleado." });
+      }
+
+      const branches = normalizeStoreBranches(access.store.branches, access.store.location ?? null);
+
+      if (parsed.data.role === "client") {
+        await appliaStorage.removeStoreStaffMember(storeId, memberUserId);
+      } else {
+        const branchId = parsed.data.branchId?.trim();
+        if (!branchId || !resolveStoreBranch(branches, branchId)) {
+          return res.status(400).json({ message: "Selecciona una sucursal válida." });
+        }
+        await appliaStorage.upsertStoreStaffMember(storeId, memberUserId, { branchId });
+      }
+
+      const members = await buildStoreStaffDirectory(access.store);
+      const updated = members.find((m) => m.userId === memberUserId);
+      return res.json({ member: updated ?? null });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para actualizar usuarios." });
+      }
+      console.error("[stores] patch staff member", e);
+      return res.status(500).json({ message: "No se pudo actualizar el usuario." });
     }
   });
 
@@ -1931,6 +2839,81 @@ export function registerStoreRoutes(app: Express): void {
     } catch (e) {
       console.error("[stores] get my order", e);
       return res.status(500).json({ message: "No se pudo cargar el pedido." });
+    }
+  });
+
+  // ==================== Banners / Popups (vitrina) ====================
+  app.get("/api/stores/:storeId/showcase-ads", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      const [banners, popups] = await Promise.all([
+        appliaStorage.listStoreShowcaseAds(storeId, "banner"),
+        appliaStorage.listStoreShowcaseAds(storeId, "popup"),
+      ]);
+      return res.json({
+        banners: banners.map(serializeShowcaseAdItem),
+        popups: popups.map(serializeShowcaseAdItem),
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      console.error("[stores] showcase-ads list", e);
+      return res.status(500).json({ message: "No se pudieron cargar los banners y popups." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/showcase-ads", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      const parsed = insertStoreShowcaseAdItemSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const created = await appliaStorage.createStoreShowcaseAdItem(storeId, parsed.data);
+      return res.status(201).json({ item: serializeShowcaseAdItem(created) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      console.error("[stores] showcase-ads create", e);
+      return res.status(500).json({ message: "No se pudo crear el banner o popup." });
+    }
+  });
+
+  app.delete("/api/stores/:storeId/showcase-ads/:kind/:adId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const kind = String(req.params.kind ?? "") as StoreShowcaseAdKind;
+      const adId = parsePositiveIntParam(req.params.adId);
+      if (!storeId || !adId) return res.status(400).json({ message: "ID inválido." });
+      if (kind !== "banner" && kind !== "popup") return res.status(400).json({ message: "Kind inválido." });
+
+      await requireStoreOwner(userId, storeId);
+      await appliaStorage.deleteStoreShowcaseAdItem(storeId, kind, adId);
+      return res.status(204).send();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      console.error("[stores] showcase-ads delete", e);
+      return res.status(500).json({ message: "No se pudo eliminar el banner o popup." });
     }
   });
 
@@ -2175,10 +3158,19 @@ export function registerStoreRoutes(app: Express): void {
         .filter((p) => p.status === "active" && p.items.some((item) => item.status === "active"))
         .map((p) => serializeStoreShowcasePromotion(p, all));
 
+      const [banners, popups] = await Promise.all([
+        appliaStorage.listStoreShowcaseAds(storeForView.id, "banner"),
+        appliaStorage.listStoreShowcaseAds(storeForView.id, "popup"),
+      ]);
+      const serializedBanners = banners.map(serializeShowcaseAdItem);
+      const serializedPopups = popups.map(serializeShowcaseAdItem);
+
       return res.json({
         products,
         categories,
         promotions,
+        banners: serializedBanners,
+        popups: serializedPopups,
         visibilityActive,
         isOwner,
       });
@@ -2204,6 +3196,8 @@ export function registerStoreRoutes(app: Express): void {
 
       const viewerId = req.user?.id != null ? String(req.user.id) : null;
       const isOwner = await viewerCanManageStore(viewerId, store, req.user?.role);
+      const access = await resolveStoreAccess(viewerId, store, req.user?.role);
+      const canManageStore = access.isOwner || access.isPlatformAdmin || access.isEmployee;
       const storeForView =
         isOwner ? await repairStoreSubscriptionVisibilityIfNeeded(store) : store;
       const visibilityActive = isStoreVisibilityActive(storeForView);
@@ -2216,6 +3210,11 @@ export function registerStoreRoutes(app: Express): void {
           isOwner,
         }),
         isOwner,
+        isEmployee: access.isEmployee,
+        employeeBranchId: access.employeeBranchId,
+        canManageStore,
+        canManageStaff: access.canManageStaff,
+        canFilterOrdersByBranch: access.canFilterOrdersByBranch,
         visibilityActive,
       });
     } catch (e) {

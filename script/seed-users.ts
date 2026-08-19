@@ -1,6 +1,6 @@
 /**
  * Usuarios de prueba Applia (Firestore).
- * Crea o actualiza: admin@test.com, support@test.com, client@test.com
+ * Crea o actualiza: admin@test.com, employee@test.com, client@test.com
  *
  * Contraseña para todos: 12345678
  * Ejecutar desde la raíz: npm run seed:users
@@ -16,7 +16,7 @@ const PASSWORD_PLAIN = "12345678";
 
 const SEED_USERS: {
   email: string;
-  role: "admin" | "tiSupport" | "client";
+  role: "admin" | "employee" | "client";
   name: string;
   lastName: string;
   phone: string;
@@ -29,9 +29,9 @@ const SEED_USERS: {
     phone: "+58 414 0000001",
   },
   {
-    email: "support@test.com",
-    role: "tiSupport",
-    name: "Soporte",
+    email: "employee@test.com",
+    role: "employee",
+    name: "Employee",
     lastName: "Test",
     phone: "+58 414 0000002",
   },

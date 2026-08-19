@@ -6,6 +6,7 @@ export function roleLabelEs(role: string): string {
   const r = role.trim().toLowerCase();
   const map: Record<string, string> = {
     client: "Cliente",
+    employee: "Empleado",
     professional: "Profesional / asociado",
     central: "Central",
     admin: "Administrador",
