@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { storeAdminFieldClass, storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
+import { CASHEA_PAYMENT_METHOD_SYSTEM_KIND } from "@shared/store-cashea";
 import { cn } from "@/lib/utils";
 
 const NEW_TAB = "_new";
@@ -344,17 +345,20 @@ function PaymentMethodForm({
 
 export function StorePaymentMethodsConfigCard({ storeId }: { storeId: number }) {
   const { data: methods = [], isLoading, error } = useStorePaymentMethods(storeId);
+  const editableMethods = methods.filter(
+    (m) => (m.systemKind ?? "").trim().toLowerCase() !== CASHEA_PAYMENT_METHOD_SYSTEM_KIND,
+  );
   const [activeTab, setActiveTab] = useState<string>(NEW_TAB);
 
   useEffect(() => {
     if (activeTab === NEW_TAB) return;
-    const exists = methods.some((m) => String(m.id) === activeTab);
-    if (!exists && methods.length > 0) {
-      setActiveTab(String(methods[0].id));
-    } else if (!exists && methods.length === 0) {
+    const exists = editableMethods.some((m) => String(m.id) === activeTab);
+    if (!exists && editableMethods.length > 0) {
+      setActiveTab(String(editableMethods[0].id));
+    } else if (!exists && editableMethods.length === 0) {
       setActiveTab(NEW_TAB);
     }
-  }, [methods, activeTab]);
+  }, [editableMethods, activeTab]);
 
   function tabLabel(method: StorePaymentMethodSummary) {
     const label = method.name.trim() || `Método #${method.id}`;
@@ -383,7 +387,7 @@ export function StorePaymentMethodsConfigCard({ storeId }: { storeId: number }) 
                 "flex h-auto w-full flex-wrap justify-start gap-1.5 rounded-2xl bg-muted/60 p-1.5",
               )}
             >
-              {methods.map((method) => (
+              {editableMethods.map((method) => (
                 <TabsTrigger
                   key={method.id}
                   value={String(method.id)}
@@ -398,7 +402,7 @@ export function StorePaymentMethodsConfigCard({ storeId }: { storeId: number }) 
               </TabsTrigger>
             </TabsList>
 
-            {methods.map((method) => (
+            {editableMethods.map((method) => (
               <TabsContent key={method.id} value={String(method.id)}>
                 <PaymentMethodForm
                   storeId={storeId}
@@ -406,7 +410,7 @@ export function StorePaymentMethodsConfigCard({ storeId }: { storeId: number }) 
                   initial={formFromMethod(method)}
                   onSaved={() => setActiveTab(String(method.id))}
                   onDeleted={() => {
-                    const rest = methods.filter((m) => m.id !== method.id);
+                    const rest = editableMethods.filter((m) => m.id !== method.id);
                     setActiveTab(rest.length > 0 ? String(rest[0].id) : NEW_TAB);
                   }}
                 />

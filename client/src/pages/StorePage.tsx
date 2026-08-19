@@ -25,6 +25,9 @@ import {
 } from "@/components/store/StoreShowcaseFilters";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { StoreShowcaseBannersCarousel } from "@/components/store/StoreShowcaseBannersCarousel";
+import { StoreShowcasePopupsModal } from "@/components/store/StoreShowcasePopupsModal";
+import { StoreContactChannels } from "@/components/store/StoreContactChannels";
 
 type StorePayload = {
   id: number;
@@ -112,12 +115,32 @@ export default function StorePage() {
     error: showcaseError,
   } = useStoreShowcaseProducts(slug, canLoadShowcase);
 
+  const banners = showcaseData?.banners ?? [];
+  const popups = showcaseData?.popups ?? [];
+  const [popupsOpen, setPopupsOpen] = useState(false);
+
   useEffect(() => {
     setSearchQuery("");
     setCategoryFilter("all");
     setSelectedProduct(null);
     setMobilePanelOpen(false);
+    setPopupsOpen(false);
   }, [slug]);
+
+  // Pop-ups: aparecen en el cliente si no ha ingresado a la vitrina en al menos 1 hora.
+  useEffect(() => {
+    if (!slug) return;
+    if (canManageStorePreview) return;
+    if (showcaseLoading) return;
+    if (popups.length === 0) return;
+
+    const key = `applia_store_last_enter_${encodeURIComponent(slug)}`;
+    const last = Number(localStorage.getItem(key) ?? "0");
+    const now = Date.now();
+    const shouldShow = now - last >= 60 * 60 * 1000;
+    localStorage.setItem(key, String(now));
+    if (shouldShow) setPopupsOpen(true);
+  }, [slug, canManageStorePreview, showcaseLoading, popups.length]);
 
   useEffect(() => {
     const mql = window.matchMedia("(min-width: 1024px)");
@@ -303,6 +326,10 @@ export default function StorePage() {
         ) : null}
 
         <section className="space-y-3 sm:space-y-4">
+          {!showcaseLoading && hasShowcaseFilters && banners.length > 0 ? (
+            <StoreShowcaseBannersCarousel banners={banners} />
+          ) : null}
+
           {!showcaseLoading && hasShowcaseFilters ? (
             <StoreShowcaseFilters
               searchQuery={searchQuery}
@@ -352,6 +379,32 @@ export default function StorePage() {
           )}
         </section>
 
+        {showCustomerCart ? (
+          <section className="mx-auto max-w-3xl rounded-2xl border border-border/70 bg-card/95 p-4 sm:p-5 space-y-3">
+            <div>
+              <h2 className="font-display text-lg font-semibold">Comunícate con nosotros</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Servicio al cliente de {store.name}. Para un pedido concreto abre el chat dentro de
+                tu orden en Mis pedidos.
+              </p>
+            </div>
+            <StoreContactChannels
+              whatsappUrl={data?.store?.whatsappUrl}
+              whatsappDisplay={data?.store?.whatsappDisplay}
+              onOpenChat={
+                isAuthenticated ? () => window.location.assign("/pedidos-tienda") : undefined
+              }
+              showChat
+              chatDisabled={!isAuthenticated}
+              chatDisabledReason={
+                !isAuthenticated
+                  ? "Inicia sesión y abre un pedido activo para usar el chat."
+                  : undefined
+              }
+            />
+          </section>
+        ) : null}
+
         {!isAuthenticated && showCustomerCart ? (
           <p className="text-sm text-muted-foreground text-center">
             <Link href="/login" className="text-foreground underline underline-offset-2">
@@ -361,6 +414,10 @@ export default function StorePage() {
           </p>
         ) : null}
       </div>
+
+      {showCustomerCart ? (
+        <StoreShowcasePopupsModal open={popupsOpen} onOpenChange={setPopupsOpen} popups={popups} />
+      ) : null}
 
       {showSidePanel && isLgUp ? (
         <aside

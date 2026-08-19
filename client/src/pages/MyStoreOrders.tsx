@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { StoreOrderStatusRoadmap } from "@/components/store/StoreOrderStatusRoadmap";
 import { StoreOrderDeliveryRouteMap } from "@/components/store/StoreOrderDeliveryRouteMap";
+import { StoreMyOrderChatPanel } from "@/components/store/StoreMyOrderChatPanel";
 import { cn } from "@/lib/utils";
 
 function formatPrice(value: number) {
@@ -129,6 +130,12 @@ function MyOrderDetailContent({ orderId }: { orderId: number }) {
           <span className="font-medium text-foreground">Entrega:</span>{" "}
           <span className="text-muted-foreground">{order.fulfillmentLabel}</span>
         </p>
+        {order.branchName ? (
+          <p>
+            <span className="font-medium text-foreground">Sucursal:</span>{" "}
+            <span className="text-muted-foreground">{order.branchName}</span>
+          </p>
+        ) : null}
       </div>
 
       <StoreOrderStatusRoadmap status={order.status} fulfillmentMode={order.fulfillmentMode} />
@@ -208,6 +215,13 @@ function MyOrderDetailContent({ orderId }: { orderId: number }) {
           ))}
         </ul>
       </div>
+
+      <StoreMyOrderChatPanel
+        orderId={order.id}
+        status={order.status}
+        updatedAt={order.updatedAt}
+        branchName={order.branchName}
+      />
     </div>
   );
 }

@@ -18,7 +18,7 @@ export async function fetchPrimaryStore(): Promise<PrimaryStore | null> {
   return data.store;
 }
 
-/** Vitrina pública de la tienda principal (menor id en BD). */
+/** Vitrina pública de la tienda principal (PRIMARY_STORE_ID en shared/store-schema). */
 export function getPrimaryStoreVitrinaHref(store: Pick<PrimaryStore, "slug"> | null | undefined): string {
   if (!store?.slug) return "/tienda";
   return `/tienda/${encodeURIComponent(store.slug)}`;

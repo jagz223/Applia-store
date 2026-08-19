@@ -341,6 +341,7 @@ type UserOption = { id: string; name: string; email: string; role?: string };
 const SALDO_DEBOUNCE_MS = 1000;
 const ROLE_LABELS: Record<string, string> = {
   client: "Cliente",
+  employee: "Empleado",
   professional: "Asociado",
   central: "Central",
   admin: "Administrador",

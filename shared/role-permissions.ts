@@ -291,6 +291,10 @@ export function systemRolePermissions(code: string): Record<RolePermissionKey, b
     return clientDefaults(base);
   }
 
+  if (c === "employee") {
+    return clientDefaults(base);
+  }
+
   return base;
 }
 

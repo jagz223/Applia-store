@@ -139,6 +139,8 @@ function MapClickPick({
 type StoreCheckoutDeliverySectionProps = {
   storeLocation: StoreLocation;
   deliveryFares?: StoreDeliveryFares | null;
+  itemCount?: number;
+  cartWeightKg?: number;
   value: PickedLocation | null;
   onChange: (place: PickedLocation | null) => void;
   onQuoteChange: (quote: StoreDeliveryQuote | null) => void;
@@ -153,6 +155,8 @@ type StoreCheckoutDeliverySectionProps = {
 export function StoreCheckoutDeliverySection({
   storeLocation,
   deliveryFares,
+  itemCount = 0,
+  cartWeightKg = 0,
   value,
   onChange,
   onQuoteChange,
@@ -187,6 +191,8 @@ export function StoreCheckoutDeliverySection({
   const destination = value ? { lat: value.lat, lon: value.lon } : null;
   const hasBoth = destination != null;
   const fares = normalizeStoreDeliveryFares(deliveryFares ?? DEFAULT_STORE_DELIVERY_FARES);
+  const cartMetric = { itemCount, cartWeightKg };
+  const tiersKey = fares.costTiers.map((t) => `${t.minValue}:${t.priceUsd}`).join("|");
 
   useEffect(() => {
     setInput(value?.label ?? "");
@@ -226,7 +232,7 @@ export function StoreCheckoutDeliverySection({
 
         setRouteGeometry(route.geometry);
         setDistanceM(route.distanceM);
-        const fee = computeStoreDeliveryFeeUsd(fares, route.distanceM);
+        const fee = computeStoreDeliveryFeeUsd(fares, route.distanceM, cartMetric);
         setDeliveryFee(fee);
         onQuoteChangeRef.current({ distanceM: route.distanceM, deliveryFee: fee });
       } catch {
@@ -246,7 +252,18 @@ export function StoreCheckoutDeliverySection({
     };
     // fares as primitives to avoid object identity churn
     // eslint-disable-next-line react-hooks/exhaustive-deps -- origin/destination coords
-  }, [destination?.lat, destination?.lon, origin.lat, origin.lon, fares.baseUsd, fares.perKmUsd]);
+  }, [
+    destination?.lat,
+    destination?.lon,
+    origin.lat,
+    origin.lon,
+    fares.baseUsd,
+    fares.perKmUsd,
+    fares.surchargeMode,
+    tiersKey,
+    itemCount,
+    cartWeightKg,
+  ]);
 
   const reverseAt = useCallback(async (lat: number, lon: number) => {
     setReverseLoading(true);
@@ -329,7 +346,7 @@ export function StoreCheckoutDeliverySection({
       <div>
         <h3 className="text-sm font-semibold">Entrega a domicilio</h3>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Origen: {storeLocation.label}. Indica dónde recibirás el pedido.
+          Origen: {storeLocation.label}. El envío sale de la sucursal más cercana a tu ubicación.
         </p>
       </div>
 

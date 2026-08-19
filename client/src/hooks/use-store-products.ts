@@ -7,6 +7,7 @@ export type StoreProductSizeSummary = {
   name: string;
   pricesByCurrency: Record<string, number>;
   price?: number;
+  weight?: number;
 };
 
 export type StoreProductAdditionalSummary = {
@@ -32,6 +33,8 @@ export type StoreProductSummary = {
   ingredientAdditionals?: StoreProductAdditionalSummary[];
   imageUrls: string[];
   showOnShowcase: boolean;
+  hasWeight?: boolean;
+  weight?: number;
   createdAt: string;
   updatedAt: string;
 };

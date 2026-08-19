@@ -17,14 +17,17 @@ import {
   STORE_FULFILLMENT_LABELS,
   type StoreFulfillmentMode,
 } from "@shared/store-fulfillment";
-import type { StoreProduct, StorePromotion, StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
+import type { StoreProduct, StorePromotion, StoreLocation, StoreDeliveryFares, StoreBranch } from "@shared/store-schema";
 import {
+  computeCartDeliveryWeightKg,
   normalizeStoreDeliveryFares,
   normalizeStoreLocation,
+  normalizeStoreBranches,
   resolveAdditionalDisplayPrice,
   resolveStorePromotionImageUrl,
 } from "@shared/store-schema";
 import type { StoreCheckoutPaymentMethod } from "@shared/store-order-schema";
+import { isCasheaPaymentMethod } from "@shared/store-cashea";
 import { resolveProductDisplayPrice, STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
 import { appliaStorage } from "./storage-applia";
 
@@ -51,14 +54,18 @@ export type StoreCartFulfillmentOption = {
 
 export type EnrichedStoreCart = {
   storeId: number;
+  storeName: string | null;
+  whatsappPhone: string | null;
   items: EnrichedStoreCartLine[];
   subtotal: number;
   itemCount: number;
+  cartWeightKg: number;
   expiresAt: string | null;
   fulfillmentMode: StoreFulfillmentMode | null;
   fulfillmentOptions: StoreCartFulfillmentOption[];
   paymentMethods: StoreCheckoutPaymentMethod[];
   storeLocation: StoreLocation | null;
+  branches: StoreBranch[];
   deliveryFares: StoreDeliveryFares;
 };
 
@@ -234,22 +241,31 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     accountNumber: m.accountNumber,
     extraFields: m.extraFields ?? [],
     imageUrl: m.imageUrl ?? null,
+    isCashea: isCasheaPaymentMethod(m),
   }));
 
+  const storeName = store?.name?.trim() ? store.name.trim() : null;
+  const whatsappPhone = store?.whatsappPhone ?? null;
+
   const storeLocation = normalizeStoreLocation(store?.location ?? null);
+  const branches = normalizeStoreBranches(store?.branches, storeLocation);
   const deliveryFares = normalizeStoreDeliveryFares(store?.deliveryFares);
 
   if (!cart) {
     return {
       storeId,
+      storeName,
+      whatsappPhone,
       items: [],
       subtotal: 0,
       itemCount: 0,
+      cartWeightKg: 0,
       expiresAt: null,
       fulfillmentMode: null,
       fulfillmentOptions,
       paymentMethods,
       storeLocation,
+      branches,
       deliveryFares,
     };
   }
@@ -350,16 +366,22 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
       ? cart.expiresAt.toISOString()
       : new Date(cart.expiresAt).toISOString();
 
+  const cartWeightKg = computeCartDeliveryWeightKg(items, products, promotions);
+
   return {
     storeId,
+    storeName,
+    whatsappPhone,
     items,
     subtotal,
     itemCount,
+    cartWeightKg,
     expiresAt,
     fulfillmentMode,
     fulfillmentOptions,
     paymentMethods,
     storeLocation,
+    branches,
     deliveryFares,
   };
 }
@@ -370,6 +392,7 @@ export async function validateCheckoutPaymentMethod(
 ): Promise<void> {
   const method = await appliaStorage.getStorePaymentMethod(storeId, paymentMethodId);
   if (!method) throw new Error("STORE_PAYMENT_METHOD_NOT_FOUND");
+  if (isCasheaPaymentMethod(method)) throw new Error("STORE_CASHEA_WHATSAPP_ONLY");
 }
 
 export async function validateCheckoutFulfillment(

@@ -7,7 +7,7 @@ import type {
 } from "@shared/store-cart-schema";
 import type { SubmitStoreCheckout } from "@shared/store-order-schema";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
-import type { StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
+import type { StoreBranch, StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
 
 export type StoreCartLine = {
   kind: "product" | "promotion";
@@ -35,18 +35,23 @@ export type StoreCartPaymentMethodOption = {
   accountNumber: string;
   extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
+  isCashea?: boolean;
 };
 
 export type StoreCartSummary = {
   storeId: number;
+  storeName?: string | null;
+  whatsappPhone?: string | null;
   items: StoreCartLine[];
   subtotal: number;
   itemCount: number;
+  cartWeightKg: number;
   expiresAt: string | null;
   fulfillmentMode: StoreFulfillmentMode | null;
   fulfillmentOptions: StoreCartFulfillmentOption[];
   paymentMethods: StoreCartPaymentMethodOption[];
   storeLocation: StoreLocation | null;
+  branches: StoreBranch[];
   deliveryFares: StoreDeliveryFares;
 };
 
