@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { AlertCircle, CheckCircle2, Loader2, MessageCircleMore, Wallet } from "lucide-react";
+import { AlertCircle, CheckCircle2, CreditCard, Loader2, MessageCircleMore, Wallet } from "lucide-react";
 
 import { STORE_FULFILLMENT_CUSTOMER_HINTS } from "@shared/store-fulfillment";
 
@@ -12,6 +12,11 @@ import {
 } from "@shared/store-cashea";
 
 import { buildStoreWhatsappUrl } from "@shared/store-whatsapp";
+
+import {
+  parseStorePaymentGatewayKind,
+  STORE_PAYMENT_GATEWAY_LABELS,
+} from "@shared/store-payment-gateways";
 
 import {
 
@@ -148,6 +153,25 @@ function PaymentMethodDetails({
               <MessageCircleMore className="h-3.5 w-3.5" />
               Redirección directa al chat de la tienda
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  const gatewayKind = parseStorePaymentGatewayKind(method.gatewayKind);
+  if (gatewayKind) {
+    const label = STORE_PAYMENT_GATEWAY_LABELS[gatewayKind];
+    return (
+      <div className="rounded-2xl border border-secondary/25 bg-gradient-to-br from-secondary/10 via-background to-background p-4 sm:p-5">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 rounded-full bg-secondary/15 p-2 text-secondary dark:bg-primary/15 dark:text-primary">
+            <CreditCard className="h-4 w-4" />
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-foreground">Pago en línea con {label}</p>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Al confirmar te redirigimos a {label} para pagar. El pedido se crea cuando {label} confirma el pago.
+            </p>
           </div>
         </div>
       </div>
@@ -294,6 +318,9 @@ export function StoreCartCheckoutDialog({
   );
 
   const isCasheaSelected = Boolean(selectedPaymentMethod?.isCashea);
+  const selectedGatewayKind = parseStorePaymentGatewayKind(selectedPaymentMethod?.gatewayKind);
+  const isGatewaySelected = selectedGatewayKind != null;
+  const skipProof = isCasheaSelected || isGatewaySelected;
 
 
 
@@ -480,7 +507,7 @@ export function StoreCartCheckoutDialog({
 
     const missing: string[] = [];
 
-    if (!isCasheaSelected) {
+    if (!skipProof) {
       const trimmedRef = reference.trim();
 
       if (!trimmedRef) missing.push("Referencia");
@@ -566,38 +593,12 @@ export function StoreCartCheckoutDialog({
         return;
       }
 
-      const trimmedRef = reference.trim();
-      const paid = Number.parseFloat(amountPaid.replace(",", "."));
-
-      const proofImageUrl = await resolveProofUrl();
-
-      if (!proofImageUrl) {
-
-        showFormFeedback({
-
-          title: "Campos incompletos",
-
-          description: missingFieldsMessage(["Comprobante de pago"]),
-
-        });
-
-        return;
-
-      }
-
-
-
       clearFormFeedback();
 
-
-
       const result = await submitMutation.mutateAsync({
-
-        reference: trimmedRef,
-
-        proofImageUrl,
-
-        amountPaid: paid,
+        reference: skipProof ? "" : reference.trim(),
+        proofImageUrl: skipProof ? "" : (await resolveProofUrl()) ?? "",
+        amountPaid: skipProof ? undefined : Number.parseFloat(amountPaid.replace(",", ".")),
         customerNote: customerNote.trim(),
 
         paymentMethodId: Number(effectivePaymentMethodId),
@@ -629,6 +630,42 @@ export function StoreCartCheckoutDialog({
 
 
       if (proofPreviewUrl?.startsWith("blob:")) revokeBlobPreview(proofPreviewUrl);
+
+      if (result.checkoutUrl) {
+        if (
+          selectedGatewayKind === "paypal" &&
+          /stripe\.com/i.test(result.checkoutUrl)
+        ) {
+          showFormFeedback({
+            title: "Pasarela incorrecta",
+            description: "Seleccionaste PayPal pero el sistema intentó abrir Stripe. Edita el método de pago y elige la pasarela PayPal.",
+          });
+          return;
+        }
+        if (
+          selectedGatewayKind === "stripe" &&
+          /paypal\.com/i.test(result.checkoutUrl)
+        ) {
+          showFormFeedback({
+            title: "Pasarela incorrecta",
+            description: "Seleccionaste Stripe pero el sistema intentó abrir PayPal. Edita el método de pago y elige la pasarela Stripe.",
+          });
+          return;
+        }
+        if (
+          result.gatewayKind &&
+          selectedGatewayKind &&
+          result.gatewayKind !== selectedGatewayKind
+        ) {
+          showFormFeedback({
+            title: "Pasarela incorrecta",
+            description: `El método no coincide con ${STORE_PAYMENT_GATEWAY_LABELS[selectedGatewayKind]}. Revisa la pasarela del método en Métodos de pago.`,
+          });
+          return;
+        }
+        window.location.assign(result.checkoutUrl);
+        return;
+      }
 
       const newOrderId = result.order?.id;
       handleClose(false);
@@ -678,7 +715,9 @@ export function StoreCartCheckoutDialog({
           <DialogDescription className="text-sm leading-snug">
             {isCasheaSelected
               ? "Elige entrega y confirma para continuar por WhatsApp con Cashea."
-              : "Elige entrega, pago y adjunta el comprobante."}
+              : isGatewaySelected
+                ? `Elige entrega y confirma: te redirigimos a ${STORE_PAYMENT_GATEWAY_LABELS[selectedGatewayKind]}. El pedido se crea cuando el pago se confirme.`
+                : "Elige entrega, pago y adjunta el comprobante."}
           </DialogDescription>
         </DialogHeader>
 
@@ -748,7 +787,7 @@ export function StoreCartCheckoutDialog({
               <div>
                 <h3 className="text-sm font-semibold">Método de pago</h3>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Elige dónde realizaste el pago.
+                  Elige cómo vas a pagar.
                 </p>
               </div>
 
@@ -772,9 +811,12 @@ export function StoreCartCheckoutDialog({
                   <TabsList className="grid h-auto w-full grid-cols-1 gap-2 rounded-2xl bg-muted/50 p-2 sm:grid-cols-2">
                     {cart.paymentMethods.map((method) => {
                       const active = effectivePaymentMethodId === String(method.id);
+                      const methodGateway = parseStorePaymentGatewayKind(method.gatewayKind);
                       const methodSubtitle = method.isCashea
                         ? null
-                        : method.extraFields?.[0]?.value || method.accountNumber || "Método de pago disponible";
+                        : methodGateway
+                          ? `Pago en línea · ${STORE_PAYMENT_GATEWAY_LABELS[methodGateway]}`
+                          : method.extraFields?.[0]?.value || method.accountNumber || "Método de pago disponible";
                       return (
                         <TabsTrigger
                           key={method.id}
@@ -784,7 +826,7 @@ export function StoreCartCheckoutDialog({
                             "group h-auto min-h-[4.25rem] flex-col items-start justify-center gap-1 rounded-xl border px-4 py-3 text-left transition-all",
                             "data-[state=inactive]:bg-background/90 data-[state=inactive]:text-foreground",
                             "data-[state=inactive]:hover:border-border data-[state=inactive]:hover:bg-background",
-                            method.isCashea
+                            method.isCashea || methodGateway
                               ? "border-secondary/20 data-[state=active]:border-secondary/40 data-[state=active]:bg-secondary/10 dark:data-[state=active]:border-primary/40 dark:data-[state=active]:bg-primary/10"
                               : "border-border/70 data-[state=active]:border-primary/30 data-[state=active]:bg-primary/5",
                           )}
@@ -794,12 +836,18 @@ export function StoreCartCheckoutDialog({
                               <span
                                 className={cn(
                                   "rounded-full p-1.5",
-                                  method.isCashea
+                                  method.isCashea || methodGateway
                                     ? "bg-secondary/15 text-secondary dark:bg-primary/15 dark:text-primary"
                                     : "bg-muted text-muted-foreground",
                                 )}
                               >
-                                {method.isCashea ? <Wallet className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                {method.isCashea ? (
+                                  <Wallet className="h-3.5 w-3.5" />
+                                ) : methodGateway ? (
+                                  <CreditCard className="h-3.5 w-3.5" />
+                                ) : (
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                )}
                               </span>
                               <span className="font-medium">{method.name}</span>
                             </span>
@@ -926,8 +974,8 @@ export function StoreCartCheckoutDialog({
             </p>
           </div>
 
-          <div className={cn("grid gap-4 sm:gap-6", !isCasheaSelected && "lg:grid-cols-2")}>
-            {!isCasheaSelected ? (
+          <div className={cn("grid gap-4 sm:gap-6", !skipProof && "lg:grid-cols-2")}>
+            {!skipProof ? (
             <div className="space-y-3 rounded-2xl border border-border/70 bg-card p-3.5 sm:space-y-4 sm:p-4">
               <div>
                 <h3 className="text-sm font-semibold">Comprobante de pago</h3>
@@ -987,7 +1035,7 @@ export function StoreCartCheckoutDialog({
             <div
               className={cn(
                 "space-y-3 rounded-2xl border border-border/70 bg-card p-3.5 sm:space-y-4 sm:p-4",
-                isCasheaSelected && "lg:col-span-2",
+                skipProof && "lg:col-span-2",
               )}
             >
               <div>
@@ -1075,7 +1123,9 @@ export function StoreCartCheckoutDialog({
                 className="h-11 rounded-full font-semibold sm:min-w-[10rem]"
               >
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Confirmar compra
+                {isGatewaySelected
+                  ? `Pagar con ${STORE_PAYMENT_GATEWAY_LABELS[selectedGatewayKind]}`
+                  : "Confirmar compra"}
               </Button>
             </div>
           </DialogFooter>

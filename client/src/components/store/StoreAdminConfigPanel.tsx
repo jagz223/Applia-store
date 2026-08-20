@@ -1,8 +1,6 @@
 import { StoreFulfillmentConfigCard } from "@/components/store/StoreFulfillmentConfigCard";
 import { StoreLocationConfigCard } from "@/components/store/StoreLocationConfigCard";
-import { StorePaymentMethodsConfigCard } from "@/components/store/StorePaymentMethodsConfigCard";
 import { StoreWhatsAppConfigCard } from "@/components/store/StoreWhatsAppConfigCard";
-import { StoreCasheaConfigCard } from "@/components/store/StoreCasheaConfigCard";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
 import type { StoreBranch, StoreDeliveryFares, StoreLocation } from "@shared/store-schema";
 
@@ -14,7 +12,6 @@ type StoreAdminConfigPanelProps = {
   initialLocation: StoreLocation | null;
   initialBranches?: StoreBranch[] | null;
   initialWhatsappPhone?: string | null;
-  initialCasheaEnabled?: boolean;
 };
 
 export function StoreAdminConfigPanel({
@@ -25,14 +22,13 @@ export function StoreAdminConfigPanel({
   initialLocation,
   initialBranches,
   initialWhatsappPhone,
-  initialCasheaEnabled,
 }: StoreAdminConfigPanelProps) {
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="space-y-1">
         <h2 className="font-display text-2xl font-bold tracking-tight">Configuración</h2>
         <p className="text-sm text-muted-foreground">
-          Ubicación, modalidades de entrega y métodos de pago de tu tienda.
+          Ubicación, modalidades de entrega y WhatsApp de atención de tu tienda.
         </p>
       </div>
 
@@ -52,11 +48,7 @@ export function StoreAdminConfigPanel({
         storeBranches={initialBranches}
       />
 
-      <StorePaymentMethodsConfigCard storeId={storeId} />
-
       <StoreWhatsAppConfigCard storeId={storeId} initialPhone={initialWhatsappPhone} />
-
-      <StoreCasheaConfigCard storeId={storeId} initialEnabled={initialCasheaEnabled} />
     </div>
   );
 }

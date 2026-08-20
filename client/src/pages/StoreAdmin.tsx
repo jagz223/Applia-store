@@ -16,6 +16,7 @@ import { StoreAdminProductsPanel } from "@/components/store/StoreAdminProductsPa
 import { StoreAdminCategoriesPanel } from "@/components/store/StoreAdminCategoriesPanel";
 import { StoreAdminPromotionsPanel } from "@/components/store/StoreAdminPromotionsPanel";
 import { StoreAdminConfigPanel } from "@/components/store/StoreAdminConfigPanel";
+import { StoreAdminPaymentMethodsPanel } from "@/components/store/StoreAdminPaymentMethodsPanel";
 import { StoreAdminCurrencyPanel } from "@/components/store/StoreAdminCurrencyPanel";
 import { StoreAdminOrdersPanel } from "@/components/store/StoreAdminOrdersPanel";
 import { StoreAdminIngredientsPanel } from "@/components/store/StoreAdminIngredientsPanel";
@@ -91,6 +92,16 @@ function sectionPanel(
       />
     );
   }
+  if (section === "metodos_pago") {
+    return (
+      <StoreAdminPaymentMethodsPanel
+        storeId={store.id}
+        slug={store.slug}
+        initialWhatsappPhone={store.whatsappPhone}
+        initialCasheaEnabled={store.casheaEnabled}
+      />
+    );
+  }
   if (section === "configuracion") {
     return (
       <StoreAdminConfigPanel
@@ -101,7 +112,6 @@ function sectionPanel(
         initialLocation={store.location ?? null}
         initialBranches={store.branches}
         initialWhatsappPhone={store.whatsappPhone}
-        initialCasheaEnabled={store.casheaEnabled}
       />
     );
   }

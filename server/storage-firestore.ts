@@ -5125,7 +5125,7 @@ class FirestoreStorageImpl implements IStorage {
 
   async createStorePaymentMethod(
     storeId: number,
-    input: InsertStorePaymentMethod & { systemKind?: string | null },
+    input: Omit<InsertStorePaymentMethod, "systemKind"> & { systemKind?: string | null },
   ): Promise<StorePaymentMethod> {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("store_payment_methods");
@@ -5163,6 +5163,9 @@ class FirestoreStorageImpl implements IStorage {
     if (input.imageUrl !== undefined) {
       patch.imageUrl = input.imageUrl?.trim() ? input.imageUrl.trim() : null;
     }
+    if (input.systemKind !== undefined) {
+      patch.systemKind = input.systemKind?.trim() ? input.systemKind.trim() : null;
+    }
     await this.db
       .collection(FIRESTORE_COLLECTIONS.STORE_PAYMENT_METHODS)
       .doc(String(paymentMethodId))
@@ -5181,7 +5184,7 @@ class FirestoreStorageImpl implements IStorage {
   }
 
   async createStoreOrder(
-    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt">,
+    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt"> & { status?: StoreOrder["status"] },
   ): Promise<StoreOrder> {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("store_orders");
@@ -5191,7 +5194,7 @@ class FirestoreStorageImpl implements IStorage {
       ...input,
       packRideId: input.packRideId ?? null,
       deliveryUnreadCount: input.deliveryUnreadCount ?? 0,
-      status: "pagado",
+      status: input.status ?? "pagado",
       createdAt: now,
       updatedAt: now,
     };
@@ -5259,7 +5262,7 @@ class FirestoreStorageImpl implements IStorage {
     storeId: number,
     orderId: number,
     patch: Partial<
-      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation">
+      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation" | "reference">
     >,
   ): Promise<StoreOrder> {
     if (!this.db) throw new Error("Firestore no configurado");

@@ -28,6 +28,7 @@ import {
 } from "@shared/store-schema";
 import type { StoreCheckoutPaymentMethod } from "@shared/store-order-schema";
 import { isCasheaPaymentMethod } from "@shared/store-cashea";
+import { parseStorePaymentGatewayKind } from "@shared/store-payment-gateways";
 import { resolveProductDisplayPrice, STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
 import { appliaStorage } from "./storage-applia";
 
@@ -242,6 +243,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     extraFields: m.extraFields ?? [],
     imageUrl: m.imageUrl ?? null,
     isCashea: isCasheaPaymentMethod(m),
+    gatewayKind: parseStorePaymentGatewayKind(m.systemKind),
   }));
 
   const storeName = store?.name?.trim() ? store.name.trim() : null;

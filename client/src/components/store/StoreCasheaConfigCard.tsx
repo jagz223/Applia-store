@@ -1,7 +1,10 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { Loader2, Wallet } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CASHEA_ACTIVATION_NOTICE } from "@shared/store-cashea";
+import { CASHEA_ACTIVATION_NOTICE, CASHEA_REQUIRES_WHATSAPP_MESSAGE } from "@shared/store-cashea";
+import { normalizeStoreWhatsappPhone } from "@shared/store-whatsapp";
+import { storeAdminSectionPath } from "@shared/store-admin-sections";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -27,15 +30,21 @@ function authHeaders(): HeadersInit {
 
 export function StoreCasheaConfigCard({
   storeId,
+  slug,
   initialEnabled,
+  whatsappPhone,
 }: {
   storeId: number;
+  slug: string;
   initialEnabled?: boolean;
+  whatsappPhone?: string | null;
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [enabled, setEnabled] = useState(initialEnabled === true);
+  const hasWhatsapp = Boolean(normalizeStoreWhatsappPhone(whatsappPhone));
+  const [enabled, setEnabled] = useState(initialEnabled === true && hasWhatsapp);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const settingsHref = `/tienda/${encodeURIComponent(slug)}/admin/${storeAdminSectionPath("configuracion")}`;
 
   const saveMutation = useMutation({
     mutationFn: async (nextEnabled: boolean) => {
@@ -67,6 +76,14 @@ export function StoreCasheaConfigCard({
   function handleToggle(checked: boolean) {
     if (saveMutation.isPending) return;
     if (checked) {
+      if (!hasWhatsapp) {
+        toast({
+          variant: "destructive",
+          title: "WhatsApp requerido",
+          description: CASHEA_REQUIRES_WHATSAPP_MESSAGE,
+        });
+        return;
+      }
       setConfirmOpen(true);
       return;
     }
@@ -110,14 +127,24 @@ export function StoreCasheaConfigCard({
               <Label htmlFor="store-cashea-enabled" className="text-sm font-semibold">
                 Cashea disponible para clientes
               </Label>
-              <p className="text-xs text-muted-foreground">
-                Requiere WhatsApp de atención configurado para recibir los pedidos.
-              </p>
+              {hasWhatsapp ? (
+                <p className="text-xs text-muted-foreground">
+                  Los pedidos con Cashea se envían al WhatsApp de atención de la tienda.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {CASHEA_REQUIRES_WHATSAPP_MESSAGE}{" "}
+                  <Link href={settingsHref} className="font-medium text-primary underline-offset-2 hover:underline">
+                    Ir a Configuraciones
+                  </Link>
+                  .
+                </p>
+              )}
             </div>
             <Switch
               id="store-cashea-enabled"
               checked={enabled}
-              disabled={saveMutation.isPending}
+              disabled={saveMutation.isPending || !hasWhatsapp}
               onCheckedChange={handleToggle}
             />
           </div>

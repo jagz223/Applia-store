@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Package, Tags, Percent, Ticket, Settings2, ClipboardList, Coins, Leaf, Images, Users, MessageSquare, BarChart3 } from "lucide-react";
+import { ArrowLeft, Package, Tags, Percent, Ticket, Settings2, ClipboardList, Coins, Leaf, Images, Users, MessageSquare, BarChart3, CreditCard } from "lucide-react";
 import {
   getVisibleStoreAdminSections,
   type StoreAdminSectionId,
@@ -22,6 +22,7 @@ const SECTION_ICONS: Record<StoreAdminSectionId, typeof Package> = {
   ordenes: ClipboardList,
   banners_popups: Images,
   moneda: Coins,
+  metodos_pago: CreditCard,
   configuracion: Settings2,
   chat_sucursales: MessageSquare,
   usuarios: Users,

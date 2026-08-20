@@ -213,6 +213,8 @@ export const FIRESTORE_COLLECTIONS = {
   STORE_PAYMENT_METHODS: "store_payment_methods",
   /** Pedidos / compras de clientes en tienda. */
   STORE_ORDERS: "store_orders",
+  /** Checkout pendiente de pasarela (Stripe/PayPal) hasta confirmar el pago. */
+  STORE_PENDING_CHECKOUTS: "store_pending_checkouts",
   /** Empleados de una tienda (rol y sucursal asignada). */
   STORE_STAFF: "store_staff",
   /** Ingredientes y materiales globales (sin pertenencia a tienda). */

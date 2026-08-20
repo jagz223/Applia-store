@@ -36,6 +36,7 @@ export type StoreCartPaymentMethodOption = {
   extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
   isCashea?: boolean;
+  gatewayKind?: "stripe" | "paypal" | "dlocalgo" | null;
 };
 
 export type StoreCartSummary = {
@@ -137,7 +138,11 @@ export function useSubmitStoreCheckout(storeId: number) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { message?: string }).message ?? "No se pudo confirmar la compra");
       }
-      return res.json();
+      return res.json() as Promise<{
+        order?: { id: number } | null;
+        checkoutUrl?: string | null;
+        gatewayKind?: "stripe" | "paypal" | "dlocalgo" | null;
+      }>;
     },
     onSuccess: () => invalidateCart(qc, storeId),
   });

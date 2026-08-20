@@ -130,11 +130,11 @@ export const submitStoreCheckoutSchema = z
 
     fulfillmentMode: storeFulfillmentModeSchema.nullable().optional(),
 
-    reference: z.string().trim().min(1, "La referencia es obligatoria").max(120),
+    reference: z.string().trim().max(120).optional().default(""),
 
-    proofImageUrl: z.string().trim().min(1, "El comprobante es obligatorio").max(2000),
+    proofImageUrl: z.string().trim().max(2000).optional().default(""),
 
-    amountPaid: z.number().positive("Indica el monto pagado"),
+    amountPaid: z.number().positive("Indica el monto pagado").optional(),
 
     deliveryLocation: storeOrderDeliveryLocationSchema.nullable().optional(),
     branchId: z.string().trim().min(1).max(64).nullable().optional(),
@@ -264,6 +264,8 @@ export type StoreCheckoutPaymentMethod = {
   extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
   isCashea?: boolean;
+  /** stripe | paypal | dlocalgo cuando el método redirige a pasarela. */
+  gatewayKind?: "stripe" | "paypal" | "dlocalgo" | null;
 };
 
 

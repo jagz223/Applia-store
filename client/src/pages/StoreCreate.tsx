@@ -137,7 +137,7 @@ export default function StoreCreate() {
           </CardHeader>
           <CardContent>
             <Button variant="outline" asChild className="w-full">
-              <Link href="/dashboard">Volver al dashboard</Link>
+              <Link href="/">Volver al inicio</Link>
             </Button>
           </CardContent>
         </Card>
@@ -148,8 +148,8 @@ export default function StoreCreate() {
   return (
     <div className="container max-w-lg py-8 sm:py-12 px-4">
       <Button variant="ghost" size="sm" className="mb-6 gap-2" asChild>
-        <Link href="/dashboard">
-          <ArrowLeft className="h-4 w-4" /> Dashboard
+        <Link href="/">
+          <ArrowLeft className="h-4 w-4" /> Inicio
         </Link>
       </Button>
 

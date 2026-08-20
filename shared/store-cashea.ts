@@ -6,6 +6,9 @@ export const CASHEA_PAYMENT_METHOD_NAME = "Cashea";
 export const CASHEA_ACTIVATION_NOTICE =
   "Actualmente no está disponible una conexión directa con Cashea, por lo que al activar esta opción, si los clientes la seleccionan se les permitirá enviar un mensaje al WhatsApp con el pedido.";
 
+export const CASHEA_REQUIRES_WHATSAPP_MESSAGE =
+  "Para activar Cashea, primero asigna un número de WhatsApp a la tienda en Configuraciones de tienda.";
+
 export const CASHEA_WHATSAPP_REDIRECT_NOTICE =
   "Te reenviaremos al chat de WhatsApp de la tienda con el pedido que tienes para proceder con el pago por medio de Cashea.";
 

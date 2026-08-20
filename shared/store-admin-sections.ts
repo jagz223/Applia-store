@@ -8,6 +8,7 @@ export const STORE_ADMIN_SECTIONS = [
   { id: "chat_sucursales", label: "Chat", path: "chat-sucursales" },
   { id: "banners_popups", label: "Banners y Pop ups", path: "banners-popups" },
   { id: "moneda", label: "Moneda", path: "moneda" },
+  { id: "metodos_pago", label: "Métodos de pago", path: "metodos-pago" },
   { id: "configuracion", label: "Configuraciones de tienda", path: "configuracion" },
   { id: "usuarios", label: "Usuarios", path: "usuarios" },
   { id: "estadisticas", label: "Estadísticas", path: "estadisticas" },

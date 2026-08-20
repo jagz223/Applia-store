@@ -178,3 +178,62 @@ export async function refundPayment(paymentIntentId: string, amount?: number) {
 export function isStripeConfigured(): boolean {
   return !!stripe;
 }
+
+export async function createStoreStripeCheckoutSession(params: {
+  amount: number;
+  currency?: string;
+  pendingCheckoutId: string;
+  storeId: number;
+  storeName: string;
+  successUrl: string;
+  cancelUrl: string;
+}): Promise<{ url: string; sessionId: string }> {
+  if (!stripe) {
+    throw new Error("STRIPE_NOT_CONFIGURED");
+  }
+
+  const currency = (params.currency || "usd").toLowerCase();
+  const unitAmount = Math.round(params.amount * 100);
+  if (!Number.isFinite(unitAmount) || unitAmount < 50) {
+    throw new Error("STRIPE_AMOUNT_INVALID");
+  }
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    success_url: params.successUrl,
+    cancel_url: params.cancelUrl,
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency,
+          unit_amount: unitAmount,
+          product_data: {
+            name: `Pago · ${params.storeName}`,
+          },
+        },
+      },
+    ],
+    metadata: {
+      pendingCheckoutId: params.pendingCheckoutId,
+      storeId: String(params.storeId),
+    },
+  });
+
+  if (!session.url) {
+    throw new Error("STRIPE_CHECKOUT_URL_MISSING");
+  }
+
+  return { url: session.url, sessionId: session.id };
+}
+
+export async function retrieveStoreStripeCheckoutSession(sessionId: string) {
+  if (!stripe) {
+    throw new Error("STRIPE_NOT_CONFIGURED");
+  }
+  return stripe.checkout.sessions.retrieve(sessionId);
+}
+
+export function isStripeCheckoutSessionPaid(session: { payment_status?: string | null; status?: string | null }): boolean {
+  return session.payment_status === "paid";
+}

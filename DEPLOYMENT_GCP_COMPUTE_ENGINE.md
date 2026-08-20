@@ -565,6 +565,7 @@ SESSION_SECRET=YOUR_SESSION_SECRET_MIN_32_CHARS
 
 # Stripe Payments (Production Keys)
 STRIPE_SECRET_KEY=sk_live_your_stripe_live_key
+STRIPE_PUBLISHABLE_KEY=pk_live_your_stripe_publishable_key
 STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
 
 # Google Maps
@@ -580,8 +581,16 @@ PAYPAL_CLIENT_ID=your_paypal_client_id
 PAYPAL_CLIENT_SECRET=your_paypal_client_secret
 PAYPAL_MODE=live
 
+# dLocal Go (Production)
+DLOCALGO_API_KEY=
+DLOCALGO_SECRET_KEY=
+DLOCALGO_MODE=live
+DLOCALGO_CURRENCY=USD
+DLOCALGO_COUNTRY=
+
 # Frontend URL (Production Domain)
 FRONTEND_URL=https://applia.com
+PUBLIC_SITE_URL=https://applia.com
 
 # Node Environment
 NODE_ENV=production

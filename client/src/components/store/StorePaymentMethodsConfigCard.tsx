@@ -28,7 +28,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { storeAdminFieldClass, storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 import { CASHEA_PAYMENT_METHOD_SYSTEM_KIND } from "@shared/store-cashea";
+import {
+  parseStorePaymentGatewayKind,
+  STORE_PAYMENT_GATEWAY_LABELS,
+  type StorePaymentGatewayKind,
+} from "@shared/store-payment-gateways";
 import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const NEW_TAB = "_new";
 
@@ -39,6 +45,7 @@ type PaymentMethodFormState = {
   imagePreviewUrl: string | null;
   pendingImageFile: File | null;
   extraFields: ExtraFieldDraft[];
+  systemKind: StorePaymentGatewayKind | "";
 };
 
 function newExtraField(): ExtraFieldDraft {
@@ -50,7 +57,7 @@ function newExtraField(): ExtraFieldDraft {
 }
 
 function emptyForm(): PaymentMethodFormState {
-  return { name: "", imagePreviewUrl: null, pendingImageFile: null, extraFields: [] };
+  return { name: "", imagePreviewUrl: null, pendingImageFile: null, extraFields: [], systemKind: "" };
 }
 
 function formFromMethod(method: StorePaymentMethodSummary): PaymentMethodFormState {
@@ -63,6 +70,7 @@ function formFromMethod(method: StorePaymentMethodSummary): PaymentMethodFormSta
       name: f.name,
       value: f.value,
     })),
+    systemKind: parseStorePaymentGatewayKind(method.systemKind) ?? "",
   };
 }
 
@@ -132,29 +140,35 @@ function PaymentMethodForm({
       toast({ variant: "destructive", title: "Nombre obligatorio" });
       return;
     }
+    const isGateway = Boolean(form.systemKind);
 
-    const extraFields = form.extraFields
-      .map((f) => ({ name: f.name.trim(), value: f.value.trim() }))
-      .filter((f) => f.name || f.value);
+    const extraFields = isGateway
+      ? []
+      : form.extraFields
+          .map((f) => ({ name: f.name.trim(), value: f.value.trim() }))
+          .filter((f) => f.name || f.value);
 
-    for (const field of extraFields) {
-      if (!field.name || !field.value) {
-        toast({
-          variant: "destructive",
-          title: "Datos incompletos",
-          description: "Cada dato extra debe tener nombre y valor.",
-        });
-        return;
+    if (!isGateway) {
+      for (const field of extraFields) {
+        if (!field.name || !field.value) {
+          toast({
+            variant: "destructive",
+            title: "Datos incompletos",
+            description: "Cada dato extra debe tener nombre y valor.",
+          });
+          return;
+        }
       }
     }
 
     try {
-      const imageUrl = await resolveImageUrl();
+      const imageUrl = isGateway ? null : await resolveImageUrl();
       const payload = {
         name: trimmedName,
         accountNumber: "",
         imageUrl,
         extraFields,
+        systemKind: form.systemKind || null,
       };
 
       if (isNew) {
@@ -210,6 +224,36 @@ function PaymentMethodForm({
           />
         </div>
 
+        <div className="space-y-2">
+          <Label htmlFor={`pm-gateway-${methodId ?? "new"}`}>Pasarela de pago</Label>
+          <Select
+            value={form.systemKind || "none"}
+            disabled={saving || deleting}
+            onValueChange={(value) =>
+              setForm((prev) => ({
+                ...prev,
+                systemKind: value === "none" ? "" : (value as StorePaymentGatewayKind),
+              }))
+            }
+          >
+            <SelectTrigger id={`pm-gateway-${methodId ?? "new"}`} className={storeAdminFieldClass}>
+              <SelectValue placeholder="Ninguna (comprobante)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Ninguna (el cliente sube comprobante)</SelectItem>
+              <SelectItem value="stripe">Stripe</SelectItem>
+              <SelectItem value="paypal">PayPal</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {form.systemKind
+              ? `Al pagar, el cliente será redirigido a ${STORE_PAYMENT_GATEWAY_LABELS[form.systemKind]}. El pedido se crea cuando el pago se confirme.`
+              : "Sin pasarela: el cliente indica referencia, monto y foto del comprobante, como hasta ahora."}
+          </p>
+        </div>
+
+        {form.systemKind ? null : (
+          <>
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label>Datos del método</Label>
@@ -295,6 +339,8 @@ function PaymentMethodForm({
           disabled={saving || deleting}
           onPreviewChange={handleImageChange}
         />
+          </>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
           <Button type="submit" disabled={saving || deleting}>
@@ -361,8 +407,10 @@ export function StorePaymentMethodsConfigCard({ storeId }: { storeId: number }) 
   }, [editableMethods, activeTab]);
 
   function tabLabel(method: StorePaymentMethodSummary) {
-    const label = method.name.trim() || `Método #${method.id}`;
-    return label.length > 18 ? `${label.slice(0, 16)}…` : label;
+    const gateway = parseStorePaymentGatewayKind(method.systemKind);
+    const base = method.name.trim() || `Método #${method.id}`;
+    const label = gateway ? `${base} · ${STORE_PAYMENT_GATEWAY_LABELS[gateway]}` : base;
+    return label.length > 22 ? `${label.slice(0, 20)}…` : label;
   }
 
   return (
@@ -370,7 +418,7 @@ export function StorePaymentMethodsConfigCard({ storeId }: { storeId: number }) 
       <CardHeader className="space-y-1.5 px-4 pt-5 sm:px-6">
         <CardTitle className="font-display text-xl tracking-tight">Métodos de pago</CardTitle>
         <CardDescription className="text-sm leading-snug">
-          Registra las cuentas o apps con las que tus clientes pueden pagarte. Cada tienda tiene los suyos propios.
+          Registra cuentas, apps o pasarelas (Stripe, PayPal). Cada tienda tiene los suyos propios.
         </CardDescription>
       </CardHeader>
       <CardContent className="px-4 pb-5 sm:px-6">
