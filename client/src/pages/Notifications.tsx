@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, Link, useSearch } from "wouter";
 import { navigate } from "wouter/use-browser-location";
-import { Info, ArrowLeft, Bell, MessageSquare, Calendar, Shield, ShieldCheck, ShieldAlert, Ticket, ShoppingBag } from "lucide-react";
+import { Info, ArrowLeft, Bell, Shield, ShieldCheck, ShieldAlert, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,519 +14,72 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { useSocket } from "@/hooks/use-socket";
-import { useConversations } from "@/hooks/use-chat";
-import { serviceBookingPaymentLabel } from "@shared/booking-payment";
 import {
-  NOTIFICATION_TYPE_CENTRAL_AFFILIATION,
-  NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED,
-  NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED,
-  NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS,
-} from "@shared/central-affiliation";
-import {
-  centralAffiliationApplicantNotificationPath,
-  centralAffiliationNotificationPath,
-} from "@/lib/central-affiliation-notification-path";
-import { NOTIFICATION_TYPE_ROLE_CHANGED } from "@shared/role-change-notification";
-import {
-  getNotificationAccentCtaClassName,
   getNotificationCardClassName,
   getNotificationTitleClassName,
 } from "@/lib/notification-card-ui";
-import {
-  PUBLIC_PROMO_NOTIFICATION_CTA,
-  getPublicPromoNotificationDescription,
-  getPublicPromoNotificationPath,
-  getPublicPromoNotificationTitle,
-  isPublicPromoNotificationType,
-  shouldShowPublicPromoInNotificationList,
-} from "@/lib/public-promo-notification-ui";
-import { resolveStoreOrderNotificationPath } from "@/lib/store-order-notification-path";
+import { getStoreNotificationPath } from "@/lib/notification-path";
 import {
   getStoreNotificationBody,
   getStoreNotificationTitle,
-  resolveStoreNotificationPath,
 } from "@shared/store-notification-copy";
 
 const PAGE_SIZE = 10;
 
-function getNotificationPath(notification: { id?: string; type: string; data?: any }): string {
-  const data = notification.data ?? {};
-
-  const storePath = resolveStoreNotificationPath(notification.type, data);
-  if (storePath) return storePath;
-
-  const storeOrderPath = resolveStoreOrderNotificationPath(notification.type, data);
-  if (storeOrderPath) return storeOrderPath;
-
-  const nestedType = data.type ?? data.data?.type;
-  if (typeof nestedType === "string" && nestedType !== notification.type) {
-    const nestedPath = resolveStoreOrderNotificationPath(nestedType, data);
-    if (nestedPath) return nestedPath;
+function getIcon(type: string, data?: Record<string, unknown>) {
+  if (
+    type === "store_order_new" ||
+    type === "store_order_status" ||
+    type === "store_order_delivery"
+  ) {
+    return <ShoppingBag className="h-4 w-4 text-primary" />;
   }
-
-  switch (notification.type) {
-    case "message":
-      return data.conversationId != null ? `/chat?conversation=${encodeURIComponent(data.conversationId)}` : "/chat";
-    case "booking":
-      if (data.type === "new_booking") {
-        const q = new URLSearchParams({ tab: "bookings" });
-        const bookingId = data.booking?.id ?? data.bookingId;
-        if (bookingId != null) q.set("highlight", String(bookingId));
-        return `/professional-dashboard?${q.toString()}`;
-      }
-      if (data.type === "booking_update") {
-        const bookingId = data.booking?.id ?? data.bookingId;
-        if (bookingId != null) {
-          const q = new URLSearchParams({ highlight: String(bookingId) });
-          return `/bookings?${q.toString()}`;
-        }
-        return "/bookings";
-      }
-      return "/bookings";
-    case "booking_confirmed_by_provider": {
-      const q = new URLSearchParams();
-      const bookingId = data.bookingId ?? data.data?.bookingId;
-      if (bookingId != null) q.set("highlight", String(bookingId));
-      return q.toString() ? `/bookings?${q.toString()}` : "/bookings";
-    }
-    case "booking_confirmed_by_client": {
-      const q = new URLSearchParams({ tab: "bookings" });
-      const bookingId = data.bookingId ?? data.data?.bookingId;
-      if (bookingId != null) q.set("highlight", String(bookingId));
-      return `/professional-dashboard?${q.toString()}`;
-    }
-    case "booking_cancelled": {
-      const q = new URLSearchParams({ tab: "bookings" });
-      const bookingId = data.bookingId ?? data.data?.bookingId;
-      if (bookingId != null) q.set("highlight", String(bookingId));
-      return `/professional-dashboard?${q.toString()}`;
-    }
-    case "booking_cancelled_by_provider": {
-      const bookingId = data.bookingId ?? data.data?.bookingId;
-      if (bookingId != null) {
-        const q = new URLSearchParams({ highlight: String(bookingId) });
-        return `/bookings?${q.toString()}`;
-      }
-      return "/bookings";
-    }
-    case "booking_cost_commission_reminder": {
-      const bookingId = data.bookingId ?? data.data?.bookingId;
-      if (bookingId != null) {
-        const q = new URLSearchParams({ tab: "bookings", highlight: String(bookingId) });
-        return `/professional-dashboard?${q.toString()}`;
-      }
-      return "/professional-dashboard?tab=bookings";
-    }
-    case "booking_schedule_changed":
-    case "booking_cost_changed": {
-      const q = new URLSearchParams();
-      const bookingId = data.bookingId ?? data.data?.bookingId;
-      if (bookingId != null) q.set("highlight", String(bookingId));
-      return q.toString() ? `/bookings?${q.toString()}` : "/bookings";
-    }
-    case "admin":
-      {
-        // Si el servidor ya envía un destino, respetarlo.
-        const u = data.url ?? data.data?.url;
-        if (typeof u === "string" && u.startsWith("/")) return u;
-      }
-      if (data.type === "recharge_pending") {
-        const transferId = data.data?.transferId ?? data.transferId;
-        const q = new URLSearchParams({ tab: "recargas" });
-        if (transferId != null) q.set("highlight", String(transferId));
-        return `/admin?${q.toString()}`;
-      }
-      if (data.type === "withdrawal_requested") return "/admin?tab=payouts";
-      if (data.type === "withdrawal_processed_by_other") return "/admin?tab=payouts";
-      if (data.type === "pending_account_change_request") {
-        const u = data.url ?? data.data?.url;
-        return typeof u === "string" && u.startsWith("/") ? u : "/admin?tab=overview";
-      }
-      if (data.type === "go_panic" && notification.id) {
-        return `/notifications?detail=${encodeURIComponent(String(notification.id))}`;
-      }
-      // Notificaciones admin antiguas/genéricas: por defecto deben abrir el panel admin.
-      return "/admin?tab=overview";
-    case "withdrawal_approved":
-    case "withdrawal_rejected":
-      return "/movimientos";
-    case "recharge_completed":
-    case "recharge_rejected":
-    case "balance_credited":
-      return "/movimientos";
-    case "admin_verification_request":
-      return data.url ?? "/admin?tab=overview";
-    case "verification_result": {
-      const step = data.step ?? data.data?.step;
-      const st = data.status ?? data.data?.status;
-      if (step === "transaction" && st === "verified") {
-        const fromServer = data.url ?? data.data?.url;
-        if (typeof fromServer === "string" && fromServer.includes("tab=invoices")) {
-          return fromServer.startsWith("/") ? fromServer : `/${fromServer}`;
-        }
-        const q = new URLSearchParams({ tab: "invoices", verificationInvoice: "1" });
-        const reportId = data.reportId ?? data.data?.reportId;
-        if (reportId != null) q.set("reportId", String(reportId));
-        return `/professional-dashboard?${q.toString()}`;
-      }
-      return typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/professional-dashboard";
-    }
-    case "verification_welcome":
-      return data.url ?? "/professional-dashboard";
-    case "store_subscription_result": {
-      const u = data.url ?? data.data?.url;
-      if (typeof u === "string" && u.startsWith("/")) return u;
-      const storeSlug = data.storeSlug ?? data.data?.storeSlug;
-      const st = data.status ?? data.data?.status;
-      if (st === "rejected" && typeof storeSlug === "string" && storeSlug.trim()) {
-        return `/tienda/${encodeURIComponent(storeSlug.trim())}/pago`;
-      }
-      return "/dashboard";
-    }
-    case "admin_store_subscription_payment":
-      return data.url ?? "/admin?tab=store-payments";
-    case "account_change_request_approved":
-    case "account_change_request_rejected": {
-      const u = data.url ?? data.data?.url;
-      return typeof u === "string" && u.startsWith("/") ? u : "/settings";
-    }
-    case "vehicle_change_request_approved":
-    case "vehicle_change_request_rejected": {
-      const u = data.url ?? data.data?.url;
-      return typeof u === "string" && u.startsWith("/") ? u : "/settings";
-    }
-    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION:
-      return centralAffiliationNotificationPath(data);
-    case NOTIFICATION_TYPE_CENTRAL_DATA_ACCESS:
-      return centralAffiliationApplicantNotificationPath(data);
-    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_APPROVED:
-    case NOTIFICATION_TYPE_CENTRAL_AFFILIATION_REJECTED:
-      return centralAffiliationApplicantNotificationPath(data);
-    case NOTIFICATION_TYPE_ROLE_CHANGED: {
-      const u = data.url ?? data.data?.url;
-      return typeof u === "string" && u.startsWith("/") ? u : "/settings";
-    }
-    default:
-      if (isPublicPromoNotificationType(notification.type)) {
-        return getPublicPromoNotificationPath(data);
-      }
-      return "/dashboard";
+  if (type === "store_subscription_result") {
+    return data?.status === "rejected"
+      ? <ShieldAlert className="h-4 w-4 text-red-500" />
+      : <ShieldCheck className="h-4 w-4 text-green-500" />;
   }
-}
-
-function getIcon(type: string, data?: any) {
-  switch (type) {
-    case "message":
-      return <MessageSquare className="h-4 w-4 text-blue-500" />;
-    case "booking":
-      return <Calendar className="h-4 w-4 text-green-500" />;
-    case "admin":
-      return <Shield className="h-4 w-4 text-orange-500" />;
-    case "booking_confirmed_by_provider":
-      return <Bell className="h-4 w-4 text-green-500" />;
-    case "booking_confirmed_by_client":
-      return <Calendar className="h-4 w-4 text-green-500" />;
-    case "booking_cancelled":
-    case "booking_cancelled_by_provider":
-      return <Calendar className="h-4 w-4 text-red-500" />;
-    case "booking_schedule_changed":
-    case "booking_cost_changed":
-      return <Calendar className="h-4 w-4 text-amber-500" />;
-    case "booking_cost_commission_reminder":
-      return <Calendar className="h-4 w-4 text-blue-500" />;
-    case "recharge_rejected":
-      return <Bell className="h-4 w-4 text-red-500" />;
-    case "withdrawal_approved":
-    case "withdrawal_rejected":
-      return <Bell className="h-4 w-4 text-green-500" />;
-    case "admin_verification_request":
-      return <Shield className="h-4 w-4 text-primary" />;
-    case "verification_result":
-      return data?.status === "rejected" 
-        ? <ShieldAlert className="h-4 w-4 text-red-500" /> 
-        : <ShieldCheck className="h-4 w-4 text-green-500" />;
-    case "verification_welcome":
-      return <ShieldCheck className="h-4 w-4 text-primary animate-pulse" />;
-    case "store_subscription_result":
-      return data?.status === "rejected"
-        ? <ShieldAlert className="h-4 w-4 text-red-500" />
-        : <ShieldCheck className="h-4 w-4 text-green-500" />;
-    case "admin_store_subscription_payment":
-      return <Shield className="h-4 w-4 text-amber-500" />;
-    case "account_change_request_approved":
-      return <Bell className="h-4 w-4 text-green-500" />;
-    case "account_change_request_rejected":
-      return <Bell className="h-4 w-4 text-amber-500" />;
-    case "vehicle_change_request_approved":
-      return <Bell className="h-4 w-4 text-green-500" />;
-    case "vehicle_change_request_rejected":
-      return <Bell className="h-4 w-4 text-amber-500" />;
-    case "store_order_new":
-    case "store_order_status":
-    case "store_order_delivery":
-      return <ShoppingBag className="h-4 w-4 text-primary" />;
-    default:
-      if (isPublicPromoNotificationType(type)) {
-        return <Ticket className="h-4 w-4 text-orange-500" />;
-      }
-      return <Bell className="h-4 w-4 text-gray-500" />;
+  if (type === "admin_store_subscription_payment") {
+    return <Shield className="h-4 w-4 text-amber-500" />;
   }
-}
-
-function truncateText(s: string, max: number) {
-  const t = s.trim();
-  return t.length > max ? `${t.slice(0, max)}...` : t;
-}
-
-function getTitle(type: string, data?: any, conversationSenderName?: string): string {
-  const d = data ?? {};
-  if (isPublicPromoNotificationType(type)) {
-    return getPublicPromoNotificationTitle(type, d);
-  }
-  if (type === "booking" && d.type === "new_booking") return "Nueva solicitud de reserva";
-  if (type === "booking" && d.type === "booking_update") {
-    const status = (d.booking?.status ?? d.booking?.status) as string | undefined;
-    if (status === "in_progress") return "Servicio en proceso";
-    if (status === "completed") return "Servicio completado";
-    return "Reserva actualizada";
-  }
-  if (type === "booking_confirmed_by_provider") return "Reserva confirmada por el asociado";
-  if (type === "booking_confirmed_by_client") {
-    const msg = d.message ?? d.data?.message;
-    if (typeof msg === "string" && msg.includes("acuerdo")) return "Cliente confirmó el acuerdo";
-    return "Fondos agregados";
-  }
-  if (type === "booking_cost_commission_reminder") return "Recordatorio de comisión";
-  if (type === "booking_cancelled") return "Reserva cancelada";
-  if (type === "booking_cancelled_by_provider") return "Servicio cancelado";
-  if (type === "booking_schedule_changed") return "Se cambió la fecha del servicio";
-  if (type === "booking_cost_changed") return "Se actualizó el monto del servicio";
-
-  if (type === "recharge_completed") return "Abono confirmado";
-  if (type === "recharge_rejected") return "Abono no confirmado";
-  if (type === "balance_credited") return "Saldo acreditado";
-
-  if (type === "withdrawal_approved") return "Retiro procesado";
-  if (type === "withdrawal_rejected") return "Retiro rechazado";
-
   if (type === "admin") {
-    if (d.type === "recharge_pending") return "Nueva solicitud de recarga";
-    if (d.type === "withdrawal_requested") return "Nueva solicitud de retiro";
-    if (d.type === "pending_account_change_request") return "Nueva petición de asociado";
-    if (d.type === "withdrawal_processed_by_other") {
-      return d.action === "rejected" ? "Retiro rechazado por otro admin" : "Retiro aprobado por otro admin";
-    }
-    if (d.type === "go_panic") return "Pánico Go";
-    return "Notificación del administrador";
+    return <Shield className="h-4 w-4 text-orange-500" />;
   }
+  return <Bell className="h-4 w-4 text-gray-500" />;
+}
 
-  if (type === "admin_verification_request") {
-    return data.step === "payment" ? "Comprobante de pago recibido" : "Nueva solicitud de Asociado";
-  }
-
-  if (type === "verification_result") {
-    if (d.step === "identification") return d.status === "verified" ? "Identificación aprobada" : "Identificación rechazada";
-    if (d.step === "transaction") return d.status === "verified" ? "Pago verificado" : "Pago rechazado";
-    return "Resultado de verificación";
-  }
-
-  if (type === "verification_welcome") return "¡Bienvenido Asociado!";
-
-  if (type === "store_order_new") return getStoreNotificationTitle(type, d) ?? "Nueva compra en tu tienda";
-  if (type === "store_order_status") return getStoreNotificationTitle(type, d) ?? "Estado de tu pedido";
-  if (type === "store_order_delivery") return getStoreNotificationTitle(type, d) ?? "Delivery de tu orden";
-  if (type === "store_subscription_result") return getStoreNotificationTitle(type, d) ?? "Suscripción de tienda";
-  if (type === "admin_store_subscription_payment") return getStoreNotificationTitle(type, d) ?? "Pago de tienda pendiente";
-
+function getTitle(type: string, data?: Record<string, unknown>): string {
+  const storeTitle = getStoreNotificationTitle(type, data ?? {});
+  if (storeTitle) return storeTitle;
   if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
-    const t = d.title ?? d.data?.title;
+    const t = data?.title ?? (data?.data as Record<string, unknown> | undefined)?.title;
     if (typeof t === "string" && t.trim()) return t.trim();
-    const field = String(d.field ?? d.data?.field ?? "");
-    const label =
-      field === "email" ? "Correo" : field === "name" ? "Nombre" : field === "phone" ? "Teléfono" : "Perfil";
-    return type === "account_change_request_approved" ? `${label}: aprobado` : `${label}: rechazado`;
+    return type === "account_change_request_approved" ? "Cambio aprobado" : "Cambio rechazado";
   }
-
-  if (type === "vehicle_change_request_approved" || type === "vehicle_change_request_rejected") {
-    const t = d.title ?? d.data?.title;
-    if (typeof t === "string" && t.trim()) return t.trim();
-    return type === "vehicle_change_request_approved" ? "Vehículo actualizado" : "Vehículo: solicitud rechazada";
-  }
-
-  if (type === "message") return conversationSenderName ? `Nuevo mensaje de ${truncateText(conversationSenderName, 18)}` : "Nuevo mensaje";
+  if (type === "admin" && data?.type === "go_panic") return "Alerta de pánico";
+  if (type === "admin") return "Notificación del administrador";
   return "Notificación";
 }
 
-function getDescription(type: string, data?: any, conversationSenderName?: string): string | null {
+function getDescription(type: string, data?: Record<string, unknown>): string | null {
   const d = data ?? {};
-  if (isPublicPromoNotificationType(type)) {
-    return getPublicPromoNotificationDescription(type, d);
-  }
-  if (type === "store_order_new") {
-    return getStoreNotificationBody(type, d) ?? "Tienes una nueva compra en tu tienda.";
-  }
-  if (type === "store_order_status") {
-    return getStoreNotificationBody(type, d) ?? "El estado de tu pedido fue actualizado.";
-  }
-  if (type === "store_order_delivery") {
-    return getStoreNotificationBody(type, d) ?? "Actualización del delivery de tu orden.";
-  }
-  if (type === "store_subscription_result") {
-    return getStoreNotificationBody(type, d) ?? "Resultado del pago de suscripción de tu tienda.";
-  }
-  if (type === "admin_store_subscription_payment") {
-    return getStoreNotificationBody(type, d) ?? "Nuevo comprobante de tienda pendiente de revisión.";
-  }
-  // Booking update (Socket.io) con estado real
-  if (type === "booking" && d.type === "booking_update") {
-    const status = d.booking?.status as string | undefined;
-    if (status === "in_progress") return "El asociado marcó tu reserva como en proceso. Revisa tu lista de reservas.";
-    if (status === "completed") return "El servicio fue completado. Puedes revisar la reserva y dejar tu calificación cuando corresponda.";
-    return "La reserva fue actualizada.";
-  }
-  if (type === "booking" && d.type === "new_booking") {
-    const method = serviceBookingPaymentLabel(d.booking?.paymentMethod);
-    return `Tienes una nueva solicitud de reserva (Pago: ${method}). Revisa el detalle en tu Panel Asociado.`;
-  }
-  // 1) Mensajes de reserva (comunes)
-  if (type === "booking_confirmed_by_client") {
-    const customMsg = d.message ?? d.data?.message;
-    if (typeof customMsg === "string" && customMsg.trim()) return customMsg;
-    const amount = d.amountFormatted ?? d.data?.amountFormatted;
-    const providerNet = d.providerNetFormatted ?? d.data?.providerNetFormatted;
-    const commission = d.commissionFormatted ?? d.data?.commissionFormatted;
-    const provPct = (d as any).providerPercent ?? d.data?.providerPercent ?? 90;
-    const platPct = (d as any).platformPercent ?? d.data?.platformPercent ?? 10;
-    if (amount && providerNet && commission) {
-      return `Se te han retenido $${amount} USD. Recibirás $${providerNet} USD (${provPct}%) y la plataforma tomará $${commission} USD (${platPct}%). Completa el servicio para liberar los fondos.`;
-    }
-    if (amount) return `Se te han retenido $${amount} USD. Completa el servicio para liberar los fondos.`;
-  }
-  if (type === "booking_schedule_changed") {
-    const dateFormatted = d.dateFormatted ?? d.data?.dateFormatted;
-    return dateFormatted ? `Nueva fecha y hora: ${dateFormatted}.` : "Se cambió la fecha del servicio. Revisa tu reserva.";
-  }
-  if (type === "booking_cost_changed") {
-    const amount = d.amountFormatted ?? d.data?.amountFormatted;
-    return amount ? `Nuevo monto: $${amount} USD. Revisa tu reserva.` : "Se ha actualizado el monto del servicio. Revisa tu reserva.";
-  }
-  if (type === "booking_cost_commission_reminder") {
-    const amountFormatted = d.amountFormatted ?? d.data?.amountFormatted;
-    const providerNetFormatted = d.providerNetFormatted ?? d.data?.providerNetFormatted;
-    const commissionFormatted = d.commissionFormatted ?? d.data?.commissionFormatted;
-    const provPct = (d as any).providerPercent ?? d.data?.providerPercent ?? 90;
-    const platPct = (d as any).platformPercent ?? d.data?.platformPercent ?? 10;
-    if (amountFormatted && providerNetFormatted && commissionFormatted) {
-      return `Al acordar $${amountFormatted} USD, recibirás $${providerNetFormatted} USD (${provPct}%). Comisión de plataforma: $${commissionFormatted} USD (${platPct}%).`;
-    }
-    return `Recuerda que al confirmar el pago recibirás el ${provPct}% del monto acordado.`;
-  }
-
-  // 2) Wallet / retiros / recargas
-  if (type === "balance_credited") {
-    const message = d.data?.message ?? d.message;
-    if (message) return String(message);
-    const amount = d.data?.amountFormatted ?? d.amountFormatted;
-    if (amount != null) return `Recibiste $${amount} USD`;
-  }
-  if (type === "withdrawal_approved") {
-    const message = d.message ?? d.data?.message;
-    const adminNote = d.adminNote ?? d.data?.adminNote;
-    if (message) return adminNote ? `${message} Nota: ${adminNote}` : String(message);
-  }
-  if (type === "withdrawal_rejected") {
-    const message = d.message ?? d.data?.message;
-    const adminNote = d.adminNote ?? d.data?.adminNote;
-    if (message) return adminNote ? `${message} Nota: ${adminNote}` : String(message);
-  }
-
-  // 3) Mensaje explícito guardado en la notificación (fallback)
-  if (typeof d.message === "string" && d.message.trim()) return d.message;
-  if (typeof d.data?.message === "string" && d.data.message.trim()) return d.data.message;
-
-  // 2.5) Mensaje (chat) en notificaciones
-  if (type === "message") {
-    const preview = (typeof d.preview === "string" ? d.preview : d.data?.preview) ?? null;
-    const raw = typeof preview === "string" ? preview.trim() : "";
-    const lower = raw.toLowerCase();
-    const looksLikeLocation =
-      (lower.includes("lat") && lower.includes("lng")) ||
-      lower.includes("ubicacion") ||
-      lower.includes("location") ||
-      lower.includes("latitud") ||
-      lower.includes("longitud");
-    if (looksLikeLocation) return "Te ha compartido su ubicacion.";
-
-    const truncated = raw.length > 90 ? `${raw.slice(0, 90)}...` : raw;
-    if (truncated) return conversationSenderName ? `De ${conversationSenderName}: ${truncated}` : truncated;
-    if (conversationSenderName) return `De ${conversationSenderName}`;
-    return null;
-  }
-
-  // 4) Notificaciones de admin (p. ej. solicitudes de retiro)
-  if (type === "admin") {
-    if (d.type === "pending_account_change_request") {
-      const msg = d.message ?? d.data?.message;
-      if (typeof msg === "string" && msg.trim()) return msg.trim();
-      return "Un asociado envió una solicitud de cambio de datos o vehículo. Revisa Gestión de asociados.";
-    }
-    if (d.type === "withdrawal_requested") {
-      const name = d.userName ?? d.data?.userName;
-      const amount = d.amountFormatted ?? d.data?.amountFormatted ?? d.amount ?? d.data?.amount;
-      if (name && amount) return `${name} solicitó retirar $${amount} USD. Revisa Solicitudes de Retiro en el Panel de Administración.`;
-      return "Un asociado solicitó retirar fondos. Revisa la pestaña Solicitudes de Retiro en el Panel de Administración.";
-    }
-    if (d.type === "withdrawal_processed_by_other") {
-      if (typeof d.message === "string") return d.message;
-      if (typeof d.data?.message === "string") return d.data.message;
-      return "El retiro fue procesado por otro administrador. Revisa Solicitudes de Retiro.";
-    }
-    if (d.type === "go_panic") {
-      const nested = d.data ?? {};
-      const det = typeof d.details === "string" ? d.details : typeof nested.details === "string" ? nested.details : "";
-      const t = det.trim();
-      return t.length > 0 ? (t.length > 200 ? `${t.slice(0, 200)}…` : t) : "Toca la fila para abrir el detalle completo de la alerta.";
-    }
-  }
-
-  if (type === "admin_verification_request") {
-    return d.message ?? d.data?.message ?? "Se ha recibido una nueva solicitud de verificación de asociado.";
-  }
-
-  if (type === "verification_result" || type === "verification_welcome") {
-    return d.message ?? d.data?.message ?? "Tu estado de verificación ha sido actualizado.";
-  }
-
-  if (type === "store_subscription_result") {
-    const st = d.status ?? d.data?.status;
-    const msg = d.message ?? d.data?.message;
-    if (typeof msg === "string" && msg.trim()) return msg.trim();
-    return st === "rejected"
-      ? "Pago rechazado. Toca para volver a enviar el comprobante."
-      : "Tu pago de tienda fue verificado.";
-  }
-
-  if (type === "admin_store_subscription_payment") {
-    return d.message ?? d.data?.message ?? "Nuevo comprobante de tienda pendiente de revisión.";
-  }
-
+  const storeBody = getStoreNotificationBody(type, d);
+  if (storeBody) return storeBody;
   if (type === "account_change_request_approved" || type === "account_change_request_rejected") {
-    const msg = d.message ?? d.data?.message;
+    const msg = d.message ?? (d.data as Record<string, unknown> | undefined)?.message;
     if (typeof msg === "string" && msg.trim()) return msg.trim();
     return type === "account_change_request_approved"
-      ? "Abre Configuración para actualizar tu perfil."
-      : "Revisa o vuelve a solicitar el cambio en Configuración.";
+      ? "Abre Configuración para ver los cambios."
+      : "Revisa el detalle en Configuración.";
   }
-
-  if (type === "vehicle_change_request_approved" || type === "vehicle_change_request_rejected") {
-    const msg = d.message ?? d.data?.message;
-    if (typeof msg === "string" && msg.trim()) return msg.trim();
-    return type === "vehicle_change_request_approved"
-      ? "Abre Configuración para ver tu vehículo actualizado."
-      : "Revisa el motivo en Configuración o envía una nueva solicitud.";
+  if (type === "admin" && d.type === "go_panic") {
+    const nested = (d.data as Record<string, unknown> | undefined) ?? {};
+    const det = typeof d.details === "string" ? d.details : typeof nested.details === "string" ? nested.details : "";
+    const t = det.trim();
+    return t.length > 0 ? (t.length > 200 ? `${t.slice(0, 200)}…` : t) : "Toca la fila para abrir el detalle completo.";
   }
-
-  return null;
+  const msg = d.message ?? (d.data as Record<string, unknown> | undefined)?.message;
+  return typeof msg === "string" && msg.trim() ? msg.trim() : null;
 }
 
 function GoPanicDetailView({ packet }: { packet: Record<string, unknown> | null | undefined }) {
@@ -544,17 +97,7 @@ function GoPanicDetailView({ packet }: { packet: Record<string, unknown> | null 
   if (rideId != null && String(rideId).trim()) rows.push({ label: "ID viaje", value: String(rideId) });
   if (moduleLabel != null && String(moduleLabel).trim()) rows.push({ label: "Servicio", value: String(moduleLabel) });
   if (pressedBy === "rider" || pressedBy === "driver") {
-    rows.push({ label: "Quién pulsó", value: pressedBy === "rider" ? "Cliente / pasajero" : "Conductor" });
-  }
-  const extra: [string, unknown][] = [
-    ["Cliente (nombre)", nested.riderName],
-    ["Cliente (tel.)", nested.riderPhone],
-    ["Cliente (correo)", nested.riderEmail],
-    ["Conductor (nombre)", nested.driverName],
-    ["Conductor (tel.)", nested.driverPhone],
-  ];
-  for (const [label, val] of extra) {
-    if (typeof val === "string" && val.trim()) rows.push({ label, value: val.trim() });
+    rows.push({ label: "Quién pulsó", value: pressedBy === "rider" ? "Cliente" : "Conductor" });
   }
   return (
     <div className="space-y-4">
@@ -572,12 +115,9 @@ function GoPanicDetailView({ packet }: { packet: Record<string, unknown> | null 
         </dl>
       ) : null}
       {details.trim() ? (
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Detalle completo</p>
-          <pre className="max-h-[min(52vh,420px)] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-4 text-sm leading-relaxed text-foreground">
-            {details}
-          </pre>
-        </div>
+        <pre className="max-h-[min(52vh,420px)] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-4 text-sm leading-relaxed text-foreground">
+          {details}
+        </pre>
       ) : (
         <p className="text-sm text-muted-foreground">No hay texto de detalle en esta alerta.</p>
       )}
@@ -588,23 +128,14 @@ function GoPanicDetailView({ packet }: { packet: Record<string, unknown> | null 
 export default function Notifications() {
   const { isAuthenticated } = useAuth();
   const { notifications, markNotificationAsRead, clearNotifications } = useSocket();
-  const [location, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
 
   const nav = useMemo(() => {
     const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-    const from = params.get("from");
     const returnToRaw = params.get("returnTo");
-    const returnTo = typeof returnToRaw === "string" && returnToRaw.trim() ? returnToRaw.trim() : null;
-    const backHref = returnTo ?? (from === "go" ? "/go/taxi" : "/dashboard");
-    return { from, returnTo, backHref };
+    const returnTo = typeof returnToRaw === "string" && returnToRaw.trim().startsWith("/") ? returnToRaw.trim() : null;
+    return { backHref: returnTo ?? "/" };
   }, [location]);
-
-  const { data: conversations } = useConversations(!!isAuthenticated);
-  const senderNameByConversationId = useMemo(() => {
-    const map = new Map<number, string>();
-    (conversations ?? []).forEach((c) => map.set(c.id, c.otherParticipant?.name ?? "Usuario"));
-    return map;
-  }, [conversations]);
 
   const [page, setPage] = useState(1);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -617,7 +148,7 @@ export default function Notifications() {
 
   const detailNotification = useMemo(
     () => (detailId ? notifications.find((n) => String(n.id) === detailId) : undefined),
-    [detailId, notifications]
+    [detailId, notifications],
   );
 
   const closeDetailModal = () => {
@@ -625,25 +156,18 @@ export default function Notifications() {
   };
 
   const filtered = useMemo(() => {
-    const base = notifications.filter((n) => {
-      if (isPublicPromoNotificationType(n.type)) {
-        return shouldShowPublicPromoInNotificationList(n.type);
-      }
-      return true;
-    });
+    const base = notifications;
     return unreadOnly ? base.filter((n) => !n.read) : base;
   }, [notifications, unreadOnly]);
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(Math.max(1, page), totalPages);
 
   const pageNotifications = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
-    const end = start + PAGE_SIZE;
-    return filtered.slice(start, end);
+    return filtered.slice(start, start + PAGE_SIZE);
   }, [filtered, currentPage]);
 
-  // Cuando el usuario abre el historial, consideramos que ya las revisó:
-  // marcamos como leídas para que el badge de la campanita desaparezca.
   useEffect(() => {
     if (!notifications.length) return;
     if (notifications.some((n) => !n.read)) {
@@ -651,18 +175,12 @@ export default function Notifications() {
     }
   }, [notifications, clearNotifications]);
 
-  const handleClearFilter = () => {
-    setUnreadOnly(false);
-    setPage(1);
-  };
-
-  const handleOpenNotification = (notification: any) => {
+  const handleOpenNotification = (notification: { id: string; type: string; data?: Record<string, unknown> }) => {
     markNotificationAsRead(notification.id);
     if (typeof window !== "undefined") {
-      // Evita que el SPA conserve el scroll al navegar desde abajo.
       window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
     }
-    setLocation(getNotificationPath(notification));
+    setLocation(getStoreNotificationPath(notification));
   };
 
   if (!isAuthenticated) {
@@ -670,7 +188,9 @@ export default function Notifications() {
       <div className="container max-w-4xl py-12 px-4">
         <Card className="border-border bg-card">
           <CardContent className="pt-6">
-            <p className="text-muted-foreground text-center mb-4">Debes iniciar sesión para ver el historial de notificaciones.</p>
+            <p className="text-muted-foreground text-center mb-4">
+              Debes iniciar sesión para ver el historial de notificaciones.
+            </p>
             <Button asChild className="w-full sm:w-auto">
               <Link href="/login">Iniciar sesión</Link>
             </Button>
@@ -689,16 +209,16 @@ export default function Notifications() {
             Volver
           </Link>
         </Button>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant={unreadOnly ? "default" : "outline"} size="sm" onClick={() => { setUnreadOnly((v) => !v); setPage(1); }}>
-            {unreadOnly ? "Solo no leídas" : "Mostrar no leídas"}
-          </Button>
-          {(unreadOnly || page !== 1) && (
-            <Button variant="ghost" size="sm" className="text-xs" onClick={handleClearFilter}>
-              Limpiar filtro
-            </Button>
-          )}
-        </div>
+        <Button
+          variant={unreadOnly ? "default" : "outline"}
+          size="sm"
+          onClick={() => {
+            setUnreadOnly((v) => !v);
+            setPage(1);
+          }}
+        >
+          {unreadOnly ? "Solo no leídas" : "Mostrar no leídas"}
+        </Button>
       </div>
 
       <div className="mb-6">
@@ -724,18 +244,10 @@ export default function Notifications() {
             </div>
           ) : (
             <div className="space-y-2">
-              {pageNotifications.map((notification: any) => {
-                const data = notification.data ?? {};
-                const conversationSenderName =
-                  (() => {
-                    const convId = data?.conversationId ?? data?.data?.conversationId;
-                    return convId != null && Number.isFinite(Number(convId))
-                      ? senderNameByConversationId.get(Number(convId))
-                      : undefined;
-                  })();
-                const isPromo = isPublicPromoNotificationType(notification.type);
-                const title = getTitle(notification.type, data, conversationSenderName);
-                const detail = getDescription(notification.type, data, conversationSenderName) ?? undefined;
+              {pageNotifications.map((notification) => {
+                const data = (notification.data ?? {}) as Record<string, unknown>;
+                const title = getTitle(notification.type, data);
+                const detail = getDescription(notification.type, data);
 
                 return (
                   <button
@@ -748,17 +260,16 @@ export default function Notifications() {
                       {getIcon(notification.type, data)}
                       <div className="flex-1 min-w-0">
                         <p className={getNotificationTitleClassName()}>{title}</p>
-                        {detail && <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>}
-                        {isPromo && (
-                          <p className={getNotificationAccentCtaClassName()}>{PUBLIC_PROMO_NOTIFICATION_CTA}</p>
-                        )}
+                        {detail ? <p className="text-xs text-muted-foreground mt-0.5">{detail}</p> : null}
                         <p className="text-xs text-muted-foreground mt-1">
                           {notification.timestamp instanceof Date
                             ? notification.timestamp.toLocaleString()
                             : new Date(notification.timestamp).toLocaleString()}
                         </p>
                       </div>
-                      {!notification.read && <Badge variant="default" className="h-2 w-2 p-0 rounded-full" />}
+                      {!notification.read ? (
+                        <Badge variant="default" className="h-2 w-2 p-0 rounded-full" />
+                      ) : null}
                     </div>
                   </button>
                 );
@@ -773,7 +284,12 @@ export default function Notifications() {
             <span className="text-xs text-muted-foreground">
               Página {currentPage}/{totalPages}
             </span>
-            <Button variant="ghost" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+            >
               Siguiente
             </Button>
           </div>
@@ -784,9 +300,9 @@ export default function Notifications() {
         <DialogContent className="max-w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {detailNotification?.data?.type === "go_panic" ? "Pánico Go" : "Detalle de la notificación"}
+              {detailNotification?.data?.type === "go_panic" ? "Alerta de pánico" : "Detalle de la notificación"}
             </DialogTitle>
-            <DialogDescription className="sr-only">Contenido íntegro de la alerta seleccionada.</DialogDescription>
+            <DialogDescription className="sr-only">Contenido de la alerta seleccionada.</DialogDescription>
           </DialogHeader>
           {detailNotification ? (
             detailNotification.data?.type === "go_panic" ? (
@@ -798,7 +314,7 @@ export default function Notifications() {
             )
           ) : detailId ? (
             <p className="text-sm text-muted-foreground">
-              No encontramos esta notificación en la sesión actual. Puede que la lista se haya renovado; revisa de nuevo la campana o espera una nueva alerta.
+              No encontramos esta notificación en la sesión actual.
             </p>
           ) : null}
         </DialogContent>
@@ -806,4 +322,3 @@ export default function Notifications() {
     </div>
   );
 }
-

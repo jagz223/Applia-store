@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GoRideRatingDialog } from "@/components/go/GoRideRatingDialog";
+import { GoRideRatingDialog } from "@/components/rating/GoRideRatingDialog";
 import { useSocket } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
 

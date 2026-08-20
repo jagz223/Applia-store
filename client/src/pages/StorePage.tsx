@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useRoute } from "wouter";
+import { Link, useRoute, useSearch } from "wouter";
 import { ChevronDown, ChevronRight, ChevronUp, Loader2, Settings, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -88,6 +88,7 @@ function formatCartBarTotal(value: number) {
 
 export default function StorePage() {
   const [, params] = useRoute("/tienda/:slug");
+  const searchQs = useSearch();
   const slug = params?.slug ?? "";
   const { user, isAuthenticated } = useAuth();
   const isAdmin = hasAdminRole(user);
@@ -126,6 +127,17 @@ export default function StorePage() {
     setMobilePanelOpen(false);
     setPopupsOpen(false);
   }, [slug]);
+
+  useEffect(() => {
+    const pago = new URLSearchParams(searchQs || "").get("pago")?.trim().toLowerCase();
+    if (pago === "cancelado") {
+      toast({
+        variant: "destructive",
+        title: "Pago no completado",
+        description: "No se creó el pedido. Puedes intentar de nuevo desde el carrito.",
+      });
+    }
+  }, [searchQs, toast]);
 
   // Pop-ups: aparecen en el cliente si no ha ingresado a la vitrina en al menos 1 hora.
   useEffect(() => {

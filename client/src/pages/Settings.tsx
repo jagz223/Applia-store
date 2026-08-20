@@ -1,15 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useSearch } from "wouter";
-import { ArrowLeft, Car, Loader2, ShoppingBag, User } from "lucide-react";
-import { isGoVehicleProvider } from "@shared/provider-car-go";
-import { SETTINGS_VEHICLE_SECTION_QUERY_KEY } from "@shared/settings-notification-urls";
-import { useCategories, useCurrentProvider } from "@/hooks/use-mango-data";
-import { resolveVehicleKind } from "@/components/driver/cargo-map-markers";
-import { ProviderVehicleChangeRequestDialog } from "@/components/provider/ProviderVehicleChangeRequestDialog";
+import { ArrowLeft, Loader2, ShoppingBag, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -26,27 +21,6 @@ import { ThemeAppearanceCard } from "@/components/ThemeAppearanceCard";
 import { SettingsChangePasswordCard } from "@/components/settings/SettingsChangePasswordCard";
 import { cn } from "@/lib/utils";
 import { getPrimaryStoreVitrinaHref, usePrimaryStore } from "@/hooks/use-primary-store";
-
-function sanitizeAccountNumber(value: string): string {
-  return value.replace(/[^\d\s\-]/g, "").replace(/\s+/g, " ").trim();
-}
-
-const GO_VEHICLE_TYPE_LABELS: Record<string, string> = {
-  motorcycle: "Moto",
-  car: "Carro",
-  pickup_truck: "Camioneta",
-  truck: "Camión",
-};
-
-function isMeaningfulProviderVehicleRow(row: Record<string, unknown> | null | undefined): boolean {
-  if (!row) return false;
-  return Boolean(
-    (row.license_plate && String(row.license_plate).trim()) ||
-      (row.brand && String(row.brand).trim()) ||
-      (row.model && String(row.model).trim()) ||
-      (row.vehicle_type && String(row.vehicle_type).trim()),
-  );
-}
 
 const profileSchema = z.object({
   email: z.string().email("Correo inválido").optional().or(z.literal("")),
@@ -97,60 +71,6 @@ export default function Settings() {
     return tiendaHref;
   }, [searchQs, tiendaHref]);
 
-  const [vehicleChangeOpen, setVehicleChangeOpen] = useState(false);
-  const vehicleSettingsSectionRef = useRef<HTMLDivElement | null>(null);
-  const [vehicleSectionHighlight, setVehicleSectionHighlight] = useState(false);
-
-  const isProfessional = (user as { role?: string } | null)?.role === "professional";
-  const { data: provider, isLoading: providerLoading, isError: providerError } = useCurrentProvider();
-  const { data: categories = [] } = useCategories();
-
-  const { data: providerVehicleRow, isLoading: providerVehicleLoading } = useQuery({
-    queryKey: ["/api/me/provider-vehicle"],
-    queryFn: async () => {
-      const token = localStorage.getItem("token");
-      const res = await fetch("/api/me/provider-vehicle", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (res.status === 401) return null;
-      if (!res.ok) return null;
-      return res.json() as Promise<Record<string, unknown> | null>;
-    },
-    enabled: isAuthenticated && isProfessional && provider != null && !providerLoading && !providerError,
-  });
-
-  const showGoVehicleCard =
-    isProfessional &&
-    !providerLoading &&
-    !providerError &&
-    provider != null &&
-    (isGoVehicleProvider(provider, categories) ||
-      (!providerVehicleLoading && isMeaningfulProviderVehicleRow(providerVehicleRow as Record<string, unknown>)));
-
-  const openVehicleSectionFromNotification = useMemo(() => {
-    try {
-      return new URLSearchParams(searchQs || "").get(SETTINGS_VEHICLE_SECTION_QUERY_KEY) === "1";
-    } catch {
-      return false;
-    }
-  }, [searchQs]);
-
-  useEffect(() => {
-    if (!openVehicleSectionFromNotification || !showGoVehicleCard) return;
-    if (providerVehicleLoading) return;
-    const el = vehicleSettingsSectionRef.current;
-    if (!el) return;
-    const scrollTimer = window.setTimeout(() => {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setVehicleSectionHighlight(true);
-    }, 250);
-    const unhighlightTimer = window.setTimeout(() => setVehicleSectionHighlight(false), 5200);
-    return () => {
-      window.clearTimeout(scrollTimer);
-      window.clearTimeout(unhighlightTimer);
-    };
-  }, [openVehicleSectionFromNotification, showGoVehicleCard, providerVehicleLoading]);
-
   const form = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
@@ -186,7 +106,9 @@ export default function Settings() {
       lastName: data.lastName || undefined,
       phone: data.phone || undefined,
       bankName: data.bankName || undefined,
-      accountNumber: data.accountNumber ? sanitizeAccountNumber(data.accountNumber) : undefined,
+      accountNumber: data.accountNumber
+        ? data.accountNumber.replace(/[^\d\s\-]/g, "").replace(/\s+/g, " ").trim()
+        : undefined,
     };
     try {
       const res = await fetch("/api/auth/profile", {
@@ -285,98 +207,6 @@ export default function Settings() {
           </aside>
 
           <div className="flex min-w-0 flex-col gap-5 lg:col-span-8">
-            {showGoVehicleCard ? (
-              <>
-                <div
-                  ref={vehicleSettingsSectionRef}
-                  className={cn(
-                    "scroll-mt-24 transition-shadow duration-300",
-                    vehicleSectionHighlight && "rounded-[1.5rem] ring-2 ring-primary ring-offset-2 ring-offset-background",
-                  )}
-                >
-                  <section className={panelClass}>
-                    <div className="mb-4 flex items-start gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-                        <Car className="h-4 w-4" aria-hidden />
-                      </span>
-                      <div className="min-w-0">
-                        <h2 className="font-display text-base font-bold tracking-tight text-foreground">
-                          Tu unidad
-                        </h2>
-                        <p className="mt-0.5 text-sm text-muted-foreground">
-                          Si cambias de vehículo o modalidad, envía una solicitud para revisión.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="space-y-4 lg:flex lg:items-end lg:justify-between lg:gap-6 lg:space-y-0">
-                      <div className="min-w-0 flex-1 text-sm">
-                        {providerVehicleLoading ? (
-                          <p className="flex items-center gap-2 text-muted-foreground">
-                            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                            Cargando unidad…
-                          </p>
-                        ) : providerVehicleRow &&
-                          (providerVehicleRow.license_plate ||
-                            providerVehicleRow.brand ||
-                            providerVehicleRow.model ||
-                            providerVehicleRow.vehicle_type) ? (
-                          <div className="space-y-2 rounded-2xl border border-border/60 bg-muted/25 p-4">
-                            <p>
-                              <span className="text-muted-foreground">Tipo:</span>{" "}
-                              <span className="font-semibold text-foreground">
-                                {GO_VEHICLE_TYPE_LABELS[
-                                  resolveVehicleKind(providerVehicleRow.vehicle_type as string | undefined)
-                                ] ?? "Vehículo"}
-                              </span>
-                            </p>
-                            {(String(providerVehicleRow.brand ?? "").trim() ||
-                              String(providerVehicleRow.model ?? "").trim()) && (
-                              <p>
-                                <span className="text-muted-foreground">Unidad:</span>{" "}
-                                <span className="font-semibold text-foreground">
-                                  {[providerVehicleRow.brand, providerVehicleRow.model]
-                                    .filter(Boolean)
-                                    .join(" ")}
-                                  {providerVehicleRow.model_year != null
-                                    ? ` · ${String(providerVehicleRow.model_year)}`
-                                    : ""}
-                                </span>
-                              </p>
-                            )}
-                            {providerVehicleRow.license_plate ? (
-                              <p>
-                                <span className="text-muted-foreground">Placa:</span>{" "}
-                                <span className="font-mono font-semibold">
-                                  {String(providerVehicleRow.license_plate)}
-                                </span>
-                              </p>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <p className="text-muted-foreground">
-                            Todavía no hay unidad registrada. Completa la solicitud para operar con normalidad.
-                          </p>
-                        )}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-10 w-full shrink-0 rounded-full px-5 font-semibold lg:w-auto"
-                        onClick={() => setVehicleChangeOpen(true)}
-                      >
-                        Solicitar cambio
-                      </Button>
-                    </div>
-                  </section>
-                </div>
-                <ProviderVehicleChangeRequestDialog
-                  open={vehicleChangeOpen}
-                  onOpenChange={setVehicleChangeOpen}
-                  vehicleRow={providerVehicleRow ?? null}
-                />
-              </>
-            ) : null}
-
             <Form {...form}>
               <form onSubmit={form.handleSubmit(doSubmit)} className="space-y-5">
                 <section className={panelClass}>
@@ -448,11 +278,7 @@ export default function Settings() {
                         <FormItem className="sm:col-span-2">
                           <FormLabel>Teléfono</FormLabel>
                           <FormControl>
-                            <Input
-                              placeholder="Ej. +58 412 123 4567"
-                              className={fieldClass}
-                              {...field}
-                            />
+                            <Input placeholder="Ej. +58 412 123 4567" className={fieldClass} {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -462,12 +288,7 @@ export default function Settings() {
                 </section>
 
                 <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    asChild
-                    className="h-11 rounded-full px-6 font-semibold"
-                  >
+                  <Button type="button" variant="outline" asChild className="h-11 rounded-full px-6 font-semibold">
                     <Link href={tiendaHref}>Volver a la tienda</Link>
                   </Button>
                   <Button

@@ -5,14 +5,139 @@ import {
   capturePayPalOrder,
   getPayPalOrderDetails,
   refundPayPalPayment,
+  isPayPalConfigured,
 } from "./paypal";
+import {
+  retrieveStoreStripeCheckoutSession,
+  isStripeCheckoutSessionPaid,
+  constructWebhookEvent,
+  isStripeConfigured,
+} from "./stripe";
+import {
+  storePaymentsCancelUrl,
+  storePaymentsSuccessUrl,
+} from "./store-payment-checkout";
+import { fulfillStorePendingCheckout, getStorePendingCheckout } from "./store-pending-checkout";
 import { authenticateJWT } from "./routes-auth";
+
+function redirectCancel(res: { redirect: (url: string) => void }, storeSlug?: string | null) {
+  return res.redirect(storePaymentsCancelUrl(storeSlug ?? ""));
+}
+
+function redirectSuccess(res: { redirect: (url: string) => void }, orderId: number) {
+  return res.redirect(storePaymentsSuccessUrl(orderId));
+}
 
 export async function registerPayPalRoutes(
   httpServer: Server,
   app: Express
 ): Promise<void> {
-  
+  app.get("/api/store-payments/stripe/return", async (req, res) => {
+    const sessionId = String(req.query.session_id ?? "").trim();
+    let storeSlug = "";
+    if (!sessionId || !isStripeConfigured()) {
+      return redirectCancel(res);
+    }
+    try {
+      const session = await retrieveStoreStripeCheckoutSession(sessionId);
+      const pendingId = String(session.metadata?.pendingCheckoutId ?? "").trim();
+      if (pendingId) {
+        const pending = await getStorePendingCheckout(pendingId);
+        storeSlug = pending?.storeSlug ?? "";
+      }
+      if (!isStripeCheckoutSessionPaid(session) || !pendingId) {
+        return redirectCancel(res, storeSlug);
+      }
+      const { order } = await fulfillStorePendingCheckout({
+        pendingId,
+        gatewayReference: `stripe:${session.id}`,
+      });
+      return redirectSuccess(res, order.id);
+    } catch (error) {
+      console.error("[store-payments] stripe return", error);
+      return redirectCancel(res, storeSlug);
+    }
+  });
+
+  app.post("/api/store-payments/stripe/webhook", async (req, res) => {
+    const webhookSecret = (process.env.STRIPE_WEBHOOK_SECRET ?? "").trim();
+    if (!webhookSecret || webhookSecret === "whsec_your_webhook_secret") {
+      return res.status(503).json({ message: "Webhook de Stripe no configurado." });
+    }
+    const signature = String(req.headers["stripe-signature"] ?? "");
+    const raw = req.rawBody;
+    if (!signature || raw == null) {
+      return res.status(400).json({ message: "Webhook inválido." });
+    }
+    try {
+      const payload = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+      const event = constructWebhookEvent(payload, signature);
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object as {
+          id?: string;
+          payment_status?: string;
+          metadata?: { pendingCheckoutId?: string };
+        };
+        const pendingId = String(session.metadata?.pendingCheckoutId ?? "").trim();
+        if (pendingId && (session.payment_status === "paid" || event.type === "checkout.session.completed")) {
+          await fulfillStorePendingCheckout({
+            pendingId,
+            gatewayReference: `stripe:${session.id ?? ""}`,
+          });
+        }
+      }
+      return res.json({ received: true });
+    } catch (error) {
+      console.error("[store-payments] stripe webhook", error);
+      return res.status(400).json({ message: "Webhook no verificado." });
+    }
+  });
+
+  app.get("/api/store-payments/paypal/return", async (req, res) => {
+    const token = String(req.query.token ?? "").trim();
+    const pendingId = String(req.query.pendingId ?? "").trim();
+    let storeSlug = "";
+    if (pendingId) {
+      const pending = await getStorePendingCheckout(pendingId);
+      storeSlug = pending?.storeSlug ?? "";
+      if (pending && pending.gatewayKind !== "paypal") {
+        console.error("[store-payments] paypal return for non-paypal pending", pending.gatewayKind);
+        return redirectCancel(res, storeSlug);
+      }
+    }
+    if (!token || !pendingId || !isPayPalConfigured()) {
+      return redirectCancel(res, storeSlug);
+    }
+    try {
+      let captureStatus = "";
+      let gatewayReference = `paypal:${token}`;
+      try {
+        const capture = await capturePayPalOrder(token);
+        captureStatus = capture.status;
+        gatewayReference = `paypal:${capture.transactionId || token}`;
+      } catch {
+        const details = await getPayPalOrderDetails(token);
+        captureStatus = String(details?.status ?? "");
+      }
+      if (captureStatus !== "COMPLETED") {
+        return redirectCancel(res, storeSlug);
+      }
+      const { order } = await fulfillStorePendingCheckout({
+        pendingId,
+        gatewayReference,
+      });
+      return redirectSuccess(res, order.id);
+    } catch (error) {
+      console.error("[store-payments] paypal capture", error);
+      return redirectCancel(res, storeSlug);
+    }
+  });
+
+  app.get("/api/store-payments/paypal/cancel", (req, res) => {
+    const storeSlug = String(req.query.storeSlug ?? "").trim();
+    return redirectCancel(res, storeSlug);
+  });
+
   // POST /api/paypal/create-order - Crea una orden de PayPal
   app.post(
     "/api/paypal/create-order",
@@ -45,7 +170,6 @@ export async function registerPayPalRoutes(
     }
   );
 
-  // POST /api/paypal/capture-order - Captura/confirma el pago
   app.post(
     "/api/paypal/capture-order",
     authenticateJWT,
@@ -63,8 +187,8 @@ export async function registerPayPalRoutes(
           status: capture.status,
           transactionId: capture.transactionId,
           payerEmail: capture.payerEmail,
-          message: capture.status === "COMPLETED" 
-            ? "Pago completado exitosamente" 
+          message: capture.status === "COMPLETED"
+            ? "Pago completado exitosamente"
             : "Pago en proceso",
         });
       } catch (error: any) {
@@ -74,7 +198,6 @@ export async function registerPayPalRoutes(
     }
   );
 
-  // GET /api/paypal/order/:orderId - Obtiene detalles de la orden
   app.get(
     "/api/paypal/order/:orderId",
     authenticateJWT,
@@ -92,7 +215,6 @@ export async function registerPayPalRoutes(
     }
   );
 
-  // POST /api/paypal/refund - Reembolsa un pago
   app.post(
     "/api/paypal/refund",
     authenticateJWT,
@@ -105,8 +227,8 @@ export async function registerPayPalRoutes(
         }
 
         const refund = await refundPayPalPayment(
-          captureId, 
-          amount, 
+          captureId,
+          amount,
           reason
         );
 
@@ -122,16 +244,13 @@ export async function registerPayPalRoutes(
     }
   );
 
-  // GET /api/paypal/status/:bookingId - Verifica estado del pago
   app.get(
     "/api/paypal/status/:bookingId",
     authenticateJWT,
     async (req: any, res) => {
       try {
         const { bookingId } = req.params;
-        
-        // En una implementación real, almacenaríamos el orderId relacionado al booking
-        // Por ahora, respondemos que no hay información
+
         res.json({
           bookingId,
           status: "pending",

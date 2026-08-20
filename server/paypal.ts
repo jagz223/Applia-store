@@ -3,24 +3,47 @@
  * Applia
  */
 
-const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || "your-paypal-client-id";
-const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET || "your-paypal-client-secret";
-const PAYPAL_MODE = process.env.PAYPAL_MODE || "sandbox";
+function paypalClientId(): string {
+  return (process.env.PAYPAL_CLIENT_ID ?? "").trim();
+}
 
-const PAYPAL_API_BASE = PAYPAL_MODE === "production" 
-  ? "https://api-m.paypal.com" 
-  : "https://api-m.sandbox.paypal.com";
+function paypalClientSecret(): string {
+  return (process.env.PAYPAL_CLIENT_SECRET ?? "").trim();
+}
+
+function paypalMode(): string {
+  return (process.env.PAYPAL_MODE || "sandbox").trim().toLowerCase();
+}
+
+const PLACEHOLDER_PAYPAL_IDS = new Set(["your-paypal-client-id", "your_paypal_client_id"]);
+const PLACEHOLDER_PAYPAL_SECRETS = new Set(["your-paypal-client-secret", "your_paypal_client_secret"]);
+
+export function isPayPalConfigured(): boolean {
+  const id = paypalClientId();
+  const secret = paypalClientSecret();
+  return Boolean(id && secret && !PLACEHOLDER_PAYPAL_IDS.has(id) && !PLACEHOLDER_PAYPAL_SECRETS.has(secret));
+}
+
+function paypalApiBase(): string {
+  return paypalMode() === "live" || paypalMode() === "production"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
+}
 
 /**
  * Obtiene el token de acceso de PayPal
  */
 async function getAccessToken(): Promise<string> {
-  const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString("base64");
-  
-  const response = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
+  if (!isPayPalConfigured()) {
+    throw new Error("PAYPAL_NOT_CONFIGURED");
+  }
+
+  const auth = Buffer.from(`${paypalClientId()}:${paypalClientSecret()}`).toString("base64");
+
+  const response = await fetch(`${paypalApiBase()}/v1/oauth2/token`, {
     method: "POST",
     headers: {
-      "Authorization": `Basic ${auth}`,
+      Authorization: `Basic ${auth}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: "grant_type=client_credentials",
@@ -34,6 +57,11 @@ async function getAccessToken(): Promise<string> {
   return data.access_token;
 }
 
+export type CreatePayPalOrderUrls = {
+  returnUrl?: string;
+  cancelUrl?: string;
+};
+
 /**
  * Crea una orden de PayPal
  */
@@ -41,22 +69,27 @@ export async function createPayPalOrder(
   amount: number,
   currency: string = "USD",
   description: string,
-  bookingId: string
+  bookingId: string,
+  urls?: CreatePayPalOrderUrls,
 ): Promise<{ orderId: string; approvalUrl: string }> {
   const accessToken = await getAccessToken();
+  const origin = (process.env.FRONTEND_URL || process.env.PUBLIC_SITE_URL || "http://localhost:5000").replace(
+    /\/$/,
+    "",
+  );
 
-  const response = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders`, {
+  const response = await fetch(`${paypalApiBase()}/v2/checkout/orders`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${accessToken}`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       intent: "CAPTURE",
       purchase_units: [
         {
-          reference_id: bookingId,
-          description: description,
+          reference_id: bookingId.slice(0, 256),
+          description,
           amount: {
             currency_code: currency,
             value: amount.toFixed(2),
@@ -67,8 +100,8 @@ export async function createPayPalOrder(
         brand_name: "Applia",
         landing_page: "BILLING",
         user_action: "PAY_NOW",
-        return_url: `${process.env.FRONTEND_URL || "http://localhost:5000"}/payments/success`,
-        cancel_url: `${process.env.FRONTEND_URL || "http://localhost:5000"}/payments/cancel`,
+        return_url: urls?.returnUrl || `${origin}/payments/success`,
+        cancel_url: urls?.cancelUrl || `${origin}/payments/cancel`,
       },
     }),
   });
@@ -79,9 +112,8 @@ export async function createPayPalOrder(
   }
 
   const data = await response.json();
-  
-  // Find the approval URL
-  const approvalUrl = data.links?.find((link: any) => link.rel === "approve")?.href || "";
+
+  const approvalUrl = data.links?.find((link: { rel?: string; href?: string }) => link.rel === "approve")?.href || "";
 
   return {
     orderId: data.id,
@@ -99,7 +131,7 @@ export async function capturePayPalOrder(orderId: string): Promise<{
 }> {
   const accessToken = await getAccessToken();
 
-  const response = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders/${orderId}/capture`, {
+  const response = await fetch(`${paypalApiBase()}/v2/checkout/orders/${orderId}/capture`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${accessToken}`,
@@ -130,7 +162,7 @@ export async function capturePayPalOrder(orderId: string): Promise<{
 export async function getPayPalOrderDetails(orderId: string): Promise<any> {
   const accessToken = await getAccessToken();
 
-  const response = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders/${orderId}`, {
+  const response = await fetch(`${paypalApiBase()}/v2/checkout/orders/${orderId}`, {
     method: "GET",
     headers: {
       "Authorization": `Bearer ${accessToken}`,
@@ -154,7 +186,7 @@ export async function refundPayPalPayment(
 ): Promise<{ refundId: string; status: string }> {
   const accessToken = await getAccessToken();
 
-  const body: any = {};
+  const body: Record<string, unknown> = {};
   if (amount) {
     body.amount = {
       value: amount.toFixed(2),
@@ -166,7 +198,7 @@ export async function refundPayPalPayment(
   }
 
   const response = await fetch(
-    `${PAYPAL_API_BASE}/v2/payments/captures/${captureId}/refund`,
+    `${paypalApiBase()}/v2/payments/captures/${captureId}/refund`,
     {
       method: "POST",
       headers: {

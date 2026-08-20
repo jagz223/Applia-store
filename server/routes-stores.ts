@@ -138,7 +138,8 @@ import {
   normalizeStoreWhatsappPhone,
 } from "@shared/store-whatsapp";
 import { isCasheaPaymentMethod } from "@shared/store-cashea";
-import { syncStoreCasheaPaymentMethod } from "./store-cashea";
+import { parseStorePaymentGatewayKind } from "@shared/store-payment-gateways";
+import { syncStoreCasheaPaymentMethod, prepareCasheaEnabledForStoreUpdate } from "./store-cashea";
 import {
   storeStaffListQuerySchema,
   updateStoreStaffMemberSchema,
@@ -171,6 +172,12 @@ import {
   validateCheckoutFulfillment,
   validateCheckoutPaymentMethod,
 } from "./store-cart";
+import {
+  assertStorePaymentGatewayConfigured,
+  createStoreGatewayCheckout,
+  storeGatewayNotConfiguredMessage,
+} from "./store-payment-checkout";
+import { createStorePendingCheckout } from "./store-pending-checkout";
 
 import { buildStoreStats } from "./store-stats";
 
@@ -943,9 +950,26 @@ export function registerStoreRoutes(app: Express): void {
       if (!canEnableStoreFulfillmentOptions(nextFulfillment, nextLocation, nextBranches)) {
         return res.status(400).json({ message: STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE });
       }
-      const updated = await appliaStorage.updateStore(store.id, parsed.data);
-      if (parsed.data.casheaEnabled !== undefined) {
-        await syncStoreCasheaPaymentMethod(appliaStorage, store.id, parsed.data.casheaEnabled);
+      const myPatch = { ...parsed.data };
+      if (myPatch.whatsappPhone !== undefined) {
+        myPatch.whatsappPhone = normalizeStoreWhatsappPhone(myPatch.whatsappPhone);
+      }
+      const casheaPrep = prepareCasheaEnabledForStoreUpdate({
+        currentWhatsappPhone: store.whatsappPhone,
+        nextWhatsappPhone: myPatch.whatsappPhone,
+        whatsappPhoneInPatch: myPatch.whatsappPhone !== undefined,
+        currentCasheaEnabled: store.casheaEnabled === true,
+        casheaEnabledInPatch: myPatch.casheaEnabled,
+      });
+      if (!casheaPrep.ok) {
+        return res.status(400).json({ message: casheaPrep.message });
+      }
+      if (casheaPrep.casheaEnabled !== undefined) {
+        myPatch.casheaEnabled = casheaPrep.casheaEnabled;
+      }
+      const updated = await appliaStorage.updateStore(store.id, myPatch);
+      if (myPatch.casheaEnabled !== undefined) {
+        await syncStoreCasheaPaymentMethod(appliaStorage, store.id, myPatch.casheaEnabled);
       }
       const freshStore =
         (await appliaStorage.getStoreById(store.id)) ??
@@ -1026,9 +1050,22 @@ export function registerStoreRoutes(app: Express): void {
       if (patchBody.whatsappPhone !== undefined) {
         patchBody.whatsappPhone = normalizeStoreWhatsappPhone(patchBody.whatsappPhone);
       }
+      const casheaPrep = prepareCasheaEnabledForStoreUpdate({
+        currentWhatsappPhone: existing.whatsappPhone,
+        nextWhatsappPhone: patchBody.whatsappPhone,
+        whatsappPhoneInPatch: patchBody.whatsappPhone !== undefined,
+        currentCasheaEnabled: existing.casheaEnabled === true,
+        casheaEnabledInPatch: patchBody.casheaEnabled,
+      });
+      if (!casheaPrep.ok) {
+        return res.status(400).json({ message: casheaPrep.message });
+      }
+      if (casheaPrep.casheaEnabled !== undefined) {
+        patchBody.casheaEnabled = casheaPrep.casheaEnabled;
+      }
       const store = await appliaStorage.updateStore(storeId, patchBody);
-      if (parsed.data.casheaEnabled !== undefined) {
-        await syncStoreCasheaPaymentMethod(appliaStorage, storeId, parsed.data.casheaEnabled);
+      if (patchBody.casheaEnabled !== undefined) {
+        await syncStoreCasheaPaymentMethod(appliaStorage, storeId, patchBody.casheaEnabled);
       }
       const freshStore = (await appliaStorage.getStoreById(storeId)) ?? store;
       if (parsed.data.branches !== undefined) {
@@ -1416,7 +1453,10 @@ export function registerStoreRoutes(app: Express): void {
           errors: parsed.error.errors,
         });
       }
-      const method = await appliaStorage.createStorePaymentMethod(storeId, parsed.data);
+      const method = await appliaStorage.createStorePaymentMethod(storeId, {
+        ...parsed.data,
+        systemKind: parsed.data.systemKind ?? null,
+      });
       return res.status(201).json({ paymentMethod: serializeStorePaymentMethod(method) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1694,6 +1734,37 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
+      const gatewayKind = parseStorePaymentGatewayKind(paymentMethod.systemKind);
+      const isGatewayCheckout = gatewayKind != null;
+      if (isGatewayCheckout) {
+        try {
+          assertStorePaymentGatewayConfigured(gatewayKind);
+        } catch (configErr) {
+          const configMsg = configErr instanceof Error ? configErr.message : String(configErr);
+          if (
+            configMsg === "STRIPE_NOT_CONFIGURED" ||
+            configMsg === "PAYPAL_NOT_CONFIGURED" ||
+            configMsg === "DLOCALGO_NOT_CONFIGURED"
+          ) {
+            return res.status(503).json({ message: storeGatewayNotConfiguredMessage(gatewayKind) });
+          }
+          throw configErr;
+        }
+      } else {
+        const reference = parsed.data.reference.trim();
+        const proofImageUrl = parsed.data.proofImageUrl.trim();
+        const amountPaid = parsed.data.amountPaid;
+        if (!reference) {
+          return res.status(400).json({ message: "La referencia es obligatoria." });
+        }
+        if (!proofImageUrl) {
+          return res.status(400).json({ message: "El comprobante es obligatorio." });
+        }
+        if (amountPaid == null || !Number.isFinite(amountPaid) || amountPaid <= 0) {
+          return res.status(400).json({ message: "Indica el monto pagado." });
+        }
+      }
+
       const orderItems = enriched.items.map((line) => ({
         kind: line.kind,
         productId: line.productId,
@@ -1749,6 +1820,95 @@ export function registerStoreRoutes(app: Express): void {
       const amountDue =
         fulfillmentMode === "delivery" ? enriched.subtotal + deliveryFee : enriched.subtotal;
 
+      if (isGatewayCheckout) {
+        const pending = await createStorePendingCheckout({
+          userId,
+          storeId,
+          storeName: store.name ?? "Tienda",
+          storeSlug: store.slug ?? "",
+          gatewayKind,
+          paymentMethodId: parsed.data.paymentMethodId,
+          paymentMethodName: paymentMethod.name,
+          paymentMethodAccountNumber:
+            formatStorePaymentMethodExtraFieldsAsText(paymentMethod.extraFields ?? []) ||
+            paymentMethod.accountNumber ||
+            "",
+          fulfillmentMode,
+          branchId: assignedBranch.id,
+          branchName: assignedBranch.name,
+          storeLocation: assignedBranch.location,
+          customerNote: parsed.data.customerNote?.trim() ?? "",
+          amountDue,
+          deliveryFee,
+          deliveryDistanceM,
+          deliveryLocation,
+          items: orderItems,
+          subtotal: enriched.subtotal,
+        });
+
+        const checkoutUser = (await appliaStorage.getUserById(userId)) as
+          | { name?: string; firstName?: string; lastName?: string; email?: string; phone?: string }
+          | undefined;
+        const payerName = [checkoutUser?.name ?? checkoutUser?.firstName, checkoutUser?.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+
+        let checkoutUrl: string;
+        let resolvedGatewayKind = gatewayKind;
+        try {
+          const gateway = await createStoreGatewayCheckout({
+            kind: gatewayKind,
+            amount: amountDue,
+            pendingCheckoutId: pending.id,
+            storeId,
+            storeName: store.name ?? "Tienda",
+            storeSlug: store.slug ?? "",
+            payer: {
+              name: payerName || null,
+              email: checkoutUser?.email ?? null,
+              phone: checkoutUser?.phone ?? null,
+            },
+          });
+          checkoutUrl = gateway.checkoutUrl;
+          resolvedGatewayKind = gateway.gatewayKind;
+          if (resolvedGatewayKind !== gatewayKind) {
+            return res.status(502).json({
+              message: "La pasarela de pago no coincide con el método seleccionado.",
+            });
+          }
+          if (gatewayKind === "paypal" && /stripe\.com/i.test(checkoutUrl)) {
+            return res.status(502).json({
+              message: "Error al iniciar PayPal: se recibió una URL de Stripe. Revisa la configuración del método.",
+            });
+          }
+          if (gatewayKind === "stripe" && /paypal\.com/i.test(checkoutUrl)) {
+            return res.status(502).json({
+              message: "Error al iniciar Stripe: se recibió una URL de PayPal. Revisa la configuración del método.",
+            });
+          }
+        } catch (gatewayErr) {
+          console.error("[stores] gateway checkout", gatewayErr);
+          const gatewayMsg = gatewayErr instanceof Error ? gatewayErr.message : String(gatewayErr);
+          if (
+            gatewayMsg === "STRIPE_NOT_CONFIGURED" ||
+            gatewayMsg === "PAYPAL_NOT_CONFIGURED" ||
+            gatewayMsg === "DLOCALGO_NOT_CONFIGURED"
+          ) {
+            return res.status(503).json({ message: storeGatewayNotConfiguredMessage(gatewayKind) });
+          }
+          return res.status(502).json({
+            message: "No se pudo iniciar el pago. El pedido no se creó; intenta de nuevo.",
+          });
+        }
+
+        return res.status(201).json({
+          order: null,
+          checkoutUrl,
+          gatewayKind: resolvedGatewayKind,
+        });
+      }
+
       const order = await appliaStorage.createStoreOrder({
         storeId,
         userId,
@@ -1766,7 +1926,7 @@ export function registerStoreRoutes(app: Express): void {
         proofImageUrl: parsed.data.proofImageUrl.trim(),
         customerNote: parsed.data.customerNote?.trim() ?? "",
         amountDue,
-        amountPaid: parsed.data.amountPaid,
+        amountPaid: parsed.data.amountPaid!,
         deliveryFee,
         deliveryDistanceM,
         deliveryLocation,
@@ -1793,6 +1953,7 @@ export function registerStoreRoutes(app: Express): void {
           amountPaid: order.amountPaid,
           createdAt: serializeDate(order.createdAt),
         },
+        checkoutUrl: null,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

@@ -533,7 +533,7 @@ export interface IStorage
   getStorePaymentMethod(storeId: number, paymentMethodId: number): Promise<StorePaymentMethod | undefined>;
   createStorePaymentMethod(
     storeId: number,
-    input: InsertStorePaymentMethod & { systemKind?: string | null },
+    input: Omit<InsertStorePaymentMethod, "systemKind"> & { systemKind?: string | null },
   ): Promise<StorePaymentMethod>;
   updateStorePaymentMethod(
     storeId: number,
@@ -541,7 +541,9 @@ export interface IStorage
     input: UpdateStorePaymentMethod,
   ): Promise<StorePaymentMethod>;
   deleteStorePaymentMethod(storeId: number, paymentMethodId: number): Promise<void>;
-  createStoreOrder(input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt">): Promise<StoreOrder>;
+  createStoreOrder(
+    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt"> & { status?: StoreOrder["status"] },
+  ): Promise<StoreOrder>;
   listStoreOrders(storeId: number, filters?: StoreOrderListFilters): Promise<StoreOrder[]>;
   listStoreOrdersForUser(userId: string, filters?: StoreOrderListFilters): Promise<StoreOrder[]>;
   getStoreOrder(storeId: number, orderId: number): Promise<StoreOrder | undefined>;
@@ -551,7 +553,7 @@ export interface IStorage
     storeId: number,
     orderId: number,
     patch: Partial<
-      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation">
+      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation" | "reference">
     >,
   ): Promise<StoreOrder>;
   incrementStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder>;
@@ -3801,7 +3803,7 @@ export class InMemoryStorage implements IStorage {
 
   async createStorePaymentMethod(
     storeId: number,
-    input: InsertStorePaymentMethod & { systemKind?: string | null },
+    input: Omit<InsertStorePaymentMethod, "systemKind"> & { systemKind?: string | null },
   ): Promise<StorePaymentMethod> {
     const now = new Date();
     const method: StorePaymentMethod = {
@@ -3839,6 +3841,9 @@ export class InMemoryStorage implements IStorage {
       ...(input.imageUrl !== undefined
         ? { imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null }
         : {}),
+      ...(input.systemKind !== undefined
+        ? { systemKind: input.systemKind?.trim() ? input.systemKind.trim() : null }
+        : {}),
       updatedAt: new Date(),
     };
     this.storePaymentMethods[idx] = next;
@@ -3858,7 +3863,7 @@ export class InMemoryStorage implements IStorage {
   private storeOrderIdCounter = 1;
 
   async createStoreOrder(
-    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt">,
+    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt"> & { status?: StoreOrder["status"] },
   ): Promise<StoreOrder> {
     const now = new Date();
     const order: StoreOrder = {
@@ -3866,7 +3871,7 @@ export class InMemoryStorage implements IStorage {
       ...input,
       packRideId: input.packRideId ?? null,
       deliveryUnreadCount: input.deliveryUnreadCount ?? 0,
-      status: "pagado",
+      status: input.status ?? "pagado",
       createdAt: now,
       updatedAt: now,
     };
@@ -3914,7 +3919,7 @@ export class InMemoryStorage implements IStorage {
     storeId: number,
     orderId: number,
     patch: Partial<
-      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation">
+      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation" | "reference">
     >,
   ): Promise<StoreOrder> {
     const idx = this.storeOrders.findIndex((o) => o.storeId === storeId && o.id === orderId);

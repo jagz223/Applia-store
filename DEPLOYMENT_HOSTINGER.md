@@ -111,10 +111,23 @@ JWT_SECRET=tu-secreto-muy-largo-y-seguro
 # Stripe (Pagos)
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
 
 # PayPal
 PAYPAL_CLIENT_ID=...
 PAYPAL_CLIENT_SECRET=...
+PAYPAL_MODE=sandbox
+
+# dLocal Go
+DLOCALGO_API_KEY=
+DLOCALGO_SECRET_KEY=
+DLOCALGO_MODE=sandbox
+DLOCALGO_CURRENCY=USD
+DLOCALGO_COUNTRY=
+
+# URL pública (retornos de pago)
+FRONTEND_URL=http://localhost:5000
+PUBLIC_SITE_URL=http://localhost:5000
 
 # Firebase (Opcional - para Base de Datos)
 FIREBASE_PROJECT_ID=...
