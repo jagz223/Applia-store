@@ -8,7 +8,7 @@ import {
   storePushDataStrings,
   type StoreOrderDeliveryEventType,
 } from "@shared/store-notification-copy";
-import { normalizeStoreLocation } from "@shared/store-schema";
+import { normalizeStoreLocation, normalizeStoreBranches, resolveStoreBranch } from "@shared/store-schema";
 import {
   createPackRideForStoreOrder,
   cancelStoreOrderPackSearch,
@@ -124,7 +124,13 @@ export async function launchStoreOrderDeliverySearch(
     throw new Error("STORE_ORDER_INVALID_STATUS_FOR_DELIVERY_SEARCH");
   }
 
-  const storeLocation = normalizeStoreLocation(store.location ?? null);
+  const storeLocation =
+    normalizeStoreLocation(order.storeLocation) ??
+    resolveStoreBranch(
+      normalizeStoreBranches(store.branches, store.location ?? null),
+      order.branchId,
+    )?.location ??
+    normalizeStoreLocation(store.location ?? null);
   const { start, end } = requireDeliveryLocations(storeLocation, order.deliveryLocation);
 
   const active = getActivePackRideForStoreOrder(order.id);
@@ -169,7 +175,13 @@ export async function handleStoreOrderStatusListoParaEnvio(
   if (!order) throw new Error("STORE_ORDER_NOT_FOUND");
   if (order.fulfillmentMode !== "delivery") throw new Error("STORE_ORDER_NOT_DELIVERY");
 
-  const storeLocation = normalizeStoreLocation(store.location ?? null);
+  const storeLocation =
+    normalizeStoreLocation(order.storeLocation) ??
+    resolveStoreBranch(
+      normalizeStoreBranches(store.branches, store.location ?? null),
+      order.branchId,
+    )?.location ??
+    normalizeStoreLocation(store.location ?? null);
   requireDeliveryLocations(storeLocation, order.deliveryLocation);
 
   // La tienda envía el pedido; ya no se inicia búsqueda Pack Go automática.
@@ -325,11 +337,17 @@ export async function onStoreOrderDeliveryChatMessage(input: {
   });
 }
 
-export async function getStoreDeliveryNotificationsSummary(storeId: number): Promise<{
+export async function getStoreDeliveryNotificationsSummary(
+  storeId: number,
+  branchId?: string | null,
+): Promise<{
   totalUnread: number;
   byOrderId: Record<number, number>;
 }> {
-  const orders = await appliaStorage.listStoreOrders(storeId, { deliveryQueue: true });
+  const orders = await appliaStorage.listStoreOrders(storeId, {
+    deliveryQueue: true,
+    branchId: branchId?.trim() || undefined,
+  });
   let totalUnread = 0;
   const byOrderId: Record<number, number> = {};
   for (const o of orders) {

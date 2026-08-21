@@ -7,7 +7,7 @@ import type {
 } from "@shared/store-cart-schema";
 import type { SubmitStoreCheckout } from "@shared/store-order-schema";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
-import type { StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
+import type { StoreBranch, StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
 
 export type StoreCartLine = {
   kind: "product" | "promotion";
@@ -35,18 +35,24 @@ export type StoreCartPaymentMethodOption = {
   accountNumber: string;
   extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
+  isCashea?: boolean;
+  gatewayKind?: "stripe" | "paypal" | "dlocalgo" | null;
 };
 
 export type StoreCartSummary = {
   storeId: number;
+  storeName?: string | null;
+  whatsappPhone?: string | null;
   items: StoreCartLine[];
   subtotal: number;
   itemCount: number;
+  cartWeightKg: number;
   expiresAt: string | null;
   fulfillmentMode: StoreFulfillmentMode | null;
   fulfillmentOptions: StoreCartFulfillmentOption[];
   paymentMethods: StoreCartPaymentMethodOption[];
   storeLocation: StoreLocation | null;
+  branches: StoreBranch[];
   deliveryFares: StoreDeliveryFares;
 };
 
@@ -132,7 +138,11 @@ export function useSubmitStoreCheckout(storeId: number) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { message?: string }).message ?? "No se pudo confirmar la compra");
       }
-      return res.json();
+      return res.json() as Promise<{
+        order?: { id: number } | null;
+        checkoutUrl?: string | null;
+        gatewayKind?: "stripe" | "paypal" | "dlocalgo" | null;
+      }>;
     },
     onSuccess: () => invalidateCart(qc, storeId),
   });

@@ -28,7 +28,9 @@ import {
 } from "@/components/ui/select";
 import { StoreOrderStatusRoadmap } from "@/components/store/StoreOrderStatusRoadmap";
 import { StoreOrderDeliveryRouteMap } from "@/components/store/StoreOrderDeliveryRouteMap";
+import { StoreMyOrderChatPanel } from "@/components/store/StoreMyOrderChatPanel";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("es-VE", {
@@ -129,6 +131,12 @@ function MyOrderDetailContent({ orderId }: { orderId: number }) {
           <span className="font-medium text-foreground">Entrega:</span>{" "}
           <span className="text-muted-foreground">{order.fulfillmentLabel}</span>
         </p>
+        {order.branchName ? (
+          <p>
+            <span className="font-medium text-foreground">Sucursal:</span>{" "}
+            <span className="text-muted-foreground">{order.branchName}</span>
+          </p>
+        ) : null}
       </div>
 
       <StoreOrderStatusRoadmap status={order.status} fulfillmentMode={order.fulfillmentMode} />
@@ -208,12 +216,20 @@ function MyOrderDetailContent({ orderId }: { orderId: number }) {
           ))}
         </ul>
       </div>
+
+      <StoreMyOrderChatPanel
+        orderId={order.id}
+        status={order.status}
+        updatedAt={order.updatedAt}
+        branchName={order.branchName}
+      />
     </div>
   );
 }
 
 export default function MyStoreOrders() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { toast } = useToast();
   const searchQs = useSearch();
   const [statusFilter, setStatusFilter] = useState("all");
   const [orderIdFilter, setOrderIdFilter] = useState("");
@@ -239,12 +255,25 @@ export default function MyStoreOrders() {
   useMyStoreOrdersLiveSync(isAuthenticated);
 
   useEffect(() => {
-    const orderIdRaw = new URLSearchParams(searchQs || "").get("orderId");
+    const params = new URLSearchParams(searchQs || "");
+    const orderIdRaw = params.get("orderId");
     const parsed = orderIdRaw ? Number.parseInt(orderIdRaw, 10) : NaN;
     if (Number.isFinite(parsed) && parsed > 0) {
       setSelectedOrderId(parsed);
     }
-  }, [searchQs]);
+    const pago = (params.get("pago") ?? "").trim().toLowerCase();
+    if (pago === "ok") {
+      toast({ title: "Pago confirmado", description: "Tu pedido se creó y quedó confirmado." });
+    } else if (pago === "pendiente") {
+      toast({ title: "Pago pendiente", description: "Aún no se creó el pedido. Completa el pago para confirmarlo." });
+    } else if (pago === "cancelado") {
+      toast({
+        variant: "destructive",
+        title: "Pago no completado",
+        description: "No se creó el pedido. Puedes volver al carrito e intentar de nuevo.",
+      });
+    }
+  }, [searchQs, toast]);
 
   if (authLoading) {
     return (

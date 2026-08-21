@@ -130,14 +130,15 @@ export const submitStoreCheckoutSchema = z
 
     fulfillmentMode: storeFulfillmentModeSchema.nullable().optional(),
 
-    reference: z.string().trim().min(1, "La referencia es obligatoria").max(120),
+    reference: z.string().trim().max(120).optional().default(""),
 
-    proofImageUrl: z.string().trim().min(1, "El comprobante es obligatorio").max(2000),
+    proofImageUrl: z.string().trim().max(2000).optional().default(""),
 
-    amountPaid: z.number().positive("Indica el monto pagado"),
+    amountPaid: z.number().positive("Indica el monto pagado").optional(),
 
     deliveryLocation: storeOrderDeliveryLocationSchema.nullable().optional(),
-
+    branchId: z.string().trim().min(1).max(64).nullable().optional(),
+    customerNote: z.string().trim().max(1000).optional().default(""),
   })
 
   .superRefine((data, ctx) => {
@@ -151,6 +152,20 @@ export const submitStoreCheckoutSchema = z
         message: "Selecciona la ubicación de entrega en el mapa",
 
         path: ["deliveryLocation"],
+
+      });
+
+    }
+
+    if (data.fulfillmentMode && data.fulfillmentMode !== "delivery" && !data.branchId) {
+
+      ctx.addIssue({
+
+        code: z.ZodIssueCode.custom,
+
+        message: "Selecciona la sucursal",
+
+        path: ["branchId"],
 
       });
 
@@ -192,9 +207,19 @@ export type StoreOrder = {
 
   fulfillmentMode: StoreFulfillmentMode | null;
 
+  /** Sucursal asignada al pedido. */
+  branchId: string;
+
+  branchName: string;
+
+  /** Ubicación de la sucursal al momento del pedido (origen de la ruta). */
+  storeLocation: StoreOrderDeliveryLocation | null;
+
   reference: string;
 
   proofImageUrl: string;
+
+  customerNote: string;
 
   amountDue: number;
 
@@ -238,6 +263,9 @@ export type StoreCheckoutPaymentMethod = {
   accountNumber: string;
   extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
+  isCashea?: boolean;
+  /** stripe | paypal | dlocalgo cuando el método redirige a pasarela. */
+  gatewayKind?: "stripe" | "paypal" | "dlocalgo" | null;
 };
 
 
@@ -467,7 +495,15 @@ export type StoreOrderListFilters = {
 
   dateTo?: string;
 
+  /** Sucursal asignada al pedido. */
+
+  branchId?: string;
+
 };
+
+export const updateStoreOrderBranchSchema = z.object({
+  branchId: z.string().trim().min(1).max(64),
+});
 
 
 
@@ -548,6 +584,14 @@ export function filterStoreOrders(orders: StoreOrder[], filters?: StoreOrderList
   if (filters?.status) {
 
     list = list.filter((o) => o.status === filters.status);
+
+  }
+
+  if (filters?.branchId?.trim()) {
+
+    const branchId = filters.branchId.trim();
+
+    list = list.filter((o) => (o.branchId ?? "").trim() === branchId);
 
   }
 

@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Package, Tags, Percent, Ticket, Settings2, ClipboardList, Coins, Leaf } from "lucide-react";
+import { ArrowLeft, Package, Tags, Percent, Ticket, Settings2, ClipboardList, Coins, Leaf, Images, Users, MessageSquare, BarChart3, CreditCard } from "lucide-react";
 import {
   getVisibleStoreAdminSections,
   type StoreAdminSectionId,
@@ -20,8 +20,13 @@ const SECTION_ICONS: Record<StoreAdminSectionId, typeof Package> = {
   promociones: Percent,
   codigos: Ticket,
   ordenes: ClipboardList,
+  banners_popups: Images,
   moneda: Coins,
+  metodos_pago: CreditCard,
   configuracion: Settings2,
+  chat_sucursales: MessageSquare,
+  usuarios: Users,
+  estadisticas: BarChart3,
 };
 
 type StoreAdminLayoutProps = {
@@ -29,6 +34,8 @@ type StoreAdminLayoutProps = {
   storeName: string;
   storeId?: number;
   activeSection: StoreAdminSectionId;
+  employeeOnly?: boolean;
+  canManageStaff?: boolean;
   children: ReactNode;
 };
 
@@ -41,11 +48,23 @@ function NavBadge({ count }: { count: number }) {
   );
 }
 
-export function StoreAdminLayout({ slug, storeName, storeId = 0, activeSection, children }: StoreAdminLayoutProps) {
+export function StoreAdminLayout({
+  slug,
+  storeName,
+  storeId = 0,
+  activeSection,
+  employeeOnly = false,
+  canManageStaff = true,
+  children,
+}: StoreAdminLayoutProps) {
   const base = `/tienda/${encodeURIComponent(slug)}/admin`;
   const queryClient = useQueryClient();
   const { socket } = useSocket();
   const { data: deliveryNotifications } = useStoreDeliveryNotifications(storeId, storeId > 0);
+  const navSections = getVisibleStoreAdminSections({
+    employeeOnly,
+    includeStaff: canManageStaff,
+  });
 
   useEffect(() => {
     if (!socket || storeId <= 0) return;
@@ -90,7 +109,7 @@ export function StoreAdminLayout({ slug, storeName, storeId = 0, activeSection, 
           </Button>
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-secondary dark:text-primary">
-              Administración
+              {employeeOnly ? "Panel de empleado" : "Administración"}
             </p>
             <h1 className="truncate font-display text-lg font-bold tracking-tight text-foreground sm:text-xl">
               {storeName}
@@ -105,7 +124,7 @@ export function StoreAdminLayout({ slug, storeName, storeId = 0, activeSection, 
           aria-label="Secciones de la tienda"
         >
           <ul className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin md:flex-col md:space-y-1 md:overflow-visible md:pb-0">
-            {getVisibleStoreAdminSections().map((section) => {
+            {navSections.map((section) => {
               const Icon = SECTION_ICONS[section.id];
               const href = `${base}/${storeAdminSectionPath(section.id)}`;
               const active = activeSection === section.id;
@@ -133,7 +152,7 @@ export function StoreAdminLayout({ slug, storeName, storeId = 0, activeSection, 
 
         <main className="min-w-0 flex-1 md:border-l md:border-border/50 md:pl-6">{children}</main>
       </div>
-      {storeId > 0 ? <StoreAdminDeliveryRatePrompt storeId={storeId} /> : null}
+      {!employeeOnly && storeId > 0 ? <StoreAdminDeliveryRatePrompt storeId={storeId} /> : null}
     </div>
   );
 }

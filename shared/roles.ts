@@ -1,6 +1,6 @@
 /**
  * Roles con los mismos privilegios que el administrador (panel, APIs admin, notificaciones internas).
- * Mantener sincronizado con el catálogo en Firestore / seed (code: tiSupport, name: Soporte).
+ * Mantener sincronizado con el catálogo en Firestore / seed (admin, client, employee).
  */
 export const ADMIN_PRIVILEGE_ROLES = ["admin", "tiSupport"] as const;
 

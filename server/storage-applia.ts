@@ -48,6 +48,9 @@ import {
   normalizeStoreProductSizes,
   deriveProductPricesFromSizes,
   resolveStoreProductPriceFields,
+  resolveStoreProductWeightFields,
+  resolveStoreLocationAndBranches,
+  normalizeStoreBranches,
   DEFAULT_STORE_DELIVERY_FARES,
   type Store,
   type IngredientMaterial,
@@ -64,6 +67,11 @@ import {
   type InsertStorePromotion,
   type UpdateStorePromotion,
 } from "@shared/store-schema";
+import type {
+  StoreShowcaseAdItem,
+  InsertStoreShowcaseAdItem,
+  StoreShowcaseAdKind,
+} from "@shared/store-showcase-ads-schema";
 import { STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
 import type {
   InsertStorePaymentMethod,
@@ -75,6 +83,7 @@ import {
 } from "@shared/store-payment-method-schema";
 import type { StoreOrder, StoreOrderListFilters } from "@shared/store-order-schema";
 import { filterStoreOrders } from "@shared/store-order-schema";
+import type { StoreStaffRecord } from "@shared/store-staff-schema";
 import type { StoreCart, StoreCartItem } from "@shared/store-cart-schema";
 import { STORE_CART_TTL_MS } from "@shared/store-cart-schema";
 import {
@@ -158,6 +167,12 @@ export interface IStorage
   }): Promise<any | null>;
   /** Hilo activo de un viaje Go (por mobilityRideId; no reutiliza chats genéricos ni cerrados). */
   findConversationForMobilityRide(params: { rideId: string }): Promise<any | null>;
+  findStoreOrderCustomerConversation(storeOrderId: number): Promise<any | null>;
+  findStoreBranchCoordinationConversation(storeId: number): Promise<any | null>;
+  findStoreBranchPairConversation(storeId: number, branchIdA: string, branchIdB: string): Promise<any | null>;
+  listStoreBranchPairConversations(storeId: number): Promise<any[]>;
+  listStoreOrderCustomerConversations(storeId: number): Promise<any[]>;
+  getConversationById(conversationId: number): Promise<any | null>;
   /** Lista conversaciones para auditoría admin (sin filtro de gracia ni hiddenForUserIds). */
   listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]>;
   /** Marca hilos de viaje Go no completados cuyo plazo de 24 h ya venció. */
@@ -508,16 +523,27 @@ export interface IStorage
     input: UpdateStorePromotion,
   ): Promise<StorePromotion>;
   deleteStorePromotion(storeId: number, promotionId: number): Promise<void>;
+
+  // ==================== Banners / Popups (vitrina) ====================
+  listStoreShowcaseAds(storeId: number, kind: StoreShowcaseAdKind): Promise<StoreShowcaseAdItem[]>;
+  createStoreShowcaseAdItem(storeId: number, input: InsertStoreShowcaseAdItem): Promise<StoreShowcaseAdItem>;
+  deleteStoreShowcaseAdItem(storeId: number, kind: StoreShowcaseAdKind, itemId: number): Promise<void>;
+
   listStorePaymentMethods(storeId: number): Promise<StorePaymentMethod[]>;
   getStorePaymentMethod(storeId: number, paymentMethodId: number): Promise<StorePaymentMethod | undefined>;
-  createStorePaymentMethod(storeId: number, input: InsertStorePaymentMethod): Promise<StorePaymentMethod>;
+  createStorePaymentMethod(
+    storeId: number,
+    input: Omit<InsertStorePaymentMethod, "systemKind"> & { systemKind?: string | null },
+  ): Promise<StorePaymentMethod>;
   updateStorePaymentMethod(
     storeId: number,
     paymentMethodId: number,
     input: UpdateStorePaymentMethod,
   ): Promise<StorePaymentMethod>;
   deleteStorePaymentMethod(storeId: number, paymentMethodId: number): Promise<void>;
-  createStoreOrder(input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt">): Promise<StoreOrder>;
+  createStoreOrder(
+    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt"> & { status?: StoreOrder["status"] },
+  ): Promise<StoreOrder>;
   listStoreOrders(storeId: number, filters?: StoreOrderListFilters): Promise<StoreOrder[]>;
   listStoreOrdersForUser(userId: string, filters?: StoreOrderListFilters): Promise<StoreOrder[]>;
   getStoreOrder(storeId: number, orderId: number): Promise<StoreOrder | undefined>;
@@ -526,10 +552,21 @@ export interface IStorage
   patchStoreOrder(
     storeId: number,
     orderId: number,
-    patch: Partial<Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount">>,
+    patch: Partial<
+      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation" | "reference">
+    >,
   ): Promise<StoreOrder>;
   incrementStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder>;
   resetStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder>;
+  getStoreStaffMember(storeId: number, userId: string): Promise<StoreStaffRecord | undefined>;
+  listStoreStaffMembers(storeId: number): Promise<StoreStaffRecord[]>;
+  upsertStoreStaffMember(
+    storeId: number,
+    userId: string,
+    input: { branchId: string },
+  ): Promise<StoreStaffRecord>;
+  removeStoreStaffMember(storeId: number, userId: string): Promise<void>;
+  findStoreStaffMembershipForUser(userId: string): Promise<StoreStaffRecord | undefined>;
   getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined>;
   saveStoreCart(
     userId: string,
@@ -1461,6 +1498,69 @@ export class InMemoryStorage implements IStorage {
     return matches[0] ?? null;
   }
 
+  async findStoreOrderCustomerConversation(storeOrderId: number): Promise<any | null> {
+    const oid = Number(storeOrderId);
+    if (!Number.isFinite(oid)) return null;
+    return (
+      this.conversations.find(
+        (c: any) =>
+          String(c.kind ?? "") === "store_order_customer" && Number(c.storeOrderId) === oid,
+      ) ?? null
+    );
+  }
+
+  async findStoreBranchCoordinationConversation(storeId: number): Promise<any | null> {
+    const sid = Number(storeId);
+    if (!Number.isFinite(sid)) return null;
+    return (
+      this.conversations.find(
+        (c: any) =>
+          String(c.kind ?? "") === "store_branch_coordination" && Number(c.storeId) === sid,
+      ) ?? null
+    );
+  }
+
+  async findStoreBranchPairConversation(
+    storeId: number,
+    branchIdA: string,
+    branchIdB: string,
+  ): Promise<any | null> {
+    const sid = Number(storeId);
+    if (!Number.isFinite(sid)) return null;
+    const [a, b] = [branchIdA.trim(), branchIdB.trim()].sort((x, y) => x.localeCompare(y));
+    return (
+      this.conversations.find(
+        (c: any) =>
+          String(c.kind ?? "") === "store_branch_pair" &&
+          Number(c.storeId) === sid &&
+          String(c.branchIdA ?? "") === a &&
+          String(c.branchIdB ?? "") === b,
+      ) ?? null
+    );
+  }
+
+  async listStoreBranchPairConversations(storeId: number): Promise<any[]> {
+    const sid = Number(storeId);
+    if (!Number.isFinite(sid)) return [];
+    return this.conversations.filter(
+      (c: any) => String(c.kind ?? "") === "store_branch_pair" && Number(c.storeId) === sid,
+    );
+  }
+
+  async listStoreOrderCustomerConversations(storeId: number): Promise<any[]> {
+    const sid = Number(storeId);
+    if (!Number.isFinite(sid)) return [];
+    return this.conversations.filter(
+      (c: any) => String(c.kind ?? "") === "store_order_customer" && Number(c.storeId) === sid,
+    );
+  }
+
+  async getConversationById(conversationId: number): Promise<any | null> {
+    const id = Number(conversationId);
+    if (!Number.isFinite(id)) return null;
+    return this.conversations.find((c: any) => Number(c.id) === id) ?? null;
+  }
+
   async listConversationsForAdmin(opts?: { limit?: number }): Promise<any[]> {
     const lim = Math.min(Math.max(Number(opts?.limit) || 200, 1), 500);
     const sorted = [...this.conversations].sort((a: any, b: any) => {
@@ -1555,17 +1655,12 @@ export class InMemoryStorage implements IStorage {
         byCode.set(code, row);
         continue;
       }
-      const patch: Partial<RoleDefinition> = {};
-      if (!existing.description?.trim() && fields.description) patch.description = fields.description;
-      if (!existing.responsibilities?.trim() && fields.responsibilities) {
-        patch.responsibilities = fields.responsibilities;
-      }
-      if (!existing.permissions && fields.permissions) {
-        patch.permissions = fields.permissions;
-      }
-      if (Object.keys(patch).length > 0) {
-        Object.assign(existing, patch, { updatedAt: new Date() });
-      }
+      Object.assign(existing, {
+        ...fields,
+        isSystem: isSystem ?? true,
+        sortOrder: sortOrder ?? existing.sortOrder ?? 99,
+        updatedAt: new Date(),
+      });
     }
   }
 
@@ -3202,10 +3297,6 @@ export class InMemoryStorage implements IStorage {
   private ingredientMaterialIdCounter = 1;
 
   async createStore(input: InsertStore & { ownerUserId: string }): Promise<Store> {
-    const existing = await this.getStoreByOwnerUserId(input.ownerUserId);
-    if (existing) {
-      throw new Error("STORE_ALREADY_EXISTS");
-    }
     const slug = await resolveUniqueStoreSlug(input.name, (s) => this.storeSlugExists(s));
     const now = new Date();
     const store: Store = {
@@ -3217,11 +3308,14 @@ export class InMemoryStorage implements IStorage {
       rubro: null,
       coverImageUrl: null,
       location: null,
+      branches: normalizeStoreBranches([]),
       fulfillmentOptions: [],
-      deliveryFares: { ...DEFAULT_STORE_DELIVERY_FARES },
+      deliveryFares: normalizeStoreDeliveryFares(DEFAULT_STORE_DELIVERY_FARES),
       currencyExtras: [],
       currencyVisualId: STORE_CURRENCY_USD_ID,
       currencyAcceptedPaymentIds: [STORE_CURRENCY_USD_ID],
+      whatsappPhone: null,
+      casheaEnabled: false,
       visibilitySubscriptionEndsAt: null,
       createdAt: now,
       updatedAt: now,
@@ -3246,6 +3340,13 @@ export class InMemoryStorage implements IStorage {
               input.currencyAcceptedPaymentIds ?? current.currencyAcceptedPaymentIds,
           })
         : null;
+    const nextPlaces =
+      input.location !== undefined || input.branches !== undefined
+        ? resolveStoreLocationAndBranches(current, {
+            location: input.location,
+            branches: input.branches,
+          })
+        : null;
     const updated: Store = {
       ...current,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -3262,10 +3363,14 @@ export class InMemoryStorage implements IStorage {
       ...(input.deliveryFares !== undefined
         ? { deliveryFares: normalizeStoreDeliveryFares(input.deliveryFares) }
         : {}),
-      ...(input.location !== undefined
-        ? { location: input.location === null ? null : normalizeStoreLocation(input.location) ?? input.location }
-        : {}),
+      ...(nextPlaces ?? {}),
       ...(nextCurrency ?? {}),
+      ...(input.whatsappPhone !== undefined
+        ? {
+            whatsappPhone: input.whatsappPhone?.trim() ? input.whatsappPhone.trim() : null,
+          }
+        : {}),
+      ...(input.casheaEnabled !== undefined ? { casheaEnabled: input.casheaEnabled } : {}),
       updatedAt: now,
     };
     this.stores[index] = updated;
@@ -3401,6 +3506,11 @@ export class InMemoryStorage implements IStorage {
       visualCurrencyId,
     );
     const ingredientOptions = normalizeStoreProductIngredientOptions(input);
+    const weightFields = resolveStoreProductWeightFields({
+      hasWeight: input.hasWeight,
+      weight: input.weight,
+      sizes,
+    });
     const product: StoreProduct = {
       id: this.storeProductIdCounter++,
       storeId,
@@ -3408,11 +3518,13 @@ export class InMemoryStorage implements IStorage {
       description: input.description?.trim() ?? null,
       price,
       pricesByCurrency,
-      sizes,
+      sizes: weightFields.sizes,
       categoryIds: input.categoryIds ?? [],
       ...ingredientOptions,
       imageUrls: input.imageUrls ?? [],
       showOnShowcase: input.showOnShowcase ?? true,
+      hasWeight: weightFields.hasWeight,
+      weight: weightFields.weight,
       createdAt: now,
       updatedAt: now,
     };
@@ -3451,6 +3563,11 @@ export class InMemoryStorage implements IStorage {
         input.removableIngredientMaterialIds ?? cur.removableIngredientMaterialIds,
       ingredientAdditionals: input.ingredientAdditionals ?? cur.ingredientAdditionals,
     });
+    const weightFields = resolveStoreProductWeightFields({
+      hasWeight: input.hasWeight ?? cur.hasWeight,
+      weight: input.weight !== undefined ? input.weight : cur.weight,
+      sizes,
+    });
     const next: StoreProduct = {
       ...cur,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -3458,7 +3575,11 @@ export class InMemoryStorage implements IStorage {
         ? { description: input.description?.trim() ?? null }
         : {}),
       ...(priceFields ?? {}),
-      ...(input.sizes !== undefined ? { sizes } : {}),
+      ...(input.sizes !== undefined ||
+      input.hasWeight !== undefined ||
+      input.weight !== undefined
+        ? { sizes: weightFields.sizes, hasWeight: weightFields.hasWeight, weight: weightFields.weight }
+        : {}),
       ...(input.categoryIds !== undefined ? { categoryIds: input.categoryIds } : {}),
       ...ingredientOptions,
       ...(input.imageUrls !== undefined ? { imageUrls: input.imageUrls } : {}),
@@ -3616,6 +3737,54 @@ export class InMemoryStorage implements IStorage {
     this.storePromotions.splice(idx, 1);
   }
 
+  // ==================== Banners / Popups (vitrina) ====================
+  private storeShowcaseAds: StoreShowcaseAdItem[] = [];
+  private storeShowcaseAdItemIdCounter = 1;
+
+  private nextShowcaseAdSortOrder(storeId: number, kind: StoreShowcaseAdKind): number {
+    const existing = this.storeShowcaseAds.filter((a) => a.storeId === storeId && a.kind === kind);
+    const max = existing.reduce((acc, a) => Math.max(acc, a.sortOrder), 0);
+    return max + 1;
+  }
+
+  async listStoreShowcaseAds(storeId: number, kind: StoreShowcaseAdKind): Promise<StoreShowcaseAdItem[]> {
+    return this.storeShowcaseAds
+      .filter((a) => a.storeId === storeId && a.kind === kind)
+      .sort((a, b) => (a.sortOrder - b.sortOrder) || (a.id - b.id));
+  }
+
+  async createStoreShowcaseAdItem(
+    storeId: number,
+    input: InsertStoreShowcaseAdItem,
+  ): Promise<StoreShowcaseAdItem> {
+    const now = new Date();
+    const sortOrder =
+      input.sortOrder != null ? input.sortOrder : this.nextShowcaseAdSortOrder(storeId, input.kind);
+
+    const item: StoreShowcaseAdItem = {
+      id: this.storeShowcaseAdItemIdCounter++,
+      storeId,
+      kind: input.kind,
+      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      linkUrl: input.linkUrl?.trim() ? input.linkUrl.trim() : null,
+      sortOrder,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storeShowcaseAds.push(item);
+    return item;
+  }
+
+  async deleteStoreShowcaseAdItem(
+    storeId: number,
+    kind: StoreShowcaseAdKind,
+    itemId: number,
+  ): Promise<void> {
+    const idx = this.storeShowcaseAds.findIndex((a) => a.storeId === storeId && a.kind === kind && a.id === itemId);
+    if (idx === -1) throw new Error("STORE_SHOWCASE_AD_NOT_FOUND");
+    this.storeShowcaseAds.splice(idx, 1);
+  }
+
   private storePaymentMethods: StorePaymentMethod[] = [];
   private storePaymentMethodIdCounter = 1;
 
@@ -3634,7 +3803,7 @@ export class InMemoryStorage implements IStorage {
 
   async createStorePaymentMethod(
     storeId: number,
-    input: InsertStorePaymentMethod,
+    input: Omit<InsertStorePaymentMethod, "systemKind"> & { systemKind?: string | null },
   ): Promise<StorePaymentMethod> {
     const now = new Date();
     const method: StorePaymentMethod = {
@@ -3644,6 +3813,7 @@ export class InMemoryStorage implements IStorage {
       accountNumber: (input.accountNumber ?? "").trim(),
       extraFields: normalizeStorePaymentMethodExtraFields(input.extraFields),
       imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      systemKind: input.systemKind?.trim() ? input.systemKind.trim() : null,
       createdAt: now,
       updatedAt: now,
     };
@@ -3671,6 +3841,9 @@ export class InMemoryStorage implements IStorage {
       ...(input.imageUrl !== undefined
         ? { imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null }
         : {}),
+      ...(input.systemKind !== undefined
+        ? { systemKind: input.systemKind?.trim() ? input.systemKind.trim() : null }
+        : {}),
       updatedAt: new Date(),
     };
     this.storePaymentMethods[idx] = next;
@@ -3686,10 +3859,11 @@ export class InMemoryStorage implements IStorage {
   }
 
   private storeOrders: StoreOrder[] = [];
+  private storeStaff: StoreStaffRecord[] = [];
   private storeOrderIdCounter = 1;
 
   async createStoreOrder(
-    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt">,
+    input: Omit<StoreOrder, "id" | "status" | "createdAt" | "updatedAt"> & { status?: StoreOrder["status"] },
   ): Promise<StoreOrder> {
     const now = new Date();
     const order: StoreOrder = {
@@ -3697,7 +3871,7 @@ export class InMemoryStorage implements IStorage {
       ...input,
       packRideId: input.packRideId ?? null,
       deliveryUnreadCount: input.deliveryUnreadCount ?? 0,
-      status: "pagado",
+      status: input.status ?? "pagado",
       createdAt: now,
       updatedAt: now,
     };
@@ -3744,7 +3918,9 @@ export class InMemoryStorage implements IStorage {
   async patchStoreOrder(
     storeId: number,
     orderId: number,
-    patch: Partial<Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount">>,
+    patch: Partial<
+      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation" | "reference">
+    >,
   ): Promise<StoreOrder> {
     const idx = this.storeOrders.findIndex((o) => o.storeId === storeId && o.id === orderId);
     if (idx === -1) throw new Error("STORE_ORDER_NOT_FOUND");
@@ -3768,6 +3944,52 @@ export class InMemoryStorage implements IStorage {
 
   async resetStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder> {
     return this.patchStoreOrder(storeId, orderId, { deliveryUnreadCount: 0 });
+  }
+
+  async getStoreStaffMember(storeId: number, userId: string): Promise<StoreStaffRecord | undefined> {
+    return this.storeStaff.find((m) => m.storeId === storeId && m.userId === userId);
+  }
+
+  async listStoreStaffMembers(storeId: number): Promise<StoreStaffRecord[]> {
+    return this.storeStaff.filter((m) => m.storeId === storeId);
+  }
+
+  async upsertStoreStaffMember(
+    storeId: number,
+    userId: string,
+    input: { branchId: string },
+  ): Promise<StoreStaffRecord> {
+    const now = new Date();
+    const idx = this.storeStaff.findIndex((m) => m.storeId === storeId && m.userId === userId);
+    if (idx >= 0) {
+      const updated: StoreStaffRecord = {
+        ...this.storeStaff[idx],
+        branchId: input.branchId,
+        updatedAt: now,
+      };
+      this.storeStaff[idx] = updated;
+      return updated;
+    }
+    const created: StoreStaffRecord = {
+      storeId,
+      userId,
+      role: "employee",
+      branchId: input.branchId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storeStaff.push(created);
+    return created;
+  }
+
+  async removeStoreStaffMember(storeId: number, userId: string): Promise<void> {
+    this.storeStaff = this.storeStaff.filter((m) => !(m.storeId === storeId && m.userId === userId));
+  }
+
+  async findStoreStaffMembershipForUser(userId: string): Promise<StoreStaffRecord | undefined> {
+    const uid = String(userId ?? "").trim();
+    if (!uid) return undefined;
+    return this.storeStaff.find((m) => m.userId === uid && m.role === "employee");
   }
 
   private storeCarts = new Map<string, StoreCart>();

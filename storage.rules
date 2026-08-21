@@ -59,6 +59,34 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
+    // Imágenes de promociones — máx. 5 MB
+    match /store-promotions/{storeId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Banners / popups de vitrina — path: store-showcase-ads/{kind}/{storeId}/{file}
+    match /store-showcase-ads/{kind}/{storeId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // QR / imagen de métodos de pago — máx. 5 MB
+    match /store-payment-methods/{storeId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Comprobantes de pedido en tienda — máx. 8 MB
+    match /store-orders/{storeId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     // Todo lo demás: sin acceso público
     match /{allPaths=**} {
       allow read: if false;

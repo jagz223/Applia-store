@@ -9,63 +9,66 @@ type FeaturedDish = {
   image: string;
 };
 
+/** Imágenes que cargan bien (Vecteezy); las de Pngtree se rompieron. */
+const PASTA_IMAGES = {
+  classico:
+    "https://static.vecteezy.com/system/resources/previews/049/159/898/non_2x/italian-food-spaghetti-top-view-transparent-png.png",
+  carbonara:
+    "https://static.vecteezy.com/system/resources/previews/056/615/020/non_2x/spaghetti-carbonara-top-view-isolate-on-transparent-background-png.png",
+  basilico:
+    "https://static.vecteezy.com/system/resources/previews/056/615/179/non_2x/a-spaghetti-carbonara-top-view-isolate-on-transparent-background-png.png",
+  spicy:
+    "https://static.vecteezy.com/system/resources/previews/068/622/935/non_2x/delicious-spicy-chicken-spaghetti-pasta-in-a-bowl-overhead-shot-png.png",
+} as const;
+
 const HERO_DISH = {
   category: "Italian",
   name: "Pasta ai Funghi",
   description:
     "Pasta con champiñones, hierbas frescas y el sabor de casa Baguette. Un clásico italiano listo para pedir.",
-  image:
-    "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325645.png",
+  image: PASTA_IMAGES.carbonara,
 };
 
 const CAROUSEL_DISHES: FeaturedDish[] = [
   {
     id: "spaghetti",
     name: "Spaghetti Classico",
-    image:
-      "https://static.vecteezy.com/system/resources/previews/049/159/898/non_2x/italian-food-spaghetti-top-view-transparent-png.png",
+    image: PASTA_IMAGES.classico,
   },
   {
     id: "carbonara",
     name: "Spaghetti Carbonara",
-    image:
-      "https://static.vecteezy.com/system/resources/previews/056/615/020/non_2x/spaghetti-carbonara-top-view-isolate-on-transparent-background-png.png",
+    image: PASTA_IMAGES.carbonara,
   },
   {
     id: "carbonara-basil",
     name: "Carbonara Basilico",
-    image:
-      "https://static.vecteezy.com/system/resources/previews/056/615/179/non_2x/a-spaghetti-carbonara-top-view-isolate-on-transparent-background-png.png",
+    image: PASTA_IMAGES.basilico,
   },
   {
     id: "spicy-chicken",
     name: "Spicy Chicken Pasta",
-    image:
-      "https://static.vecteezy.com/system/resources/previews/068/622/935/non_2x/delicious-spicy-chicken-spaghetti-pasta-in-a-bowl-overhead-shot-png.png",
+    image: PASTA_IMAGES.spicy,
   },
   {
     id: "chicken-1",
     name: "Chicken Spaghetti",
-    image:
-      "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325643.png",
+    image: PASTA_IMAGES.classico,
   },
   {
     id: "funghi",
     name: "Pasta ai Funghi",
-    image:
-      "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325645.png",
+    image: PASTA_IMAGES.carbonara,
   },
   {
     id: "mushroom",
     name: "Mushroom Pasta",
-    image:
-      "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325641.png",
+    image: PASTA_IMAGES.basilico,
   },
   {
     id: "funghi-extra",
     name: "Pasta ai Funghi",
-    image:
-      "https://png.pngtree.com/png-clipart/20231016/original/pngtree-delicious-chicken-spaghetti-png-image_13325645.png",
+    image: PASTA_IMAGES.spicy,
   },
 ];
 

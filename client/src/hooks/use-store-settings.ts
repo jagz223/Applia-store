@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { UpdateStore, StoreLocation } from "@shared/store-schema";
+import type { UpdateStore, StoreLocation, StoreBranch } from "@shared/store-schema";
 import { MY_STORE_QUERY_KEY } from "@/hooks/use-my-store";
 
 function authHeaders(): HeadersInit {
@@ -7,12 +7,12 @@ function authHeaders(): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export function useUpdateStore(slug: string) {
+export function useUpdateStore(storeId: number, slug: string) {
   const qc = useQueryClient();
 
   return useMutation({
     mutationFn: async (body: UpdateStore) => {
-      const res = await fetch("/api/stores/mine", {
+      const res = await fetch(`/api/stores/${storeId}`, {
         method: "PATCH",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -32,6 +32,7 @@ export function useUpdateStore(slug: string) {
           fulfillmentOptions?: import("@shared/store-fulfillment").StoreFulfillmentMode[];
           deliveryFares?: import("@shared/store-schema").StoreDeliveryFares;
           location?: StoreLocation | null;
+          branches?: StoreBranch[];
         };
       };
       return data.store;

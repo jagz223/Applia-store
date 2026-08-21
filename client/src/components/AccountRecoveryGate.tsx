@@ -7,7 +7,6 @@ const ALLOWED_PREFIXES = [
   "/forgot-password",
   "/login",
   "/register",
-  "/politics",
 ];
 
 function isAllowedPath(pathname: string): boolean {

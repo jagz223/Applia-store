@@ -10,8 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { isCentralRole } from "@shared/roles";
-import { CENTRAL_SETUP_PATH } from "@shared/role-change-notification";
 import { isGuest } from "@/lib/auth-utils";
 import { AlreadyAuthenticatedView } from "@/components/AlreadyAuthenticatedView";
 import { cn } from "@/lib/utils";
@@ -51,24 +49,12 @@ export default function Login() {
           title: "Bienvenido",
           description: `Hola ${fullName}, has iniciado sesión correctamente`,
         });
-        const u = result.user as {
-          recoveryQuestionsConfigured?: boolean;
-          role?: string;
-          pendingCentralSetup?: boolean;
-        };
+        const u = result.user as { recoveryQuestionsConfigured?: boolean };
         if (u.recoveryQuestionsConfigured !== true) {
           const redirect = sessionStorage.getItem("postLoginRedirect");
           const next = redirect && redirect.startsWith("/") ? redirect : "/";
           if (redirect) sessionStorage.removeItem("postLoginRedirect");
           setLocation(`/account-recovery/setup?next=${encodeURIComponent(next)}`);
-          return;
-        }
-        if (
-          isCentralRole(u.role) &&
-          (u.pendingCentralSetup === true ||
-            !String((result.user as { dispatchCompanyId?: string }).dispatchCompanyId ?? "").trim())
-        ) {
-          setLocation(CENTRAL_SETUP_PATH);
           return;
         }
         const redirect = sessionStorage.getItem("postLoginRedirect");

@@ -346,18 +346,18 @@
   .dark .taxi-leaflet-wrapper .leaflet-tile {
     background-color: #1a1d24;
   }
-  .genfeb-driver-map-fs .leaflet-container,
-  .genfeb-driver-map-fs .leaflet-tile-pane {
+  .applia-driver-map-fs .leaflet-container,
+  .applia-driver-map-fs .leaflet-tile-pane {
     background: #e2e8f0;
   }
-  .genfeb-driver-map-fs .leaflet-tile {
+  .applia-driver-map-fs .leaflet-tile {
     background-color: #e2e8f0;
   }
-  .dark .genfeb-driver-map-fs .leaflet-container,
-  .dark .genfeb-driver-map-fs .leaflet-tile-pane {
+  .dark .applia-driver-map-fs .leaflet-container,
+  .dark .applia-driver-map-fs .leaflet-tile-pane {
     background: #1a1d24;
   }
-  .dark .genfeb-driver-map-fs .leaflet-tile {
+  .dark .applia-driver-map-fs .leaflet-tile {
     background-color: #1a1d24;
   }
   /** Reserva / chat: mapa más bajo dentro de tarjetas. */
@@ -372,16 +372,16 @@
   }
 
   /** Car Go conductor (zoom a la derecha): margen fino para no pegar al borde / cabecera del shell. */
-  .genfeb-driver-map-fs .leaflet-top.leaflet-right {
+  .applia-driver-map-fs .leaflet-top.leaflet-right {
     margin-top: 0.5rem !important;
     margin-right: 0.5rem !important;
     z-index: 650 !important;
   }
   /* Cuando está en “Disponible”, el banner ocupa arriba: bajamos el zoom para que no quede debajo. */
-  .genfeb-driver-map-fs.genfeb-driver-map-fs-receiving .leaflet-top.leaflet-right {
+  .applia-driver-map-fs.applia-driver-map-fs-receiving .leaflet-top.leaflet-right {
     margin-top: 4.75rem !important;
   }
-  .genfeb-driver-map-fs .leaflet-top.leaflet-right a {
+  .applia-driver-map-fs .leaflet-top.leaflet-right a {
     pointer-events: auto !important;
     touch-action: manipulation;
   }
@@ -390,13 +390,13 @@
    * Car Go cliente (mapa fullscreen en móvil): anular min-height fijo del wrapper taxi para que flex/100%
    * rellene el main; si no, el mapa queda colapsado al reiniciar (padre sin alto).
    */
-  .taxi-leaflet-wrapper.genfeb-taxi-route-fs {
+  .taxi-leaflet-wrapper.applia-taxi-route-fs {
     min-height: 0 !important;
     height: 100% !important;
     max-height: none !important;
     flex: 1 1 0% !important;
   }
-  .taxi-leaflet-wrapper.genfeb-taxi-route-fs .leaflet-container {
+  .taxi-leaflet-wrapper.applia-taxi-route-fs .leaflet-container {
     min-height: 0 !important;
     height: 100% !important;
     border-radius: 0 !important;
@@ -406,15 +406,15 @@
    * IMPORTANTE: en Car Go móvil hay overlays (Continuar / cards) encima del mapa; si el zoom queda muy abajo,
    * el botón "−" se tapa y deja de recibir tap. Por eso lo subimos.
    */
-  .genfeb-taxi-route-fs .leaflet-bottom.leaflet-left {
+  .applia-taxi-route-fs .leaflet-bottom.leaflet-left {
     margin-bottom: 5.25rem !important;
     margin-left: 0.5rem !important;
     z-index: 650 !important;
   }
-  .genfeb-taxi-route-fs .leaflet-bottom.leaflet-left a {
+  .applia-taxi-route-fs .leaflet-bottom.leaflet-left a {
     pointer-events: auto !important;
   }
-  .genfeb-taxi-route-fs .leaflet-control-zoom a {
+  .applia-taxi-route-fs .leaflet-control-zoom a {
     touch-action: manipulation;
   }
 
@@ -640,18 +640,18 @@
 }
 
 /* APK TWA (Chrome): reduce menú «Buscar con Google» al tocar texto */
-html.genfeb-android-twa,
-html.genfeb-android-twa body {
+html.applia-android-twa,
+html.applia-android-twa body {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
   touch-action: manipulation;
 }
 
-html.genfeb-android-twa input,
-html.genfeb-android-twa textarea,
-html.genfeb-android-twa [contenteditable="true"],
-html.genfeb-android-twa .selectable-text {
+html.applia-android-twa input,
+html.applia-android-twa textarea,
+html.applia-android-twa [contenteditable="true"],
+html.applia-android-twa .selectable-text {
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;

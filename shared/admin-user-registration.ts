@@ -6,7 +6,7 @@ export const PUBLIC_REGISTER_ROLES = ["client"] as const;
 export type PublicRegisterRole = (typeof PUBLIC_REGISTER_ROLES)[number];
 
 /** Roles base que staff (admin o Soporte TI) puede asignar al crear usuarios. */
-export const STAFF_CREATABLE_ROLES = ["client", "professional", "central"] as const;
+export const STAFF_CREATABLE_ROLES = ["client", "employee", "professional", "central"] as const;
 
 /** Roles de staff que solo el administrador completo puede asignar. */
 export const FULL_ADMIN_ONLY_ASSIGN_ROLES = ["admin", "tiSupport"] as const;

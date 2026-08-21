@@ -10,6 +10,9 @@ import {
 /** Roles cuyo catálogo no puede modificarse (ni por administrador). */
 export const IMMUTABLE_ROLE_CODES = ["admin"] as const;
 
+/** Roles que crea/actualiza el seeder (`npm run seed:roles`). */
+export const SEEDED_SYSTEM_ROLE_CODES = ["admin", "client", "employee"] as const;
+
 export function isImmutableRoleCode(code: string): boolean {
   return (IMMUTABLE_ROLE_CODES as readonly string[]).includes(code.trim().toLowerCase());
 }
@@ -75,28 +78,28 @@ function systemDetail(
   };
 }
 
-/** Textos y permisos por defecto para roles de sistema. */
+/** Textos y permisos por defecto para roles de sistema (códigos en inglés). */
 export const SYSTEM_ROLE_CATALOG_DEFAULTS: RoleDefinitionDetail[] = [
   systemDetail(
     "admin",
-    "Administrador",
-    "Control total de la plataforma Applia.",
-    "Supervisa operación, finanzas, verificación y configuración global.",
-    1
-  ),
-  systemDetail(
-    "tiSupport",
-    "Soporte",
-    "Personal interno con acceso administrativo limitado.",
-    "Atiende usuarios y soporte operativo sin acceso financiero completo.",
-    2
+    "Admin",
+    "Full control of the Applia Store platform.",
+    "Supervises operations, finances, verification, and global configuration.",
+    1,
   ),
   systemDetail(
     "client",
-    "Cliente",
-    "Usuario que compra en la tienda Applia.",
-    "Navega la vitrina, compra productos y gestiona sus pedidos.",
-    3
+    "Client",
+    "User who shops in the Applia Store marketplace.",
+    "Browses the storefront, places orders, and manages their purchases.",
+    2,
+  ),
+  systemDetail(
+    "employee",
+    "Employee",
+    "Store staff member assigned to a branch.",
+    "Manages orders and branch chat for their assigned store location.",
+    3,
   ),
 ];
 

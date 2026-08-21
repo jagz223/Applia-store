@@ -42,6 +42,15 @@ export type StoreShowcaseCategory = {
   hideFromShowcaseAll?: boolean;
 };
 
+export type StoreShowcaseAd = {
+  id: number;
+  storeId: number;
+  kind: "banner" | "popup";
+  imageUrl: string | null | undefined;
+  linkUrl: string | null | undefined;
+  sortOrder: number;
+};
+
 export type StoreShowcasePromotionItem = {
   productId: number;
   productName: string;
@@ -62,6 +71,8 @@ export type StoreShowcaseResponse = {
   products: StoreShowcaseProduct[];
   categories: StoreShowcaseCategory[];
   promotions: StoreShowcasePromotion[];
+  banners?: StoreShowcaseAd[];
+  popups?: StoreShowcaseAd[];
   visibilityActive: boolean;
   inactive?: boolean;
   isOwner?: boolean;

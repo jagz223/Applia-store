@@ -10,7 +10,7 @@ import {
 } from "@/hooks/use-primary-store";
 
 /**
- * Entrada a la tienda: redirige a la vitrina de la tienda nº 1 (menor id).
+ * Entrada a la tienda: redirige a la vitrina de PRIMARY_STORE_ID (shared/store-schema).
  * Admin/dueño ven la misma vitrina con panel de configuración (en StorePage).
  */
 export default function StoreEntry() {
