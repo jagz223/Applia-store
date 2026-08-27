@@ -32,7 +32,7 @@ export const MY_STAFF_STORE_QUERY_KEY = ["/api/stores/my-staff-store"] as const;
 
 /** Ruta de administración de la tienda (siempre activa). */
 export function getMyStoreNavHref(
-  store: Pick<MyStoreSummary, "slug" | "visibilityActive"> | null | undefined,
+  store: Pick<MyStoreSummary, "slug"> | null | undefined,
 ): string | null {
   if (!store?.slug) return null;
   return `/tienda/${encodeURIComponent(store.slug)}/admin`;

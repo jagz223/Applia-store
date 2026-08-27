@@ -117,6 +117,7 @@ import { storeSubscriptionPaymentBodySchema } from "@shared/store-subscription-p
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { filterStoresByCatalogQuery, getStoreRubroLabel } from "@shared/store-rubros";
 import { parsePositiveIntParam, requireStoreAccess, requireStoreOwner, requireStoreStaffManagement, resolveStoreAccess, viewerCanManageStore, type StoreAccessContext } from "./store-product-auth";
+import { isGenlookConfigured, runGenlookVirtualTryOn } from "./genlook";
 import { buildStoreStaffDirectory } from "./store-staff-directory";
 import {
   appendStoreBranchTransferSystemMessage,
@@ -867,16 +868,15 @@ export function registerStoreRoutes(app: Express): void {
     try {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      let store = await appliaStorage.getStoreByOwnerUserId(userId);
-      if (!store) {
-        const dbUser = await appliaStorage.getUserById(userId);
-        const admin =
-          hasAdminPrivileges(req.user?.role) ||
-          hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
-        if (admin) {
-          store = (await appliaStorage.getStoreById(PRIMARY_STORE_ID)) ?? undefined;
-        }
-      }
+      const dbUser = await appliaStorage.getUserById(userId);
+      const admin =
+        hasAdminPrivileges(req.user?.role) ||
+        hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
+      // Admin de plataforma: siempre la tienda principal (PRIMARY_STORE_ID), no la que “posee”.
+      let store = admin
+        ? ((await appliaStorage.getStoreById(PRIMARY_STORE_ID)) ??
+          (await appliaStorage.getStoreByOwnerUserId(userId)))
+        : await appliaStorage.getStoreByOwnerUserId(userId);
       if (!store) return res.status(404).json({ message: "Aún no tienes una tienda." });
       const repaired = await repairStoreSubscriptionVisibilityIfNeeded(store);
       const hasPending = await storeHasPendingSubscriptionPayment(repaired.id);
@@ -919,16 +919,14 @@ export function registerStoreRoutes(app: Express): void {
     try {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
-      let store = await appliaStorage.getStoreByOwnerUserId(userId);
-      if (!store) {
-        const dbUser = await appliaStorage.getUserById(userId);
-        const admin =
-          hasAdminPrivileges(req.user?.role) ||
-          hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
-        if (admin) {
-          store = (await appliaStorage.getStoreById(PRIMARY_STORE_ID)) ?? undefined;
-        }
-      }
+      const dbUser = await appliaStorage.getUserById(userId);
+      const admin =
+        hasAdminPrivileges(req.user?.role) ||
+        hasAdminPrivileges((dbUser as { role?: string } | undefined)?.role);
+      let store = admin
+        ? ((await appliaStorage.getStoreById(PRIMARY_STORE_ID)) ??
+          (await appliaStorage.getStoreByOwnerUserId(userId)))
+        : await appliaStorage.getStoreByOwnerUserId(userId);
       if (!store) return res.status(404).json({ message: "Aún no tienes una tienda." });
       const canManage = await viewerCanManageStore(userId, store, req.user?.role);
       if (!canManage) return res.status(403).json({ message: "No tienes permiso para editar esta tienda." });
@@ -3075,6 +3073,75 @@ export function registerStoreRoutes(app: Express): void {
       if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       console.error("[stores] showcase-ads delete", e);
       return res.status(500).json({ message: "No se pudo eliminar el banner o popup." });
+    }
+  });
+
+  /** Simulación de ropa (Genlook Virtual Try-On). */
+  app.post("/api/stores/:storeId/try-on", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      if (!isGenlookConfigured()) {
+        return res.status(503).json({
+          message:
+            "Genlook no está configurado. Añade GENLOOK_API_KEY al .env (créditos gratis en platform.genlook.app).",
+        });
+      }
+
+      const personBase64 = typeof req.body?.personImageBase64 === "string" ? req.body.personImageBase64 : "";
+      const garmentBase64 = typeof req.body?.garmentImageBase64 === "string" ? req.body.garmentImageBase64 : "";
+      const personMime = typeof req.body?.personMimeType === "string" ? req.body.personMimeType : "image/jpeg";
+      const garmentMime = typeof req.body?.garmentMimeType === "string" ? req.body.garmentMimeType : "image/jpeg";
+
+      if (!personBase64.trim() || !garmentBase64.trim()) {
+        return res.status(400).json({ message: "Sube una foto de cuerpo y una foto de la prenda." });
+      }
+
+      const allowed = new Set(["image/jpeg", "image/png", "image/webp"]);
+      if (!allowed.has(personMime) || !allowed.has(garmentMime)) {
+        return res.status(400).json({ message: "Usa imágenes JPG, PNG o WebP." });
+      }
+
+      const stripDataUrl = (raw: string) => {
+        const i = raw.indexOf("base64,");
+        return i >= 0 ? raw.slice(i + "base64,".length) : raw;
+      };
+
+      const personBytes = Buffer.from(stripDataUrl(personBase64), "base64");
+      const garmentBytes = Buffer.from(stripDataUrl(garmentBase64), "base64");
+      const maxBytes = 10 * 1024 * 1024;
+      if (personBytes.length === 0 || garmentBytes.length === 0) {
+        return res.status(400).json({ message: "Las imágenes no son válidas." });
+      }
+      if (personBytes.length > maxBytes || garmentBytes.length > maxBytes) {
+        return res.status(400).json({ message: "Cada imagen debe pesar menos de 10 MB." });
+      }
+
+      const ext = (mime: string) => (mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg");
+      const result = await runGenlookVirtualTryOn({
+        personBytes,
+        personMime,
+        personFileName: `person.${ext(personMime)}`,
+        garmentBytes,
+        garmentMime,
+        garmentFileName: `garment.${ext(garmentMime)}`,
+      });
+
+      return res.json({
+        resultImageUrl: result.resultImageUrl,
+        generationId: result.generationId,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      console.error("[stores] try-on", e);
+      return res.status(500).json({ message: msg || "No se pudo generar la simulación." });
     }
   });
 

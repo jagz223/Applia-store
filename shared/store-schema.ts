@@ -390,7 +390,7 @@ export function normalizeStoreCurrencyFields(input: {
 export const STORE_PRODUCT_MAX_IMAGES = 1;
 export const STORE_PRODUCT_MAX_SIZES = 20;
 
-/** Tienda principal del sistema (Home, nav, /tienda). Cambiar aquí el id. */
+/** Tienda principal del sistema (Home, nav, /tienda, panel admin). Cambiar aquí el id. */
 export const PRIMARY_STORE_ID = 1;
 
 export const storeProductSizeSchema = z.object({
