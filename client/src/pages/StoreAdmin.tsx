@@ -11,6 +11,7 @@ import {
 } from "@shared/store-admin-sections";
 import { useAuth } from "@/hooks/use-auth";
 import { useStoreBySlug } from "@/hooks/use-my-store";
+import { usePrimaryStore } from "@/hooks/use-primary-store";
 import { StoreAdminLayout } from "@/components/store/StoreAdminLayout";
 import { StoreAdminProductsPanel } from "@/components/store/StoreAdminProductsPanel";
 import { StoreAdminCategoriesPanel } from "@/components/store/StoreAdminCategoriesPanel";
@@ -18,6 +19,7 @@ import { StoreAdminPromotionsPanel } from "@/components/store/StoreAdminPromotio
 import { StoreAdminConfigPanel } from "@/components/store/StoreAdminConfigPanel";
 import { StoreAdminPaymentMethodsPanel } from "@/components/store/StoreAdminPaymentMethodsPanel";
 import { StoreAdminCurrencyPanel } from "@/components/store/StoreAdminCurrencyPanel";
+import { StoreAdminTryOnPanel } from "@/components/store/StoreAdminTryOnPanel";
 import { StoreAdminOrdersPanel } from "@/components/store/StoreAdminOrdersPanel";
 import { StoreAdminIngredientsPanel } from "@/components/store/StoreAdminIngredientsPanel";
 import { StoreAdminShowcaseAdsPanel } from "@/components/store/StoreAdminShowcaseAdsPanel";
@@ -92,6 +94,9 @@ function sectionPanel(
       />
     );
   }
+  if (section === "simulacion_ropa") {
+    return <StoreAdminTryOnPanel storeId={store.id} />;
+  }
   if (section === "metodos_pago") {
     return (
       <StoreAdminPaymentMethodsPanel
@@ -151,12 +156,22 @@ export default function StoreAdmin() {
   const [, setLocation] = useLocation();
 
   const { data, isLoading, error } = useStoreBySlug(slug, isAuthenticated && Boolean(slug));
+  const { data: primaryStore } = usePrimaryStore(isAdmin);
 
   const employeeOnly = Boolean(data?.isEmployee && !data?.isOwner && !isAdmin);
   const defaultSection: StoreAdminSectionId = employeeOnly ? "ordenes" : "productos";
 
+  // Admin de plataforma: el panel siempre es el de PRIMARY_STORE_ID.
+  useEffect(() => {
+    if (!isAdmin || !primaryStore?.slug || !slug) return;
+    if (slug === primaryStore.slug) return;
+    const suffix = sectionParam ? `/${sectionParam}` : "";
+    setLocation(`/tienda/${encodeURIComponent(primaryStore.slug)}/admin${suffix}`, { replace: true });
+  }, [isAdmin, primaryStore?.slug, slug, sectionParam, setLocation]);
+
   useEffect(() => {
     if (!slug || !data?.store) return;
+    if (isAdmin && primaryStore?.slug && slug !== primaryStore.slug) return;
     if (!sectionParam) {
       setLocation(`/tienda/${encodeURIComponent(slug)}/admin/${storeAdminSectionPath(defaultSection)}`, {
         replace: true,
@@ -178,7 +193,19 @@ export default function StoreAdmin() {
         });
       }
     }
-  }, [slug, sectionParam, setLocation, employeeOnly, data?.store, defaultSection]);
+  }, [
+    slug,
+    sectionParam,
+    setLocation,
+    employeeOnly,
+    data?.store,
+    defaultSection,
+    isAdmin,
+    primaryStore?.slug,
+  ]);
+
+  const redirectingToPrimary =
+    isAdmin && Boolean(primaryStore?.slug) && Boolean(slug) && slug !== primaryStore!.slug;
 
   if (!isAuthenticated) {
     return (
@@ -198,7 +225,7 @@ export default function StoreAdmin() {
     );
   }
 
-  if (isLoading || (!sectionParam && slug)) {
+  if (isLoading || redirectingToPrimary || (!sectionParam && slug)) {
     return (
       <div className="py-20 flex justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />

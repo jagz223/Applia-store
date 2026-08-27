@@ -1,6 +1,6 @@
 ﻿import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { isClientRole } from "@/lib/auth-utils";
+import { isClientRole, hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
@@ -110,15 +110,18 @@ export function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const showMyOrders = isAuthenticated && isClientRole(user);
+  const isPlatformAdmin = isAuthenticated && hasAdminRole(user);
   const { data: primaryStore } = usePrimaryStore();
   const { data: myStore } = useMyStore(isAuthenticated);
-  const { data: staffStore } = useMyStaffStore(isAuthenticated);
-  const storeAdminHref =
-    getMyStoreNavHref(myStore) ??
-    (staffStore?.store.slug ? getMyStoreNavHref(staffStore.store) : null);
-  const storeChatHref =
-    getMyStoreChatNavHref(myStore) ??
-    (staffStore?.store.slug ? getStoreAdminChatHref(staffStore.store.slug) : null);
+  const { data: staffStore } = useMyStaffStore(isAuthenticated && !isPlatformAdmin);
+  const storeAdminHref = isPlatformAdmin
+    ? getMyStoreNavHref(primaryStore)
+    : getMyStoreNavHref(myStore) ??
+      (staffStore?.store.slug ? getMyStoreNavHref(staffStore.store) : null);
+  const storeChatHref = isPlatformAdmin
+    ? getMyStoreChatNavHref(primaryStore)
+    : getMyStoreChatNavHref(myStore) ??
+      (staffStore?.store.slug ? getStoreAdminChatHref(staffStore.store.slug) : null);
   const showStoreStaffNav = Boolean(storeAdminHref);
   const tiendaHref = getPrimaryStoreVitrinaHref(primaryStore);
 
