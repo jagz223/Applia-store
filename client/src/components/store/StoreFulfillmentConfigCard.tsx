@@ -26,6 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { NumberField } from "@/components/ui/number-field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -54,6 +55,8 @@ type StoreFulfillmentConfigCardProps = {
   slug: string;
   initialOptions: StoreFulfillmentMode[];
   initialDeliveryFares?: StoreDeliveryFares | null;
+  /** Moneda marcada como “Visual en tienda”; el umbral de envío gratis usa esa unidad. */
+  currencyVisualId?: string | null;
   storeLocation: StoreLocation | null;
   storeBranches?: StoreBranch[] | null;
   disabled?: boolean;
@@ -84,6 +87,8 @@ function splitFaresDraft(fares: StoreDeliveryFares): {
   defaultPriceUsd: string;
   perKmUsd: string;
   extraTiers: ExtraTierDraft[];
+  freeDeliveryEnabled: boolean;
+  freeDeliveryFromAmount: string;
 } {
   const defaultTier = fares.costTiers.find((t) => t.minValue === 0) ?? fares.costTiers[0];
   return {
@@ -97,6 +102,11 @@ function splitFaresDraft(fares: StoreDeliveryFares): {
         minValue: String(t.minValue),
         priceUsd: String(t.priceUsd),
       })),
+    freeDeliveryEnabled: fares.freeDeliveryEnabled === true,
+    freeDeliveryFromAmount:
+      fares.freeDeliveryFromAmount != null && fares.freeDeliveryFromAmount > 0
+        ? String(fares.freeDeliveryFromAmount)
+        : "",
   };
 }
 
@@ -105,12 +115,14 @@ export function StoreFulfillmentConfigCard({
   slug,
   initialOptions,
   initialDeliveryFares,
+  currencyVisualId,
   storeLocation,
   storeBranches,
   disabled,
 }: StoreFulfillmentConfigCardProps) {
   const { toast } = useToast();
   const updateStore = useUpdateStore(storeId, slug);
+  const visualCurrencyLabel = (currencyVisualId?.trim() || "REF").toUpperCase();
 
   const [savedOptions, setSavedOptions] = useState<StoreFulfillmentMode[]>(initialOptions);
   const [selected, setSelected] = useState<StoreFulfillmentMode[]>(initialOptions);
@@ -124,6 +136,10 @@ export function StoreFulfillmentConfigCard({
   const [defaultPriceUsd, setDefaultPriceUsd] = useState(initialDraft.defaultPriceUsd);
   const [perKmUsd, setPerKmUsd] = useState(initialDraft.perKmUsd);
   const [extraTiers, setExtraTiers] = useState<ExtraTierDraft[]>(initialDraft.extraTiers);
+  const [freeDeliveryEnabled, setFreeDeliveryEnabled] = useState(initialDraft.freeDeliveryEnabled);
+  const [freeDeliveryFromAmount, setFreeDeliveryFromAmount] = useState(
+    initialDraft.freeDeliveryFromAmount,
+  );
   const [explainMode, setExplainMode] = useState<StoreFulfillmentMode | null>(null);
 
   const hasStoreLocation = storeHasConfiguredLocation(storeBranches, storeLocation);
@@ -133,6 +149,10 @@ export function StoreFulfillmentConfigCard({
     surchargeMode === "weight"
       ? "Se usa el umbral más alto cuyo peso mínimo el carrito cumple."
       : "Se usa el umbral más alto cuya cantidad mínima el carrito cumple.";
+  const isDistanceMode = surchargeMode === "distance";
+  const pricingDescription = isDistanceMode
+    ? "El total es solo distancia × precio por km. No dependen la cantidad ni el peso del carrito."
+    : "El total es: coste según umbral + (km × precio por km). El umbral reemplaza el precio base; el km se suma igual.";
 
   function applyFaresToDraft(next: StoreDeliveryFares) {
     const draft = splitFaresDraft(next);
@@ -140,6 +160,8 @@ export function StoreFulfillmentConfigCard({
     setDefaultPriceUsd(draft.defaultPriceUsd);
     setPerKmUsd(draft.perKmUsd);
     setExtraTiers(draft.extraTiers);
+    setFreeDeliveryEnabled(draft.freeDeliveryEnabled);
+    setFreeDeliveryFromAmount(draft.freeDeliveryFromAmount);
   }
 
   useEffect(() => {
@@ -159,6 +181,8 @@ export function StoreFulfillmentConfigCard({
     (surchargeMode !== savedSplit.surchargeMode ||
       defaultPriceUsd !== savedSplit.defaultPriceUsd ||
       perKmUsd !== savedSplit.perKmUsd ||
+      freeDeliveryEnabled !== savedSplit.freeDeliveryEnabled ||
+      freeDeliveryFromAmount !== savedSplit.freeDeliveryFromAmount ||
       extraTiers.length !== savedSplit.extraTiers.length ||
       extraTiers.some((row, i) => {
         const saved = savedSplit.extraTiers[i];
@@ -232,60 +256,97 @@ export function StoreFulfillmentConfigCard({
 
     let nextFares = savedFares;
     if (selected.includes("delivery")) {
-      const defaultPrice = parseMoneyUsd(defaultPriceUsd);
+      const freeAmountRaw = String(freeDeliveryFromAmount).trim().replace(",", ".");
+      let freeAmount: number | null = null;
+      if (freeAmountRaw !== "") {
+        const parsedFree = parseMoneyUsd(freeAmountRaw);
+        if (parsedFree == null || parsedFree <= 0) {
+          toast({
+            variant: "destructive",
+            title: "Monto inválido",
+            description: "«Gratis a partir de» debe ser un número mayor que 0, o dejarlo vacío.",
+          });
+          return;
+        }
+        freeAmount = parsedFree;
+      }
+
       const perKm = parseMoneyUsd(perKmUsd);
-      if (defaultPrice == null || perKm == null) {
-        toast({
-          variant: "destructive",
-          title: "Tarifas inválidas",
-          description: "Indica precios válidos (0 o mayor) para el coste por defecto y el precio por km.",
+      if (surchargeMode === "distance") {
+        if (perKm == null) {
+          toast({
+            variant: "destructive",
+            title: "Tarifas inválidas",
+            description: "Indica un precio por km válido (0 o mayor).",
+          });
+          return;
+        }
+        nextFares = normalizeStoreDeliveryFares({
+          ...savedFares,
+          baseUsd: parseMoneyUsd(defaultPriceUsd) ?? savedFares.baseUsd,
+          perKmUsd: perKm,
+          surchargeMode: "distance",
+          freeDeliveryEnabled,
+          freeDeliveryFromAmount: freeAmount,
         });
-        return;
-      }
-      const seen = new Set<number>([0]);
-      const costTiers: StoreDeliveryCostTier[] = [
-        { id: "default", minValue: 0, priceUsd: defaultPrice },
-      ];
-      for (let i = 0; i < extraTiers.length; i += 1) {
-        const row = extraTiers[i];
-        const minValue = parseTierMinValue(row.minValue, surchargeMode);
-        const priceUsd = parseMoneyUsd(row.priceUsd);
-        if (minValue == null) {
+      } else {
+        const defaultPrice = parseMoneyUsd(defaultPriceUsd);
+        if (defaultPrice == null || perKm == null) {
           toast({
             variant: "destructive",
-            title: "Umbral inválido",
+            title: "Tarifas inválidas",
             description:
-              surchargeMode === "weight"
-                ? `El coste ${i + 2} necesita un peso mínimo mayor a 0 kg.`
-                : `El coste ${i + 2} necesita una cantidad mínima de 1 artículo o más.`,
+              "Indica precios válidos (0 o mayor) para el coste por defecto y el precio por km.",
           });
           return;
         }
-        if (priceUsd == null) {
-          toast({
-            variant: "destructive",
-            title: "Precio inválido",
-            description: `Indica un precio válido para el coste ${i + 2}.`,
-          });
-          return;
+        const seen = new Set<number>([0]);
+        const costTiers: StoreDeliveryCostTier[] = [
+          { id: "default", minValue: 0, priceUsd: defaultPrice },
+        ];
+        for (let i = 0; i < extraTiers.length; i += 1) {
+          const row = extraTiers[i];
+          const minValue = parseTierMinValue(row.minValue, surchargeMode);
+          const priceUsd = parseMoneyUsd(row.priceUsd);
+          if (minValue == null) {
+            toast({
+              variant: "destructive",
+              title: "Umbral inválido",
+              description:
+                surchargeMode === "weight"
+                  ? `El coste ${i + 2} necesita un peso mínimo mayor a 0 kg.`
+                  : `El coste ${i + 2} necesita una cantidad mínima de 1 artículo o más.`,
+            });
+            return;
+          }
+          if (priceUsd == null) {
+            toast({
+              variant: "destructive",
+              title: "Precio inválido",
+              description: `Indica un precio válido para el coste ${i + 2}.`,
+            });
+            return;
+          }
+          if (seen.has(minValue)) {
+            toast({
+              variant: "destructive",
+              title: "Umbral repetido",
+              description: "Cada coste debe tener un umbral distinto.",
+            });
+            return;
+          }
+          seen.add(minValue);
+          costTiers.push({ id: row.id.trim() || newTierId(), minValue, priceUsd });
         }
-        if (seen.has(minValue)) {
-          toast({
-            variant: "destructive",
-            title: "Umbral repetido",
-            description: "Cada coste debe tener un umbral distinto.",
-          });
-          return;
-        }
-        seen.add(minValue);
-        costTiers.push({ id: row.id.trim() || newTierId(), minValue, priceUsd });
+        nextFares = normalizeStoreDeliveryFares({
+          baseUsd: defaultPrice,
+          perKmUsd: perKm,
+          surchargeMode,
+          costTiers,
+          freeDeliveryEnabled,
+          freeDeliveryFromAmount: freeAmount,
+        });
       }
-      nextFares = normalizeStoreDeliveryFares({
-        baseUsd: defaultPrice,
-        perKmUsd: perKm,
-        surchargeMode,
-        costTiers,
-      });
     }
 
     try {
@@ -337,198 +398,30 @@ export function StoreFulfillmentConfigCard({
 
           <div className="space-y-3">
             {STORE_FULFILLMENT_MODES.map((mode) => (
-              <div key={mode} className="min-w-0 space-y-3">
-                <div className="flex items-start gap-3 rounded-2xl border border-border/70 px-3 py-3">
-                  <Checkbox
-                    id={`fulfillment-${mode}`}
-                    checked={isChecked(mode)}
-                    disabled={disabled || saving || (!hasStoreLocation && !isChecked(mode))}
-                    onCheckedChange={(v) => handleToggle(mode, v === true)}
-                  />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Label htmlFor={`fulfillment-${mode}`} className="cursor-pointer font-medium">
-                      {STORE_FULFILLMENT_LABELS[mode]}
-                    </Label>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">
-                      {STORE_FULFILLMENT_CUSTOMER_HINTS[mode]}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                    aria-label={`Más información sobre ${STORE_FULFILLMENT_LABELS[mode]}`}
-                    disabled={disabled || saving}
-                    onClick={() => setExplainMode(mode)}
-                  >
-                    <Info className="h-4 w-4" />
-                  </button>
+              <div key={mode} className="flex items-start gap-3 rounded-2xl border border-border/70 px-3 py-3">
+                <Checkbox
+                  id={`fulfillment-${mode}`}
+                  checked={isChecked(mode)}
+                  disabled={disabled || saving || (!hasStoreLocation && !isChecked(mode))}
+                  onCheckedChange={(v) => handleToggle(mode, v === true)}
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <Label htmlFor={`fulfillment-${mode}`} className="cursor-pointer font-medium">
+                    {STORE_FULFILLMENT_LABELS[mode]}
+                  </Label>
+                  <p className="line-clamp-2 text-xs text-muted-foreground">
+                    {STORE_FULFILLMENT_CUSTOMER_HINTS[mode]}
+                  </p>
                 </div>
-
-                {mode === "delivery" && deliveryEnabled ? (
-                  <div className="min-w-0 space-y-4 rounded-2xl border border-border/70 bg-muted/25 p-3.5 sm:ml-6">
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-foreground">Precios del delivery</p>
-                      <p className="text-xs text-muted-foreground">
-                        El total es: coste según umbral + (km × precio por km). El umbral reemplaza el
-                        precio base; el km se suma igual.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-xs">¿Cómo se elige el coste?</Label>
-                      <RadioGroup
-                        value={surchargeMode}
-                        onValueChange={(v) =>
-                          setSurchargeMode(v === "weight" ? "weight" : "quantity")
-                        }
-                        className="grid gap-2 sm:grid-cols-2"
-                        disabled={disabled || saving}
-                      >
-                        <label
-                          htmlFor="delivery-mode-quantity"
-                          className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/70 bg-background/60 px-3 py-2.5"
-                        >
-                          <RadioGroupItem
-                            value="quantity"
-                            id="delivery-mode-quantity"
-                            disabled={disabled || saving}
-                            className="mt-0.5"
-                          />
-                          <span className="space-y-0.5">
-                            <span className="block text-sm font-medium">Por cantidad</span>
-                            <span className="block text-xs text-muted-foreground">
-                              Según cuántos artículos hay en el carrito.
-                            </span>
-                          </span>
-                        </label>
-                        <label
-                          htmlFor="delivery-mode-weight"
-                          className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/70 bg-background/60 px-3 py-2.5"
-                        >
-                          <RadioGroupItem
-                            value="weight"
-                            id="delivery-mode-weight"
-                            disabled={disabled || saving}
-                            className="mt-0.5"
-                          />
-                          <span className="space-y-0.5">
-                            <span className="block text-sm font-medium">Por peso</span>
-                            <span className="block text-xs text-muted-foreground">
-                              Según los kg de los productos con peso.
-                            </span>
-                          </span>
-                        </label>
-                      </RadioGroup>
-                    </div>
-
-                    <div className="min-w-0 space-y-1.5">
-                      <Label htmlFor="delivery-per-km-usd" className="text-xs">
-                        Precio por km (USD)
-                      </Label>
-                      <NumberField
-                        id="delivery-per-km-usd"
-                        prefix="$"
-                        min="0"
-                        step="0.01"
-                        value={perKmUsd}
-                        disabled={disabled || saving}
-                        onChange={setPerKmUsd}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <div>
-                        <p className="text-xs font-medium text-foreground">Costes según umbral</p>
-                        <p className="text-xs text-muted-foreground">
-                          El coste 1 aplica si no se cumple ningún otro. {thresholdHint}
-                        </p>
-                      </div>
-
-                      <div className="space-y-2 rounded-xl border border-border/70 bg-background/50 p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium">Coste 1 (por defecto)</p>
-                          <span className="text-[11px] text-muted-foreground">Siempre activo</span>
-                        </div>
-                        <div className="min-w-0 space-y-1.5">
-                          <Label htmlFor="delivery-default-usd" className="text-xs">
-                            Precio (USD)
-                          </Label>
-                          <NumberField
-                            id="delivery-default-usd"
-                            prefix="$"
-                            min="0"
-                            step="0.01"
-                            value={defaultPriceUsd}
-                            disabled={disabled || saving}
-                            onChange={setDefaultPriceUsd}
-                          />
-                        </div>
-                      </div>
-
-                      {extraTiers.map((row, index) => (
-                        <div
-                          key={row.id}
-                          className="space-y-2 rounded-xl border border-border/70 bg-background/50 p-3"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-medium">Coste {index + 2}</p>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                              disabled={disabled || saving}
-                              aria-label={`Quitar coste ${index + 2}`}
-                              onClick={() => removeExtraTier(row.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div className="min-w-0 space-y-1.5">
-                              <Label htmlFor={`delivery-tier-min-${row.id}`} className="text-xs">
-                                {thresholdLabel}
-                              </Label>
-                              <NumberField
-                                id={`delivery-tier-min-${row.id}`}
-                                min={surchargeMode === "quantity" ? "1" : "0.001"}
-                                step={surchargeMode === "quantity" ? "1" : "0.001"}
-                                value={row.minValue}
-                                disabled={disabled || saving}
-                                onChange={(next) => updateExtraTier(row.id, { minValue: next })}
-                              />
-                            </div>
-                            <div className="min-w-0 space-y-1.5">
-                              <Label htmlFor={`delivery-tier-price-${row.id}`} className="text-xs">
-                                Precio (USD)
-                              </Label>
-                              <NumberField
-                                id={`delivery-tier-price-${row.id}`}
-                                prefix="$"
-                                min="0"
-                                step="0.01"
-                                value={row.priceUsd}
-                                disabled={disabled || saving}
-                                onChange={(next) => updateExtraTier(row.id, { priceUsd: next })}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-10 w-full rounded-full"
-                        disabled={disabled || saving || extraTiers.length >= 49}
-                        onClick={addExtraTier}
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Agregar coste
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
+                <button
+                  type="button"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label={`Más información sobre ${STORE_FULFILLMENT_LABELS[mode]}`}
+                  disabled={disabled || saving}
+                  onClick={() => setExplainMode(mode)}
+                >
+                  <Info className="h-4 w-4" />
+                </button>
               </div>
             ))}
           </div>
@@ -538,31 +431,244 @@ export function StoreFulfillmentConfigCard({
               Sin opciones activas, el carrito no mostrará modalidades de entrega.
             </p>
           ) : null}
+        </CardContent>
+      </Card>
 
-          {dirty ? (
-            <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
-              <Button
-                type="button"
-                className="h-11 rounded-full font-semibold"
-                disabled={saving}
-                onClick={() => void handleSave()}
+      {deliveryEnabled ? (
+        <Card className={cn(storeAdminSectionCardClass, "overflow-hidden")}>
+          <CardHeader>
+            <CardTitle className="font-display">Precios del delivery</CardTitle>
+            <CardDescription>{pricingDescription}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-xs">¿Cómo se elige el coste?</Label>
+              <RadioGroup
+                value={surchargeMode}
+                onValueChange={(v) => {
+                  if (v === "weight") setSurchargeMode("weight");
+                  else if (v === "quantity") setSurchargeMode("quantity");
+                  else setSurchargeMode("distance");
+                }}
+                className="grid gap-2 sm:grid-cols-3"
+                disabled={disabled || saving}
               >
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Guardar modalidades
-              </Button>
+                <label
+                  htmlFor="delivery-mode-distance"
+                  className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/70 bg-muted/20 px-3 py-2.5"
+                >
+                  <RadioGroupItem
+                    value="distance"
+                    id="delivery-mode-distance"
+                    disabled={disabled || saving}
+                    className="mt-0.5"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Por distancia</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Solo kilómetros × precio por km.
+                    </span>
+                  </span>
+                </label>
+                <label
+                  htmlFor="delivery-mode-quantity"
+                  className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/70 bg-muted/20 px-3 py-2.5"
+                >
+                  <RadioGroupItem
+                    value="quantity"
+                    id="delivery-mode-quantity"
+                    disabled={disabled || saving}
+                    className="mt-0.5"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Por cantidad</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Según cuántos artículos hay en el carrito.
+                    </span>
+                  </span>
+                </label>
+                <label
+                  htmlFor="delivery-mode-weight"
+                  className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/70 bg-muted/20 px-3 py-2.5"
+                >
+                  <RadioGroupItem
+                    value="weight"
+                    id="delivery-mode-weight"
+                    disabled={disabled || saving}
+                    className="mt-0.5"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Por peso</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Según los kg de los productos con peso.
+                    </span>
+                  </span>
+                </label>
+              </RadioGroup>
+            </div>
+
+            <div className="min-w-0 space-y-1.5">
+              <Label htmlFor="delivery-per-km-usd" className="text-xs">
+                Precio por km (USD)
+              </Label>
+              <NumberField
+                id="delivery-per-km-usd"
+                prefix="$"
+                min="0"
+                step="0.01"
+                value={perKmUsd}
+                disabled={disabled || saving}
+                onChange={setPerKmUsd}
+              />
+            </div>
+
+            {!isDistanceMode ? (
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs font-medium text-foreground">Costes según umbral</p>
+                <p className="text-xs text-muted-foreground">
+                  El coste 1 aplica si no se cumple ningún otro. {thresholdHint}
+                </p>
+              </div>
+
+              <div className="space-y-2 rounded-xl border border-border/70 bg-muted/15 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Coste 1 (por defecto)</p>
+                  <span className="text-[11px] text-muted-foreground">Siempre activo</span>
+                </div>
+                <div className="min-w-0 space-y-1.5">
+                  <Label htmlFor="delivery-default-usd" className="text-xs">
+                    Precio (USD)
+                  </Label>
+                  <NumberField
+                    id="delivery-default-usd"
+                    prefix="$"
+                    min="0"
+                    step="0.01"
+                    value={defaultPriceUsd}
+                    disabled={disabled || saving}
+                    onChange={setDefaultPriceUsd}
+                  />
+                </div>
+              </div>
+
+              {extraTiers.map((row, index) => (
+                <div
+                  key={row.id}
+                  className="space-y-2 rounded-xl border border-border/70 bg-muted/15 p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium">Coste {index + 2}</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                      disabled={disabled || saving}
+                      aria-label={`Quitar coste ${index + 2}`}
+                      onClick={() => removeExtraTier(row.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="min-w-0 space-y-1.5">
+                      <Label htmlFor={`delivery-tier-min-${row.id}`} className="text-xs">
+                        {thresholdLabel}
+                      </Label>
+                      <NumberField
+                        id={`delivery-tier-min-${row.id}`}
+                        min={surchargeMode === "quantity" ? "1" : "0.001"}
+                        step={surchargeMode === "quantity" ? "1" : "0.001"}
+                        value={row.minValue}
+                        disabled={disabled || saving}
+                        onChange={(next) => updateExtraTier(row.id, { minValue: next })}
+                      />
+                    </div>
+                    <div className="min-w-0 space-y-1.5">
+                      <Label htmlFor={`delivery-tier-price-${row.id}`} className="text-xs">
+                        Precio (USD)
+                      </Label>
+                      <NumberField
+                        id={`delivery-tier-price-${row.id}`}
+                        prefix="$"
+                        min="0"
+                        step="0.01"
+                        value={row.priceUsd}
+                        disabled={disabled || saving}
+                        onChange={(next) => updateExtraTier(row.id, { priceUsd: next })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+
               <Button
                 type="button"
                 variant="outline"
-                className="h-11 rounded-full"
-                disabled={saving}
-                onClick={discardChanges}
+                className="h-10 w-full rounded-full"
+                disabled={disabled || saving || extraTiers.length >= 49}
+                onClick={addExtraTier}
               >
-                Descartar
+                <Plus className="mr-2 h-4 w-4" />
+                Agregar coste
               </Button>
             </div>
-          ) : null}
-        </CardContent>
-      </Card>
+            ) : null}
+
+            <div className="space-y-2 rounded-xl border border-border/70 bg-muted/15 p-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <Label htmlFor="delivery-free-from" className="shrink-0 text-xs font-medium">
+                  Gratis a partir de:
+                </Label>
+                <NumberField
+                  id="delivery-free-from"
+                  className="min-w-0 flex-1"
+                  prefix={visualCurrencyLabel}
+                  min="0"
+                  step="0.01"
+                  value={freeDeliveryFromAmount}
+                  disabled={disabled || saving || !freeDeliveryEnabled}
+                  onChange={setFreeDeliveryFromAmount}
+                />
+                <Switch
+                  checked={freeDeliveryEnabled}
+                  disabled={disabled || saving}
+                  onCheckedChange={setFreeDeliveryEnabled}
+                  aria-label="Activar delivery gratis a partir de un monto"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Si está activo y hay un monto, el envío queda gratis cuando el total (productos +
+                delivery) en {visualCurrencyLabel} es mayor o igual a ese valor.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {dirty ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            className="h-11 rounded-full font-semibold"
+            disabled={saving}
+            onClick={() => void handleSave()}
+          >
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Guardar modalidades
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 rounded-full"
+            disabled={saving}
+            onClick={discardChanges}
+          >
+            Descartar
+          </Button>
+        </div>
+      ) : null}
 
       <Dialog open={explainMode != null} onOpenChange={(open) => !open && setExplainMode(null)}>
         <DialogContent

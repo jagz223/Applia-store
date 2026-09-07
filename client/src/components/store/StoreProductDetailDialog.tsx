@@ -115,6 +115,14 @@ export function StoreProductDetailDialog({
             <dd>{product.showOnShowcase !== false ? "Visible en la tienda pública" : "Oculto en vitrina"}</dd>
           </div>
           <div>
+            <dt className="font-medium text-muted-foreground">Stock</dt>
+            <dd>
+              {product.hasStock === true
+                ? `${product.stock ?? 0} unidad(es)`
+                : "Sin control de stock"}
+            </dd>
+          </div>
+          <div>
             <dt className="font-medium text-muted-foreground">Ingredientes / materiales</dt>
             <dd>
               {product.ingredientMaterialIds.length > 0

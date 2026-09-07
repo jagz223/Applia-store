@@ -31,6 +31,7 @@ export type StoreShowcaseProduct = {
   displayCurrencyLabel?: string;
   imageUrls: string[];
   categoryIds: number[];
+  subcategoryIds?: number[];
   ingredients?: StoreShowcaseIngredient[];
   removableIngredients?: StoreShowcaseIngredient[];
   additionals?: StoreShowcaseAdditional[];
@@ -40,6 +41,13 @@ export type StoreShowcaseCategory = {
   id: number;
   name: string;
   hideFromShowcaseAll?: boolean;
+  sortOrder?: number;
+};
+
+export type StoreShowcaseSubcategory = {
+  id: number;
+  categoryId: number;
+  name: string;
 };
 
 export type StoreShowcaseAd = {
@@ -49,6 +57,8 @@ export type StoreShowcaseAd = {
   imageUrl: string | null | undefined;
   linkUrl: string | null | undefined;
   sortOrder: number;
+  categoryVisibilityMode?: "all" | "exclude" | "include";
+  categoryIds?: number[];
 };
 
 export type StoreShowcasePromotionItem = {
@@ -70,6 +80,7 @@ export type StoreShowcasePromotion = {
 export type StoreShowcaseResponse = {
   products: StoreShowcaseProduct[];
   categories: StoreShowcaseCategory[];
+  subcategories?: StoreShowcaseSubcategory[];
   promotions: StoreShowcasePromotion[];
   banners?: StoreShowcaseAd[];
   popups?: StoreShowcaseAd[];

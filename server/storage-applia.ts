@@ -49,6 +49,12 @@ import {
   deriveProductPricesFromSizes,
   resolveStoreProductPriceFields,
   resolveStoreProductWeightFields,
+  normalizeStoreProductStockFields,
+  resolveStoreProductShowOnShowcase,
+  storeProductHasAvailableStock,
+  compareStoreCategoriesBySortOrder,
+  assignContiguousStoreCategorySortOrders,
+  moveStoreCategoryToSortOrder,
   resolveStoreLocationAndBranches,
   normalizeStoreBranches,
   DEFAULT_STORE_DELIVERY_FARES,
@@ -63,6 +69,9 @@ import {
   type StoreCategory,
   type InsertStoreCategory,
   type UpdateStoreCategory,
+  type StoreSubcategory,
+  type InsertStoreSubcategory,
+  type UpdateStoreSubcategory,
   type StorePromotion,
   type InsertStorePromotion,
   type UpdateStorePromotion,
@@ -70,8 +79,10 @@ import {
 import type {
   StoreShowcaseAdItem,
   InsertStoreShowcaseAdItem,
+  UpdateStoreShowcaseAdItem,
   StoreShowcaseAdKind,
 } from "@shared/store-showcase-ads-schema";
+import { normalizeBannerCategoryVisibility } from "@shared/store-showcase-ads-schema";
 import { STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
 import type {
   InsertStorePaymentMethod,
@@ -501,19 +512,41 @@ export interface IStorage
   ): Promise<Store>;
   listStoreProducts(storeId: number): Promise<StoreProduct[]>;
   getStoreProduct(storeId: number, productId: number): Promise<StoreProduct | undefined>;
+  getStoreProductByCodigo(storeId: number, codigo: string): Promise<StoreProduct | undefined>;
   createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct>;
   updateStoreProduct(storeId: number, productId: number, input: UpdateStoreProduct): Promise<StoreProduct>;
   deleteStoreProduct(storeId: number, productId: number): Promise<void>;
   deleteStoreProduct(storeId: number, productId: number): Promise<void>;
   listStoreCategories(storeId: number): Promise<StoreCategory[]>;
   getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined>;
-  createStoreCategory(storeId: number, input: Omit<InsertStoreCategory, "productIds">): Promise<StoreCategory>;
+  createStoreCategory(
+    storeId: number,
+    input: Omit<InsertStoreCategory, "productIds" | "subcategoryNames">,
+  ): Promise<StoreCategory>;
   updateStoreCategory(
     storeId: number,
     categoryId: number,
-    input: Omit<UpdateStoreCategory, "productIds">,
+    input: Omit<UpdateStoreCategory, "productIds" | "subcategoryNames">,
+  ): Promise<StoreCategory>;
+  /** Mueve la categoría a `sortOrder` (1-based) y reenumera el resto. */
+  setStoreCategorySortOrder(
+    storeId: number,
+    categoryId: number,
+    sortOrder: number,
   ): Promise<StoreCategory>;
   deleteStoreCategory(storeId: number, categoryId: number): Promise<void>;
+  listStoreSubcategories(
+    storeId: number,
+    filters?: { categoryId?: number },
+  ): Promise<StoreSubcategory[]>;
+  getStoreSubcategory(storeId: number, subcategoryId: number): Promise<StoreSubcategory | undefined>;
+  createStoreSubcategory(storeId: number, input: InsertStoreSubcategory): Promise<StoreSubcategory>;
+  updateStoreSubcategory(
+    storeId: number,
+    subcategoryId: number,
+    input: UpdateStoreSubcategory,
+  ): Promise<StoreSubcategory>;
+  deleteStoreSubcategory(storeId: number, subcategoryId: number): Promise<void>;
   listStorePromotions(storeId: number): Promise<StorePromotion[]>;
   getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined>;
   createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion>;
@@ -527,6 +560,12 @@ export interface IStorage
   // ==================== Banners / Popups (vitrina) ====================
   listStoreShowcaseAds(storeId: number, kind: StoreShowcaseAdKind): Promise<StoreShowcaseAdItem[]>;
   createStoreShowcaseAdItem(storeId: number, input: InsertStoreShowcaseAdItem): Promise<StoreShowcaseAdItem>;
+  updateStoreShowcaseAdItem(
+    storeId: number,
+    kind: StoreShowcaseAdKind,
+    itemId: number,
+    input: UpdateStoreShowcaseAdItem,
+  ): Promise<StoreShowcaseAdItem>;
   deleteStoreShowcaseAdItem(storeId: number, kind: StoreShowcaseAdKind, itemId: number): Promise<void>;
 
   listStorePaymentMethods(storeId: number): Promise<StorePaymentMethod[]>;
@@ -553,7 +592,18 @@ export interface IStorage
     storeId: number,
     orderId: number,
     patch: Partial<
-      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation" | "reference">
+      Pick<
+        StoreOrder,
+        | "status"
+        | "packRideId"
+        | "deliveryUnreadCount"
+        | "branchId"
+        | "branchName"
+        | "storeLocation"
+        | "reference"
+        | "stockCommitted"
+        | "stockImpact"
+      >
     >,
   ): Promise<StoreOrder>;
   incrementStoreOrderDeliveryUnread(storeId: number, orderId: number): Promise<StoreOrder>;
@@ -3495,6 +3545,14 @@ export class InMemoryStorage implements IStorage {
     return this.storeProducts.find((p) => p.storeId === storeId && p.id === productId);
   }
 
+  async getStoreProductByCodigo(storeId: number, codigo: string): Promise<StoreProduct | undefined> {
+    const key = codigo.trim();
+    if (!key) return undefined;
+    return this.storeProducts.find(
+      (p) => p.storeId === storeId && (p.codigo ?? "").trim() === key,
+    );
+  }
+
   async createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct> {
     const now = new Date();
     const store = await this.getStoreById(storeId);
@@ -3511,18 +3569,31 @@ export class InMemoryStorage implements IStorage {
       weight: input.weight,
       sizes,
     });
+    const stockFields = normalizeStoreProductStockFields({
+      hasStock: input.hasStock,
+      stock: input.stock,
+    });
+    const showOnShowcase = resolveStoreProductShowOnShowcase({
+      showOnShowcase: input.showOnShowcase ?? true,
+      hasStock: stockFields.hasStock,
+      stock: stockFields.stock,
+    });
     const product: StoreProduct = {
       id: this.storeProductIdCounter++,
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ?? null,
+      codigo: input.codigo?.trim() ? input.codigo.trim().slice(0, 120) : null,
       price,
       pricesByCurrency,
       sizes: weightFields.sizes,
       categoryIds: input.categoryIds ?? [],
+      subcategoryIds: input.subcategoryIds ?? [],
       ...ingredientOptions,
       imageUrls: input.imageUrls ?? [],
-      showOnShowcase: input.showOnShowcase ?? true,
+      showOnShowcase,
+      hasStock: stockFields.hasStock,
+      stock: stockFields.stock,
       hasWeight: weightFields.hasWeight,
       weight: weightFields.weight,
       createdAt: now,
@@ -3568,11 +3639,28 @@ export class InMemoryStorage implements IStorage {
       weight: input.weight !== undefined ? input.weight : cur.weight,
       sizes,
     });
+    const stockFields = normalizeStoreProductStockFields({
+      hasStock: input.hasStock !== undefined ? input.hasStock : cur.hasStock,
+      stock: input.stock !== undefined ? input.stock : cur.stock,
+    });
+    if (input.showOnShowcase === true && !storeProductHasAvailableStock(stockFields)) {
+      throw new Error("STORE_PRODUCT_NO_STOCK");
+    }
+    const requestedShow =
+      input.showOnShowcase !== undefined ? input.showOnShowcase : cur.showOnShowcase;
+    const showOnShowcase = resolveStoreProductShowOnShowcase({
+      showOnShowcase: requestedShow,
+      hasStock: stockFields.hasStock,
+      stock: stockFields.stock,
+    });
     const next: StoreProduct = {
       ...cur,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.description !== undefined
         ? { description: input.description?.trim() ?? null }
+        : {}),
+      ...(input.codigo !== undefined
+        ? { codigo: input.codigo?.trim() ? input.codigo.trim().slice(0, 120) : null }
         : {}),
       ...(priceFields ?? {}),
       ...(input.sizes !== undefined ||
@@ -3581,9 +3669,12 @@ export class InMemoryStorage implements IStorage {
         ? { sizes: weightFields.sizes, hasWeight: weightFields.hasWeight, weight: weightFields.weight }
         : {}),
       ...(input.categoryIds !== undefined ? { categoryIds: input.categoryIds } : {}),
+      ...(input.subcategoryIds !== undefined ? { subcategoryIds: input.subcategoryIds } : {}),
       ...ingredientOptions,
       ...(input.imageUrls !== undefined ? { imageUrls: input.imageUrls } : {}),
-      ...(input.showOnShowcase !== undefined ? { showOnShowcase: input.showOnShowcase } : {}),
+      showOnShowcase,
+      hasStock: stockFields.hasStock,
+      stock: stockFields.stock,
       updatedAt: new Date(),
     };
     this.storeProducts[idx] = next;
@@ -3600,40 +3691,65 @@ export class InMemoryStorage implements IStorage {
   private storeCategoryIdCounter = 1;
 
   async listStoreCategories(storeId: number): Promise<StoreCategory[]> {
-    return this.storeCategories
+    const list = this.storeCategories
       .filter((c) => c.storeId === storeId)
-      .sort((a, b) => {
-        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-        return byDate !== 0 ? byDate : a.id - b.id;
-      });
+      .map((c) => ({
+        ...c,
+        sortOrder: typeof c.sortOrder === "number" && c.sortOrder > 0 ? c.sortOrder : 0,
+        hideFromShowcaseAll: c.hideFromShowcaseAll === true,
+      }))
+      .sort(compareStoreCategoriesBySortOrder);
+    const needsRenumber =
+      list.some((c, i) => c.sortOrder !== i + 1) ||
+      new Set(list.map((c) => c.sortOrder)).size !== list.length;
+    if (!needsRenumber) return list;
+    const renumbered = assignContiguousStoreCategorySortOrders(list);
+    for (const row of renumbered) {
+      const idx = this.storeCategories.findIndex((c) => c.id === row.id);
+      if (idx >= 0) {
+        this.storeCategories[idx] = { ...this.storeCategories[idx]!, sortOrder: row.sortOrder };
+      }
+    }
+    return renumbered;
   }
 
   async getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined> {
-    return this.storeCategories.find((c) => c.storeId === storeId && c.id === categoryId);
+    const c = this.storeCategories.find((x) => x.storeId === storeId && x.id === categoryId);
+    if (!c) return undefined;
+    return {
+      ...c,
+      sortOrder: typeof c.sortOrder === "number" && c.sortOrder > 0 ? c.sortOrder : 0,
+      hideFromShowcaseAll: c.hideFromShowcaseAll === true,
+    };
   }
 
   async createStoreCategory(
     storeId: number,
-    input: Omit<InsertStoreCategory, "productIds">,
+    input: Omit<InsertStoreCategory, "productIds" | "subcategoryNames">,
   ): Promise<StoreCategory> {
     const now = new Date();
+    const existing = await this.listStoreCategories(storeId);
     const category: StoreCategory = {
       id: this.storeCategoryIdCounter++,
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ?? null,
       hideFromShowcaseAll: input.hideFromShowcaseAll === true,
+      sortOrder: existing.length + 1,
       createdAt: now,
       updatedAt: now,
     };
     this.storeCategories.push(category);
+    if (input.sortOrder != null && input.sortOrder > 0) {
+      return this.setStoreCategorySortOrder(storeId, category.id, input.sortOrder);
+    }
     return category;
   }
 
   async updateStoreCategory(
     storeId: number,
     categoryId: number,
-    input: Omit<UpdateStoreCategory, "productIds">,
+    input: Omit<UpdateStoreCategory, "productIds" | "subcategoryNames">,
   ): Promise<StoreCategory> {
     const idx = this.storeCategories.findIndex((c) => c.storeId === storeId && c.id === categoryId);
     if (idx === -1) throw new Error("STORE_CATEGORY_NOT_FOUND");
@@ -3650,13 +3766,126 @@ export class InMemoryStorage implements IStorage {
       updatedAt: new Date(),
     };
     this.storeCategories[idx] = next;
+    if (input.sortOrder != null && input.sortOrder > 0) {
+      return this.setStoreCategorySortOrder(storeId, categoryId, input.sortOrder);
+    }
     return next;
+  }
+
+  async setStoreCategorySortOrder(
+    storeId: number,
+    categoryId: number,
+    sortOrder: number,
+  ): Promise<StoreCategory> {
+    const existing = this.storeCategories.filter((c) => c.storeId === storeId);
+    if (!existing.some((c) => c.id === categoryId)) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    const next = moveStoreCategoryToSortOrder(existing, categoryId, sortOrder);
+    const now = new Date();
+    for (const row of next) {
+      const idx = this.storeCategories.findIndex((c) => c.id === row.id);
+      if (idx >= 0) {
+        this.storeCategories[idx] = {
+          ...this.storeCategories[idx]!,
+          sortOrder: row.sortOrder,
+          updatedAt: now,
+        };
+      }
+    }
+    return (await this.getStoreCategory(storeId, categoryId))!;
   }
 
   async deleteStoreCategory(storeId: number, categoryId: number): Promise<void> {
     const idx = this.storeCategories.findIndex((c) => c.storeId === storeId && c.id === categoryId);
     if (idx === -1) throw new Error("STORE_CATEGORY_NOT_FOUND");
     this.storeCategories.splice(idx, 1);
+    const remaining = this.storeCategories.filter((c) => c.storeId === storeId);
+    const renumbered = assignContiguousStoreCategorySortOrders(remaining);
+    for (const row of renumbered) {
+      const i = this.storeCategories.findIndex((c) => c.id === row.id);
+      if (i >= 0) this.storeCategories[i] = { ...this.storeCategories[i]!, sortOrder: row.sortOrder };
+    }
+  }
+
+  private storeSubcategories: StoreSubcategory[] = [];
+  private storeSubcategoryIdCounter = 1;
+
+  async listStoreSubcategories(
+    storeId: number,
+    filters?: { categoryId?: number },
+  ): Promise<StoreSubcategory[]> {
+    const categoryId = filters?.categoryId;
+    return this.storeSubcategories
+      .filter((s) => {
+        if (s.storeId !== storeId) return false;
+        if (categoryId != null && s.categoryId !== categoryId) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return byDate !== 0 ? byDate : a.id - b.id;
+      });
+  }
+
+  async getStoreSubcategory(
+    storeId: number,
+    subcategoryId: number,
+  ): Promise<StoreSubcategory | undefined> {
+    return this.storeSubcategories.find((s) => s.storeId === storeId && s.id === subcategoryId);
+  }
+
+  async createStoreSubcategory(
+    storeId: number,
+    input: InsertStoreSubcategory,
+  ): Promise<StoreSubcategory> {
+    const category = await this.getStoreCategory(storeId, input.categoryId);
+    if (!category) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    const now = new Date();
+    const subcategory: StoreSubcategory = {
+      id: this.storeSubcategoryIdCounter++,
+      storeId,
+      categoryId: input.categoryId,
+      name: input.name.trim(),
+      description: input.description?.trim() ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.storeSubcategories.push(subcategory);
+    return subcategory;
+  }
+
+  async updateStoreSubcategory(
+    storeId: number,
+    subcategoryId: number,
+    input: UpdateStoreSubcategory,
+  ): Promise<StoreSubcategory> {
+    const idx = this.storeSubcategories.findIndex(
+      (s) => s.storeId === storeId && s.id === subcategoryId,
+    );
+    if (idx === -1) throw new Error("STORE_SUBCATEGORY_NOT_FOUND");
+    if (input.categoryId !== undefined) {
+      const category = await this.getStoreCategory(storeId, input.categoryId);
+      if (!category) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    }
+    const cur = this.storeSubcategories[idx];
+    const next: StoreSubcategory = {
+      ...cur,
+      ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description?.trim() ? input.description.trim() : null }
+        : {}),
+      updatedAt: new Date(),
+    };
+    this.storeSubcategories[idx] = next;
+    return next;
+  }
+
+  async deleteStoreSubcategory(storeId: number, subcategoryId: number): Promise<void> {
+    const idx = this.storeSubcategories.findIndex(
+      (s) => s.storeId === storeId && s.id === subcategoryId,
+    );
+    if (idx === -1) throw new Error("STORE_SUBCATEGORY_NOT_FOUND");
+    this.storeSubcategories.splice(idx, 1);
   }
 
   private storePromotions: StorePromotion[] = [];
@@ -3750,6 +3979,17 @@ export class InMemoryStorage implements IStorage {
   async listStoreShowcaseAds(storeId: number, kind: StoreShowcaseAdKind): Promise<StoreShowcaseAdItem[]> {
     return this.storeShowcaseAds
       .filter((a) => a.storeId === storeId && a.kind === kind)
+      .map((a) => {
+        const visibility =
+          kind === "banner"
+            ? normalizeBannerCategoryVisibility(a.categoryVisibilityMode, a.categoryIds)
+            : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
+        return {
+          ...a,
+          categoryVisibilityMode: visibility.categoryVisibilityMode,
+          categoryIds: visibility.categoryIds,
+        };
+      })
       .sort((a, b) => (a.sortOrder - b.sortOrder) || (a.id - b.id));
   }
 
@@ -3761,6 +4001,11 @@ export class InMemoryStorage implements IStorage {
     const sortOrder =
       input.sortOrder != null ? input.sortOrder : this.nextShowcaseAdSortOrder(storeId, input.kind);
 
+    const visibility =
+      input.kind === "banner"
+        ? normalizeBannerCategoryVisibility(input.categoryVisibilityMode, input.categoryIds)
+        : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
+
     const item: StoreShowcaseAdItem = {
       id: this.storeShowcaseAdItemIdCounter++,
       storeId,
@@ -3768,11 +4013,60 @@ export class InMemoryStorage implements IStorage {
       imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
       linkUrl: input.linkUrl?.trim() ? input.linkUrl.trim() : null,
       sortOrder,
+      categoryVisibilityMode: visibility.categoryVisibilityMode,
+      categoryIds: visibility.categoryIds,
       createdAt: now,
       updatedAt: now,
     };
     this.storeShowcaseAds.push(item);
     return item;
+  }
+
+  async updateStoreShowcaseAdItem(
+    storeId: number,
+    kind: StoreShowcaseAdKind,
+    itemId: number,
+    input: UpdateStoreShowcaseAdItem,
+  ): Promise<StoreShowcaseAdItem> {
+    const idx = this.storeShowcaseAds.findIndex(
+      (a) => a.storeId === storeId && a.kind === kind && a.id === itemId,
+    );
+    if (idx === -1) throw new Error("STORE_SHOWCASE_AD_NOT_FOUND");
+    const current = this.storeShowcaseAds[idx]!;
+    const nextImage =
+      input.imageUrl !== undefined
+        ? input.imageUrl?.trim()
+          ? input.imageUrl.trim()
+          : null
+        : current.imageUrl;
+    const nextLink =
+      input.linkUrl !== undefined
+        ? input.linkUrl?.trim()
+          ? input.linkUrl.trim()
+          : null
+        : current.linkUrl;
+    if (!nextImage && !nextLink) throw new Error("STORE_SHOWCASE_AD_EMPTY");
+    const visibility =
+      kind === "banner"
+        ? normalizeBannerCategoryVisibility(
+            input.categoryVisibilityMode !== undefined
+              ? input.categoryVisibilityMode
+              : current.categoryVisibilityMode,
+            input.categoryIds !== undefined ? input.categoryIds : current.categoryIds,
+          )
+        : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
+    const updated: StoreShowcaseAdItem = {
+      ...current,
+      imageUrl: nextImage,
+      linkUrl: nextLink,
+      sortOrder:
+        input.sortOrder != null ? Math.trunc(input.sortOrder) : current.sortOrder,
+      categoryVisibilityMode: visibility.categoryVisibilityMode,
+      categoryIds: visibility.categoryIds,
+      updatedAt: new Date(),
+    };
+    this.storeShowcaseAds[idx] = updated;
+    return updated;
   }
 
   async deleteStoreShowcaseAdItem(
@@ -3871,6 +4165,8 @@ export class InMemoryStorage implements IStorage {
       ...input,
       packRideId: input.packRideId ?? null,
       deliveryUnreadCount: input.deliveryUnreadCount ?? 0,
+      stockImpact: input.stockImpact ?? [],
+      stockCommitted: input.stockCommitted ?? false,
       status: input.status ?? "pagado",
       createdAt: now,
       updatedAt: now,
@@ -3919,7 +4215,18 @@ export class InMemoryStorage implements IStorage {
     storeId: number,
     orderId: number,
     patch: Partial<
-      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation" | "reference">
+      Pick<
+        StoreOrder,
+        | "status"
+        | "packRideId"
+        | "deliveryUnreadCount"
+        | "branchId"
+        | "branchName"
+        | "storeLocation"
+        | "reference"
+        | "stockCommitted"
+        | "stockImpact"
+      >
     >,
   ): Promise<StoreOrder> {
     const idx = this.storeOrders.findIndex((o) => o.storeId === storeId && o.id === orderId);

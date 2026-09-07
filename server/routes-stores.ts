@@ -56,6 +56,14 @@ import {
   removeCategoryFromAllProducts,
   syncCategoryProductMembership,
 } from "./store-category-sync";
+import {
+  assertStoreSubcategoryIds,
+  createSubcategoriesForCategory,
+  deleteSubcategoriesForCategory,
+  productIdsForSubcategory,
+  pruneProductSubcategoryIds,
+  removeSubcategoryFromAllProducts,
+} from "./store-subcategory-sync";
 import { computeStoreDeliveryQuote } from "./store-delivery-quote";
 import {
   getStoreDeliveryNotificationsSummary,
@@ -66,6 +74,10 @@ import {
   notifyCustomerStoreOrderStatusChanged,
   notifyStoreOwnerNewOrder,
 } from "./store-order-notifications";
+import {
+  commitStoreOrderStock,
+  syncStoreOrderStockAfterStatusChange,
+} from "./store-order-stock";
 import { getPackRideDeliveryDetail } from "./pack-rides";
 import {
   insertStoreSchema,
@@ -75,12 +87,15 @@ import {
   updateStoreSchema,
   insertStoreCategorySchema,
   updateStoreCategorySchema,
+  insertStoreSubcategorySchema,
+  updateStoreSubcategorySchema,
   insertStorePromotionSchema,
   updateStorePromotionSchema,
   INGREDIENTS_MATERIALS_PAGE_SIZE,
   type Store,
   type StoreProduct,
   type StoreCategory,
+  type StoreSubcategory,
   type StorePromotion,
   resolveStorePromotionImageUrl,
   resolveAdditionalDisplayPrice,
@@ -100,9 +115,20 @@ import {
   PRIMARY_STORE_ID,
   type StoreProductSize,
   type StoreProductIngredientAdditional,
+  normalizeStoreProductStockFields,
+  resolveStoreProductShowOnShowcase,
+  storeProductHasAvailableStock,
+  compareProductsByCategorySortOrder,
 } from "@shared/store-schema";
 import {
+  isDeliveryLocationInBranchPerimeter,
+  STORE_DELIVERY_OUT_OF_PERIMETER_MESSAGE,
+} from "@shared/store-delivery-perimeter";
+import { branchAvoidLocations } from "@shared/store-delivery-avoid";
+import {
   insertStoreShowcaseAdItemSchema,
+  updateStoreShowcaseAdItemSchema,
+  normalizeBannerCategoryVisibility,
   type StoreShowcaseAdItem,
   type StoreShowcaseAdKind,
 } from "@shared/store-showcase-ads-schema";
@@ -116,8 +142,16 @@ import {
 import { storeSubscriptionPaymentBodySchema } from "@shared/store-subscription-payment";
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { filterStoresByCatalogQuery, getStoreRubroLabel } from "@shared/store-rubros";
+import { ingredientMaterialKey } from "@shared/store-slug";
 import { parsePositiveIntParam, requireStoreAccess, requireStoreOwner, requireStoreStaffManagement, resolveStoreAccess, viewerCanManageStore, type StoreAccessContext } from "./store-product-auth";
 import { isGenlookConfigured, runGenlookVirtualTryOn } from "./genlook";
+import {
+  parseProductImportFile,
+  parseProductImportCsvDelimiter,
+  normalizeProductImportOptionals,
+  type ProductImportColumnMap,
+  type ProductImportRow,
+} from "./store-product-import";
 import { buildStoreStaffDirectory } from "./store-staff-directory";
 import {
   appendStoreBranchTransferSystemMessage,
@@ -239,6 +273,7 @@ function serializeStoreProduct(
     storeId: product.storeId,
     name: product.name,
     description,
+    codigo: product.codigo?.trim() || null,
     price: displayPrice,
     pricesByCurrency: product.pricesByCurrency ?? {},
     sizes: sizes.map((s) => ({
@@ -257,11 +292,14 @@ function serializeStoreProduct(
       storeCurrency?.currencyExtras ?? [],
     ),
     categoryIds: product.categoryIds,
+    subcategoryIds: product.subcategoryIds ?? [],
     ingredientMaterialIds: product.ingredientMaterialIds,
     removableIngredientMaterialIds: product.removableIngredientMaterialIds ?? [],
     ingredientAdditionals: product.ingredientAdditionals ?? [],
     imageUrls: product.imageUrls ?? [],
     showOnShowcase: product.showOnShowcase !== false,
+    hasStock: product.hasStock === true,
+    stock: product.hasStock === true ? product.stock ?? 0 : product.stock ?? 0,
     hasWeight: product.hasWeight === true,
     weight: product.hasWeight === true ? product.weight ?? 0 : 0,
     createdAt: serializeDate(product.createdAt),
@@ -277,10 +315,39 @@ function serializeStoreCategory(category: StoreCategory, products: StoreProduct[
     name: category.name,
     description: category.description,
     hideFromShowcaseAll: category.hideFromShowcaseAll === true,
+    sortOrder: category.sortOrder > 0 ? category.sortOrder : 0,
     productIds: ids,
     productCount: ids.length,
     createdAt: serializeDate(category.createdAt),
     updatedAt: serializeDate(category.updatedAt),
+  };
+}
+
+function serializeStoreSubcategory(
+  subcategory: StoreSubcategory,
+  products: StoreProduct[],
+  categoryNameById?: Map<number, string>,
+) {
+  const ids = productIdsForSubcategory(products, subcategory.id);
+  return {
+    id: subcategory.id,
+    storeId: subcategory.storeId,
+    categoryId: subcategory.categoryId,
+    categoryName: categoryNameById?.get(subcategory.categoryId) ?? null,
+    name: subcategory.name,
+    description: subcategory.description,
+    productIds: ids,
+    productCount: ids.length,
+    createdAt: serializeDate(subcategory.createdAt),
+    updatedAt: serializeDate(subcategory.updatedAt),
+  };
+}
+
+function serializeShowcaseSubcategory(subcategory: StoreSubcategory) {
+  return {
+    id: subcategory.id,
+    categoryId: subcategory.categoryId,
+    name: subcategory.name,
   };
 }
 
@@ -357,6 +424,7 @@ function serializeStoreShowcaseProduct(
     displayCurrencyLabel: currencyLabelForId(currency.currencyVisualId, currency.currencyExtras),
     imageUrls: product.imageUrls ?? [],
     categoryIds: product.categoryIds ?? [],
+    subcategoryIds: product.subcategoryIds ?? [],
     ingredients: ingredientMaterialIds.map((id) => ({ id, name: resolveName(id) })),
     removableIngredients: removableIngredientMaterialIds.map((id) => ({
       id,
@@ -446,10 +514,15 @@ function serializeShowcaseCategory(category: StoreCategory) {
     id: category.id,
     name: category.name,
     hideFromShowcaseAll: category.hideFromShowcaseAll === true,
+    sortOrder: category.sortOrder > 0 ? category.sortOrder : 0,
   };
 }
 
 function serializeShowcaseAdItem(item: StoreShowcaseAdItem) {
+  const visibility =
+    item.kind === "banner"
+      ? normalizeBannerCategoryVisibility(item.categoryVisibilityMode, item.categoryIds)
+      : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
   return {
     id: item.id,
     storeId: item.storeId,
@@ -457,6 +530,8 @@ function serializeShowcaseAdItem(item: StoreShowcaseAdItem) {
     imageUrl: item.imageUrl,
     linkUrl: item.linkUrl,
     sortOrder: item.sortOrder,
+    categoryVisibilityMode: visibility.categoryVisibilityMode,
+    categoryIds: visibility.categoryIds,
     createdAt: serializeDate(item.createdAt),
     updatedAt: serializeDate(item.updatedAt),
   };
@@ -1175,8 +1250,14 @@ export function registerStoreRoutes(app: Express): void {
         name: parsed.data.name,
         description: parsed.data.description,
         hideFromShowcaseAll: parsed.data.hideFromShowcaseAll ?? false,
+        sortOrder: parsed.data.sortOrder,
       });
       await syncCategoryProductMembership(storeId, category.id, productIds);
+      await createSubcategoriesForCategory(
+        storeId,
+        category.id,
+        parsed.data.subcategoryNames ?? [],
+      );
       const products = await appliaStorage.listStoreProducts(storeId);
       return res.status(201).json({ category: serializeStoreCategory(category, products) });
     } catch (e: unknown) {
@@ -1234,9 +1315,13 @@ export function registerStoreRoutes(app: Express): void {
         name: parsed.data.name,
         description: parsed.data.description,
         hideFromShowcaseAll: parsed.data.hideFromShowcaseAll,
+        sortOrder: parsed.data.sortOrder,
       });
       if (parsed.data.productIds != null) {
         await syncCategoryProductMembership(storeId, categoryId, parsed.data.productIds);
+      }
+      if (parsed.data.subcategoryNames != null && parsed.data.subcategoryNames.length > 0) {
+        await createSubcategoriesForCategory(storeId, categoryId, parsed.data.subcategoryNames);
       }
       const products = await appliaStorage.listStoreProducts(storeId);
       return res.json({ category: serializeStoreCategory(category, products) });
@@ -1261,6 +1346,7 @@ export function registerStoreRoutes(app: Express): void {
       const categoryId = parsePositiveIntParam(req.params.categoryId);
       if (!storeId || !categoryId) return res.status(400).json({ message: "ID inválido." });
       await requireStoreOwner(userId, storeId);
+      await deleteSubcategoriesForCategory(storeId, categoryId);
       await removeCategoryFromAllProducts(storeId, categoryId);
       await appliaStorage.deleteStoreCategory(storeId, categoryId);
       return res.status(204).send();
@@ -1272,6 +1358,163 @@ export function registerStoreRoutes(app: Express): void {
       if (msg === "STORE_CATEGORY_NOT_FOUND") return res.status(404).json({ message: "Categoría no encontrada." });
       console.error("[stores] delete category", e);
       return res.status(500).json({ message: "No se pudo eliminar la categoría." });
+    }
+  });
+
+  app.get("/api/stores/:storeId/subcategories", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const paginationResult = parseOptionalAdminListPagination(req.query);
+      if (!paginationResult.ok) {
+        return res.status(400).json({ message: "Parámetros de paginación inválidos." });
+      }
+      const nameQuery = parseOptionalAdminListNameQuery(req.query);
+      const categoryIdRaw =
+        typeof req.query.categoryId === "string" ? req.query.categoryId.trim() : "";
+      const categoryId = categoryIdRaw ? Number.parseInt(categoryIdRaw, 10) : undefined;
+      const [subcategories, products, categories] = await Promise.all([
+        appliaStorage.listStoreSubcategories(
+          storeId,
+          Number.isFinite(categoryId) && categoryId! > 0 ? { categoryId } : undefined,
+        ),
+        appliaStorage.listStoreProducts(storeId),
+        appliaStorage.listStoreCategories(storeId),
+      ]);
+      const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+      const serialized = filterSerializedListByName(
+        subcategories.map((s) => serializeStoreSubcategory(s, products, categoryNameById)),
+        nameQuery,
+      );
+      if (!paginationResult.pagination) {
+        return res.json({ subcategories: serialized });
+      }
+      const pageResult = paginateSerializedList(serialized, paginationResult.pagination);
+      return res.json({
+        subcategories: pageResult.items,
+        total: pageResult.total,
+        page: pageResult.page,
+        limit: pageResult.limit,
+        totalPages: pageResult.totalPages,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      }
+      console.error("[stores] list subcategories", e);
+      return res.status(500).json({ message: "No se pudieron cargar las subcategorías." });
+    }
+  });
+
+  app.post("/api/stores/:storeId/subcategories", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const parsed = insertStoreSubcategorySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const subcategory = await appliaStorage.createStoreSubcategory(storeId, parsed.data);
+      const [products, categories] = await Promise.all([
+        appliaStorage.listStoreProducts(storeId),
+        appliaStorage.listStoreCategories(storeId),
+      ]);
+      const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+      return res.status(201).json({
+        subcategory: serializeStoreSubcategory(subcategory, products, categoryNameById),
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      }
+      if (msg === "STORE_CATEGORY_NOT_FOUND") {
+        return res.status(400).json({ message: "La categoría indicada no existe." });
+      }
+      console.error("[stores] create subcategory", e);
+      return res.status(500).json({ message: "No se pudo crear la subcategoría." });
+    }
+  });
+
+  app.patch("/api/stores/:storeId/subcategories/:subcategoryId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const subcategoryId = parsePositiveIntParam(req.params.subcategoryId);
+      if (!storeId || !subcategoryId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      const parsed = updateStoreSubcategorySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+      const subcategory = await appliaStorage.updateStoreSubcategory(
+        storeId,
+        subcategoryId,
+        parsed.data,
+      );
+      const [products, categories] = await Promise.all([
+        appliaStorage.listStoreProducts(storeId),
+        appliaStorage.listStoreCategories(storeId),
+      ]);
+      const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+      return res.json({
+        subcategory: serializeStoreSubcategory(subcategory, products, categoryNameById),
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      }
+      if (msg === "STORE_SUBCATEGORY_NOT_FOUND") {
+        return res.status(404).json({ message: "Subcategoría no encontrada." });
+      }
+      if (msg === "STORE_CATEGORY_NOT_FOUND") {
+        return res.status(400).json({ message: "La categoría indicada no existe." });
+      }
+      console.error("[stores] update subcategory", e);
+      return res.status(500).json({ message: "No se pudo actualizar la subcategoría." });
+    }
+  });
+
+  app.delete("/api/stores/:storeId/subcategories/:subcategoryId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const subcategoryId = parsePositiveIntParam(req.params.subcategoryId);
+      if (!storeId || !subcategoryId) return res.status(400).json({ message: "ID inválido." });
+      await requireStoreOwner(userId, storeId);
+      await removeSubcategoryFromAllProducts(storeId, subcategoryId);
+      await appliaStorage.deleteStoreSubcategory(storeId, subcategoryId);
+      return res.status(204).send();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      }
+      if (msg === "STORE_SUBCATEGORY_NOT_FOUND") {
+        return res.status(404).json({ message: "Subcategoría no encontrada." });
+      }
+      console.error("[stores] delete subcategory", e);
+      return res.status(500).json({ message: "No se pudo eliminar la subcategoría." });
     }
   });
 
@@ -1578,6 +1821,9 @@ export function registerStoreRoutes(app: Express): void {
       if (msg === "STORE_CART_ITEM_INVALID") {
         return res.status(400).json({ message: "El artículo no está disponible en esta tienda." });
       }
+      if (msg === "STORE_PRODUCT_NO_STOCK") {
+        return res.status(400).json({ message: "No hay stock de este producto" });
+      }
       console.error("[stores] add cart item", e);
       return res.status(500).json({ message: "No se pudo añadir al carrito." });
     }
@@ -1623,6 +1869,9 @@ export function registerStoreRoutes(app: Express): void {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "STORE_CART_ITEM_INVALID") {
         return res.status(400).json({ message: "El artículo no está disponible en esta tienda." });
+      }
+      if (msg === "STORE_PRODUCT_NO_STOCK") {
+        return res.status(400).json({ message: "No hay stock de este producto" });
       }
       console.error("[stores] update cart item", e);
       return res.status(500).json({ message: "No se pudo actualizar el carrito." });
@@ -1794,11 +2043,16 @@ export function registerStoreRoutes(app: Express): void {
         }
         assignedBranch =
           findNearestStoreBranch(branches, deliveryLocation) ?? assignedBranch;
+        if (!isDeliveryLocationInBranchPerimeter(assignedBranch, deliveryLocation)) {
+          return res.status(400).json({ message: STORE_DELIVERY_OUT_OF_PERIMETER_MESSAGE });
+        }
         const quote = await computeStoreDeliveryQuote(
           assignedBranch.location,
           deliveryLocation,
           store.deliveryFares,
           { itemCount: enriched.itemCount, cartWeightKg: enriched.cartWeightKg },
+          enriched.subtotal,
+          branchAvoidLocations(assignedBranch),
         );
         deliveryFee = quote.deliveryFee;
         deliveryDistanceM = quote.distanceM;
@@ -1932,29 +2186,46 @@ export function registerStoreRoutes(app: Express): void {
         subtotal: enriched.subtotal,
         packRideId: null,
         deliveryUnreadCount: 0,
+        stockImpact: [],
+        stockCommitted: false,
       });
+
+      let committedOrder = order;
+      try {
+        committedOrder = await commitStoreOrderStock(order);
+      } catch (stockErr) {
+        const stockMsg = stockErr instanceof Error ? stockErr.message : String(stockErr);
+        if (stockMsg === "STORE_PRODUCT_NO_STOCK") {
+          await appliaStorage.updateStoreOrderStatus(storeId, order.id, "rechazado").catch(() => undefined);
+          return res.status(400).json({ message: "No hay stock de este producto" });
+        }
+        throw stockErr;
+      }
 
       await appliaStorage.deleteStoreCart(userId, storeId);
 
-      void notifyStoreOwnerNewOrder(order, store).catch((err) =>
+      void notifyStoreOwnerNewOrder(committedOrder, store).catch((err) =>
         console.error("[stores] notify owner new order", err),
       );
 
       return res.status(201).json({
         order: {
-          id: order.id,
-          storeId: order.storeId,
-          status: order.status,
-          statusLabel: STORE_ORDER_STATUS_LABELS[order.status],
-          subtotal: order.subtotal,
-          amountDue: order.amountDue,
-          amountPaid: order.amountPaid,
-          createdAt: serializeDate(order.createdAt),
+          id: committedOrder.id,
+          storeId: committedOrder.storeId,
+          status: committedOrder.status,
+          statusLabel: STORE_ORDER_STATUS_LABELS[committedOrder.status],
+          subtotal: committedOrder.subtotal,
+          amountDue: committedOrder.amountDue,
+          amountPaid: committedOrder.amountPaid,
+          createdAt: serializeDate(committedOrder.createdAt),
         },
         checkoutUrl: null,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_PRODUCT_NO_STOCK") {
+        return res.status(400).json({ message: "No hay stock de este producto" });
+      }
       if (msg === "STORE_PAYMENT_METHOD_NOT_FOUND") {
         return res.status(400).json({ message: "Método de pago no válido." });
       }
@@ -2170,7 +2441,23 @@ export function registerStoreRoutes(app: Express): void {
         return res.json({ order: await serializeStoreOrder(order, true, store) });
       }
 
-      const order = await appliaStorage.updateStoreOrderStatus(storeId, orderId, parsed.data.status);
+      const updated = await appliaStorage.updateStoreOrderStatus(storeId, orderId, parsed.data.status);
+      let order = updated;
+      try {
+        order = await syncStoreOrderStockAfterStatusChange(existing, updated);
+      } catch (stockErr) {
+        // Revert status if re-commit from rechazado fails (no stock).
+        if (
+          existing.status === "rechazado" &&
+          parsed.data.status !== "rechazado" &&
+          stockErr instanceof Error &&
+          stockErr.message === "STORE_PRODUCT_NO_STOCK"
+        ) {
+          await appliaStorage.updateStoreOrderStatus(storeId, orderId, "rechazado").catch(() => undefined);
+          return res.status(400).json({ message: "No hay stock de este producto" });
+        }
+        throw stockErr;
+      }
       void syncStoreOrderCustomerChatLock(appliaStorage, order).catch((err) =>
         console.error("[stores] sync order customer chat lock", err),
       );
@@ -2180,6 +2467,9 @@ export function registerStoreRoutes(app: Express): void {
       return res.json({ order: await serializeStoreOrder(order, true, store) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_PRODUCT_NO_STOCK") {
+        return res.status(400).json({ message: "No hay stock de este producto" });
+      }
       if (msg === "STORE_FORBIDDEN" || msg === "STORE_ORDER_FORBIDDEN") {
         return res.status(403).json({ message: "No tienes permiso para actualizar esta orden." });
       }
@@ -3054,6 +3344,49 @@ export function registerStoreRoutes(app: Express): void {
     }
   });
 
+  app.patch("/api/stores/:storeId/showcase-ads/:kind/:adId", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      const kind = String(req.params.kind ?? "") as StoreShowcaseAdKind;
+      const adId = parsePositiveIntParam(req.params.adId);
+      if (!storeId || !adId) return res.status(400).json({ message: "ID inválido." });
+      if (kind !== "banner" && kind !== "popup") return res.status(400).json({ message: "Kind inválido." });
+      await requireStoreOwner(userId, storeId);
+
+      const parsed = updateStoreShowcaseAdItemSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: parsed.error.errors[0]?.message ?? "Datos inválidos",
+          errors: parsed.error.errors,
+        });
+      }
+
+      const updated = await appliaStorage.updateStoreShowcaseAdItem(
+        storeId,
+        kind,
+        adId,
+        parsed.data,
+      );
+      return res.json({ item: serializeShowcaseAdItem(updated) });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      }
+      if (msg === "STORE_SHOWCASE_AD_NOT_FOUND") {
+        return res.status(404).json({ message: "Banner o popup no encontrado." });
+      }
+      if (msg === "STORE_SHOWCASE_AD_EMPTY") {
+        return res.status(400).json({ message: "Debes indicar al menos una imagen o un link." });
+      }
+      console.error("[stores] showcase-ads update", e);
+      return res.status(500).json({ message: "No se pudo actualizar el banner o popup." });
+    }
+  });
+
   app.delete("/api/stores/:storeId/showcase-ads/:kind/:adId", authenticateJWT, async (req: any, res) => {
     try {
       const userId = String(req.user?.id ?? "");
@@ -3214,9 +3547,17 @@ export function registerStoreRoutes(app: Express): void {
       );
       if (priceError) return res.status(400).json({ message: priceError });
       await assertStoreCategoryIds(storeId, parsed.data.categoryIds ?? []);
+      const categoryIds = parsed.data.categoryIds ?? [];
+      const subcategoryIds = await pruneProductSubcategoryIds(
+        storeId,
+        categoryIds,
+        parsed.data.subcategoryIds ?? [],
+      );
+      await assertStoreSubcategoryIds(storeId, subcategoryIds, categoryIds);
       const product = await appliaStorage.createStoreProduct(storeId, {
         ...parsed.data,
         sizes,
+        subcategoryIds,
       });
       const currency = normalizeStoreCurrencyFields(store);
       return res.status(201).json({
@@ -3233,8 +3574,286 @@ export function registerStoreRoutes(app: Express): void {
       if (msg === "STORE_CATEGORY_INVALID") {
         return res.status(400).json({ message: "Una o más categorías no son válidas para esta tienda." });
       }
+      if (msg === "STORE_SUBCATEGORY_INVALID" || msg === "STORE_SUBCATEGORY_CATEGORY_MISMATCH") {
+        return res.status(400).json({
+          message: "Una o más subcategorías no son válidas para las categorías del producto.",
+        });
+      }
       console.error("[stores] create product", e);
       return res.status(500).json({ message: "No se pudo crear el producto." });
+    }
+  });
+
+  /** Importar productos desde CSV/Excel (upsert por código). */
+  app.post("/api/stores/:storeId/products/import", authenticateJWT, async (req: any, res) => {
+    try {
+      const userId = String(req.user?.id ?? "");
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const storeId = parsePositiveIntParam(req.params.storeId);
+      if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
+      await requireStoreOwner(userId, storeId);
+      const store = await appliaStorage.getStoreById(storeId);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const colCodigo = typeof req.body?.colCodigo === "string" ? req.body.colCodigo.trim() : "";
+      const colNombre =
+        typeof req.body?.colNombre === "string"
+          ? req.body.colNombre.trim()
+          : typeof req.body?.colDescripcion === "string"
+            ? req.body.colDescripcion.trim()
+            : "";
+      const colPrecio = typeof req.body?.colPrecio === "string" ? req.body.colPrecio.trim() : "";
+      if (!colCodigo || !colNombre || !colPrecio) {
+        return res.status(400).json({
+          message: "Código, nombre y precio son obligatorios (indica el nombre de cada columna).",
+        });
+      }
+
+      const optionals = normalizeProductImportOptionals(req.body?.optionals);
+      const csvDelimiter = parseProductImportCsvDelimiter(req.body?.csvDelimiter ?? req.body?.delimiter);
+
+      const fileName =
+        typeof req.body?.fileName === "string" && req.body.fileName.trim()
+          ? req.body.fileName.trim()
+          : "import.csv";
+      const fileBase64 = typeof req.body?.fileBase64 === "string" ? req.body.fileBase64 : "";
+      if (!fileBase64.trim()) {
+        return res.status(400).json({ message: "Debes subir un archivo CSV o Excel." });
+      }
+      const stripDataUrl = (raw: string) => {
+        const i = raw.indexOf("base64,");
+        return i >= 0 ? raw.slice(i + "base64,".length) : raw;
+      };
+      const buffer = Buffer.from(stripDataUrl(fileBase64), "base64");
+      if (buffer.length === 0) {
+        return res.status(400).json({ message: "El archivo está vacío o no es válido." });
+      }
+      if (buffer.length > 8 * 1024 * 1024) {
+        return res.status(400).json({ message: "El archivo no debe superar 8 MB." });
+      }
+
+      const columns: ProductImportColumnMap = {
+        codigo: colCodigo,
+        nombre: colNombre,
+        precio: colPrecio,
+        optionals,
+      };
+      const parsed = parseProductImportFile(fileName, buffer, columns, csvDelimiter);
+      if (parsed.rows.length === 0 && parsed.errors.length > 0) {
+        return res.status(400).json({
+          message: parsed.errors[0]?.message ?? "No se pudieron leer productos del archivo.",
+          errors: parsed.errors,
+          headers: parsed.headers,
+        });
+      }
+
+      const storeIdNum = storeId;
+
+      const currency = normalizeStoreCurrencyFields(store);
+      const visualCurrencyId = currency.currencyVisualId;
+      let created = 0;
+      let updated = 0;
+      const rowErrors = [...parsed.errors];
+
+      const categoriesCache = await appliaStorage.listStoreCategories(storeIdNum);
+      const subcategoriesCache = await appliaStorage.listStoreSubcategories(storeIdNum);
+      const normalizeNameKey = (value: string) =>
+        value
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, " ");
+
+      async function resolveCategoryId(name: string | null): Promise<number | null> {
+        if (!name || !name.trim()) return null;
+        const trimmed = name.trim().slice(0, 120);
+        const key = normalizeNameKey(trimmed);
+        const existing = categoriesCache.find((c) => normalizeNameKey(c.name) === key);
+        if (existing) return existing.id;
+        const createdCat = await appliaStorage.createStoreCategory(storeIdNum, {
+          name: trimmed,
+          description: null,
+          hideFromShowcaseAll: false,
+        });
+        categoriesCache.push(createdCat);
+        return createdCat.id;
+      }
+
+      async function resolveSubcategoryId(
+        categoryId: number | null,
+        name: string | null,
+      ): Promise<number | null> {
+        if (!name || !name.trim()) return null;
+        if (categoryId == null) {
+          throw new Error("Para importar subcategoría debes mapear también la columna de categoría.");
+        }
+        const trimmed = name.trim().slice(0, 120);
+        const key = normalizeNameKey(trimmed);
+        const existing = subcategoriesCache.find(
+          (s) => s.categoryId === categoryId && normalizeNameKey(s.name) === key,
+        );
+        if (existing) return existing.id;
+        const createdSub = await appliaStorage.createStoreSubcategory(storeIdNum, {
+          categoryId,
+          name: trimmed,
+          description: null,
+        });
+        subcategoriesCache.push(createdSub);
+        return createdSub.id;
+      }
+
+      async function resolveIngredientIds(names: string[]): Promise<number[]> {
+        const ids: number[] = [];
+        const seen = new Set<number>();
+        for (const name of names) {
+          const key = ingredientMaterialKey(name);
+          let item = await appliaStorage.findIngredientMaterialByNormalizedName(key);
+          if (!item) {
+            try {
+              item = await appliaStorage.createIngredientMaterial({ name });
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              if (msg === "INGREDIENT_MATERIAL_ALREADY_EXISTS") {
+                item = await appliaStorage.findIngredientMaterialByNormalizedName(key);
+              } else {
+                throw e;
+              }
+            }
+          }
+          if (item && !seen.has(item.id)) {
+            seen.add(item.id);
+            ids.push(item.id);
+          }
+        }
+        return ids;
+      }
+
+      const mappedFields = new Set(optionals.map((o) => o.field));
+
+      async function buildRowPayload(row: ProductImportRow) {
+        const pricesByCurrency = { [visualCurrencyId]: row.price };
+
+        let categoryId: number | null = null;
+        if (mappedFields.has("category")) {
+          categoryId = await resolveCategoryId(row.categoryName);
+        }
+
+        let subcategoryId: number | null = null;
+        if (mappedFields.has("subcategory")) {
+          subcategoryId = await resolveSubcategoryId(categoryId, row.subcategoryName);
+        }
+
+        const ingredientMaterialIds = mappedFields.has("ingredients")
+          ? await resolveIngredientIds(row.ingredientNames)
+          : [];
+        const imageUrls = mappedFields.has("imageUrl") && row.imageUrl ? [row.imageUrl] : [];
+        const categoryIds = categoryId != null ? [categoryId] : [];
+        const subcategoryIds = subcategoryId != null ? [subcategoryId] : [];
+
+        return {
+          name: row.name,
+          description: mappedFields.has("description") ? row.description : undefined,
+          codigo: row.codigo,
+          price: row.price,
+          pricesByCurrency,
+          sizes: [] as [],
+          categoryIds,
+          subcategoryIds,
+          ingredientMaterialIds,
+          imageUrls,
+          hasStock: row.hasStock,
+          stock: row.hasStock ? (row.stock ?? 0) : undefined,
+          hasWeight: row.hasWeight,
+          weight: row.hasWeight ? (row.weight ?? 0) : 0,
+        };
+      }
+
+      for (const row of parsed.rows) {
+        try {
+          const payload = await buildRowPayload(row);
+          const existing = await appliaStorage.getStoreProductByCodigo(storeId, row.codigo);
+          if (existing) {
+            await appliaStorage.updateStoreProduct(storeId, existing.id, {
+              name: payload.name,
+              ...(payload.description !== undefined ? { description: payload.description } : {}),
+              codigo: payload.codigo,
+              price: payload.price,
+              pricesByCurrency: payload.pricesByCurrency,
+              sizes: payload.sizes,
+              ...(mappedFields.has("category") || mappedFields.has("subcategory")
+                ? {
+                    categoryIds: payload.categoryIds.length
+                      ? payload.categoryIds
+                      : existing.categoryIds,
+                    subcategoryIds: mappedFields.has("subcategory")
+                      ? payload.subcategoryIds
+                      : existing.subcategoryIds,
+                  }
+                : {}),
+              ...(mappedFields.has("ingredients")
+                ? {
+                    ingredientMaterialIds: payload.ingredientMaterialIds,
+                    removableIngredientMaterialIds: [],
+                    ingredientAdditionals: [],
+                  }
+                : {}),
+              ...(mappedFields.has("imageUrl")
+                ? {
+                    imageUrls:
+                      payload.imageUrls.length > 0 ? payload.imageUrls : existing.imageUrls,
+                  }
+                : {}),
+              ...(payload.hasStock ? { hasStock: true, stock: payload.stock ?? 0 } : {}),
+              ...(payload.hasWeight ? { hasWeight: true, weight: payload.weight ?? 0 } : {}),
+            });
+            updated += 1;
+          } else {
+            await appliaStorage.createStoreProduct(storeId, {
+              name: payload.name,
+              description: payload.description ?? null,
+              codigo: payload.codigo,
+              price: payload.price,
+              pricesByCurrency: payload.pricesByCurrency,
+              sizes: payload.sizes,
+              categoryIds: payload.categoryIds,
+              subcategoryIds: payload.subcategoryIds,
+              ingredientMaterialIds: payload.ingredientMaterialIds,
+              removableIngredientMaterialIds: [],
+              ingredientAdditionals: [],
+              imageUrls: payload.imageUrls,
+              showOnShowcase: true,
+              hasStock: payload.hasStock,
+              stock: payload.hasStock ? payload.stock ?? 0 : 0,
+              hasWeight: payload.hasWeight,
+              weight: payload.hasWeight ? payload.weight ?? 0 : 0,
+            });
+            created += 1;
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          rowErrors.push({ rowNumber: row.rowNumber, message: msg || "Error al guardar la fila." });
+        }
+      }
+
+      return res.json({
+        created,
+        updated,
+        skippedErrors: rowErrors.length,
+        errors: rowErrors.slice(0, 50),
+        message: `Importación lista: ${created} creados, ${updated} actualizados${
+          rowErrors.length ? `, ${rowErrors.length} con error` : ""
+        }.`,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
+      if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
+      if (msg === "STORE_FORBIDDEN") {
+        return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
+      }
+      console.error("[stores] products import", e);
+      return res.status(500).json({ message: msg || "No se pudo importar el archivo." });
     }
   });
 
@@ -3298,19 +3917,37 @@ export function registerStoreRoutes(app: Express): void {
       }
       const additionals =
         parsed.data.ingredientAdditionals ?? existing.ingredientAdditionals ?? [];
-      const priceError = assertProductSizesAndAdditionalsPrices(
-        store,
-        sizes,
-        mergedPrices,
-        additionals,
-      );
-      if (priceError) return res.status(400).json({ message: priceError });
+      /** Ocultar de vitrina debe poder hacerse aunque falten precios u otros datos. */
+      const hidingFromShowcase = parsed.data.showOnShowcase === false;
+      if (!hidingFromShowcase) {
+        const priceError = assertProductSizesAndAdditionalsPrices(
+          store,
+          sizes,
+          mergedPrices,
+          additionals,
+        );
+        if (priceError) return res.status(400).json({ message: priceError });
+      }
       if (parsed.data.categoryIds != null) {
         await assertStoreCategoryIds(storeId, parsed.data.categoryIds);
+      }
+      const nextCategoryIds = parsed.data.categoryIds ?? existing.categoryIds ?? [];
+      const rawSubcategoryIds =
+        parsed.data.subcategoryIds ?? existing.subcategoryIds ?? [];
+      const subcategoryIds = await pruneProductSubcategoryIds(
+        storeId,
+        nextCategoryIds,
+        rawSubcategoryIds,
+      );
+      if (parsed.data.subcategoryIds != null || parsed.data.categoryIds != null) {
+        await assertStoreSubcategoryIds(storeId, subcategoryIds, nextCategoryIds);
       }
       const product = await appliaStorage.updateStoreProduct(storeId, productId, {
         ...parsed.data,
         ...(parsed.data.sizes !== undefined ? { sizes } : {}),
+        ...(parsed.data.subcategoryIds != null || parsed.data.categoryIds != null
+          ? { subcategoryIds }
+          : {}),
       });
       const currency = normalizeStoreCurrencyFields(store);
       return res.json({
@@ -3325,8 +3962,16 @@ export function registerStoreRoutes(app: Express): void {
       if (msg === "STORE_NOT_FOUND") return res.status(404).json({ message: "Tienda no encontrada." });
       if (msg === "STORE_FORBIDDEN") return res.status(403).json({ message: "No tienes permiso para gestionar esta tienda." });
       if (msg === "STORE_PRODUCT_NOT_FOUND") return res.status(404).json({ message: "Producto no encontrado." });
+      if (msg === "STORE_PRODUCT_NO_STOCK") {
+        return res.status(400).json({ message: "No hay stock de este producto" });
+      }
       if (msg === "STORE_CATEGORY_INVALID") {
         return res.status(400).json({ message: "Una o más categorías no son válidas para esta tienda." });
+      }
+      if (msg === "STORE_SUBCATEGORY_INVALID" || msg === "STORE_SUBCATEGORY_CATEGORY_MISMATCH") {
+        return res.status(400).json({
+          message: "Una o más subcategorías no son válidas para las categorías del producto.",
+        });
       }
       console.error("[stores] update product", e);
       return res.status(500).json({ message: "No se pudo actualizar el producto." });
@@ -3369,17 +4014,40 @@ export function registerStoreRoutes(app: Express): void {
 
       // Vitrina pública: clientes e invitados siempre ven productos (tienda única).
       const all = await appliaStorage.listStoreProducts(storeForView.id);
-      const showcaseList = all.filter((p) => p.showOnShowcase !== false);
+      const showcaseList = all.filter((p) =>
+        resolveStoreProductShowOnShowcase({
+          showOnShowcase: p.showOnShowcase,
+          hasStock: p.hasStock,
+          stock: p.stock,
+        }),
+      );
+      const allCategories = await appliaStorage.listStoreCategories(storeForView.id);
+      const categorySortOrderById = new Map(
+        allCategories.map((c) => [
+          c.id,
+          c.sortOrder > 0 ? c.sortOrder : Number.MAX_SAFE_INTEGER,
+        ]),
+      );
       const ingredientsPage = await appliaStorage.listIngredientsMaterials({ page: 1, limit: 500 });
       const ingredientNameById = new Map(ingredientsPage.items.map((i) => [i.id, i.name]));
-      const products = showcaseList.map((p) =>
-        serializeStoreShowcaseProduct(p, storeForView, ingredientNameById),
-      );
+      const products = showcaseList
+        .slice()
+        .sort((a, b) => compareProductsByCategorySortOrder(a, b, categorySortOrderById))
+        .map((p) => serializeStoreShowcaseProduct(p, storeForView, ingredientNameById));
 
-      const allCategories = await appliaStorage.listStoreCategories(storeForView.id);
       const categories = allCategories
         .filter((c) => productIdsForCategory(showcaseList, c.id).length > 0)
         .map(serializeShowcaseCategory);
+
+      const allSubcategories = await appliaStorage.listStoreSubcategories(storeForView.id);
+      const categoryIdSet = new Set(categories.map((c) => c.id));
+      const subcategories = allSubcategories
+        .filter(
+          (s) =>
+            categoryIdSet.has(s.categoryId) &&
+            productIdsForSubcategory(showcaseList, s.id).length > 0,
+        )
+        .map(serializeShowcaseSubcategory);
 
       const allPromotions = await appliaStorage.listStorePromotions(storeForView.id);
       const promotions = allPromotions
@@ -3396,6 +4064,7 @@ export function registerStoreRoutes(app: Express): void {
       return res.json({
         products,
         categories,
+        subcategories,
         promotions,
         banners: serializedBanners,
         popups: serializedPopups,

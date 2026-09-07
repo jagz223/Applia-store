@@ -72,14 +72,22 @@ export type FetchRoadDrivingRouteResult = {
 /**
  * Ruta en coche vía GET /api/maps/route (Geoapify).
  * Un solo intento por llamada; solo reintenta si falla la red (no en 502 de ruta inválida).
+ * `avoidLocations`: preferencia suave (no bloquea el pedido).
  */
 export async function fetchRoadDrivingRoute(
   start: { lat: number; lon: number },
   end: { lat: number; lon: number },
+  opts?: { avoidLocations?: Array<{ lat: number; lon: number }> },
 ): Promise<FetchRoadDrivingRouteResult> {
   const from = `${start.lon},${start.lat}`;
   const to = `${end.lon},${end.lat}`;
-  const url = `/api/maps/route?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const avoid = (opts?.avoidLocations ?? [])
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon))
+    .slice(0, 48)
+    .map((p) => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`)
+    .join(";");
+  let url = `/api/maps/route?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  if (avoid) url += `&avoid=${encodeURIComponent(avoid)}`;
 
   const tryFetch = async () => {
     const res = await fetch(url);

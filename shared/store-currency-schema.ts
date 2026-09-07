@@ -137,6 +137,50 @@ export function currencyLabelForId(id: string, extras: StoreCurrencyExtra[]): st
   return extras.find((e) => e.id === id)?.name ?? id;
 }
 
+/** Parsea una tasa en Bs (acepta "450", "450,50", "450.50"). */
+export function parseRateBs(raw: string | number | null | undefined): number | null {
+  if (raw == null) return null;
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) && raw > 0 ? raw : null;
+  }
+  const normalized = String(raw)
+    .trim()
+    .replace(/\s/g, "")
+    .replace(",", ".");
+  if (!normalized) return null;
+  const n = Number.parseFloat(normalized);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Tasa Bs por 1 unidad de la moneda visual (USD/EUR BCV o extra manual).
+ */
+export function resolveCurrencyRateBs(input: {
+  currencyId: string;
+  extras?: StoreCurrencyExtra[];
+  dollarRateBs?: number | string | null;
+  euroRateBs?: number | string | null;
+}): number | null {
+  const id = String(input.currencyId ?? "").trim() || STORE_CURRENCY_USD_ID;
+  if (id === STORE_CURRENCY_USD_ID) return parseRateBs(input.dollarRateBs);
+  if (id === STORE_CURRENCY_EUR_ID) return parseRateBs(input.euroRateBs);
+  const extra = (input.extras ?? []).find((e) => e.id === id);
+  return parseRateBs(extra?.value);
+}
+
+/** Monto en moneda visual → Bs (redondeado a 2 decimales). */
+export function convertAmountToBs(amount: number, rateBs: number | null | undefined): number | null {
+  if (rateBs == null || !(rateBs > 0) || !Number.isFinite(amount)) return null;
+  return Math.round(amount * rateBs * 100) / 100;
+}
+
+export function formatAmountBs(amount: number): string {
+  return `${new Intl.NumberFormat("es-VE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)} Bs`;
+}
+
 export function normalizeProductPricesByCurrency(raw: unknown): Record<string, number> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out: Record<string, number> = {};

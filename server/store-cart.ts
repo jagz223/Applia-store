@@ -20,16 +20,19 @@ import {
 import type { StoreProduct, StorePromotion, StoreLocation, StoreDeliveryFares, StoreBranch } from "@shared/store-schema";
 import {
   computeCartDeliveryWeightKg,
+  normalizeStoreCurrencyFields,
   normalizeStoreDeliveryFares,
   normalizeStoreLocation,
   normalizeStoreBranches,
   resolveAdditionalDisplayPrice,
   resolveStorePromotionImageUrl,
+  storeProductHasAvailableStock,
 } from "@shared/store-schema";
 import type { StoreCheckoutPaymentMethod } from "@shared/store-order-schema";
 import { isCasheaPaymentMethod } from "@shared/store-cashea";
 import { parseStorePaymentGatewayKind } from "@shared/store-payment-gateways";
-import { resolveProductDisplayPrice, STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
+import { resolveProductDisplayPrice } from "@shared/store-currency-schema";
+import type { StoreCurrencyExtra } from "@shared/store-currency-schema";
 import { appliaStorage } from "./storage-applia";
 
 export type EnrichedStoreCartLine = {
@@ -44,6 +47,7 @@ export type EnrichedStoreCartLine = {
   quantity: number;
   lineTotal: number;
   imageUrl: string | null;
+  secondaryImageUrl?: string | null;
   removedIngredientMaterialIds?: number[];
   additionalIngredientMaterialIds?: number[];
 };
@@ -68,6 +72,8 @@ export type EnrichedStoreCart = {
   storeLocation: StoreLocation | null;
   branches: StoreBranch[];
   deliveryFares: StoreDeliveryFares;
+  currencyVisualId: string;
+  currencyExtras: StoreCurrencyExtra[];
 };
 
 export function addBodyToCartItem(body: AddStoreCartItem): StoreCartItem {
@@ -216,7 +222,9 @@ async function isValidCartItem(
 ): Promise<boolean> {
   if (item.kind === "product") {
     const product = products.find((p) => p.id === item.productId && p.storeId === storeId);
-    if (!product || product.showOnShowcase === false) return false;
+    if (!product) return false;
+    if (!storeProductHasAvailableStock(product)) return false;
+    if (product.showOnShowcase === false) return false;
     return validateProductCustomization(product, item);
   }
   const promotion = promotions.find((p) => p.id === item.promotionId && p.storeId === storeId);
@@ -252,6 +260,11 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
   const storeLocation = normalizeStoreLocation(store?.location ?? null);
   const branches = normalizeStoreBranches(store?.branches, storeLocation);
   const deliveryFares = normalizeStoreDeliveryFares(store?.deliveryFares);
+  const currency = normalizeStoreCurrencyFields({
+    currencyExtras: store?.currencyExtras,
+    currencyVisualId: store?.currencyVisualId,
+    currencyAcceptedPaymentIds: store?.currencyAcceptedPaymentIds,
+  });
 
   if (!cart) {
     return {
@@ -269,6 +282,8 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
       storeLocation,
       branches,
       deliveryFares,
+      currencyVisualId: currency.currencyVisualId,
+      currencyExtras: currency.currencyExtras,
     };
   }
 
@@ -285,7 +300,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
   const productById = new Map(products.map((p) => [p.id, p]));
   const promotionById = new Map(promotions.map((p) => [p.id, p]));
   const ingredientNameById = new Map(ingredientsPage.items.map((i) => [i.id, i.name]));
-  const visualCurrencyId = store?.currencyVisualId ?? STORE_CURRENCY_USD_ID;
+  const visualCurrencyId = currency.currencyVisualId;
 
   const items: EnrichedStoreCartLine[] = [];
   let subtotal = 0;
@@ -339,6 +354,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
         quantity: line.quantity,
         lineTotal,
         imageUrl: product.imageUrls?.[0]?.trim() ?? null,
+        secondaryImageUrl: product.imageUrls?.[1]?.trim() ?? null,
         removedIngredientMaterialIds: removed,
         additionalIngredientMaterialIds: additionals,
       });
@@ -360,6 +376,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
       quantity: line.quantity,
       lineTotal,
       imageUrl: imageUrl ?? null,
+      secondaryImageUrl: null,
     });
   }
 
@@ -385,6 +402,8 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     storeLocation,
     branches,
     deliveryFares,
+    currencyVisualId: currency.currencyVisualId,
+    currencyExtras: currency.currencyExtras,
   };
 }
 
@@ -429,6 +448,12 @@ export async function validateCartItemForStore(storeId: number, item: StoreCartI
     appliaStorage.listStoreProducts(storeId),
     appliaStorage.listStorePromotions(storeId),
   ]);
+  if (item.kind === "product") {
+    const product = products.find((p) => p.id === item.productId && p.storeId === storeId);
+    if (product && !storeProductHasAvailableStock(product)) {
+      throw new Error("STORE_PRODUCT_NO_STOCK");
+    }
+  }
   const ok = await isValidCartItem(storeId, item, products, promotions);
   if (!ok) throw new Error("STORE_CART_ITEM_INVALID");
 }

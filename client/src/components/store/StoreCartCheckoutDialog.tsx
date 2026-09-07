@@ -19,6 +19,13 @@ import {
 } from "@shared/store-payment-gateways";
 
 import {
+  convertAmountToBs,
+  formatAmountBs,
+  resolveCurrencyRateBs,
+  STORE_CURRENCY_USD_ID,
+} from "@shared/store-currency-schema";
+
+import {
 
   findNearestStoreBranch,
 
@@ -35,6 +42,8 @@ import {
   type StoreCartSummary,
 
 } from "@/hooks/use-store-cart";
+
+import { useBcvRates } from "@/hooks/use-store-currency";
 
 import { StoreCoverPhotoPicker } from "@/components/store/StoreCoverPhotoPicker";
 
@@ -94,6 +103,16 @@ function formatPrice(value: number) {
 
   return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
 
+}
+
+function CheckoutBsEquivalent({ amountBs }: { amountBs: number | null }) {
+  if (amountBs == null) return null;
+  return (
+    <p className="text-[11px] text-muted-foreground">
+      Equivale a{" "}
+      <span className="font-semibold text-foreground">{formatAmountBs(amountBs)}</span>
+    </p>
+  );
 }
 
 
@@ -321,6 +340,11 @@ export function StoreCartCheckoutDialog({
   const selectedGatewayKind = parseStorePaymentGatewayKind(selectedPaymentMethod?.gatewayKind);
   const isGatewaySelected = selectedGatewayKind != null;
   const skipProof = isCasheaSelected || isGatewaySelected;
+  /** Stripe/PayPal: sin conversión Bs. Resto de métodos (transferencia, Cashea, dLocal, etc.): sí. */
+  const showBsConversion =
+    selectedGatewayKind !== "stripe" && selectedGatewayKind !== "paypal";
+
+  const bcvQuery = useBcvRates(open && showBsConversion);
 
 
 
@@ -348,6 +372,24 @@ export function StoreCartCheckoutDialog({
 
   const storePaymentDue =
     cart.subtotal + (isDelivery && estimatedDeliveryFee != null ? estimatedDeliveryFee : 0);
+
+  const storePaymentDueBs = useMemo(() => {
+    if (!showBsConversion) return null;
+    const rateBs = resolveCurrencyRateBs({
+      currencyId: cart.currencyVisualId ?? STORE_CURRENCY_USD_ID,
+      extras: cart.currencyExtras ?? [],
+      dollarRateBs: bcvQuery.data?.dollar.rateBs ?? null,
+      euroRateBs: bcvQuery.data?.euro.rateBs ?? null,
+    });
+    return convertAmountToBs(storePaymentDue, rateBs);
+  }, [
+    showBsConversion,
+    cart.currencyVisualId,
+    cart.currencyExtras,
+    bcvQuery.data?.dollar.rateBs,
+    bcvQuery.data?.euro.rateBs,
+    storePaymentDue,
+  ]);
 
 
 
@@ -883,9 +925,11 @@ export function StoreCartCheckoutDialog({
                     ? `${nearestDeliveryBranch.name} · ${deliveryOrigin.label}`
                     : deliveryOrigin.label,
                 }}
+                branches={branches}
                 deliveryFares={cart.deliveryFares}
                 itemCount={cart.itemCount}
                 cartWeightKg={cart.cartWeightKg ?? 0}
+                merchandiseTotalVisual={cart.subtotal}
                 value={deliveryLocation}
                 disabled={saving}
                 mapEnabled={open}
@@ -1021,6 +1065,7 @@ export function StoreCartCheckoutDialog({
                     <span> (incluye envío {formatPrice(estimatedDeliveryFee)}).</span>
                   ) : null}
                 </p>
+                {showBsConversion ? <CheckoutBsEquivalent amountBs={storePaymentDueBs} /> : null}
               </div>
 
               <StoreCoverPhotoPicker
@@ -1062,9 +1107,16 @@ export function StoreCartCheckoutDialog({
                 ) : null}
                 <div className="flex items-center justify-between gap-4 border-t border-border pt-2.5">
                   <span className="font-semibold">Total a la tienda</span>
-                  <span className="text-lg font-bold text-secondary dark:text-primary">
-                    {formatPrice(storePaymentDue)}
-                  </span>
+                  <div className="text-right">
+                    <span className="text-lg font-bold text-secondary dark:text-primary">
+                      {formatPrice(storePaymentDue)}
+                    </span>
+                    {showBsConversion && storePaymentDueBs != null ? (
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {formatAmountBs(storePaymentDueBs)}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
@@ -1105,7 +1157,14 @@ export function StoreCartCheckoutDialog({
           >
             <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:min-w-[12rem]">
               <span className="text-sm text-muted-foreground">Total</span>
-              <span className="text-lg font-bold tracking-tight">{formatPrice(storePaymentDue)}</span>
+              <div className="text-right">
+                <span className="text-lg font-bold tracking-tight">{formatPrice(storePaymentDue)}</span>
+                {showBsConversion && storePaymentDueBs != null ? (
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {formatAmountBs(storePaymentDueBs)}
+                  </p>
+                ) : null}
+              </div>
             </div>
             <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row sm:justify-end">
               <Button

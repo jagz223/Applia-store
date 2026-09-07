@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Eye, ImageIcon, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Link } from "wouter";
+import { Eye, FileSpreadsheet, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import {
   useDeleteStoreProduct,
   useStoreProductsPage,
@@ -8,6 +9,7 @@ import {
 } from "@/hooks/use-store-products";
 import { StoreProductFormDialog } from "@/components/store/StoreProductFormDialog";
 import { StoreProductDetailDialog } from "@/components/store/StoreProductDetailDialog";
+import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
 import {
   STORE_ADMIN_LIST_PAGE_SIZE,
   StoreAdminListPagination,
@@ -53,22 +55,13 @@ function formatPrice(value: number, currencyLabel?: string) {
 }
 
 function ProductThumbnail({ imageUrls }: { imageUrls: string[] }) {
-  const url = imageUrls[0]?.trim();
-  if (!url) {
-    return (
-      <div
-        className="h-12 w-12 shrink-0 rounded-md border border-dashed border-border bg-muted/40 flex items-center justify-center text-muted-foreground"
-        aria-hidden
-      >
-        <ImageIcon className="h-5 w-5" />
-      </div>
-    );
-  }
   return (
-    <img
-      src={url}
-      alt=""
-      className="h-12 w-12 shrink-0 rounded-md border border-border object-cover bg-muted/30"
+    <StoreProductDualImage
+      primaryUrl={imageUrls[0]}
+      secondaryUrl={imageUrls[1]}
+      frameClassName="h-12 w-12 shrink-0 rounded-md border border-border"
+      secondaryClassName="h-4 w-4 bottom-0.5 right-0.5 border"
+      placeholderClassName="bg-muted/40 text-muted-foreground border-dashed"
     />
   );
 }
@@ -90,6 +83,13 @@ function ShowcaseToggle({
   }, [product.id, product.showOnShowcase]);
 
   async function handleChange(next: boolean) {
+    if (next && product.hasStock === true && (product.stock ?? 0) <= 0) {
+      toast({
+        variant: "destructive",
+        title: "No hay stock de este producto",
+      });
+      return;
+    }
     const prev = checked;
     setChecked(next);
     try {
@@ -105,10 +105,11 @@ function ShowcaseToggle({
       });
     } catch (e) {
       setChecked(prev);
+      const msg = e instanceof Error ? e.message : "Error desconocido";
       toast({
         variant: "destructive",
-        title: "No se pudo actualizar",
-        description: e instanceof Error ? e.message : "Error desconocido",
+        title: msg.includes("stock") ? "No hay stock de este producto" : "No se pudo actualizar",
+        description: msg.includes("stock") ? undefined : msg,
       });
     }
   }
@@ -179,11 +180,13 @@ function ProductRowActions({
 
 export function StoreAdminProductsPanel({
   storeId,
+  slug,
   currencyAcceptedPaymentIds,
   currencyExtras,
   currencyVisualId,
 }: {
   storeId: number;
+  slug: string;
   currencyAcceptedPaymentIds?: string[];
   currencyExtras?: StoreCurrencyExtra[];
   currencyVisualId?: string;
@@ -259,10 +262,18 @@ export function StoreAdminProductsPanel({
             <CardTitle className="font-display">Productos</CardTitle>
             <CardDescription>Administra el catálogo de tu tienda.</CardDescription>
           </div>
-          <Button size="sm" className="h-10 shrink-0 gap-1.5 rounded-full" onClick={openCreate}>
-            <Plus className="h-4 w-4" />
-            Crear producto
-          </Button>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" className="h-10 gap-1.5 rounded-full" asChild>
+              <Link href={`/tienda/${encodeURIComponent(slug)}/admin/productos/importar`}>
+                <FileSpreadsheet className="h-4 w-4" />
+                Importar Excel/CSV
+              </Link>
+            </Button>
+            <Button size="sm" className="h-10 shrink-0 gap-1.5 rounded-full" onClick={openCreate}>
+              <Plus className="h-4 w-4" />
+              Crear producto
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="relative">

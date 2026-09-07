@@ -1,9 +1,10 @@
-import { ImageIcon, Loader2, Package } from "lucide-react";
+import { Loader2, Package } from "lucide-react";
 import type { StoreShowcaseProduct } from "@/hooks/use-store-showcase";
 import {
   StoreShowcaseAddToCartButton,
   showcaseCartItemKey,
 } from "@/components/store/StoreShowcaseAddToCartButton";
+import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
 import { cn } from "@/lib/utils";
 
 function formatPrice(value: number, currencyLabel?: string) {
@@ -28,6 +29,7 @@ function ShowcaseProductCard({
   selected?: boolean;
 }) {
   const imageUrl = product.imageUrls[0]?.trim();
+  const secondaryImageUrl = product.imageUrls[1]?.trim();
   const description = product.description?.trim() ?? "";
   const itemKey = showcaseCartItemKey("product", product.id);
   const busy = addBusyKey === itemKey;
@@ -57,17 +59,13 @@ function ShowcaseProductCard({
     >
       <div className="relative bg-muted/20 p-2 sm:p-3 pb-0">
         <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-muted/40">
-          {imageUrl ? (
-            <img
-              src={imageUrl}
-              alt=""
-              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <ImageIcon className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground/40" />
-            </div>
-          )}
+          <StoreProductDualImage
+            primaryUrl={imageUrl}
+            secondaryUrl={secondaryImageUrl}
+            frameClassName="h-full w-full"
+            imgClassName="transition-transform duration-300 group-hover:scale-[1.02]"
+            secondaryClassName="h-8 w-8 sm:h-10 sm:w-10"
+          />
           {onAddToCart && !onSelect ? (
             <div onClick={(e) => e.stopPropagation()}>
               <StoreShowcaseAddToCartButton

@@ -1,7 +1,10 @@
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import type { StoreShowcaseCategory } from "@/hooks/use-store-showcase";
+import type {
+  StoreShowcaseCategory,
+  StoreShowcaseSubcategory,
+} from "@/hooks/use-store-showcase";
 import { cn } from "@/lib/utils";
 
 export type ShowcaseCategoryFilter = "all" | "promotions" | number;
@@ -11,7 +14,10 @@ type StoreShowcaseFiltersProps = {
   onSearchChange: (value: string) => void;
   categoryFilter: ShowcaseCategoryFilter;
   onCategoryChange: (value: ShowcaseCategoryFilter) => void;
+  subcategoryFilter: number | null;
+  onSubcategoryChange: (value: number | null) => void;
   categories: StoreShowcaseCategory[];
+  subcategories?: StoreShowcaseSubcategory[];
   showPromotionsFilter?: boolean;
   className?: string;
 };
@@ -21,10 +27,18 @@ export function StoreShowcaseFilters({
   onSearchChange,
   categoryFilter,
   onCategoryChange,
+  subcategoryFilter,
+  onSubcategoryChange,
   categories,
+  subcategories = [],
   showPromotionsFilter,
   className,
 }: StoreShowcaseFiltersProps) {
+  const categorySubs =
+    typeof categoryFilter === "number"
+      ? subcategories.filter((s) => s.categoryId === categoryFilter)
+      : [];
+
   return (
     <Card className={cn("rounded-2xl border-border shadow-sm", className)}>
       <CardContent className="p-4 space-y-3">
@@ -54,13 +68,19 @@ export function StoreShowcaseFilters({
           <CategoryChip
             label="Todo"
             active={categoryFilter === "all"}
-            onClick={() => onCategoryChange("all")}
+            onClick={() => {
+              onCategoryChange("all");
+              onSubcategoryChange(null);
+            }}
           />
           {showPromotionsFilter ? (
             <CategoryChip
               label="Promociones"
               active={categoryFilter === "promotions"}
-              onClick={() => onCategoryChange("promotions")}
+              onClick={() => {
+                onCategoryChange("promotions");
+                onSubcategoryChange(null);
+              }}
             />
           ) : null}
           {categories.map((cat) => (
@@ -68,10 +88,39 @@ export function StoreShowcaseFilters({
               key={cat.id}
               label={cat.name}
               active={categoryFilter === cat.id}
-              onClick={() => onCategoryChange(cat.id)}
+              onClick={() => {
+                onCategoryChange(cat.id);
+                onSubcategoryChange(null);
+              }}
             />
           ))}
         </div>
+
+        {categorySubs.length > 0 ? (
+          <div
+            className={cn(
+              "flex flex-nowrap gap-2 overflow-x-auto overscroll-x-contain pb-0.5",
+              "scroll-smooth [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5",
+              "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30",
+              "[&::-webkit-scrollbar-track]:bg-transparent",
+            )}
+            aria-label="Filtrar por subcategoría"
+          >
+            <CategoryChip
+              label="Todas"
+              active={subcategoryFilter == null}
+              onClick={() => onSubcategoryChange(null)}
+            />
+            {categorySubs.map((sub) => (
+              <CategoryChip
+                key={sub.id}
+                label={sub.name}
+                active={subcategoryFilter === sub.id}
+                onClick={() => onSubcategoryChange(sub.id)}
+              />
+            ))}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

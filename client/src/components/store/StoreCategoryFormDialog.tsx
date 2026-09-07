@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import {
   useCreateStoreCategory,
   useUpdateStoreCategory,
   productsFromIds,
   type StoreCategorySummary,
 } from "@/hooks/use-store-categories";
+import { useStoreSubcategories } from "@/hooks/use-store-subcategories";
 import { useStoreProducts } from "@/hooks/use-store-products";
 import type { SelectedEntity } from "@/components/store/StoreEntityMultiPicker";
 import { StoreCategoryProductPicker } from "@/components/store/StoreCategoryProductPicker";
@@ -47,11 +48,17 @@ export function StoreCategoryFormDialog({
   const { toast } = useToast();
   const isEdit = category != null;
   const { data: products = [] } = useStoreProducts(storeId, open);
+  const { data: existingSubs = [] } = useStoreSubcategories(
+    storeId,
+    open && isEdit,
+    category?.id,
+  );
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [hideFromShowcaseAll, setHideFromShowcaseAll] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<SelectedEntity[]>([]);
+  const [draftSubNames, setDraftSubNames] = useState<string[]>([""]);
 
   const createMutation = useCreateStoreCategory(storeId);
   const updateMutation = useUpdateStoreCategory(storeId);
@@ -69,6 +76,7 @@ export function StoreCategoryFormDialog({
       setHideFromShowcaseAll(false);
       setSelectedProducts([]);
     }
+    setDraftSubNames([""]);
   }, [open, category]);
 
   useEffect(() => {
@@ -85,11 +93,13 @@ export function StoreCategoryFormDialog({
     }
 
     const productIds = selectedProducts.map((p) => p.id);
+    const subcategoryNames = draftSubNames.map((n) => n.trim()).filter(Boolean);
     const payload = {
       name: trimmedName,
       description: description.trim() || null,
       productIds,
       hideFromShowcaseAll,
+      subcategoryNames,
     };
 
     try {
@@ -123,8 +133,8 @@ export function StoreCategoryFormDialog({
           </DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Modifica la categoría y sus productos asociados."
-              : "Agrupa productos para organizar tu catálogo."}
+              ? "Modifica la categoría, productos y nuevas subcategorías."
+              : "Agrupa productos y, si quieres, crea subcategorías a la vez."}
           </DialogDescription>
         </DialogHeader>
 
@@ -168,6 +178,70 @@ export function StoreCategoryFormDialog({
                 onCheckedChange={setHideFromShowcaseAll}
                 disabled={saving}
               />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Subcategorías</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-full"
+                  disabled={saving || draftSubNames.length >= 50}
+                  onClick={() => setDraftSubNames((prev) => [...prev, ""])}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Añadir
+                </Button>
+              </div>
+              {isEdit && existingSubs.length > 0 ? (
+                <ul className="space-y-1 rounded-xl border border-border/70 bg-muted/15 px-3 py-2 text-sm">
+                  {existingSubs.map((s) => (
+                    <li key={s.id} className="text-muted-foreground">
+                      {s.name}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                {isEdit
+                  ? "Puedes añadir nombres nuevos; se crearán al guardar."
+                  : "Opcional. Se crearán junto con la categoría."}
+              </p>
+              <div className="space-y-2">
+                {draftSubNames.map((value, index) => (
+                  <div key={index} className="flex gap-2">
+                    <Input
+                      className={storeAdminFieldClass}
+                      value={value}
+                      maxLength={120}
+                      placeholder={`Subcategoría ${index + 1}`}
+                      disabled={saving}
+                      onChange={(e) =>
+                        setDraftSubNames((prev) =>
+                          prev.map((row, i) => (i === index ? e.target.value : row)),
+                        )
+                      }
+                    />
+                    {draftSubNames.length > 1 ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-11 w-11 shrink-0 text-muted-foreground hover:text-destructive"
+                        disabled={saving}
+                        aria-label="Quitar"
+                        onClick={() =>
+                          setDraftSubNames((prev) => prev.filter((_, i) => i !== index))
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </div>
 
             <StoreCategoryProductPicker

@@ -71,17 +71,119 @@ export const STORE_FULFILLMENT_REQUIRES_LOCATION_MESSAGE =
 
 export const STORE_PRIMARY_BRANCH_ID = "primary";
 export const STORE_BRANCH_MAX = 20;
+export const STORE_DELIVERY_PERIMETER_MAX_VERTICES = 80;
+export const STORE_DELIVERY_AVOID_SEGMENTS_MAX = 30;
+
+export const storeDeliveryPerimeterPointSchema = z.object({
+  lat: z.number().finite().min(-90).max(90),
+  lon: z.number().finite().min(-180).max(180),
+});
+
+export const storeDeliveryPerimeterSchema = z
+  .array(storeDeliveryPerimeterPointSchema)
+  .max(STORE_DELIVERY_PERIMETER_MAX_VERTICES)
+  .nullable()
+  .optional()
+  .refine((v) => v == null || v.length === 0 || v.length >= 3, {
+    message: "El perímetro de delivery requiere al menos 3 puntos",
+  });
+
+export const storeDeliveryAvoidSegmentSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  a: storeDeliveryPerimeterPointSchema,
+  b: storeDeliveryPerimeterPointSchema,
+  /** Vértices del tramo ajustado a la red vial (opcional). */
+  path: z.array(storeDeliveryPerimeterPointSchema).max(100).optional(),
+});
+
+export const storeDeliveryAvoidSegmentsSchema = z
+  .array(storeDeliveryAvoidSegmentSchema)
+  .max(STORE_DELIVERY_AVOID_SEGMENTS_MAX)
+  .nullable()
+  .optional();
 
 export const storeBranchSchema = z.object({
   id: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1).max(80),
   location: storeLocationSchema.nullable(),
+  /** Polígono de cobertura de delivery (≥3 vértices). null / vacío = sin restricción. */
+  deliveryPerimeter: storeDeliveryPerimeterSchema.default(null),
+  /**
+   * Tramos a evitar en el cálculo de ruta (preferencia suave vía Geoapify).
+   * Cada ítem = dos extremos; la ruta se desvía si hay alternativa.
+   */
+  deliveryAvoidSegments: storeDeliveryAvoidSegmentsSchema.default(null),
 });
 
 export type StoreBranch = z.infer<typeof storeBranchSchema>;
+export type StoreDeliveryAvoidSegment = z.infer<typeof storeDeliveryAvoidSegmentSchema>;
 
 export function defaultStoreBranchName(index: number): string {
   return `Sucursal ${index + 1}`;
+}
+
+function normalizeBranchDeliveryPerimeter(value: unknown): StoreBranch["deliveryPerimeter"] {
+  if (!Array.isArray(value)) return null;
+  const out: Array<{ lat: number; lon: number }> = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const lat = Number(row.lat);
+    const lon = Number(row.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
+    out.push({ lat, lon });
+    if (out.length >= STORE_DELIVERY_PERIMETER_MAX_VERTICES) break;
+  }
+  return out.length >= 3 ? out : null;
+}
+
+function normalizeLatLonPoint(value: unknown): { lat: number; lon: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const lat = Number(row.lat);
+  const lon = Number(row.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return { lat, lon };
+}
+
+function normalizeBranchDeliveryAvoidSegments(
+  value: unknown,
+): StoreBranch["deliveryAvoidSegments"] {
+  if (!Array.isArray(value)) return null;
+  const out: StoreDeliveryAvoidSegment[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const a = normalizeLatLonPoint(row.a);
+    const b = normalizeLatLonPoint(row.b);
+    if (!a || !b) continue;
+    if (a.lat === b.lat && a.lon === b.lon) continue;
+    let id = String(row.id ?? "").trim();
+    if (!id || seen.has(id)) {
+      id = `avs_${out.length}_${Math.abs(Math.round(a.lat * 1e5))}_${Math.abs(Math.round(a.lon * 1e5))}`;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const pathRaw = Array.isArray(row.path) ? row.path : [];
+    const path: Array<{ lat: number; lon: number }> = [];
+    for (const pr of pathRaw) {
+      const p = normalizeLatLonPoint(pr);
+      if (!p) continue;
+      path.push(p);
+      if (path.length >= 100) break;
+    }
+    out.push({
+      id,
+      a,
+      b,
+      ...(path.length >= 2 ? { path } : {}),
+    });
+    if (out.length >= STORE_DELIVERY_AVOID_SEGMENTS_MAX) break;
+  }
+  return out.length > 0 ? out : null;
 }
 
 export function normalizeStoreBranches(
@@ -102,6 +204,8 @@ export function normalizeStoreBranches(
       id,
       name: name || defaultStoreBranchName(parsed.length),
       location: normalizeStoreLocation(row.location),
+      deliveryPerimeter: normalizeBranchDeliveryPerimeter(row.deliveryPerimeter),
+      deliveryAvoidSegments: normalizeBranchDeliveryAvoidSegments(row.deliveryAvoidSegments),
     });
     if (parsed.length >= STORE_BRANCH_MAX) break;
   }
@@ -115,6 +219,8 @@ export function normalizeStoreBranches(
     id: STORE_PRIMARY_BRANCH_ID,
     name: primaryFromList?.name?.trim() || defaultStoreBranchName(0),
     location: primaryFromList?.location ?? fallbackLocation ?? null,
+    deliveryPerimeter: primaryFromList?.deliveryPerimeter ?? null,
+    deliveryAvoidSegments: primaryFromList?.deliveryAvoidSegments ?? null,
   };
   return [primary, ...extras].slice(0, STORE_BRANCH_MAX);
 }
@@ -188,7 +294,7 @@ export function canEnableStoreFulfillmentOptions(
 }
 
 /** Tarifas de delivery propias de la tienda (base + por km + umbrales). */
-export const storeDeliverySurchargeModeSchema = z.enum(["quantity", "weight"]);
+export const storeDeliverySurchargeModeSchema = z.enum(["distance", "quantity", "weight"]);
 export type StoreDeliverySurchargeMode = z.infer<typeof storeDeliverySurchargeModeSchema>;
 
 export const storeDeliveryCostTierSchema = z.object({
@@ -202,15 +308,24 @@ export type StoreDeliveryCostTier = z.infer<typeof storeDeliveryCostTierSchema>;
 export const DEFAULT_STORE_DELIVERY_FARES = {
   baseUsd: 1.75,
   perKmUsd: 0.5,
-  surchargeMode: "quantity" as StoreDeliverySurchargeMode,
+  surchargeMode: "distance" as StoreDeliverySurchargeMode,
   costTiers: [{ id: "default", minValue: 0, priceUsd: 1.75 }] as StoreDeliveryCostTier[],
+  freeDeliveryEnabled: false,
+  freeDeliveryFromAmount: null as number | null,
 };
 
 export const storeDeliveryFaresSchema = z.object({
   baseUsd: z.number().min(0).max(500),
   perKmUsd: z.number().min(0).max(50),
-  surchargeMode: storeDeliverySurchargeModeSchema.optional().default("quantity"),
+  surchargeMode: storeDeliverySurchargeModeSchema.optional().default("distance"),
   costTiers: z.array(storeDeliveryCostTierSchema).max(50).optional().default([]),
+  /** Si está activo, el delivery puede ser gratis al alcanzar el monto. */
+  freeDeliveryEnabled: z.boolean().optional().default(false),
+  /**
+   * Monto mínimo (moneda visual de la tienda) del total de compra (productos + envío calculado)
+   * a partir del cual el envío queda en 0. null / ≤0 = nunca gratis.
+   */
+  freeDeliveryFromAmount: z.number().positive().max(1_000_000_000).nullable().optional().default(null),
 });
 
 export type StoreDeliveryFares = z.infer<typeof storeDeliveryFaresSchema>;
@@ -271,18 +386,31 @@ export function normalizeStoreDeliveryFares(value: unknown): StoreDeliveryFares 
   const perKmUsd = parsed.success
     ? roundMoneyUsd(parsed.data.perKmUsd)
     : DEFAULT_STORE_DELIVERY_FARES.perKmUsd;
-  const surchargeMode: StoreDeliverySurchargeMode =
-    parsed.success && parsed.data.surchargeMode === "weight" ? "weight" : "quantity";
+  const surchargeMode: StoreDeliverySurchargeMode = parsed.success
+    ? parsed.data.surchargeMode === "weight"
+      ? "weight"
+      : parsed.data.surchargeMode === "quantity"
+        ? "quantity"
+        : "distance"
+    : DEFAULT_STORE_DELIVERY_FARES.surchargeMode;
   const costTiers = normalizeStoreDeliveryCostTiers(
     parsed.success ? parsed.data.costTiers : [],
     baseUsd,
   );
   const defaultTier = costTiers.find((t) => t.minValue === 0) ?? costTiers[0];
+  const freeDeliveryEnabled = parsed.success ? parsed.data.freeDeliveryEnabled === true : false;
+  const rawAmount = parsed.success ? parsed.data.freeDeliveryFromAmount : null;
+  const freeDeliveryFromAmount =
+    typeof rawAmount === "number" && Number.isFinite(rawAmount) && rawAmount > 0
+      ? roundMoneyUsd(rawAmount)
+      : null;
   return {
     baseUsd: defaultTier ? defaultTier.priceUsd : baseUsd,
     perKmUsd,
     surchargeMode,
     costTiers,
+    freeDeliveryEnabled,
+    freeDeliveryFromAmount,
   };
 }
 
@@ -291,6 +419,7 @@ export function resolveStoreDeliveryBaseUsd(
   metric?: StoreDeliveryCartMetric | null,
 ): number {
   const normalized = normalizeStoreDeliveryFares(fares);
+  if (normalized.surchargeMode === "distance") return 0;
   const value =
     normalized.surchargeMode === "weight"
       ? Math.max(0, Number(metric?.cartWeightKg) || 0)
@@ -302,14 +431,41 @@ export function resolveStoreDeliveryBaseUsd(
   return normalized.baseUsd;
 }
 
+/**
+ * Si el switch está activo y hay monto > 0, y el total (productos + fee calculado)
+ * en moneda visual alcanza el umbral, el envío queda en 0.
+ */
+export function applyStoreFreeDeliveryFee(
+  fares: StoreDeliveryFares,
+  fee: number,
+  merchandiseTotalVisual: number,
+): number {
+  const normalized = normalizeStoreDeliveryFares(fares);
+  if (!normalized.freeDeliveryEnabled) return fee;
+  const threshold = normalized.freeDeliveryFromAmount;
+  if (threshold == null || !(threshold > 0)) return fee;
+  const safeFee = Math.max(0, Number(fee) || 0);
+  const merchandise = Math.max(0, Number(merchandiseTotalVisual) || 0);
+  const orderTotal = merchandise + safeFee;
+  if (orderTotal >= threshold) return 0;
+  return safeFee;
+}
+
 export function computeStoreDeliveryFeeUsd(
   fares: StoreDeliveryFares,
   distanceM: number,
   metric?: StoreDeliveryCartMetric | null,
+  merchandiseTotalVisual?: number | null,
 ): number {
+  const normalized = normalizeStoreDeliveryFares(fares);
   const km = Math.max(0, (Number(distanceM) || 0) / 1000);
-  const total = resolveStoreDeliveryBaseUsd(fares, metric) + km * Number(fares.perKmUsd);
-  return roundMoneyUsd(total);
+  const total =
+    normalized.surchargeMode === "distance"
+      ? km * Number(normalized.perKmUsd)
+      : resolveStoreDeliveryBaseUsd(normalized, metric) + km * Number(normalized.perKmUsd);
+  const fee = roundMoneyUsd(total);
+  if (merchandiseTotalVisual == null) return fee;
+  return applyStoreFreeDeliveryFee(normalized, fee, merchandiseTotalVisual);
 }
 
 export type Store = {
@@ -387,7 +543,7 @@ export function normalizeStoreCurrencyFields(input: {
   return { currencyExtras, currencyVisualId, currencyAcceptedPaymentIds };
 }
 
-export const STORE_PRODUCT_MAX_IMAGES = 1;
+export const STORE_PRODUCT_MAX_IMAGES = 2;
 export const STORE_PRODUCT_MAX_SIZES = 20;
 
 /** Tienda principal del sistema (Home, nav, /tienda, panel admin). Cambiar aquí el id. */
@@ -440,6 +596,51 @@ export function resolveStoreProductWeightFields(input: {
   if (!hasWeight) return { hasWeight: false, weight: 0, sizes };
   if (sizes.length > 0) return { hasWeight: true, weight: 0, sizes };
   return { hasWeight: true, weight: normalizeWeightKg(input.weight), sizes };
+}
+
+/** Normaliza hasStock + stock. Con tracking: vacío/inválido = 0. */
+export function normalizeStoreProductStockFields(input: {
+  hasStock?: boolean | null;
+  stock?: number | null;
+}): { hasStock: boolean; stock: number } {
+  const hasStock = input.hasStock === true;
+  if (input.stock == null || (typeof input.stock === "number" && !Number.isFinite(input.stock))) {
+    return { hasStock, stock: 0 };
+  }
+  const stock = Math.max(0, Math.trunc(Number(input.stock)));
+  if (!Number.isFinite(stock)) return { hasStock, stock: 0 };
+  return { hasStock, stock };
+}
+
+/** `null` = no se lleva inventario; número = unidades efectivas (≥0). */
+export function storeProductEffectiveStock(product: {
+  hasStock?: boolean | null;
+  stock?: number | null;
+}): number | null {
+  if (product.hasStock !== true) return null;
+  return normalizeStoreProductStockFields({ hasStock: true, stock: product.stock }).stock;
+}
+
+export function storeProductHasAvailableStock(product: {
+  hasStock?: boolean | null;
+  stock?: number | null;
+}): boolean {
+  const effective = storeProductEffectiveStock(product);
+  return effective === null || effective > 0;
+}
+
+/**
+ * Resuelve showOnShowcase respetando stock.
+ * Si hasStock y stock efectivo ≤ 0 → siempre false.
+ */
+export function resolveStoreProductShowOnShowcase(input: {
+  showOnShowcase?: boolean | null;
+  hasStock?: boolean | null;
+  stock?: number | null;
+}): boolean {
+  if (input.showOnShowcase === false) return false;
+  if (!storeProductHasAvailableStock(input)) return false;
+  return true;
 }
 
 /** Precio de listado: el menor entre tamaños en la moneda visual. */
@@ -619,6 +820,8 @@ export function normalizeStoreProductIngredientOptions(input: {
 export const insertStoreProductSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(5000).optional().nullable(),
+  /** Código interno del producto (único por tienda cuando está definido). */
+  codigo: z.string().trim().max(120).optional().nullable(),
   price: z.number().positive(),
   pricesByCurrency: z
     .record(z.string().trim().min(1).max(64), z.number().positive())
@@ -627,6 +830,8 @@ export const insertStoreProductSchema = z.object({
   /** Tamaños del producto (vacío = un solo precio base). */
   sizes: z.array(storeProductSizeSchema).max(STORE_PRODUCT_MAX_SIZES).optional().default([]),
   categoryIds: z.array(z.number().int().positive()).optional().default([]),
+  /** Subcategorías del producto (opcionales; deben pertenecer a alguna categoría seleccionada). */
+  subcategoryIds: z.array(z.number().int().positive()).optional().default([]),
   ingredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
   /** Subconjunto de ingredientMaterialIds que el cliente puede quitar (≥2 base para usarlo). */
   removableIngredientMaterialIds: z.array(z.number().int().positive()).optional().default([]),
@@ -634,11 +839,21 @@ export const insertStoreProductSchema = z.object({
   ingredientAdditionals: z.array(storeProductIngredientAdditionalSchema).optional().default([]),
   imageUrls: z
     .array(z.string().trim().min(1).max(2000))
-    .max(STORE_PRODUCT_MAX_IMAGES)
+    .max(2) // principal + segunda imagen (STORE_PRODUCT_MAX_IMAGES)
     .optional()
     .default([]),
   /** Si el producto aparece en la vitrina pública de la tienda. */
   showOnShowcase: z.boolean().optional().default(true),
+  /**
+   * Si true, el inventario (`stock`) limita vitrina y venta.
+   * Si false, `stock` se ignora.
+   */
+  hasStock: z.boolean().optional().default(false),
+  /**
+   * Unidades disponibles cuando `hasStock` es true.
+   * Vacío/null/ inválido se trata como 0.
+   */
+  stock: z.number().int().min(0).max(1_000_000_000).optional().nullable().default(null),
   /** Si está activo, el peso entra en el cálculo de delivery por kg. */
   hasWeight: z.boolean().optional().default(false),
   /** Peso en kg cuando el producto no tiene tamaños. 0 si hasWeight es false. */
@@ -656,22 +871,34 @@ export type StoreProduct = {
   storeId: number;
   name: string;
   description: string | null;
+  /** Código interno; null si no tiene. */
+  codigo: string | null;
   price: number;
   /** Precio por moneda aceptada como pago (id → monto). Sin tamaños, o derivado (mínimo) si hay tamaños. */
   pricesByCurrency: Record<string, number>;
   /** Tamaños con precio propio por moneda. Vacío = producto sin variantes de tamaño. */
   sizes: StoreProductSize[];
   categoryIds: number[];
+  subcategoryIds: number[];
   ingredientMaterialIds: number[];
   removableIngredientMaterialIds: number[];
   ingredientAdditionals: StoreProductIngredientAdditional[];
   imageUrls: string[];
   showOnShowcase: boolean;
+  hasStock: boolean;
+  /** Unidades; relevante solo si hasStock. Vacío en UI = 0 cuando hasStock. */
+  stock: number;
   hasWeight: boolean;
   weight: number;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
+
+export function normalizeStoreProductCodigo(value: unknown): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s.length > 0 ? s.slice(0, 120) : null;
+}
 
 export function resolveStoreProductUnitWeightKg(
   product: Pick<StoreProduct, "hasWeight" | "weight" | "sizes">,
@@ -751,6 +978,10 @@ export const insertStoreCategorySchema = z.object({
    * sí al filtrar por esta u otras categorías a las que pertenezcan.
    */
   hideFromShowcaseAll: z.boolean().optional().default(false),
+  /** Orden en vitrina (1 = primera categoría real, después de Todo/Promociones). */
+  sortOrder: z.number().int().positive().max(10_000).optional(),
+  /** Nombres de subcategorías a crear junto con la categoría (solo create / opcional en update). */
+  subcategoryNames: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
 });
 
 export type InsertStoreCategory = z.infer<typeof insertStoreCategorySchema>;
@@ -765,6 +996,102 @@ export type StoreCategory = {
   name: string;
   description: string | null;
   hideFromShowcaseAll: boolean;
+  /** Posición 1-based en filtros de vitrina (Tras Todo / Promociones). */
+  sortOrder: number;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};
+
+export function compareStoreCategoriesBySortOrder(a: StoreCategory, b: StoreCategory): number {
+  const ao = a.sortOrder > 0 ? a.sortOrder : Number.MAX_SAFE_INTEGER;
+  const bo = b.sortOrder > 0 ? b.sortOrder : Number.MAX_SAFE_INTEGER;
+  if (ao !== bo) return ao - bo;
+  const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  return byDate !== 0 ? byDate : a.id - b.id;
+}
+
+/** Asigna sortOrder contiguo 1..n según el orden actual. */
+export function assignContiguousStoreCategorySortOrders(
+  categories: StoreCategory[],
+): StoreCategory[] {
+  return [...categories]
+    .sort(compareStoreCategoriesBySortOrder)
+    .map((c, i) => ({ ...c, sortOrder: i + 1 }));
+}
+
+/**
+ * Mueve una categoría a la posición `toPosition` (1-based).
+ * Ej.: de 7 a 5 → la 5 y 6 bajan a 6 y 7.
+ */
+export function moveStoreCategoryToSortOrder(
+  categories: StoreCategory[],
+  categoryId: number,
+  toPosition: number,
+): StoreCategory[] {
+  const list = assignContiguousStoreCategorySortOrders(categories);
+  const fromIdx = list.findIndex((c) => c.id === categoryId);
+  if (fromIdx < 0) return list;
+  const toIdx = Math.max(0, Math.min(list.length - 1, Math.trunc(toPosition) - 1));
+  if (fromIdx === toIdx) return list;
+  const next = [...list];
+  const [item] = next.splice(fromIdx, 1);
+  next.splice(toIdx, 0, item!);
+  return next.map((c, i) => ({ ...c, sortOrder: i + 1 }));
+}
+
+/**
+ * Orden primario de un producto en vitrina: el menor `sortOrder` entre sus categorías.
+ * Sin categorías → al final.
+ */
+export function productPrimaryCategorySortOrder(
+  categoryIds: number[] | undefined | null,
+  categorySortOrderById: Map<number, number>,
+): number {
+  const ids = categoryIds ?? [];
+  let best = Number.MAX_SAFE_INTEGER;
+  for (const id of ids) {
+    const raw = categorySortOrderById.get(id);
+    if (raw == null) continue;
+    const order = raw > 0 ? raw : Number.MAX_SAFE_INTEGER;
+    if (order < best) best = order;
+  }
+  return best;
+}
+
+/** Compara productos por orden de categoría (empate → id). */
+export function compareProductsByCategorySortOrder(
+  a: { id: number; categoryIds?: number[] | null },
+  b: { id: number; categoryIds?: number[] | null },
+  categorySortOrderById: Map<number, number>,
+): number {
+  const ao = productPrimaryCategorySortOrder(a.categoryIds, categorySortOrderById);
+  const bo = productPrimaryCategorySortOrder(b.categoryIds, categorySortOrderById);
+  if (ao !== bo) return ao - bo;
+  return a.id - b.id;
+}
+
+export const insertStoreSubcategorySchema = z.object({
+  categoryId: z.number().int().positive(),
+  name: z.string().trim().min(1, "El nombre es obligatorio").max(120),
+  description: z.string().trim().max(500).optional().nullable(),
+});
+
+export type InsertStoreSubcategory = z.infer<typeof insertStoreSubcategorySchema>;
+
+export const updateStoreSubcategorySchema = z.object({
+  categoryId: z.number().int().positive().optional(),
+  name: z.string().trim().min(1, "El nombre es obligatorio").max(120).optional(),
+  description: z.string().trim().max(500).optional().nullable(),
+});
+
+export type UpdateStoreSubcategory = z.infer<typeof updateStoreSubcategorySchema>;
+
+export type StoreSubcategory = {
+  id: number;
+  storeId: number;
+  categoryId: number;
+  name: string;
+  description: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };

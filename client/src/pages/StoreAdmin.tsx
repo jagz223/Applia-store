@@ -15,8 +15,10 @@ import { usePrimaryStore } from "@/hooks/use-primary-store";
 import { StoreAdminLayout } from "@/components/store/StoreAdminLayout";
 import { StoreAdminProductsPanel } from "@/components/store/StoreAdminProductsPanel";
 import { StoreAdminCategoriesPanel } from "@/components/store/StoreAdminCategoriesPanel";
+import { StoreAdminSubcategoriesPanel } from "@/components/store/StoreAdminSubcategoriesPanel";
 import { StoreAdminPromotionsPanel } from "@/components/store/StoreAdminPromotionsPanel";
 import { StoreAdminConfigPanel } from "@/components/store/StoreAdminConfigPanel";
+import { StoreAdminFulfillmentPanel } from "@/components/store/StoreAdminFulfillmentPanel";
 import { StoreAdminPaymentMethodsPanel } from "@/components/store/StoreAdminPaymentMethodsPanel";
 import { StoreAdminCurrencyPanel } from "@/components/store/StoreAdminCurrencyPanel";
 import { StoreAdminTryOnPanel } from "@/components/store/StoreAdminTryOnPanel";
@@ -60,6 +62,7 @@ function sectionPanel(
     return (
       <StoreAdminProductsPanel
         storeId={store.id}
+        slug={store.slug}
         currencyAcceptedPaymentIds={store.currencyAcceptedPaymentIds}
         currencyExtras={store.currencyExtras}
         currencyVisualId={store.currencyVisualId}
@@ -67,6 +70,7 @@ function sectionPanel(
     );
   }
   if (section === "categorias") return <StoreAdminCategoriesPanel storeId={store.id} />;
+  if (section === "subcategorias") return <StoreAdminSubcategoriesPanel storeId={store.id} />;
   if (section === "ingredientes") return <StoreAdminIngredientsPanel />;
   if (section === "promociones") return <StoreAdminPromotionsPanel storeId={store.id} />;
   if (section === "ordenes") {
@@ -107,13 +111,24 @@ function sectionPanel(
       />
     );
   }
+  if (section === "metodos_entrega") {
+    return (
+      <StoreAdminFulfillmentPanel
+        storeId={store.id}
+        slug={store.slug}
+        initialFulfillmentOptions={store.fulfillmentOptions ?? []}
+        initialDeliveryFares={store.deliveryFares}
+        currencyVisualId={store.currencyVisualId}
+        storeLocation={store.location ?? null}
+        storeBranches={store.branches}
+      />
+    );
+  }
   if (section === "configuracion") {
     return (
       <StoreAdminConfigPanel
         storeId={store.id}
         slug={store.slug}
-        initialFulfillmentOptions={store.fulfillmentOptions ?? []}
-        initialDeliveryFares={store.deliveryFares}
         initialLocation={store.location ?? null}
         initialBranches={store.branches}
         initialWhatsappPhone={store.whatsappPhone}

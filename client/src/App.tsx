@@ -23,6 +23,7 @@ import StorePage from "@/pages/StorePage";
 import StoreCreate from "@/pages/StoreCreate";
 import StoreAdmin from "@/pages/StoreAdmin";
 import StoreAdminOrderDelivery from "@/pages/StoreAdminOrderDelivery";
+import StoreProductImport from "@/pages/StoreProductImport";
 import StoreSubscriptionPayment from "@/pages/StoreSubscriptionPayment";
 import MyStoreOrders from "@/pages/MyStoreOrders";
 import StoreEntry from "@/pages/StoreEntry";
@@ -41,6 +42,7 @@ function MainRouter() {
       <Route path="/pedidos-tienda" component={MyStoreOrders} />
       <Route path="/tienda/:slug/pago" component={StoreSubscriptionPayment} />
       <Route path="/tienda/:slug/admin/ordenes/delivery/:orderId" component={StoreAdminOrderDelivery} />
+      <Route path="/tienda/:slug/admin/productos/importar" component={StoreProductImport} />
       <Route path="/tienda/:slug/admin/:section?" component={StoreAdmin} />
       <Route path="/tienda" component={StoreEntry} />
       <Route path="/tienda/:slug" component={StorePage} />

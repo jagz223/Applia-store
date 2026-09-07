@@ -18,13 +18,21 @@ export async function computeStoreDeliveryQuote(
   deliveryLocation: StoreOrderDeliveryLocation,
   deliveryFares?: StoreDeliveryFares | null,
   metric?: StoreDeliveryCartMetric | null,
+  merchandiseTotalVisual?: number | null,
+  avoidLocations?: Array<{ lat: number; lon: number }> | null,
 ): Promise<StoreDeliveryQuote> {
   const route = await computeDrivingRoute(
     { lon: storeLocation.lon, lat: storeLocation.lat },
     { lon: deliveryLocation.lon, lat: deliveryLocation.lat },
+    { avoidLocations: avoidLocations ?? undefined },
   );
   const fares = normalizeStoreDeliveryFares(deliveryFares);
-  const deliveryFee = computeStoreDeliveryFeeUsd(fares, route.distanceM, metric);
+  const deliveryFee = computeStoreDeliveryFeeUsd(
+    fares,
+    route.distanceM,
+    metric,
+    merchandiseTotalVisual,
+  );
   return {
     distanceM: route.distanceM,
     deliveryFee,

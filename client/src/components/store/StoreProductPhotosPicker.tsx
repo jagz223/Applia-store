@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { SquareImageCropDialog } from "@/components/store/SquareImageCropDialog";
+import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
 import {
   isLikelyImageUrl,
   revokeBlobPreview,
@@ -13,6 +14,8 @@ import {
 } from "@/lib/store-image-draft";
 import { SQUARE_CROP_MAX_FILE_BYTES } from "@/lib/square-image-crop";
 import { cn } from "@/lib/utils";
+
+const SLOT_LABELS = ["Foto principal", "Segunda imagen"] as const;
 
 export function StoreProductPhotosPicker({
   drafts,
@@ -30,23 +33,49 @@ export function StoreProductPhotosPicker({
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [cropFileName, setCropFileName] = useState("producto.jpg");
   const [cropOpen, setCropOpen] = useState(false);
+  const [editingIndex, setEditingIndex] = useState(0);
 
-  const draft = drafts[0] ?? null;
-  const hasImage = draft != null;
+  const primary = drafts[0] ?? null;
+  const secondary = drafts[1] ?? null;
+  const count = drafts.filter(Boolean).length;
 
-  function clearDraft() {
-    if (draft) revokeBlobPreview(draft.previewUrl);
-    onChange([]);
+  function setSlot(index: number, next: StoreImageDraft | null) {
+    if (next == null) {
+      if (index === 0) {
+        if (drafts[0]) revokeBlobPreview(drafts[0].previewUrl);
+        // Si había segunda, pasa a ser principal
+        onChange(drafts.slice(1));
+        return;
+      }
+      if (drafts[index]) revokeBlobPreview(drafts[index]!.previewUrl);
+      onChange(drafts.filter((_, i) => i !== index));
+      return;
+    }
+    if (index === 1 && drafts.length === 0) {
+      revokeBlobPreview(next.previewUrl);
+      toast({
+        variant: "destructive",
+        title: "Falta la foto principal",
+        description: "Sube primero la imagen principal y luego la segunda.",
+      });
+      return;
+    }
+    if (drafts[index]) revokeBlobPreview(drafts[index]!.previewUrl);
+    const copy = [...drafts];
+    copy[index] = next;
+    onChange(copy.slice(0, STORE_PRODUCT_MAX_IMAGES));
   }
 
-  function openCropper(src: string, fileName: string) {
+  function openCropper(index: number, src: string, fileName: string) {
+    setEditingIndex(index);
     setCropSrc(src);
     setCropFileName(fileName);
     setCropOpen(true);
   }
 
   function closeCropper() {
-    if (cropSrc?.startsWith("blob:") && cropSrc !== draft?.previewUrl) {
+    const currentPreview = drafts[editingIndex]?.previewUrl;
+    if (cropSrc?.startsWith("blob:") && cropSrc !== currentPreview) {
       revokeBlobPreview(cropSrc);
     }
     setCropOpen(false);
@@ -55,8 +84,10 @@ export function StoreProductPhotosPicker({
   }
 
   async function applyCroppedFile(file: File) {
-    if (draft) revokeBlobPreview(draft.previewUrl);
-    onChange([{ previewUrl: URL.createObjectURL(file), pendingFile: file }]);
+    setSlot(editingIndex, {
+      previewUrl: URL.createObjectURL(file),
+      pendingFile: file,
+    });
     closeCropper();
   }
 
@@ -79,10 +110,14 @@ export function StoreProductPhotosPicker({
       });
       return;
     }
-    openCropper(URL.createObjectURL(file), file.name.replace(/\.\w+$/, "") + ".jpg");
+    openCropper(
+      editingIndex,
+      URL.createObjectURL(file),
+      file.name.replace(/\.\w+$/, "") + ".jpg",
+    );
   }
 
-  async function handleAddUrl() {
+  async function handleAddUrl(index: number) {
     const trimmed = urlInput.trim();
     if (!trimmed || disabled) return;
     if (!isLikelyImageUrl(trimmed)) {
@@ -102,7 +137,7 @@ export function StoreProductPhotosPicker({
         img.onerror = () => reject(new Error("No se pudo cargar la imagen desde esa URL."));
         img.src = trimmed;
       });
-      openCropper(trimmed, "producto-url.jpg");
+      openCropper(index, trimmed, "producto-url.jpg");
       setUrlInput("");
     } catch (e) {
       toast({
@@ -115,129 +150,170 @@ export function StoreProductPhotosPicker({
     }
   }
 
-  function handleReplace() {
-    inputRef.current?.click();
-  }
+  function renderSlot(index: 0 | 1) {
+    const draft = drafts[index] ?? null;
+    const label = SLOT_LABELS[index];
+    const lockedSecondary = index === 1 && !primary;
 
-  function handleEditCrop() {
-    if (!draft) return;
-    openCropper(draft.previewUrl, draft.pendingFile?.name ?? "producto.jpg");
+    return (
+      <div key={index} className="space-y-2 rounded-xl border border-border/70 bg-muted/10 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <Label className="text-sm">{label}</Label>
+          {index === 1 ? (
+            <span className="text-[10px] text-muted-foreground">Esquina inferior derecha</span>
+          ) : null}
+        </div>
+
+        {draft ? (
+          <div className="space-y-2">
+            <div className="relative mx-auto max-w-[160px] aspect-square rounded-lg border border-border overflow-hidden bg-muted/30">
+              <img src={draft.previewUrl} alt="" className="h-full w-full object-cover" />
+              {draft.pendingFile ? (
+                <span className="absolute bottom-1 left-1 rounded bg-background/90 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  Sin guardar
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className="absolute top-1 right-1 rounded-full bg-background/90 p-1 shadow hover:bg-background disabled:opacity-50"
+                aria-label={`Quitar ${label.toLowerCase()}`}
+                disabled={disabled}
+                onClick={() => setSlot(index, null)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                disabled={disabled}
+                onClick={() => {
+                  setEditingIndex(index);
+                  inputRef.current?.click();
+                }}
+              >
+                <ImagePlus className="mr-2 h-4 w-4" />
+                Cambiar
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                disabled={disabled}
+                onClick={() =>
+                  openCropper(
+                    index,
+                    draft.previewUrl,
+                    draft.pendingFile?.name ?? "producto.jpg",
+                  )
+                }
+              >
+                <Pencil className="mr-2 h-4 w-4" />
+                Recortar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <button
+              type="button"
+              disabled={disabled || lockedSecondary}
+              className={cn(
+                "mx-auto flex aspect-square w-full max-w-[160px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border",
+                "text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary",
+                (disabled || lockedSecondary) && "pointer-events-none opacity-60",
+              )}
+              onClick={() => {
+                setEditingIndex(index);
+                inputRef.current?.click();
+              }}
+            >
+              <ImagePlus className="h-7 w-7" />
+              <span className="text-xs px-2 text-center leading-tight">
+                {lockedSecondary ? "Primero sube la principal" : "Subir foto cuadrada"}
+              </span>
+            </button>
+            {!lockedSecondary ? (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  type="url"
+                  placeholder="https://… enlace a imagen"
+                  value={editingIndex === index ? urlInput : ""}
+                  disabled={disabled || urlLoading}
+                  onFocus={() => setEditingIndex(index)}
+                  onChange={(e) => {
+                    setEditingIndex(index);
+                    setUrlInput(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleAddUrl(index);
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  className="shrink-0 gap-1.5"
+                  disabled={disabled || urlLoading || !urlInput.trim()}
+                  onClick={() => {
+                    setEditingIndex(index);
+                    void handleAddUrl(index);
+                  }}
+                >
+                  {urlLoading && editingIndex === index ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Link2 className="h-4 w-4" />
+                  )}
+                  URL
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <Label>Foto del producto</Label>
+        <Label>Fotos del producto</Label>
         <span className="text-xs text-muted-foreground">
-          {hasImage ? 1 : 0}/{STORE_PRODUCT_MAX_IMAGES}
+          {count}/{STORE_PRODUCT_MAX_IMAGES}
         </span>
       </div>
 
-      {hasImage ? (
-        <div className="space-y-3">
-          <div className="relative mx-auto max-w-[200px] aspect-square rounded-lg border border-border overflow-hidden bg-muted/30">
-            <img src={draft.previewUrl} alt="" className="h-full w-full object-cover" />
-            {draft.pendingFile ? (
-              <span className="absolute bottom-1 left-1 rounded bg-background/90 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                Sin guardar
-              </span>
-            ) : null}
-            <button
-              type="button"
-              className="absolute top-1 right-1 rounded-full bg-background/90 p-1 shadow hover:bg-background disabled:opacity-50"
-              aria-label="Quitar foto"
-              disabled={disabled}
-              onClick={clearDraft}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {renderSlot(0)}
+        {renderSlot(1)}
+      </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="rounded-full"
-              disabled={disabled}
-              onClick={handleReplace}
-            >
-              <ImagePlus className="mr-2 h-4 w-4" />
-              Cambiar foto
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="rounded-full"
-              disabled={disabled}
-              onClick={handleEditCrop}
-            >
-              <Pencil className="mr-2 h-4 w-4" />
-              Recortar de nuevo
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          disabled={disabled}
-          className={cn(
-            "mx-auto flex aspect-square w-full max-w-[200px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border",
-            "text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary",
-            disabled && "pointer-events-none opacity-60",
-          )}
-          onClick={() => inputRef.current?.click()}
-        >
-          <ImagePlus className="h-8 w-8" />
-          <span className="text-xs px-2 text-center leading-tight">Subir foto cuadrada</span>
-        </button>
-      )}
-
-      {hasImage ? (
+      {primary ? (
         <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
           <p className="text-xs font-medium text-muted-foreground">Vista previa en vitrina</p>
-          <div className="max-w-[160px]">
-            <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-muted/30">
-              <img src={draft.previewUrl} alt="" className="h-full w-full object-cover" />
-            </div>
+          <div className="max-w-[180px]">
+            <StoreProductDualImage
+              primaryUrl={primary.previewUrl}
+              secondaryUrl={secondary?.previewUrl}
+              frameClassName="aspect-square rounded-lg border border-border"
+              secondaryClassName="h-10 w-10"
+            />
           </div>
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-border p-4 flex items-center gap-3 text-muted-foreground">
           <ImageIcon className="h-8 w-8 shrink-0" />
           <p className="text-xs">
-            Sube una foto cuadrada para ver cómo se verá el producto en la vitrina.
+            La foto principal se ve grande; la segunda aparece como cuadrito abajo a la derecha.
           </p>
         </div>
       )}
-
-      {!hasImage ? (
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Input
-            type="url"
-            placeholder="https://… enlace a imagen"
-            value={urlInput}
-            disabled={disabled || urlLoading}
-            onChange={(e) => setUrlInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void handleAddUrl();
-              }
-            }}
-          />
-          <Button
-            type="button"
-            className="shrink-0 gap-1.5"
-            disabled={disabled || urlLoading || !urlInput.trim()}
-            onClick={() => void handleAddUrl()}
-          >
-            {urlLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-            Previsualizar URL
-          </Button>
-        </div>
-      ) : null}
 
       <input
         ref={inputRef}
@@ -248,8 +324,8 @@ export function StoreProductPhotosPicker({
       />
 
       <p className="text-xs text-muted-foreground">
-        Al subir se abre el recorte cuadrado. Se guarda al pulsar «Guardar» o «Crear».
-        JPG, PNG, WebP o GIF. Máximo 5 MB.
+        Al subir se abre el recorte cuadrado. Se guarda al pulsar «Guardar» o «Crear». JPG, PNG, WebP
+        o GIF. Máximo 5 MB por imagen.
       </p>
 
       <SquareImageCropDialog

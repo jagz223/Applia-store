@@ -36,8 +36,16 @@ import {
   type ProductIngredientAdditionalDraft,
 } from "@/components/store/ProductIngredientAdditionalsEditor";
 import { StoreProductCategoryPicker } from "@/components/store/StoreProductCategoryPicker";
+import {
+  StoreProductSubcategoryPicker,
+  type SelectedSubcategory,
+} from "@/components/store/StoreProductSubcategoryPicker";
 import type { SelectedEntity } from "@/components/store/StoreEntityMultiPicker";
 import { categoriesFromIds, useStoreCategories } from "@/hooks/use-store-categories";
+import {
+  subcategoriesFromIds,
+  useStoreSubcategories,
+} from "@/hooks/use-store-subcategories";
 import { StoreProductPhotosPicker } from "@/components/store/StoreProductPhotosPicker";
 import {
   storeAdminDialogShellClass,
@@ -187,6 +195,8 @@ export function StoreProductFormDialog({
   const [sizeDrafts, setSizeDrafts] = useState<SizeDraft[]>([]);
   const [hasWeight, setHasWeight] = useState(false);
   const [productWeight, setProductWeight] = useState("");
+  const [hasStock, setHasStock] = useState(false);
+  const [stockInput, setStockInput] = useState("");
   const [prices, setPrices] = useState<Record<string, string>>(() => emptyPrices(acceptedPaymentIds));
   const [hasIngredients, setHasIngredients] = useState(false);
   const [ingredients, setIngredients] = useState<SelectedIngredient[]>([]);
@@ -194,10 +204,12 @@ export function StoreProductFormDialog({
   const [hasAdditionals, setHasAdditionals] = useState(false);
   const [additionals, setAdditionals] = useState<ProductIngredientAdditionalDraft[]>([]);
   const [categories, setCategories] = useState<SelectedEntity[]>([]);
+  const [subcategories, setSubcategories] = useState<SelectedSubcategory[]>([]);
   const [imageDrafts, setImageDrafts] = useState<StoreImageDraft[]>([]);
   const [resolving, setResolving] = useState(false);
 
   const { data: allCategories = [] } = useStoreCategories(storeId, open);
+  const { data: allSubcategories = [] } = useStoreSubcategories(storeId, open);
 
   const createMutation = useCreateStoreProduct(storeId);
   const updateMutation = useUpdateStoreProduct(storeId);
@@ -272,6 +284,10 @@ export function StoreProductFormDialog({
       setProductWeight(
         product.hasWeight === true && (product.weight ?? 0) > 0 ? String(product.weight) : "",
       );
+      setHasStock(product.hasStock === true);
+      setStockInput(
+        product.hasStock === true && product.stock != null ? String(product.stock) : "",
+      );
       const ids = product.ingredientMaterialIds ?? [];
       const removable = product.removableIngredientMaterialIds ?? [];
       const savedAdditionals = product.ingredientAdditionals ?? [];
@@ -307,6 +323,9 @@ export function StoreProductFormDialog({
       }
       setImageDrafts(draftsFromSavedUrls(product.imageUrls ?? []));
       setCategories(categoriesFromIds(allCategories, product.categoryIds ?? []));
+      setSubcategories(
+        subcategoriesFromIds(allSubcategories, product.subcategoryIds ?? []),
+      );
     } else {
       hydratingIngredientsRef.current = false;
       setName("");
@@ -316,6 +335,8 @@ export function StoreProductFormDialog({
       setSizeDrafts([]);
       setHasWeight(false);
       setProductWeight("");
+      setHasStock(false);
+      setStockInput("");
       setPrices(emptyPrices(acceptedPaymentIds));
       setHasIngredients(false);
       setIngredients([]);
@@ -323,10 +344,19 @@ export function StoreProductFormDialog({
       setHasAdditionals(false);
       setAdditionals([]);
       setCategories([]);
+      setSubcategories([]);
       setImageDrafts([]);
       setResolving(false);
     }
-  }, [open, product, allCategories, acceptedPaymentIds, paymentIdsKey, visualCurrencyId]);
+  }, [
+    open,
+    product,
+    allCategories,
+    allSubcategories,
+    acceptedPaymentIds,
+    paymentIdsKey,
+    visualCurrencyId,
+  ]);
 
   useEffect(() => {
     if (!open || allCategories.length === 0) return;
@@ -335,6 +365,26 @@ export function StoreProductFormDialog({
       return prev.map((p) => ({ id: p.id, name: map.get(p.id) ?? p.name }));
     });
   }, [open, allCategories]);
+
+  useEffect(() => {
+    if (!open || allSubcategories.length === 0) return;
+    setSubcategories((prev) => {
+      const map = new Map(allSubcategories.map((s) => [s.id, s]));
+      return prev.map((p) => {
+        const s = map.get(p.id);
+        return s
+          ? { id: s.id, name: s.name, categoryId: s.categoryId }
+          : p;
+      });
+    });
+  }, [open, allSubcategories]);
+
+  /** Si se quita una categoría, quitar sus subcategorías del producto. */
+  useEffect(() => {
+    if (!open) return;
+    const allowed = new Set(categories.map((c) => c.id));
+    setSubcategories((prev) => prev.filter((s) => allowed.has(s.categoryId)));
+  }, [open, categories]);
 
   /** Mantener la cantidad de borradores de tamaño alineada con el número indicado. */
   useEffect(() => {
@@ -601,12 +651,28 @@ export function StoreProductFormDialog({
         sizes: hasSizes ? sizesPayload : [],
         hasWeight,
         weight: hasWeight && !hasSizes ? parseWeightKg(productWeight) : 0,
+        hasStock,
+        stock: hasStock
+          ? stockInput.trim() === ""
+            ? 0
+            : Math.max(0, Math.trunc(Number(stockInput) || 0))
+          : null,
         categoryIds: categories.map((c) => c.id),
+        subcategoryIds: subcategories.map((s) => s.id),
         ingredientMaterialIds: baseIngredientIds,
         removableIngredientMaterialIds: nextRemovable,
         ingredientAdditionals: nextAdditionals,
         imageUrls,
-        showOnShowcase: isEdit && product ? product.showOnShowcase : true,
+        showOnShowcase: (() => {
+          const tracks = hasStock;
+          const units = tracks
+            ? stockInput.trim() === ""
+              ? 0
+              : Math.max(0, Math.trunc(Number(stockInput) || 0))
+            : null;
+          if (tracks && (units ?? 0) <= 0) return false;
+          return isEdit && product ? product.showOnShowcase : true;
+        })(),
       };
 
       if (isEdit && product) {
@@ -718,6 +784,44 @@ export function StoreProductFormDialog({
                 disabled={saving}
                 onCheckedChange={setHasWeight}
               />
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="product-has-stock">¿Tiene stock?</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Si está activo, el inventario limita la vitrina y la venta. Si no, se ignora el
+                    campo stock.
+                  </p>
+                </div>
+                <Switch
+                  id="product-has-stock"
+                  checked={hasStock}
+                  disabled={saving}
+                  onCheckedChange={(v) => {
+                    setHasStock(v);
+                    if (!v) setStockInput("");
+                  }}
+                />
+              </div>
+              {hasStock ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="product-stock">Stock</Label>
+                  <NumberField
+                    id="product-stock"
+                    min="0"
+                    step="1"
+                    value={stockInput}
+                    onChange={setStockInput}
+                    disabled={saving}
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Vacío cuenta como 0. Al llegar a 0 se oculta de la vitrina.
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             {hasSizes ? (
@@ -898,6 +1002,14 @@ export function StoreProductFormDialog({
               selected={categories}
               disabled={saving}
               onChange={setCategories}
+            />
+
+            <StoreProductSubcategoryPicker
+              storeId={storeId}
+              selectedCategories={categories}
+              selected={subcategories}
+              disabled={saving}
+              onChange={setSubcategories}
             />
 
             <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-muted/20 p-3.5">

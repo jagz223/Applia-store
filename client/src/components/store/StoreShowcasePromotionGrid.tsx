@@ -1,95 +1,89 @@
 import { ImageIcon, Loader2, Percent } from "lucide-react";
 import type { StoreShowcasePromotion } from "@/hooks/use-store-showcase";
-import {
-  StoreShowcaseAddToCartButton,
-  showcaseCartItemKey,
-} from "@/components/store/StoreShowcaseAddToCartButton";
-import { StoreShowcaseCardImage } from "@/components/store/StoreShowcaseCardImage";
-import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 function formatPrice(value: number) {
-  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(value);
+  return new Intl.NumberFormat("es-VE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function ShowcasePromotionCard({
   promotion,
-  onAddToCart,
-  addBusyKey,
-  large,
+  onSelect,
+  selected,
 }: {
   promotion: StoreShowcasePromotion;
-  onAddToCart?: () => void;
-  addBusyKey?: string | null;
-  large?: boolean;
+  onSelect?: () => void;
+  selected?: boolean;
 }) {
   const imageUrl = (promotion.promotionImageUrl ?? promotion.imageUrl)?.trim();
-  const itemKey = showcaseCartItemKey("promotion", promotion.id);
-  const busy = addBusyKey === itemKey;
-
-  if (large) {
-    return (
-      <Card className="overflow-hidden border-0 shadow-md bg-card flex flex-col rounded-2xl">
-        <CardContent className="p-0 flex flex-col">
-          <StoreShowcaseCardImage src={imageUrl} placeholderIcon={Percent} />
-          <div className="p-3 flex flex-col gap-1.5">
-            <p className="text-sm font-bold leading-snug line-clamp-2 text-foreground">{promotion.name}</p>
-            {promotion.description ? (
-              <p className="text-xs text-muted-foreground line-clamp-2">{promotion.description}</p>
-            ) : null}
-            {promotion.items.length > 0 ? (
-              <p className="text-[11px] text-muted-foreground">
-                {promotion.items.length === 1
-                  ? "1 producto incluido"
-                  : `${promotion.items.length} productos incluidos`}
-              </p>
-            ) : null}
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-sm font-bold text-primary">{formatPrice(promotion.price)}</span>
-              {onAddToCart ? (
-                <StoreShowcaseAddToCartButton
-                  variant="footer"
-                  onClick={onAddToCart}
-                  busy={busy}
-                  ariaLabel={`Añadir promoción ${promotion.name} al carrito`}
-                />
-              ) : null}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  const description = promotion.description?.trim() ?? "";
+  const itemsHint =
+    promotion.items.length === 0
+      ? ""
+      : promotion.items.length === 1
+        ? "1 producto incluido"
+        : `${promotion.items.length} productos incluidos`;
 
   return (
-    <Card className="overflow-hidden border-border flex flex-col">
-      <CardContent className="p-0 flex flex-col">
-        <div className="relative">
-          <StoreShowcaseCardImage src={imageUrl} aspect="square" placeholderIcon={Percent} />
-          {onAddToCart ? (
-            <StoreShowcaseAddToCartButton
-              onClick={onAddToCart}
-              busy={busy}
-              ariaLabel={`Añadir promoción ${promotion.name} al carrito`}
+    <article
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={onSelect}
+      onKeyDown={
+        onSelect
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect();
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        "group flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-white shadow-sm",
+        "min-h-0 sm:min-h-[17.5rem]",
+        "transition-all dark:bg-card dark:border-border",
+        onSelect && "cursor-pointer hover:border-border hover:shadow-md",
+        selected && "border-foreground/40 ring-2 ring-foreground/80 shadow-md",
+      )}
+    >
+      <div className="relative bg-muted/20 p-2 sm:p-3 pb-0">
+        <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-muted/40">
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt=""
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
             />
-          ) : null}
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <Percent className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground/40" aria-hidden />
+            </div>
+          )}
         </div>
-        <div className="p-3 flex flex-col gap-1">
-          <p className="text-sm font-semibold leading-snug line-clamp-2 text-foreground">{promotion.name}</p>
-          <p className="text-sm font-medium text-primary">{formatPrice(promotion.price)}</p>
-          {promotion.description ? (
-            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{promotion.description}</p>
-          ) : null}
-          {promotion.items.length > 0 ? (
-            <p className="text-xs text-muted-foreground mt-1">
-              {promotion.items.length === 1
-                ? "1 producto incluido"
-                : `${promotion.items.length} productos incluidos`}
-            </p>
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+      <div className="flex flex-1 flex-col gap-0.5 px-2.5 pb-3 pt-2 sm:gap-1 sm:px-3.5 sm:pb-4 sm:pt-3">
+        <p className="text-[13px] sm:text-sm font-bold leading-snug line-clamp-2 text-foreground">
+          {promotion.name}
+        </p>
+        <p className="text-[13px] sm:text-sm font-semibold text-foreground">
+          {formatPrice(promotion.price)}
+        </p>
+        {description ? (
+          <p className="mt-0.5 line-clamp-1 sm:line-clamp-2 text-xs text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+        {itemsHint ? (
+          <p className={cn("line-clamp-1 text-xs text-muted-foreground", !description && "mt-0.5")}>
+            {itemsHint}
+          </p>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
@@ -101,8 +95,8 @@ type StoreShowcasePromotionGridProps = {
   className?: string;
   centered?: boolean;
   largeCards?: boolean;
-  onAddPromotionToCart?: (promotionId: number) => void;
-  addToCartBusyKey?: string | null;
+  onSelectPromotion?: (promotion: StoreShowcasePromotion) => void;
+  selectedPromotionId?: number | null;
 };
 
 export function StoreShowcasePromotionGrid({
@@ -113,8 +107,8 @@ export function StoreShowcasePromotionGrid({
   className,
   centered = false,
   largeCards = false,
-  onAddPromotionToCart,
-  addToCartBusyKey,
+  onSelectPromotion,
+  selectedPromotionId,
 }: StoreShowcasePromotionGridProps) {
   if (isLoading) {
     return (
@@ -134,7 +128,7 @@ export function StoreShowcasePromotionGrid({
     return (
       <div
         className={cn(
-          "rounded-xl border border-dashed border-border py-12 px-6 text-center",
+          "rounded-[1.25rem] border border-dashed border-border bg-white/60 py-12 px-6 text-center dark:bg-card/40",
           className,
         )}
       >
@@ -144,53 +138,25 @@ export function StoreShowcasePromotionGrid({
     );
   }
 
-  if (largeCards) {
-    return (
-      <div className={cn("grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-4", className)}>
-        {promotions.map((promotion) => (
-          <ShowcasePromotionCard
-            key={promotion.id}
-            promotion={promotion}
-            large
-            addBusyKey={addToCartBusyKey}
-            onAddToCart={
-              onAddPromotionToCart ? () => onAddPromotionToCart(promotion.id) : undefined
-            }
-          />
-        ))}
-      </div>
-    );
-  }
-
-  if (centered) {
-    return (
-      <div className={cn("flex flex-wrap justify-center gap-4 max-w-2xl mx-auto", className)}>
-        {promotions.map((promotion) => (
-          <div key={promotion.id} className="w-[calc(50%-0.5rem)] sm:w-[180px]">
-            <ShowcasePromotionCard
-              promotion={promotion}
-              addBusyKey={addToCartBusyKey}
-              onAddToCart={
-                onAddPromotionToCart ? () => onAddPromotionToCart(promotion.id) : undefined
-              }
-            />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  const gridClass = largeCards
+    ? "grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-4"
+    : centered
+      ? "flex flex-wrap justify-center gap-4 max-w-2xl mx-auto"
+      : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-4";
 
   return (
-    <div className={cn("grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4", className)}>
+    <div className={cn(gridClass, className)}>
       {promotions.map((promotion) => (
-        <ShowcasePromotionCard
+        <div
           key={promotion.id}
-          promotion={promotion}
-          addBusyKey={addToCartBusyKey}
-          onAddToCart={
-            onAddPromotionToCart ? () => onAddPromotionToCart(promotion.id) : undefined
-          }
-        />
+          className={centered && !largeCards ? "w-[calc(50%-0.5rem)] sm:w-[180px]" : undefined}
+        >
+          <ShowcasePromotionCard
+            promotion={promotion}
+            selected={selectedPromotionId === promotion.id}
+            onSelect={onSelectPromotion ? () => onSelectPromotion(promotion) : undefined}
+          />
+        </div>
       ))}
     </div>
   );

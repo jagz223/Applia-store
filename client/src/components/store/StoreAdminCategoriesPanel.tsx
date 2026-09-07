@@ -3,6 +3,7 @@ import { Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import {
   useDeleteStoreCategory,
   useStoreCategoriesPage,
+  useUpdateStoreCategory,
   type StoreCategorySummary,
 } from "@/hooks/use-store-categories";
 import { StoreCategoryFormDialog } from "@/components/store/StoreCategoryFormDialog";
@@ -34,6 +35,80 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { storeAdminFieldClass, storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
+
+function CategorySortOrderField({
+  storeId,
+  category,
+}: {
+  storeId: number;
+  category: StoreCategorySummary;
+}) {
+  const { toast } = useToast();
+  const updateMutation = useUpdateStoreCategory(storeId);
+  const current = category.sortOrder && category.sortOrder > 0 ? category.sortOrder : 1;
+  const [value, setValue] = useState(String(current));
+  const busy =
+    updateMutation.isPending && updateMutation.variables?.categoryId === category.id;
+
+  useEffect(() => {
+    setValue(String(current));
+  }, [category.id, current]);
+
+  async function commit() {
+    const next = Math.max(1, Math.trunc(Number(value) || 0));
+    if (!Number.isFinite(next) || next < 1) {
+      setValue(String(current));
+      toast({
+        variant: "destructive",
+        title: "Orden inválido",
+        description: "Indica un número entero mayor o igual a 1.",
+      });
+      return;
+    }
+    if (next === current) {
+      setValue(String(current));
+      return;
+    }
+    try {
+      await updateMutation.mutateAsync({
+        categoryId: category.id,
+        body: { sortOrder: next },
+      });
+      toast({
+        title: "Orden actualizado",
+        description: `«${category.name}» quedó en la posición ${next}.`,
+      });
+    } catch (e) {
+      setValue(String(current));
+      toast({
+        variant: "destructive",
+        title: "No se pudo actualizar el orden",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
+    }
+  }
+
+  return (
+    <Input
+      type="number"
+      min={1}
+      step={1}
+      inputMode="numeric"
+      value={value}
+      disabled={busy}
+      aria-label={`Orden de ${category.name}`}
+      className={cn(storeAdminFieldClass, "h-9 w-[4.5rem] px-2 text-center tabular-nums")}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+    />
+  );
+}
 
 export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
   const { toast } = useToast();
@@ -98,7 +173,8 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
           <div>
             <CardTitle className="font-display">Categorías</CardTitle>
             <CardDescription>
-              Agrupa productos de tu tienda. Un producto puede estar en varias categorías.
+              Agrupa productos de tu tienda. El número de orden define cómo se ven en la vitrina
+              (después de Todo y Promociones).
             </CardDescription>
           </div>
           <Button size="sm" className="h-10 shrink-0 gap-1.5 rounded-full" onClick={openCreate}>
@@ -144,8 +220,11 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
                     className="rounded-2xl border border-border/70 bg-card/95 p-3.5 shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <p className="font-medium">{category.name}</p>
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <CategorySortOrderField storeId={storeId} category={category} />
+                          <p className="font-medium">{category.name}</p>
+                        </div>
                         <p className="text-sm text-muted-foreground">
                           {category.productCount}{" "}
                           {category.productCount === 1 ? "producto" : "productos"}
@@ -185,6 +264,7 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-[5.5rem]">Orden</TableHead>
                       <TableHead>Nombre</TableHead>
                       <TableHead>Descripción</TableHead>
                       <TableHead className="w-[100px]">Productos</TableHead>
@@ -194,6 +274,9 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
                   <TableBody>
                     {categories.map((category) => (
                       <TableRow key={category.id}>
+                        <TableCell>
+                          <CategorySortOrderField storeId={storeId} category={category} />
+                        </TableCell>
                         <TableCell className="font-medium">{category.name}</TableCell>
                         <TableCell className="text-muted-foreground text-sm max-w-[240px] truncate">
                           {category.description ?? "—"}

@@ -69,8 +69,6 @@ function CartLineRow({
 
   const busy = updateMutation.isPending || removeMutation.isPending;
 
-
-
   async function setQuantity(next: number) {
 
     try {
@@ -146,18 +144,17 @@ function CartLineRow({
 
     <li className="flex gap-3 py-4 border-b border-border last:border-0">
 
-      <div className="h-16 w-16 shrink-0 rounded-xl border border-border bg-muted/40 overflow-hidden flex items-center justify-center">
-
+      <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-border bg-muted/40 flex items-center justify-center">
         {line.imageUrl ? (
-
-          <img src={line.imageUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
-
+          <img
+            src={line.imageUrl}
+            alt=""
+            className="h-full w-full object-cover"
+            referrerPolicy="no-referrer"
+          />
         ) : (
-
           <ImageIcon className="h-5 w-5 text-muted-foreground" aria-hidden />
-
         )}
-
       </div>
 
       <div className="flex-1 min-w-0 space-y-1.5">
