@@ -5,6 +5,7 @@ import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
 import type { StoreOrder, StoreOrderDeliveryLocation, StoreOrderLineItem } from "@shared/store-order-schema";
 import { appliaStorage } from "./storage-applia";
 import { notifyStoreOwnerNewOrder } from "./store-order-notifications";
+import { commitStoreOrderStock } from "./store-order-stock";
 
 export type StorePendingCheckout = {
   id: string;
@@ -187,13 +188,29 @@ export async function fulfillStorePendingCheckout(params: {
     packRideId: null,
     deliveryUnreadCount: 0,
     status: "confirmado",
+    stockImpact: [],
+    stockCommitted: false,
   });
+
+  let committedOrder = order;
+  try {
+    committedOrder = await commitStoreOrderStock(order);
+  } catch (stockErr) {
+    const stockMsg = stockErr instanceof Error ? stockErr.message : String(stockErr);
+    if (stockMsg === "STORE_PRODUCT_NO_STOCK") {
+      await appliaStorage
+        .updateStoreOrderStatus(order.storeId, order.id, "rechazado")
+        .catch(() => undefined);
+      throw stockErr;
+    }
+    throw stockErr;
+  }
 
   const next: StorePendingCheckout = {
     ...pending,
     status: "completed",
     gatewayReference: params.gatewayReference,
-    storeOrderId: order.id,
+    storeOrderId: committedOrder.id,
     updatedAt: new Date().toISOString(),
   };
   await saveStorePendingCheckout(next);
@@ -201,10 +218,10 @@ export async function fulfillStorePendingCheckout(params: {
 
   const store = await appliaStorage.getStoreById(pending.storeId);
   if (store) {
-    void notifyStoreOwnerNewOrder(order, store).catch((err) =>
+    void notifyStoreOwnerNewOrder(committedOrder, store).catch((err) =>
       console.error("[stores] notify owner new order after gateway", err),
     );
   }
 
-  return { order, created: true };
+  return { order: committedOrder, created: true };
 }

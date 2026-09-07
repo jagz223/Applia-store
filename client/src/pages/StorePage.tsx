@@ -9,6 +9,7 @@ import { useStoreBySlug } from "@/hooks/use-my-store";
 import {
   useStoreShowcaseProducts,
   type StoreShowcaseProduct,
+  type StoreShowcasePromotion,
 } from "@/hooks/use-store-showcase";
 import { useAddToStoreCart, useStoreCart } from "@/hooks/use-store-cart";
 import { StoreShowcaseProductGrid } from "@/components/store/StoreShowcaseProductGrid";
@@ -18,6 +19,10 @@ import {
   StoreProductCustomizePanel,
   type ProductCustomizeSelection,
 } from "@/components/store/StoreProductCustomizePanel";
+import {
+  StorePromotionDetailPanel,
+  type PromotionDetailSelection,
+} from "@/components/store/StorePromotionDetailPanel";
 import { showcaseCartItemKey } from "@/components/store/StoreShowcaseAddToCartButton";
 import {
   StoreShowcaseFilters,
@@ -28,6 +33,8 @@ import { useToast } from "@/hooks/use-toast";
 import { StoreShowcaseBannersCarousel } from "@/components/store/StoreShowcaseBannersCarousel";
 import { StoreShowcasePopupsModal } from "@/components/store/StoreShowcasePopupsModal";
 import { StoreContactChannels } from "@/components/store/StoreContactChannels";
+import { bannerVisibleForShowcaseCategoryFilter } from "@shared/store-showcase-ads-schema";
+import { compareProductsByCategorySortOrder } from "@shared/store-schema";
 
 type StorePayload = {
   id: number;
@@ -95,7 +102,9 @@ export default function StorePage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<ShowcaseCategoryFilter>("all");
+  const [subcategoryFilter, setSubcategoryFilter] = useState<number | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<StoreShowcaseProduct | null>(null);
+  const [selectedPromotion, setSelectedPromotion] = useState<StoreShowcasePromotion | null>(null);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [isLgUp, setIsLgUp] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches,
@@ -116,7 +125,10 @@ export default function StorePage() {
     error: showcaseError,
   } = useStoreShowcaseProducts(slug, canLoadShowcase);
 
-  const banners = showcaseData?.banners ?? [];
+  const banners = useMemo(() => {
+    const all = showcaseData?.banners ?? [];
+    return all.filter((b) => bannerVisibleForShowcaseCategoryFilter(b, categoryFilter));
+  }, [showcaseData?.banners, categoryFilter]);
   const popups = showcaseData?.popups ?? [];
   const [popupsOpen, setPopupsOpen] = useState(false);
 
@@ -124,6 +136,7 @@ export default function StorePage() {
     setSearchQuery("");
     setCategoryFilter("all");
     setSelectedProduct(null);
+    setSelectedPromotion(null);
     setMobilePanelOpen(false);
     setPopupsOpen(false);
   }, [slug]);
@@ -164,6 +177,7 @@ export default function StorePage() {
 
   const showcaseProducts = showcaseData?.products ?? [];
   const showcaseCategories = showcaseData?.categories ?? [];
+  const showcaseSubcategories = showcaseData?.subcategories ?? [];
   const showcasePromotions = showcaseData?.promotions ?? [];
   const hasShowcaseFilters = showcaseProducts.length > 0 || showcasePromotions.length > 0;
   const showingPromotions = categoryFilter === "promotions";
@@ -181,13 +195,30 @@ export default function StorePage() {
       }
     } else if (typeof categoryFilter === "number") {
       list = list.filter((p) => (p.categoryIds ?? []).includes(categoryFilter));
+      if (subcategoryFilter != null) {
+        list = list.filter((p) => (p.subcategoryIds ?? []).includes(subcategoryFilter));
+      }
     }
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       list = list.filter((p) => p.name.toLowerCase().includes(q));
     }
-    return list;
-  }, [showcaseProducts, showcaseCategories, categoryFilter, searchQuery]);
+    const categorySortOrderById = new Map(
+      showcaseCategories.map((c) => [
+        c.id,
+        c.sortOrder != null && c.sortOrder > 0 ? c.sortOrder : Number.MAX_SAFE_INTEGER,
+      ]),
+    );
+    return list
+      .slice()
+      .sort((a, b) => compareProductsByCategorySortOrder(a, b, categorySortOrderById));
+  }, [
+    showcaseProducts,
+    showcaseCategories,
+    categoryFilter,
+    subcategoryFilter,
+    searchQuery,
+  ]);
 
   const filteredShowcasePromotions = useMemo(() => {
     let list = showcasePromotions;
@@ -236,6 +267,8 @@ export default function StorePage() {
   const showCustomerCart = !canManageStore;
   const cartActionsEnabled = showCustomerCart && isAuthenticated;
   const customizing = showCustomerCart && selectedProduct != null;
+  const viewingPromotion = showCustomerCart && selectedPromotion != null;
+  const detailing = customizing || viewingPromotion;
 
   const addToCartBusyKey =
     addToCartMutation.isPending && addToCartMutation.variables
@@ -244,23 +277,17 @@ export default function StorePage() {
         : showcaseCartItemKey("promotion", addToCartMutation.variables.promotionId!)
       : null;
 
-  async function handleAddPromotionToCart(promotionId: number) {
-    try {
-      await addToCartMutation.mutateAsync({ kind: "promotion", promotionId, quantity: 1 });
-      toast({ title: "Promoción añadida al carrito" });
-      setMobilePanelOpen(true);
-    } catch (e) {
-      toast({
-        variant: "destructive",
-        title: "No se pudo añadir",
-        description: e instanceof Error ? e.message : "Error desconocido",
-      });
-    }
-  }
-
   function handleSelectProduct(product: StoreShowcaseProduct) {
     if (!showCustomerCart) return;
+    setSelectedPromotion(null);
     setSelectedProduct(product);
+    setMobilePanelOpen(true);
+  }
+
+  function handleSelectPromotion(promotion: StoreShowcasePromotion) {
+    if (!showCustomerCart) return;
+    setSelectedProduct(null);
+    setSelectedPromotion(promotion);
     setMobilePanelOpen(true);
   }
 
@@ -294,15 +321,54 @@ export default function StorePage() {
     }
   }
 
+  async function handleConfirmPromotion(selection: PromotionDetailSelection) {
+    if (!cartActionsEnabled) {
+      toast({
+        variant: "destructive",
+        title: "Inicia sesión",
+        description: "Debes iniciar sesión para comprar.",
+      });
+      return;
+    }
+    try {
+      await addToCartMutation.mutateAsync({
+        kind: "promotion",
+        promotionId: selection.promotionId,
+        quantity: selection.quantity,
+      });
+      toast({ title: "Promoción añadida al carrito", description: selection.displayName });
+      setSelectedPromotion(null);
+      setMobilePanelOpen(true);
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo añadir",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
+    }
+  }
+
   function renderSidePanelContent() {
     if (showCustomerCart) {
       if (customizing && selectedProduct) {
         return (
           <StoreProductCustomizePanel
-            key={selectedProduct.id}
+            key={`product-${selectedProduct.id}`}
             product={selectedProduct}
             onClose={() => setSelectedProduct(null)}
             onConfirm={handleConfirmCustomize}
+            confirming={addToCartMutation.isPending}
+            canAddToCart={cartActionsEnabled}
+          />
+        );
+      }
+      if (viewingPromotion && selectedPromotion) {
+        return (
+          <StorePromotionDetailPanel
+            key={`promotion-${selectedPromotion.id}`}
+            promotion={selectedPromotion}
+            onClose={() => setSelectedPromotion(null)}
+            onConfirm={handleConfirmPromotion}
             confirming={addToCartMutation.isPending}
             canAddToCart={cartActionsEnabled}
           />
@@ -316,7 +382,9 @@ export default function StorePage() {
   const mobileBarTitle = showCustomerCart
     ? customizing
       ? "Personalizar"
-      : "Mi pedido"
+      : viewingPromotion
+        ? "Promoción"
+        : "Mi pedido"
     : "Administración";
   const mobileCartCount = mobileCart?.itemCount ?? 0;
   const mobileCartTotal = mobileCart?.subtotal ?? 0;
@@ -349,9 +417,18 @@ export default function StorePage() {
               categoryFilter={categoryFilter}
               onCategoryChange={(next) => {
                 setCategoryFilter(next);
+                setSubcategoryFilter(null);
                 setSelectedProduct(null);
+                setSelectedPromotion(null);
+              }}
+              subcategoryFilter={subcategoryFilter}
+              onSubcategoryChange={(next) => {
+                setSubcategoryFilter(next);
+                setSelectedProduct(null);
+                setSelectedPromotion(null);
               }}
               categories={showcaseCategories}
+              subcategories={showcaseSubcategories}
               showPromotionsFilter={showcasePromotions.length > 0}
             />
           ) : null}
@@ -362,8 +439,8 @@ export default function StorePage() {
               promotions={filteredShowcasePromotions}
               isLoading={showcaseLoading}
               error={showcaseError as Error | null}
-              onAddPromotionToCart={cartActionsEnabled ? handleAddPromotionToCart : undefined}
-              addToCartBusyKey={addToCartBusyKey}
+              selectedPromotionId={selectedPromotion?.id ?? null}
+              onSelectPromotion={showCustomerCart ? handleSelectPromotion : undefined}
               emptyMessage={
                 showcasePromotions.length === 0
                   ? "Esta tienda no tiene promociones activas."
@@ -456,6 +533,7 @@ export default function StorePage() {
                 onClick={() => {
                   setMobilePanelOpen(false);
                   if (customizing) setSelectedProduct(null);
+                  if (viewingPromotion) setSelectedPromotion(null);
                 }}
               >
                 <span className="flex min-w-0 items-center gap-2">
@@ -465,7 +543,7 @@ export default function StorePage() {
                     <Settings className="h-5 w-5 shrink-0 text-primary" aria-hidden />
                   )}
                   <span className="truncate font-semibold">{mobileBarTitle}</span>
-                  {showCustomerCart && !customizing && mobileCartCount > 0 ? (
+                  {showCustomerCart && !detailing && mobileCartCount > 0 ? (
                     <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] font-bold text-primary-foreground">
                       {mobileCartCount}
                     </span>

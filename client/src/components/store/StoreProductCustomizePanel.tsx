@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ImageIcon, Loader2, Minus, Plus, ShoppingBag } from "lucide-react";
+import { Loader2, Minus, Plus, ShoppingBag } from "lucide-react";
 import { buildCustomizedProductDisplayName } from "@shared/store-cart-schema";
 import { resolveAdditionalDisplayPrice } from "@shared/store-schema";
 import type { StoreShowcaseProduct } from "@/hooks/use-store-showcase";
 import { Button } from "@/components/ui/button";
 import { StoreSelectableChip } from "@/components/store/StoreSelectableChip";
+import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
+import { StoreProductImageLightbox } from "@/components/store/StoreProductImageLightbox";
 import { cn } from "@/lib/utils";
 
 function formatPrice(value: number, currencyLabel?: string) {
@@ -64,6 +66,19 @@ export function StoreProductCustomizePanel({
   }, [product.id]);
 
   const imageUrl = product.imageUrls[0]?.trim();
+  const secondaryImageUrl = product.imageUrls[1]?.trim();
+  const [imageSwapped, setImageSwapped] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useEffect(() => {
+    setImageSwapped(false);
+    setLightboxOpen(false);
+  }, [product.id, imageUrl, secondaryImageUrl]);
+
+  const detailPrimary = imageSwapped && secondaryImageUrl ? secondaryImageUrl : imageUrl;
+  const detailSecondary =
+    imageSwapped && secondaryImageUrl ? imageUrl : secondaryImageUrl;
+  const canSwapImages = Boolean(imageUrl && secondaryImageUrl && imageUrl !== secondaryImageUrl);
   const description = product.description?.trim() ?? "";
   const removable = product.removableIngredients ?? [];
   const additionals = product.additionals ?? [];
@@ -174,13 +189,28 @@ export function StoreProductCustomizePanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
-        <div className="aspect-[4/3] max-h-44 w-full shrink-0 overflow-hidden rounded-2xl bg-muted/40 flex items-center justify-center sm:max-h-52">
-          {imageUrl ? (
-            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <ImageIcon className="h-12 w-12 text-muted-foreground/50" />
-          )}
-        </div>
+        <StoreProductDualImage
+          primaryUrl={detailPrimary}
+          secondaryUrl={canSwapImages ? detailSecondary : null}
+          alt={product.name}
+          frameClassName="aspect-[4/3] max-h-52 w-full shrink-0 rounded-2xl sm:max-h-60"
+          secondaryClassName="!bottom-2 !right-2 h-14 w-14 sm:h-16 sm:w-16 border-[3px]"
+          onClick={detailPrimary ? () => setLightboxOpen(true) : undefined}
+          onSecondaryClick={
+            canSwapImages
+              ? () => {
+                  setImageSwapped((v) => !v);
+                }
+              : undefined
+          }
+        />
+        <StoreProductImageLightbox
+          open={lightboxOpen}
+          onOpenChange={setLightboxOpen}
+          primaryUrl={imageUrl}
+          secondaryUrl={secondaryImageUrl}
+          title={product.name}
+        />
 
         <div className="mt-4 space-y-1 pb-1">
           <h2 className="text-lg font-bold text-foreground leading-snug">{product.name}</h2>

@@ -34,7 +34,13 @@ function newBranchId(): string {
 
 function branchFingerprint(branch: StoreBranch): string {
   const loc = branch.location;
-  return `${branch.id}|${branch.name.trim()}|${loc ? `${loc.lat}|${loc.lon}|${loc.label.trim()}` : ""}`;
+  const peri = (branch.deliveryPerimeter ?? [])
+    .map((p) => `${p.lat},${p.lon}`)
+    .join(";");
+  const avoids = (branch.deliveryAvoidSegments ?? [])
+    .map((s) => `${s.id}:${s.a.lat},${s.a.lon}>${s.b.lat},${s.b.lon}`)
+    .join(";");
+  return `${branch.id}|${branch.name.trim()}|${loc ? `${loc.lat}|${loc.lon}|${loc.label.trim()}` : ""}|${peri}|${avoids}`;
 }
 
 function branchesFingerprint(branches: StoreBranch[]): string {
@@ -96,6 +102,8 @@ export function StoreLocationConfigCard({
       id,
       name: defaultStoreBranchName(draftBranches.length),
       location: null,
+      deliveryPerimeter: null,
+      deliveryAvoidSegments: null,
     };
     setDraftBranches((prev) => [...prev, next]);
     setActiveTab(id);
@@ -133,6 +141,8 @@ export function StoreLocationConfigCard({
       id: b.id,
       name: b.name.trim() || defaultStoreBranchName(0),
       location: b.location,
+      deliveryPerimeter: b.deliveryPerimeter ?? null,
+      deliveryAvoidSegments: b.deliveryAvoidSegments ?? null,
     }));
 
     try {

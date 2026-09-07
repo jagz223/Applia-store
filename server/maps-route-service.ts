@@ -123,18 +123,29 @@ function resolveRouteType(from: { lon: number; lat: number }, to: { lon: number;
 /**
  * Ruta en coche (Geoapify) o fallback en línea recta.
  * Coordenadas: `{ lon, lat }` (convención GeoJSON del backend).
+ * `avoidLocations`: preferencia suave (Geoapify `avoid=location:…`); no bloquea el delivery.
  */
 export async function computeDrivingRoute(
   from: { lon: number; lat: number },
   to: { lon: number; lat: number },
-  opts?: { live?: boolean },
+  opts?: {
+    live?: boolean;
+    avoidLocations?: Array<{ lat: number; lon: number }>;
+  },
 ): Promise<DrivingRouteResult> {
   const live = !!opts?.live;
+  const avoidLocations = (opts?.avoidLocations ?? []).filter(
+    (p) => Number.isFinite(p.lat) && Number.isFinite(p.lon),
+  );
   const routeType = resolveRouteType(from, to);
-  // Prefijo v3: invalida caché anterior tras cambios de type/traffic/merge.
+  const avoidKey =
+    avoidLocations.length === 0
+      ? ""
+      : `|av=${avoidLocations.map((p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`).join(";")}`;
+  // Prefijo v4: incluye avoids en la clave de caché.
   const cacheKey = live
-    ? `ga-v3|live|${routeType}|from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`
-    : `ga-v3|${routeType}|from=${from.lon.toFixed(4)},${from.lat.toFixed(4)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}`;
+    ? `ga-v4|live|${routeType}|from=${from.lon.toFixed(5)},${from.lat.toFixed(5)}|to=${to.lon.toFixed(5)},${to.lat.toFixed(5)}${avoidKey}`
+    : `ga-v4|${routeType}|from=${from.lon.toFixed(4)},${from.lat.toFixed(4)}|to=${to.lon.toFixed(4)},${to.lat.toFixed(4)}${avoidKey}`;
   const cacheTtlMs = live ? LIVE_ROUTE_CACHE_TTL_MS : ROUTE_CACHE_TTL_MS;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
@@ -156,6 +167,13 @@ export async function computeDrivingRoute(
     url.searchParams.set("traffic", "approximated");
     url.searchParams.set("lang", "es");
     url.searchParams.set("units", "metric");
+    if (avoidLocations.length > 0) {
+      const avoidParam = avoidLocations
+        .slice(0, 48)
+        .map((p) => `location:${p.lat.toFixed(6)},${p.lon.toFixed(6)}`)
+        .join("|");
+      url.searchParams.set("avoid", avoidParam);
+    }
     url.searchParams.set("apiKey", GEOAPIFY_API_KEY);
 
     const r = await fetchWithTimeout(

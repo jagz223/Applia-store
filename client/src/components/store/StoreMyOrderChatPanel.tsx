@@ -30,8 +30,7 @@ export function StoreMyOrderChatPanel({
   if (!chatAvailable) {
     return (
       <div className="rounded-2xl border border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-        El chat con la sucursal no está disponible para este pedido (entregado hace más de 24 horas o
-        cancelado).
+        El chat con la sucursal no está disponible para este pedido (entregado hace más de 24 horas).
       </div>
     );
   }

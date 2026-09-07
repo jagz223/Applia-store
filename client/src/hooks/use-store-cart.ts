@@ -8,6 +8,7 @@ import type {
 import type { SubmitStoreCheckout } from "@shared/store-order-schema";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
 import type { StoreBranch, StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
+import type { StoreCurrencyExtra } from "@shared/store-currency-schema";
 
 export type StoreCartLine = {
   kind: "product" | "promotion";
@@ -20,6 +21,7 @@ export type StoreCartLine = {
   quantity: number;
   lineTotal: number;
   imageUrl: string | null;
+  secondaryImageUrl?: string | null;
   removedIngredientMaterialIds?: number[];
   additionalIngredientMaterialIds?: number[];
 };
@@ -54,6 +56,8 @@ export type StoreCartSummary = {
   storeLocation: StoreLocation | null;
   branches: StoreBranch[];
   deliveryFares: StoreDeliveryFares;
+  currencyVisualId?: string;
+  currencyExtras?: StoreCurrencyExtra[];
 };
 
 function authHeaders(): HeadersInit {

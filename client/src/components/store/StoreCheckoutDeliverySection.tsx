@@ -1,14 +1,31 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { GeoJSON, MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  GeoJSON,
+  MapContainer,
+  Marker,
+  Polyline,
+  TileLayer,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
 import type { GeoJsonObject } from "geojson";
 import L from "leaflet";
 import { Loader2, MapPin, Navigation } from "lucide-react";
-import type { StoreDeliveryFares, StoreLocation } from "@shared/store-schema";
+import type { StoreBranch, StoreDeliveryFares, StoreLocation } from "@shared/store-schema";
 import {
   computeStoreDeliveryFeeUsd,
   DEFAULT_STORE_DELIVERY_FARES,
+  findNearestStoreBranch,
+  normalizeStoreBranches,
   normalizeStoreDeliveryFares,
 } from "@shared/store-schema";
+import {
+  isDeliveryLocationInBranchPerimeter,
+  normalizeDeliveryPerimeter,
+  STORE_DELIVERY_OUT_OF_PERIMETER_MESSAGE,
+} from "@shared/store-delivery-perimeter";
+import { branchAvoidLocations, avoidLocationsFingerprint } from "@shared/store-delivery-avoid";
+import { StoreDeliveryPerimeterMask } from "@/components/store/StoreDeliveryPerimeterMask";
 import {
   getEffectiveLeafletMaxZoom,
   getLeafletMapContainerBehaviorProps,
@@ -138,9 +155,13 @@ function MapClickPick({
 
 type StoreCheckoutDeliverySectionProps = {
   storeLocation: StoreLocation;
+  /** Sucursales de la tienda; se usa para validar el perímetro de la más cercana. */
+  branches?: StoreBranch[] | null;
   deliveryFares?: StoreDeliveryFares | null;
   itemCount?: number;
   cartWeightKg?: number;
+  /** Subtotal de productos en moneda visual (el umbral gratis se compara con total = esto + fee). */
+  merchandiseTotalVisual?: number;
   value: PickedLocation | null;
   onChange: (place: PickedLocation | null) => void;
   onQuoteChange: (quote: StoreDeliveryQuote | null) => void;
@@ -154,9 +175,11 @@ type StoreCheckoutDeliverySectionProps = {
 
 export function StoreCheckoutDeliverySection({
   storeLocation,
+  branches,
   deliveryFares,
   itemCount = 0,
   cartWeightKg = 0,
+  merchandiseTotalVisual = 0,
   value,
   onChange,
   onQuoteChange,
@@ -172,8 +195,15 @@ export function StoreCheckoutDeliverySection({
   const [geoLoading, setGeoLoading] = useState(false);
   const [reverseLoading, setReverseLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [perimeterError, setPerimeterError] = useState<string | null>(null);
+  const [overlayPerimeter, setOverlayPerimeter] = useState<Array<{ lat: number; lon: number }> | null>(
+    null,
+  );
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  const normalizedBranches = useMemo(
+    () => normalizeStoreBranches(branches, storeLocation),
+    [branches, storeLocation],
+  );
   const [routeGeometry, setRouteGeometry] = useState<GeoJsonObject | null>(null);
   const [distanceM, setDistanceM] = useState<number | null>(null);
   const [deliveryFee, setDeliveryFee] = useState<number | null>(null);
@@ -194,6 +224,18 @@ export function StoreCheckoutDeliverySection({
   const cartMetric = { itemCount, cartWeightKg };
   const tiersKey = fares.costTiers.map((t) => `${t.minValue}:${t.priceUsd}`).join("|");
 
+  const routeBranch = useMemo(() => {
+    if (!destination) return null;
+    return findNearestStoreBranch(normalizedBranches, destination);
+  }, [destination, normalizedBranches]);
+
+  const routeAvoidLocations = useMemo(
+    () => branchAvoidLocations(routeBranch),
+    [routeBranch],
+  );
+  const routeAvoidKey = avoidLocationsFingerprint(routeAvoidLocations);
+  const routeAvoidSegments = routeBranch?.deliveryAvoidSegments ?? [];
+
   useEffect(() => {
     setInput(value?.label ?? "");
   }, [value?.label, value?.lat, value?.lon]);
@@ -212,6 +254,7 @@ export function StoreCheckoutDeliverySection({
     let cancelled = false;
     const start = origin;
     const end = destination;
+    const avoids = routeAvoidLocations;
 
     async function loadRoute() {
       setRouteLoading(true);
@@ -219,7 +262,9 @@ export function StoreCheckoutDeliverySection({
       setRouteGeometry(null);
 
       try {
-        const { route, errorMessage } = await fetchRoadDrivingRoute(start, end);
+        const { route, errorMessage } = await fetchRoadDrivingRoute(start, end, {
+          avoidLocations: avoids,
+        });
         if (cancelled) return;
 
         if (!route) {
@@ -232,7 +277,12 @@ export function StoreCheckoutDeliverySection({
 
         setRouteGeometry(route.geometry);
         setDistanceM(route.distanceM);
-        const fee = computeStoreDeliveryFeeUsd(fares, route.distanceM, cartMetric);
+        const fee = computeStoreDeliveryFeeUsd(
+          fares,
+          route.distanceM,
+          cartMetric,
+          merchandiseTotalVisual,
+        );
         setDeliveryFee(fee);
         onQuoteChangeRef.current({ distanceM: route.distanceM, deliveryFee: fee });
       } catch {
@@ -257,12 +307,16 @@ export function StoreCheckoutDeliverySection({
     destination?.lon,
     origin.lat,
     origin.lon,
+    routeAvoidKey,
     fares.baseUsd,
     fares.perKmUsd,
     fares.surchargeMode,
+    fares.freeDeliveryEnabled,
+    fares.freeDeliveryFromAmount,
     tiersKey,
     itemCount,
     cartWeightKg,
+    merchandiseTotalVisual,
   ]);
 
   const reverseAt = useCallback(async (lat: number, lon: number) => {
@@ -307,18 +361,34 @@ export function StoreCheckoutDeliverySection({
     debounceRef.current = setTimeout(() => void fetchGeocode(v), 380);
   }
 
-  function pickHit(hit: GeocodeHit) {
-    onChange({ lat: hit.lat, lon: hit.lon, label: hit.label });
-    setInput(hit.label);
+  function tryAcceptPlace(place: PickedLocation): boolean {
+    const nearest = findNearestStoreBranch(normalizedBranches, place);
+    if (nearest && !isDeliveryLocationInBranchPerimeter(nearest, place)) {
+      setPerimeterError(STORE_DELIVERY_OUT_OF_PERIMETER_MESSAGE);
+      setOverlayPerimeter(normalizeDeliveryPerimeter(nearest.deliveryPerimeter));
+      onChange(null);
+      onQuoteChangeRef.current(null);
+      setSuggestions([]);
+      return false;
+    }
+    setPerimeterError(null);
+    setOverlayPerimeter(
+      nearest ? normalizeDeliveryPerimeter(nearest.deliveryPerimeter) : null,
+    );
+    onChange(place);
+    setInput(place.label);
     setSuggestions([]);
+    return true;
+  }
+
+  function pickHit(hit: GeocodeHit) {
+    void tryAcceptPlace({ lat: hit.lat, lon: hit.lon, label: hit.label });
   }
 
   async function onMapPick(lat: number, lon: number) {
     if (disabled) return;
     const place = await reverseAt(lat, lon);
-    onChange(place);
-    setInput(place.label);
-    setSuggestions([]);
+    tryAcceptPlace(place);
   }
 
   function useGps() {
@@ -328,8 +398,7 @@ export function StoreCheckoutDeliverySection({
       async (pos) => {
         const { latitude, longitude } = pos.coords;
         const place = await reverseAt(latitude, longitude);
-        onChange(place);
-        setInput(place.label);
+        tryAcceptPlace(place);
         setGpsLoading(false);
       },
       () => setGpsLoading(false),
@@ -417,6 +486,33 @@ export function StoreCheckoutDeliverySection({
               ) : (
                 <FocusSinglePoint point={origin} />
               )}
+              {overlayPerimeter && overlayPerimeter.length >= 3 ? (
+                <StoreDeliveryPerimeterMask
+                  points={overlayPerimeter}
+                  strokeColor={themeHsl("--secondary", "#d94a3d")}
+                />
+              ) : null}
+              {routeAvoidSegments.map((s) => {
+                const line =
+                  s.path && s.path.length >= 2
+                    ? s.path.map((p) => [p.lat, p.lon] as [number, number])
+                    : ([
+                        [s.a.lat, s.a.lon],
+                        [s.b.lat, s.b.lon],
+                      ] as [number, number][]);
+                return (
+                  <Polyline
+                    key={s.id}
+                    positions={line}
+                    pathOptions={{
+                      color: "#ef4444",
+                      weight: 4,
+                      opacity: 0.75,
+                      dashArray: "8 6",
+                    }}
+                  />
+                );
+              })}
               {hasBoth && routeGeometry ? (
                 <GeoJSON
                   key={`${origin.lat}-${origin.lon}-${destination!.lat}-${destination!.lon}`}
@@ -445,6 +541,12 @@ export function StoreCheckoutDeliverySection({
           </div>
         )}
       </div>
+
+      {perimeterError ? (
+        <p className="text-sm font-medium text-destructive" role="alert">
+          {perimeterError}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
         {routeLoading ? (

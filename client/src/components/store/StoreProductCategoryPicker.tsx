@@ -87,6 +87,7 @@ export function StoreProductCategoryPicker({
         name: trimmedSearch,
         description: null,
         productIds: [],
+        hideFromShowcaseAll: false,
       });
       addItem({ id: created.id, name: created.name });
       toast({

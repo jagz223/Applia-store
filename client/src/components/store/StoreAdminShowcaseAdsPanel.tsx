@@ -6,7 +6,8 @@ export function StoreAdminShowcaseAdsPanel({ storeId }: { storeId: number }) {
       <div className="space-y-1">
         <h2 className="font-display text-2xl font-bold tracking-tight">Banners y Pop ups</h2>
         <p className="text-sm text-muted-foreground">
-          Configura los carruseles visibles en la vitrina y los pop ups que se muestran al volver luego de 1 hora.
+          Gestiona por pestañas el carrusel de banners y los pop ups de la vitrina: agrega, edita,
+          elimina o previsualiza cada imagen.
         </p>
       </div>
 
@@ -14,4 +15,3 @@ export function StoreAdminShowcaseAdsPanel({ storeId }: { storeId: number }) {
     </div>
   );
 }
-

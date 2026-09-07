@@ -1,23 +1,30 @@
-import { useEffect, useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
-import { Loader2, Plus, Trash2, Image as ImageIcon } from "lucide-react";
-import type { InsertStoreShowcaseAdItem } from "@shared/store-showcase-ads-schema";
+import { useMemo, useState } from "react";
+import { Eye, Image as ImageIcon, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { normalizeBannerCategoryVisibility } from "@shared/store-showcase-ads-schema";
 import {
-  useCreateStoreShowcaseAd,
   useDeleteStoreShowcaseAd,
   useStoreShowcaseAds,
   type StoreShowcaseAdSummary,
 } from "@/hooks/use-store-showcase-ads";
-import { uploadStoreShowcaseAdImage } from "@/lib/firebase-client";
-import { revokeBlobPreview } from "@/lib/store-image-draft";
 import {
-  isLikelyImageUrl,
   resolveShowcaseAdClickUrl,
   resolveShowcaseAdImageUrl,
 } from "@/lib/store-showcase-ad-media";
+import { StoreShowcaseAdFormDialog } from "@/components/store/StoreShowcaseAdFormDialog";
+import { StoreShowcaseAdDetailDialog } from "@/components/store/StoreShowcaseAdDetailDialog";
+import { STORE_SHOWCASE_BANNER_SIZE_HINT } from "@/components/store/StoreShowcaseBannersCarousel";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,149 +35,342 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 import { cn } from "@/lib/utils";
-import { storeAdminFieldClass } from "@/components/store/store-admin-ui";
-import { STORE_SHOWCASE_BANNER_FRAME_CLASS } from "@/components/store/StoreShowcaseBannersCarousel";
 
 type AdKind = "banner" | "popup";
 
-type AdFormState = {
-  imageSourceUrl: string;
-  clickUrl: string;
-  pendingImageFile: File | null;
-  filePreviewUrl: string | null;
-};
-
-function emptyFormState(): AdFormState {
-  return {
-    imageSourceUrl: "",
-    clickUrl: "",
-    pendingImageFile: null,
-    filePreviewUrl: null,
-  };
+function bannerVisibilityLabel(ad: StoreShowcaseAdSummary): string {
+  const { categoryVisibilityMode, categoryIds } = normalizeBannerCategoryVisibility(
+    ad.categoryVisibilityMode,
+    ad.categoryIds,
+  );
+  if (categoryVisibilityMode === "all") return "Todas las categorías";
+  if (categoryVisibilityMode === "exclude") {
+    const n = categoryIds.length;
+    return n === 1 ? "Todas menos 1 categoría" : `Todas menos ${n} categorías`;
+  }
+  const n = categoryIds.length;
+  return n === 1 ? "Solo en 1 categoría" : `Solo en ${n} categorías`;
 }
 
-function formPreviewUrl(form: AdFormState): string | null {
-  if (form.filePreviewUrl) return form.filePreviewUrl;
-  const url = form.imageSourceUrl.trim();
-  if (url && isLikelyImageUrl(url)) return url;
-  return null;
+function AdThumbnail({ imageUrl }: { imageUrl: string | null }) {
+  if (!imageUrl) {
+    return (
+      <div
+        className="flex h-14 w-24 shrink-0 items-center justify-center rounded-md border border-dashed border-border bg-muted/40 text-muted-foreground"
+        aria-hidden
+      >
+        <ImageIcon className="h-5 w-5" />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={imageUrl}
+      alt=""
+      referrerPolicy="no-referrer"
+      className="h-14 w-24 shrink-0 rounded-md border border-border object-cover bg-muted/30"
+    />
+  );
+}
+
+function AdList({
+  kind,
+  items,
+  busy,
+  onPreview,
+  onEdit,
+  onDelete,
+}: {
+  kind: AdKind;
+  items: StoreShowcaseAdSummary[];
+  busy: boolean;
+  onPreview: (ad: StoreShowcaseAdSummary) => void;
+  onEdit: (ad: StoreShowcaseAdSummary) => void;
+  onDelete: (ad: StoreShowcaseAdSummary) => void;
+}) {
+  const sorted = useMemo(
+    () => items.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id),
+    [items],
+  );
+  const isBanner = kind === "banner";
+
+  if (sorted.length === 0) {
+    return (
+      <p className="rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+        No hay {kind === "banner" ? "banners" : "pop ups"} todavía. Agrega el primero.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-3 md:hidden">
+        {sorted.map((ad) => {
+          const imageUrl = resolveShowcaseAdImageUrl(ad);
+          const clickUrl = resolveShowcaseAdClickUrl(ad);
+          return (
+            <div
+              key={ad.id}
+              className="flex gap-3 rounded-2xl border border-border/60 bg-card/60 p-3"
+            >
+              <AdThumbnail imageUrl={imageUrl} />
+              <div className="min-w-0 flex-1 space-y-2">
+                <p className="truncate text-sm font-medium">
+                  {clickUrl ? "Con link" : "Solo imagen"}
+                </p>
+                {isBanner ? (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {bannerVisibilityLabel(ad)}
+                  </p>
+                ) : null}
+                {clickUrl ? (
+                  <p className="truncate text-xs text-muted-foreground">{clickUrl}</p>
+                ) : null}
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-full px-2.5"
+                    disabled={busy}
+                    onClick={() => onPreview(ad)}
+                    aria-label="Vista previa"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-full px-2.5"
+                    disabled={busy}
+                    onClick={() => onEdit(ad)}
+                    aria-label="Editar"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-full px-2.5 text-destructive hover:text-destructive"
+                    disabled={busy}
+                    onClick={() => onDelete(ad)}
+                    aria-label="Eliminar"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-2xl border border-border/60 md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[8.5rem]">Imagen</TableHead>
+              {isBanner ? <TableHead className="w-[12rem]">Alcance</TableHead> : null}
+              <TableHead>Enlace</TableHead>
+              <TableHead className="w-[9rem] text-right">Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((ad) => {
+              const imageUrl = resolveShowcaseAdImageUrl(ad);
+              const clickUrl = resolveShowcaseAdClickUrl(ad);
+              return (
+                <TableRow key={ad.id}>
+                  <TableCell>
+                    <AdThumbnail imageUrl={imageUrl} />
+                  </TableCell>
+                  {isBanner ? (
+                    <TableCell>
+                      <span className="text-sm text-muted-foreground">
+                        {bannerVisibilityLabel(ad)}
+                      </span>
+                    </TableCell>
+                  ) : null}
+                  <TableCell className="max-w-[20rem]">
+                    {clickUrl ? (
+                      <span className="truncate text-sm">{clickUrl}</span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Sin link</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="inline-flex gap-1">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-9 w-9 rounded-full"
+                        disabled={busy}
+                        onClick={() => onPreview(ad)}
+                        aria-label="Vista previa"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-9 w-9 rounded-full"
+                        disabled={busy}
+                        onClick={() => onEdit(ad)}
+                        aria-label="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-9 w-9 rounded-full text-destructive hover:text-destructive"
+                        disabled={busy}
+                        onClick={() => onDelete(ad)}
+                        aria-label="Eliminar"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </>
+  );
 }
 
 export function StoreShowcaseAdsConfigCard({ storeId }: { storeId: number }) {
   const { toast } = useToast();
-  const { data, error } = useStoreShowcaseAds(storeId);
-  const createMutation = useCreateStoreShowcaseAd(storeId);
+  const { data, error, isLoading } = useStoreShowcaseAds(storeId);
   const deleteMutation = useDeleteStoreShowcaseAd(storeId);
 
   const banners = data?.banners ?? [];
   const popups = data?.popups ?? [];
 
-  const [bannerForm, setBannerForm] = useState<AdFormState>(emptyFormState);
-  const [popupForm, setPopupForm] = useState<AdFormState>(emptyFormState);
-  const [deleteOpenFor, setDeleteOpenFor] = useState<{ kind: AdKind; adId: number } | null>(null);
+  const [tab, setTab] = useState<AdKind>("banner");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingAd, setEditingAd] = useState<StoreShowcaseAdSummary | null>(null);
+  const [previewAd, setPreviewAd] = useState<StoreShowcaseAdSummary | null>(null);
+  const [deleteOpenFor, setDeleteOpenFor] = useState<StoreShowcaseAdSummary | null>(null);
 
-  useEffect(() => {
-    return () => {
-      revokeBlobPreview(bannerForm.filePreviewUrl);
-      revokeBlobPreview(popupForm.filePreviewUrl);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const busy = deleteMutation.isPending;
 
-  useEffect(() => {
-    setBannerForm((prev) => {
-      revokeBlobPreview(prev.filePreviewUrl);
-      return emptyFormState();
-    });
-    setPopupForm((prev) => {
-      revokeBlobPreview(prev.filePreviewUrl);
-      return emptyFormState();
-    });
-  }, [storeId]);
-
-  const bannerCanSubmit = useMemo(() => Boolean(formPreviewUrl(bannerForm)), [bannerForm]);
-  const popupCanSubmit = useMemo(() => Boolean(formPreviewUrl(popupForm)), [popupForm]);
-
-  async function handleCreate(kind: AdKind) {
-    const form = kind === "banner" ? bannerForm : popupForm;
-    const imageFromUrl = form.imageSourceUrl.trim();
-    const clickUrl = form.clickUrl.trim();
-
-    if (!form.pendingImageFile && !isLikelyImageUrl(imageFromUrl)) {
-      toast({
-        variant: "destructive",
-        title: "Imagen requerida",
-        description: "Sube un archivo o pega un enlace válido de imagen para previsualizar.",
-      });
-      return;
-    }
-
-    try {
-      let imageUrl: string | null = null;
-      if (form.pendingImageFile) {
-        imageUrl = await uploadStoreShowcaseAdImage(storeId, kind, form.pendingImageFile);
-      } else {
-        imageUrl = imageFromUrl;
-      }
-
-      const payload: InsertStoreShowcaseAdItem = {
-        kind,
-        imageUrl,
-        linkUrl: clickUrl || null,
-      };
-
-      await createMutation.mutateAsync(payload);
-      toast({ title: kind === "banner" ? "Banner creado" : "Popup creado" });
-
-      if (kind === "banner") {
-        revokeBlobPreview(bannerForm.filePreviewUrl);
-        setBannerForm(emptyFormState());
-      } else {
-        revokeBlobPreview(popupForm.filePreviewUrl);
-        setPopupForm(emptyFormState());
-      }
-    } catch (e) {
-      toast({
-        variant: "destructive",
-        title: kind === "banner" ? "No se pudo crear el banner" : "No se pudo crear el popup",
-        description: e instanceof Error ? e.message : "Error desconocido",
-      });
-    }
+  function openCreate() {
+    setEditingAd(null);
+    setFormOpen(true);
   }
 
-  const deleting = deleteMutation.isPending;
+  function openEdit(ad: StoreShowcaseAdSummary) {
+    setEditingAd(ad);
+    setFormOpen(true);
+  }
 
   return (
-    <div className="space-y-8">
-      <AdSection
-        title="Banners"
-        description="Se muestran como carrusel arriba del filtro de la vitrina."
-        sizeHint="Se sugiere un tamaño de: 1200 × 300 px (recomendado) o 1600 × 400 px."
-        previewKind="banner"
-        items={banners}
-        form={bannerForm}
-        setForm={setBannerForm}
-        canSubmit={bannerCanSubmit}
-        saving={createMutation.isPending}
-        deleting={deleting}
-        onSubmit={() => handleCreate("banner")}
-        onDelete={(adId) => setDeleteOpenFor({ kind: "banner", adId })}
+    <Card className={cn(storeAdminSectionCardClass, "overflow-hidden")}>
+      <CardHeader className="space-y-1.5 px-4 pt-5 sm:px-6">
+        <CardTitle className="font-display text-xl tracking-tight">Contenido de vitrina</CardTitle>
+        <CardDescription className="text-sm leading-snug">
+          Administra banners del carrusel y pop ups emergentes. Puedes ver, editar o eliminar cada
+          imagen.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 px-4 pb-5 sm:px-6">
+        <Tabs
+          value={tab}
+          onValueChange={(v) => setTab(v === "popup" ? "popup" : "banner")}
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <TabsList className="h-auto w-full justify-start gap-1 rounded-full p-1 sm:w-auto">
+              <TabsTrigger value="banner" className="flex-1 rounded-full sm:flex-none">
+                Banners
+              </TabsTrigger>
+              <TabsTrigger value="popup" className="flex-1 rounded-full sm:flex-none">
+                Pop ups
+              </TabsTrigger>
+            </TabsList>
+            <Button
+              type="button"
+              className="h-11 shrink-0 gap-2 rounded-full font-semibold"
+              disabled={busy}
+              onClick={openCreate}
+            >
+              <Plus className="h-4 w-4" />
+              Agregar {tab === "banner" ? "banner" : "pop up"}
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Cargando…
+            </div>
+          ) : (
+            <>
+              <TabsContent value="banner" className="mt-4 space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Carrusel arriba del filtro. Puedes limitar por categoría; “solo en…” no aparece en
+                  Todas. Tamaño sugerido: {STORE_SHOWCASE_BANNER_SIZE_HINT}.
+                </p>
+                <AdList
+                  kind="banner"
+                  items={banners}
+                  busy={busy}
+                  onPreview={setPreviewAd}
+                  onEdit={openEdit}
+                  onDelete={setDeleteOpenFor}
+                />
+              </TabsContent>
+              <TabsContent value="popup" className="mt-4 space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Emergente al volver a la tienda luego de al menos 1 hora.
+                </p>
+                <AdList
+                  kind="popup"
+                  items={popups}
+                  busy={busy}
+                  onPreview={setPreviewAd}
+                  onEdit={openEdit}
+                  onDelete={setDeleteOpenFor}
+                />
+              </TabsContent>
+            </>
+          )}
+        </Tabs>
+
+        {error ? (
+          <p className="text-sm text-destructive">
+            No se pudieron cargar los banners y pop ups.
+          </p>
+        ) : null}
+      </CardContent>
+
+      <StoreShowcaseAdFormDialog
+        storeId={storeId}
+        kind={editingAd?.kind ?? tab}
+        open={formOpen}
+        onOpenChange={(o) => {
+          setFormOpen(o);
+          if (!o) setEditingAd(null);
+        }}
+        ad={editingAd}
       />
 
-      <AdSection
-        title="Pop ups"
-        description="Se muestran como carrusel emergente cuando el cliente vuelve luego de al menos 1 hora."
-        previewKind="popup"
-        items={popups}
-        form={popupForm}
-        setForm={setPopupForm}
-        canSubmit={popupCanSubmit}
-        saving={createMutation.isPending}
-        deleting={deleting}
-        onSubmit={() => handleCreate("popup")}
-        onDelete={(adId) => setDeleteOpenFor({ kind: "popup", adId })}
-        className="border-t border-border/60 pt-8"
+      <StoreShowcaseAdDetailDialog
+        ad={previewAd}
+        open={previewAd != null}
+        onOpenChange={(o) => {
+          if (!o) setPreviewAd(null);
+        }}
       />
 
       <AlertDialog
@@ -189,15 +389,15 @@ export function StoreShowcaseAdsConfigCard({ storeId }: { storeId: number }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              disabled={deleting || !deleteOpenFor}
+              disabled={busy || !deleteOpenFor}
               onClick={async () => {
                 if (!deleteOpenFor) return;
                 try {
                   await deleteMutation.mutateAsync({
                     kind: deleteOpenFor.kind,
-                    adId: deleteOpenFor.adId,
+                    adId: deleteOpenFor.id,
                   });
                   toast({ title: "Eliminado" });
                   setDeleteOpenFor(null);
@@ -215,270 +415,6 @@ export function StoreShowcaseAdsConfigCard({ storeId }: { storeId: number }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {error ? (
-        <p className="text-sm text-destructive">No se pudo cargar los datos de banners y popups.</p>
-      ) : null}
-    </div>
-  );
-}
-
-function AdSection({
-  title,
-  description,
-  sizeHint,
-  previewKind,
-  items,
-  form,
-  setForm,
-  canSubmit,
-  saving,
-  deleting,
-  onSubmit,
-  onDelete,
-  className,
-}: {
-  title: string;
-  description: string;
-  sizeHint?: string;
-  previewKind: AdKind;
-  items: StoreShowcaseAdSummary[];
-  form: AdFormState;
-  setForm: Dispatch<SetStateAction<AdFormState>>;
-  canSubmit: boolean;
-  saving: boolean;
-  deleting: boolean;
-  onSubmit: () => Promise<void>;
-  onDelete: (adId: number) => void;
-  className?: string;
-}) {
-  return (
-    <section className={cn("space-y-4", className)}>
-      <div className="space-y-1">
-        <h3 className="text-lg font-semibold">{title}</h3>
-        <p className="text-sm text-muted-foreground">{description}</p>
-        {sizeHint ? <p className="text-sm font-medium text-red-600">{sizeHint}</p> : null}
-      </div>
-
-      <AdHorizontalList items={items} onDelete={onDelete} deleting={deleting} />
-
-      <AdCreateForm
-        previewKind={previewKind}
-        form={form}
-        setForm={setForm}
-        onSubmit={onSubmit}
-        canSubmit={canSubmit}
-        saving={saving}
-      />
-    </section>
-  );
-}
-
-function AdHorizontalList({
-  items,
-  onDelete,
-  deleting,
-}: {
-  items: StoreShowcaseAdSummary[];
-  onDelete: (adId: number) => void;
-  deleting: boolean;
-}) {
-  if (items.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        No hay elementos en este carrusel aún. Agrega uno debajo.
-      </p>
-    );
-  }
-
-  const sorted = items.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
-
-  return (
-    <div
-      className={cn(
-        "flex gap-3 overflow-x-auto overscroll-x-contain pb-1",
-        "scroll-smooth [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5",
-        "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30",
-      )}
-    >
-      {sorted.map((ad) => {
-        const imageUrl = resolveShowcaseAdImageUrl(ad);
-        const clickUrl = resolveShowcaseAdClickUrl(ad);
-        return (
-          <div
-            key={ad.id}
-            className="relative h-28 w-52 shrink-0 overflow-hidden rounded-2xl border border-border/60 bg-muted/30"
-          >
-            {imageUrl ? (
-              <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center px-3 text-center text-xs text-muted-foreground">
-                Sin imagen
-              </div>
-            )}
-            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/70 to-transparent p-2 pt-6">
-              <p className="min-w-0 truncate text-[11px] text-white/90">
-                {clickUrl ? "Con link" : "Solo imagen"}
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="h-7 gap-1 rounded-full px-2 text-xs"
-                disabled={deleting}
-                onClick={() => onDelete(ad.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                Eliminar
-              </Button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function AdCreateForm({
-  previewKind,
-  form,
-  setForm,
-  onSubmit,
-  canSubmit,
-  saving,
-}: {
-  previewKind: AdKind;
-  form: AdFormState;
-  setForm: Dispatch<SetStateAction<AdFormState>>;
-  onSubmit: () => Promise<void>;
-  canSubmit: boolean;
-  saving: boolean;
-}) {
-  const id = useId();
-  const previewUrl = formPreviewUrl(form);
-  const urlLooksLikeImage = !form.pendingImageFile && isLikelyImageUrl(form.imageSourceUrl);
-  const urlEnteredButInvalid =
-    Boolean(form.imageSourceUrl.trim()) && !form.pendingImageFile && !urlLooksLikeImage;
-  const isBannerPreview = previewKind === "banner";
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        void onSubmit();
-      }}
-      className="space-y-4 rounded-2xl border border-border/60 bg-card/50 p-4"
-    >
-      <div className="space-y-2">
-        <Label>Vista previa</Label>
-        {isBannerPreview ? (
-          <div
-            className={cn(
-              "relative w-full overflow-hidden rounded-2xl border border-border/60 bg-muted/30",
-              STORE_SHOWCASE_BANNER_FRAME_CLASS,
-            )}
-          >
-            {previewUrl ? (
-              <img src={previewUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                <ImageIcon className="h-6 w-6" aria-hidden />
-                <p className="text-xs">Sube un archivo o pega un enlace de imagen</p>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex w-full items-center justify-center overflow-hidden rounded-2xl border border-border/60 bg-muted/30 p-3">
-            {previewUrl ? (
-              <img
-                src={previewUrl}
-                alt=""
-                className="max-h-[min(70dvh,32rem)] max-w-full object-contain"
-              />
-            ) : (
-              <div className="flex h-40 w-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                <ImageIcon className="h-6 w-6" aria-hidden />
-                <p className="text-xs">Sube un archivo o pega un enlace de imagen</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor={`${id}-file`}>Subir imagen</Label>
-        <Input
-          id={`${id}-file`}
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
-          disabled={saving}
-          className={storeAdminFieldClass}
-          onChange={(e) => {
-            const file = e.currentTarget.files?.[0] ?? null;
-            setForm((prev) => {
-              revokeBlobPreview(prev.filePreviewUrl);
-              return {
-                ...prev,
-                pendingImageFile: file,
-                filePreviewUrl: file ? URL.createObjectURL(file) : null,
-                // Si elige archivo, limpiamos URL de imagen para no mezclar fuentes.
-                imageSourceUrl: file ? "" : prev.imageSourceUrl,
-              };
-            });
-          }}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor={`${id}-image-url`}>Enlace de imagen</Label>
-        <Input
-          id={`${id}-image-url`}
-          value={form.imageSourceUrl}
-          disabled={saving || Boolean(form.pendingImageFile)}
-          placeholder="https://.../imagen.jpg"
-          className={storeAdminFieldClass}
-          onChange={(e) => {
-            const imageSourceUrl = e.target.value;
-            setForm((prev) => {
-              if (prev.filePreviewUrl) revokeBlobPreview(prev.filePreviewUrl);
-              return {
-                ...prev,
-                imageSourceUrl,
-                pendingImageFile: null,
-                filePreviewUrl: null,
-              };
-            });
-          }}
-        />
-        <p className="text-xs text-muted-foreground">
-          Pega la URL de una imagen para previsualizarla antes de agregar.
-        </p>
-        {urlEnteredButInvalid ? (
-          <p className="text-xs text-destructive">
-            Ese enlace no parece una imagen. Usa una URL que termine en .jpg, .png, .webp, etc.
-          </p>
-        ) : null}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor={`${id}-click`}>Link al hacer clic (opcional)</Label>
-        <Input
-          id={`${id}-click`}
-          value={form.clickUrl}
-          disabled={saving}
-          placeholder="https://..."
-          className={storeAdminFieldClass}
-          onChange={(e) => setForm((prev) => ({ ...prev, clickUrl: e.target.value }))}
-        />
-        <p className="text-xs text-muted-foreground">
-          Si se define, al tocar el banner/popup se abrirá este enlace.
-        </p>
-      </div>
-
-      <Button type="submit" className="w-full gap-2 rounded-full" disabled={!canSubmit || saving}>
-        {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
-        Agregar
-      </Button>
-    </form>
+    </Card>
   );
 }

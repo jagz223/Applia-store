@@ -64,7 +64,8 @@ export const STORE_ORDER_STATUS_LABELS: Record<StoreOrderStatus, string> = {
 
 
 
-export const STORE_ORDER_TERMINAL_STATUSES: StoreOrderStatus[] = ["completado", "rechazado"];
+/** Solo `completado` cierra el flujo. `rechazado` se puede reactivar (p. ej. a confirmado). */
+export const STORE_ORDER_TERMINAL_STATUSES: StoreOrderStatus[] = ["completado"];
 
 /** Factura PDF: disponible desde confirmado (bloqueada en pagado y rechazado). */
 export function canGenerateStoreOrderInvoice(status: StoreOrderStatus): boolean {
@@ -241,6 +242,15 @@ export type StoreOrder = {
 
   status: StoreOrderStatus;
 
+  /**
+   * Unidades de producto descontadas por esta orden (snapshot al comprometer stock).
+   * Sirve para devolver/restar de nuevo sin depender de promociones actuales.
+   */
+  stockImpact?: Array<{ productId: number; quantity: number }>;
+
+  /** true si el stock de esta orden ya está descontado del inventario. */
+  stockCommitted?: boolean;
+
   /** Pack Go ride activo o último vinculado. */
 
   packRideId: string | null;
@@ -384,7 +394,8 @@ export function getAllowedStoreOrderStatuses(order: Pick<StoreOrder, "status" | 
 
   if (STORE_ORDER_TERMINAL_STATUSES.includes(status)) return [];
 
-
+  // Tras un rechazo, se puede retomar el flujo normal desde confirmado (p. ej. tras acordar en el chat).
+  if (status === "rechazado") return ["confirmado"];
 
   if (status === "pagado") return ["confirmado", "rechazado"];
 
@@ -442,6 +453,12 @@ export function getStoreOrderStatusTransitionLabel(
   if (from === "listo_para_envio" && to === "confirmado") {
 
     return "Volver a confirmado";
+
+  }
+
+  if (from === "rechazado" && to === "confirmado") {
+
+    return "Aprobar / salir de rechazo";
 
   }
 

@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Package, Tags, Percent, Ticket, Settings2, ClipboardList, Coins, Leaf, Images, Users, MessageSquare, BarChart3, CreditCard, Shirt } from "lucide-react";
+import { ArrowLeft, Package, Tags, Layers, Percent, Ticket, Settings2, ClipboardList, Coins, Leaf, Images, Users, MessageSquare, BarChart3, CreditCard, Shirt, Truck } from "lucide-react";
 import {
   getVisibleStoreAdminSections,
   type StoreAdminSectionId,
@@ -16,6 +16,7 @@ import { StoreAdminDeliveryRatePrompt } from "@/components/store/StoreAdminDeliv
 const SECTION_ICONS: Record<StoreAdminSectionId, typeof Package> = {
   productos: Package,
   categorias: Tags,
+  subcategorias: Layers,
   ingredientes: Leaf,
   promociones: Percent,
   codigos: Ticket,
@@ -24,6 +25,7 @@ const SECTION_ICONS: Record<StoreAdminSectionId, typeof Package> = {
   moneda: Coins,
   simulacion_ropa: Shirt,
   metodos_pago: CreditCard,
+  metodos_entrega: Truck,
   configuracion: Settings2,
   chat_sucursales: MessageSquare,
   usuarios: Users,

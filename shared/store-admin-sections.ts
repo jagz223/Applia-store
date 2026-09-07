@@ -1,6 +1,7 @@
 export const STORE_ADMIN_SECTIONS = [
   { id: "productos", label: "Productos", path: "productos" },
   { id: "categorias", label: "Categorías", path: "categorias" },
+  { id: "subcategorias", label: "Subcategorías", path: "subcategorias" },
   { id: "ingredientes", label: "Ingredientes", path: "ingredientes" },
   { id: "promociones", label: "Promociones", path: "promociones" },
   { id: "codigos", label: "Códigos de descuento", path: "codigos" },
@@ -10,6 +11,7 @@ export const STORE_ADMIN_SECTIONS = [
   { id: "moneda", label: "Moneda", path: "moneda" },
   { id: "simulacion_ropa", label: "Simulación de ropa", path: "simulacion-ropa" },
   { id: "metodos_pago", label: "Métodos de pago", path: "metodos-pago" },
+  { id: "metodos_entrega", label: "Métodos de entrega", path: "metodos-entrega" },
   { id: "configuracion", label: "Configuraciones de tienda", path: "configuracion" },
   { id: "usuarios", label: "Usuarios", path: "usuarios" },
   { id: "estadisticas", label: "Estadísticas", path: "estadisticas" },

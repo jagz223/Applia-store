@@ -284,7 +284,7 @@ export async function ensureStoreOrderCustomerConversation(
 
         created: false,
 
-        chatLocked: (existing as { messagesLocked?: boolean }).messagesLocked === true,
+        chatLocked: true,
 
       };
 
@@ -294,7 +294,8 @@ export async function ensureStoreOrderCustomerConversation(
 
   }
 
-
+  // Reabre chats que quedaron locked (p. ej. órdenes rechazadas antes del cambio de reglas).
+  await syncStoreOrderCustomerChatLock(storage, order);
 
   let conv = await storage.findStoreOrderCustomerConversation(order.id);
 
@@ -944,7 +945,9 @@ export async function syncStoreOrderCustomerChatLock(
 
   const shouldLock = !isStoreOrderCustomerChatAvailable(order);
 
-  if (shouldLock && (conv as { messagesLocked?: boolean }).messagesLocked !== true) {
+  const isLocked = (conv as { messagesLocked?: boolean }).messagesLocked === true;
+
+  if (shouldLock && !isLocked) {
 
     await storage.patchConversation(convId, { messagesLocked: true });
 
@@ -957,6 +960,30 @@ export async function syncStoreOrderCustomerChatLock(
       content:
 
         "Mensaje del sistema: este chat se cerró porque el pedido fue entregado hace más de 24 horas o ya no está activo.",
+
+      type: "system",
+
+      status: "sent",
+
+    });
+
+    return;
+
+  }
+
+  if (!shouldLock && isLocked) {
+
+    await storage.patchConversation(convId, { messagesLocked: false });
+
+    await storage.createMessage({
+
+      conversationId: convId,
+
+      senderId: CHAT_SYSTEM_SENDER_ID,
+
+      content:
+
+        "Mensaje del sistema: el chat quedó abierto de nuevo. Pueden coordinar aquí para retomar el pedido.",
 
       type: "system",
 

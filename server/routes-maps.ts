@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { computeDrivingRoute } from "./maps-route-service";
+import { matchRoadSegment, snapPointToRoad } from "./maps-snap-road";
 
 const GEOAPIFY_API_KEY = String(
   process.env.GEOAPIFY_API_KEY ?? process.env.VITE_GEOAPIFY_API_KEY ?? ""
@@ -51,6 +52,28 @@ function parseLonLatPair(s: string): { lon: number; lat: number } | null {
   const parts = s.split(",").map((p) => Number(p.trim()));
   if (parts.length !== 2 || !parts.every((n) => Number.isFinite(n))) return null;
   return { lon: parts[0], lat: parts[1] };
+}
+
+/** Query `avoid`: `lat,lon;lat,lon;…` (máx. 48). Preferencia suave en Geoapify. */
+function parseAvoidLatLonList(raw: unknown): Array<{ lat: number; lon: number }> {
+  const s = String(raw ?? "").trim();
+  if (!s) return [];
+  const out: Array<{ lat: number; lon: number }> = [];
+  const seen = new Set<string>();
+  for (const chunk of s.split(/[|;]/)) {
+    const parts = chunk.split(",").map((p) => Number(p.trim()));
+    if (parts.length !== 2) continue;
+    const lat = parts[0];
+    const lon = parts[1];
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
+    const key = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ lat, lon });
+    if (out.length >= 48) break;
+  }
+  return out;
 }
 
 function geoapifyHeaders(): HeadersInit {
@@ -149,8 +172,72 @@ export function registerMapRoutes(app: Express): void {
   });
 
   /**
+   * Ajusta un punto a la calle más cercana (Geoapify Map Matching, modo drive).
+   * Query: lat, lon
+   */
+  app.get("/api/maps/snap-road", async (req: Request, res: Response) => {
+    if (!requireGeoapify(res)) return;
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      return res.status(400).json({ message: "Usa lat y lon válidos" });
+    }
+    try {
+      const snapped = await snapPointToRoad(lat, lon);
+      if (!snapped) {
+        return res.status(422).json({
+          message: "Toca más cerca de una calle. Solo se pueden marcar puntos sobre la vía.",
+        });
+      }
+      res.json(snapped);
+    } catch (e) {
+      console.error("[maps] snap-road failed", e);
+      res.status(502).json({ message: "No se pudo ajustar el punto a una calle" });
+    }
+  });
+
+  /**
+   * Empareja un tramo A→B a la red vial y devuelve extremos + path.
+   * Body JSON: { a: {lat,lon}, b: {lat,lon} }
+   */
+  app.post("/api/maps/match-road-segment", async (req: Request, res: Response) => {
+    if (!requireGeoapify(res)) return;
+    const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+    const aRaw = body.a && typeof body.a === "object" ? (body.a as Record<string, unknown>) : null;
+    const bRaw = body.b && typeof body.b === "object" ? (body.b as Record<string, unknown>) : null;
+    const aLat = Number(aRaw?.lat);
+    const aLon = Number(aRaw?.lon);
+    const bLat = Number(bRaw?.lat);
+    const bLon = Number(bRaw?.lon);
+    if (
+      !Number.isFinite(aLat) ||
+      !Number.isFinite(aLon) ||
+      !Number.isFinite(bLat) ||
+      !Number.isFinite(bLon)
+    ) {
+      return res.status(400).json({ message: "Envía a y b con lat/lon" });
+    }
+    try {
+      const matched = await matchRoadSegment(
+        { lat: aLat, lon: aLon },
+        { lat: bLat, lon: bLon },
+      );
+      if (!matched) {
+        return res.status(422).json({
+          message: "No se pudo trazar ese tramo sobre calles. Elige otros puntos.",
+        });
+      }
+      res.json(matched);
+    } catch (e) {
+      console.error("[maps] match-road-segment failed", e);
+      res.status(502).json({ message: "No se pudo emparejar el tramo a calles" });
+    }
+  });
+
+  /**
    * Ruta en coche (Geoapify): distancia, duración y geometría Leaflet.
    * Parámetros: from=lon,lat y to=lon,lat
+   * Opcional: avoid=lat,lon;lat,lon;… (preferencia suave, no bloquea).
    */
   app.get("/api/maps/route", async (req: Request, res: Response) => {
     if (!requireGeoapify(res)) return;
@@ -159,7 +246,8 @@ export function registerMapRoutes(app: Express): void {
     if (!from || !to) return res.status(400).json({ message: "Usa from=lon,lat y to=lon,lat" });
     try {
       const live = req.query.live === "1" || req.query.live === "true";
-      const payload = await computeDrivingRoute(from, to, { live });
+      const avoidLocations = parseAvoidLatLonList(req.query.avoid);
+      const payload = await computeDrivingRoute(from, to, { live, avoidLocations });
       if (payload.source === "fallback") {
         return res.status(502).json({
           message: "No se pudo trazar la ruta por calles. Intenta de nuevo.",

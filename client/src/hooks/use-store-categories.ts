@@ -11,6 +11,7 @@ export type StoreCategorySummary = {
   name: string;
   description: string | null;
   hideFromShowcaseAll?: boolean;
+  sortOrder?: number;
   productIds: number[];
   productCount: number;
   createdAt: string;

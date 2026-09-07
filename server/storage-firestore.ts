@@ -66,6 +66,12 @@ import {
   deriveProductPricesFromSizes,
   resolveStoreProductPriceFields,
   resolveStoreProductWeightFields,
+  normalizeStoreProductStockFields,
+  resolveStoreProductShowOnShowcase,
+  storeProductHasAvailableStock,
+  compareStoreCategoriesBySortOrder,
+  assignContiguousStoreCategorySortOrders,
+  moveStoreCategoryToSortOrder,
   resolveStoreLocationAndBranches,
   normalizeStoreBranches,
   STORE_PRIMARY_BRANCH_ID,
@@ -83,6 +89,9 @@ import {
   type StoreCategory,
   type InsertStoreCategory,
   type UpdateStoreCategory,
+  type StoreSubcategory,
+  type InsertStoreSubcategory,
+  type UpdateStoreSubcategory,
   type StorePromotion,
   type InsertStorePromotion,
   type UpdateStorePromotion,
@@ -91,8 +100,10 @@ import {
 import type {
   StoreShowcaseAdItem,
   InsertStoreShowcaseAdItem,
+  UpdateStoreShowcaseAdItem,
   StoreShowcaseAdKind,
 } from "@shared/store-showcase-ads-schema";
+import { normalizeBannerCategoryVisibility } from "@shared/store-showcase-ads-schema";
 import { STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
 import type {
   InsertStorePaymentMethod,
@@ -4734,6 +4745,24 @@ class FirestoreStorageImpl implements IStorage {
     return product;
   }
 
+  async getStoreProductByCodigo(storeId: number, codigo: string): Promise<StoreProduct | undefined> {
+    const key = codigo.trim();
+    if (!key || !this.db) return undefined;
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS)
+      .where("storeId", "==", storeId)
+      .where("codigo", "==", key)
+      .limit(1)
+      .get();
+    if (!snap.empty) {
+      const doc = snap.docs[0]!;
+      return this.mapStoreProductDoc(doc.id, doc.data());
+    }
+    // Fallback: productos antiguos pueden no tener índice compuesto; buscar en memoria.
+    const all = await this.listStoreProducts(storeId);
+    return all.find((p) => (p.codigo ?? "").trim() === key);
+  }
+
   async createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct> {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("store_products");
@@ -4752,18 +4781,31 @@ class FirestoreStorageImpl implements IStorage {
       weight: input.weight,
       sizes,
     });
+    const stockFields = normalizeStoreProductStockFields({
+      hasStock: input.hasStock,
+      stock: input.stock,
+    });
+    const showOnShowcase = resolveStoreProductShowOnShowcase({
+      showOnShowcase: input.showOnShowcase ?? true,
+      hasStock: stockFields.hasStock,
+      stock: stockFields.stock,
+    });
     const payload: StoreProduct = {
       id,
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ?? null,
+      codigo: input.codigo?.trim() ? input.codigo.trim().slice(0, 120) : null,
       price,
       pricesByCurrency,
       sizes: weightFields.sizes,
       categoryIds: input.categoryIds ?? [],
+      subcategoryIds: input.subcategoryIds ?? [],
       ...ingredientOptions,
       imageUrls: input.imageUrls ?? [],
-      showOnShowcase: input.showOnShowcase ?? true,
+      showOnShowcase,
+      hasStock: stockFields.hasStock,
+      stock: stockFields.stock,
       hasWeight: weightFields.hasWeight,
       weight: weightFields.weight,
       createdAt: now,
@@ -4785,6 +4827,9 @@ class FirestoreStorageImpl implements IStorage {
     const patch: Record<string, unknown> = { updatedAt: now };
     if (input.name !== undefined) patch.name = input.name.trim();
     if (input.description !== undefined) patch.description = input.description?.trim() ?? null;
+    if (input.codigo !== undefined) {
+      patch.codigo = input.codigo?.trim() ? input.codigo.trim().slice(0, 120) : null;
+    }
     const store = await this.getStoreById(storeId);
     const visualCurrencyId = store?.currencyVisualId ?? STORE_CURRENCY_USD_ID;
     if (input.sizes !== undefined) {
@@ -4821,6 +4866,7 @@ class FirestoreStorageImpl implements IStorage {
       patch.pricesByCurrency = priceFields.pricesByCurrency;
     }
     if (input.categoryIds !== undefined) patch.categoryIds = input.categoryIds;
+    if (input.subcategoryIds !== undefined) patch.subcategoryIds = input.subcategoryIds;
     if (
       input.ingredientMaterialIds !== undefined ||
       input.removableIngredientMaterialIds !== undefined ||
@@ -4837,7 +4883,22 @@ class FirestoreStorageImpl implements IStorage {
       patch.ingredientAdditionals = ingredientOptions.ingredientAdditionals;
     }
     if (input.imageUrls !== undefined) patch.imageUrls = input.imageUrls;
-    if (input.showOnShowcase !== undefined) patch.showOnShowcase = input.showOnShowcase;
+    const stockFields = normalizeStoreProductStockFields({
+      hasStock: input.hasStock !== undefined ? input.hasStock : existing.hasStock,
+      stock: input.stock !== undefined ? input.stock : existing.stock,
+    });
+    if (input.showOnShowcase === true && !storeProductHasAvailableStock(stockFields)) {
+      throw new Error("STORE_PRODUCT_NO_STOCK");
+    }
+    const requestedShow =
+      input.showOnShowcase !== undefined ? input.showOnShowcase : existing.showOnShowcase;
+    patch.hasStock = stockFields.hasStock;
+    patch.stock = stockFields.stock;
+    patch.showOnShowcase = resolveStoreProductShowOnShowcase({
+      showOnShowcase: requestedShow,
+      hasStock: stockFields.hasStock,
+      stock: stockFields.stock,
+    });
     if (
       input.sizes !== undefined ||
       input.hasWeight !== undefined ||
@@ -4873,13 +4934,25 @@ class FirestoreStorageImpl implements IStorage {
       .collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES)
       .where("storeId", "==", storeId)
       .get();
-    return snap.docs
+    const list = snap.docs
       .map((doc) => this.mapStoreCategoryDoc(doc.id, doc.data()))
       .filter((c): c is StoreCategory => c != null)
-      .sort((a, b) => {
-        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-        return byDate !== 0 ? byDate : a.id - b.id;
-      });
+      .sort(compareStoreCategoriesBySortOrder);
+    const needsRenumber =
+      list.some((c, i) => c.sortOrder !== i + 1) ||
+      new Set(list.map((c) => c.sortOrder)).size !== list.length;
+    if (!needsRenumber) return list;
+    const renumbered = assignContiguousStoreCategorySortOrders(list);
+    if (renumbered.length > 0) {
+      const batch = this.db.batch();
+      const now = new Date();
+      for (const row of renumbered) {
+        const ref = this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(row.id));
+        batch.update(ref, { sortOrder: row.sortOrder, updatedAt: now });
+      }
+      await batch.commit();
+    }
+    return renumbered;
   }
 
   async getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined> {
@@ -4893,28 +4966,33 @@ class FirestoreStorageImpl implements IStorage {
 
   async createStoreCategory(
     storeId: number,
-    input: Omit<InsertStoreCategory, "productIds">,
+    input: Omit<InsertStoreCategory, "productIds" | "subcategoryNames">,
   ): Promise<StoreCategory> {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("store_categories");
     const now = new Date();
+    const existing = await this.listStoreCategories(storeId);
     const payload: StoreCategory = {
       id,
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ?? null,
       hideFromShowcaseAll: input.hideFromShowcaseAll === true,
+      sortOrder: existing.length + 1,
       createdAt: now,
       updatedAt: now,
     };
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(id)).set(payload);
+    if (input.sortOrder != null && input.sortOrder > 0) {
+      return this.setStoreCategorySortOrder(storeId, id, input.sortOrder);
+    }
     return payload;
   }
 
   async updateStoreCategory(
     storeId: number,
     categoryId: number,
-    input: Omit<UpdateStoreCategory, "productIds">,
+    input: Omit<UpdateStoreCategory, "productIds" | "subcategoryNames">,
   ): Promise<StoreCategory> {
     if (!this.db) throw new Error("Firestore no configurado");
     const existing = await this.getStoreCategory(storeId, categoryId);
@@ -4929,7 +5007,29 @@ class FirestoreStorageImpl implements IStorage {
       patch.hideFromShowcaseAll = input.hideFromShowcaseAll === true;
     }
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(categoryId)).update(patch);
+    if (input.sortOrder != null && input.sortOrder > 0) {
+      return this.setStoreCategorySortOrder(storeId, categoryId, input.sortOrder);
+    }
     return { ...existing, ...patch, updatedAt: now } as StoreCategory;
+  }
+
+  async setStoreCategorySortOrder(
+    storeId: number,
+    categoryId: number,
+    sortOrder: number,
+  ): Promise<StoreCategory> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.listStoreCategories(storeId);
+    if (!existing.some((c) => c.id === categoryId)) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    const next = moveStoreCategoryToSortOrder(existing, categoryId, sortOrder);
+    const now = new Date();
+    const batch = this.db.batch();
+    for (const row of next) {
+      const ref = this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(row.id));
+      batch.update(ref, { sortOrder: row.sortOrder, updatedAt: now });
+    }
+    await batch.commit();
+    return (await this.getStoreCategory(storeId, categoryId))!;
   }
 
   async deleteStoreCategory(storeId: number, categoryId: number): Promise<void> {
@@ -4937,6 +5037,101 @@ class FirestoreStorageImpl implements IStorage {
     const existing = await this.getStoreCategory(storeId, categoryId);
     if (!existing) throw new Error("STORE_CATEGORY_NOT_FOUND");
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(categoryId)).delete();
+    // Reenumera 1..n si quedaron huecos (side effect de listStoreCategories).
+    await this.listStoreCategories(storeId);
+  }
+
+  async listStoreSubcategories(
+    storeId: number,
+    filters?: { categoryId?: number },
+  ): Promise<StoreSubcategory[]> {
+    if (!this.db) return [];
+    const snap = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_SUBCATEGORIES)
+      .where("storeId", "==", storeId)
+      .get();
+    const categoryId = filters?.categoryId;
+    return snap.docs
+      .map((doc) => this.mapStoreSubcategoryDoc(doc.id, doc.data()))
+      .filter((s): s is StoreSubcategory => s != null)
+      .filter((s) => (categoryId != null ? s.categoryId === categoryId : true))
+      .sort((a, b) => {
+        const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return byDate !== 0 ? byDate : a.id - b.id;
+      });
+  }
+
+  async getStoreSubcategory(
+    storeId: number,
+    subcategoryId: number,
+  ): Promise<StoreSubcategory | undefined> {
+    if (!this.db) return undefined;
+    const doc = await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_SUBCATEGORIES)
+      .doc(String(subcategoryId))
+      .get();
+    if (!doc.exists) return undefined;
+    const subcategory = this.mapStoreSubcategoryDoc(doc.id, doc.data());
+    if (!subcategory || subcategory.storeId !== storeId) return undefined;
+    return subcategory;
+  }
+
+  async createStoreSubcategory(
+    storeId: number,
+    input: InsertStoreSubcategory,
+  ): Promise<StoreSubcategory> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const category = await this.getStoreCategory(storeId, input.categoryId);
+    if (!category) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    const id = await this.getNextId("store_subcategories");
+    const now = new Date();
+    const payload: StoreSubcategory = {
+      id,
+      storeId,
+      categoryId: input.categoryId,
+      name: input.name.trim(),
+      description: input.description?.trim() ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_SUBCATEGORIES).doc(String(id)).set(payload);
+    return payload;
+  }
+
+  async updateStoreSubcategory(
+    storeId: number,
+    subcategoryId: number,
+    input: UpdateStoreSubcategory,
+  ): Promise<StoreSubcategory> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreSubcategory(storeId, subcategoryId);
+    if (!existing) throw new Error("STORE_SUBCATEGORY_NOT_FOUND");
+    if (input.categoryId !== undefined) {
+      const category = await this.getStoreCategory(storeId, input.categoryId);
+      if (!category) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    }
+    const now = new Date();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (input.categoryId !== undefined) patch.categoryId = input.categoryId;
+    if (input.name !== undefined) patch.name = input.name.trim();
+    if (input.description !== undefined) {
+      patch.description = input.description?.trim() ? input.description.trim() : null;
+    }
+    await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_SUBCATEGORIES)
+      .doc(String(subcategoryId))
+      .update(patch);
+    return { ...existing, ...patch, updatedAt: now } as StoreSubcategory;
+  }
+
+  async deleteStoreSubcategory(storeId: number, subcategoryId: number): Promise<void> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const existing = await this.getStoreSubcategory(storeId, subcategoryId);
+    if (!existing) throw new Error("STORE_SUBCATEGORY_NOT_FOUND");
+    await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_SUBCATEGORIES)
+      .doc(String(subcategoryId))
+      .delete();
   }
 
   async listStorePromotions(storeId: number): Promise<StorePromotion[]> {
@@ -5046,6 +5241,13 @@ class FirestoreStorageImpl implements IStorage {
         const id = Number((data as any)?.id ?? doc.id);
         const sortOrderRaw = (data as any)?.sortOrder;
         const sortOrder = Number.isFinite(sortOrderRaw) ? sortOrderRaw : Number(sortOrderRaw);
+        const visibility =
+          kind === "banner"
+            ? normalizeBannerCategoryVisibility(
+                (data as any)?.categoryVisibilityMode,
+                (data as any)?.categoryIds,
+              )
+            : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
         return {
           id,
           storeId: Number((data as any)?.storeId),
@@ -5053,6 +5255,8 @@ class FirestoreStorageImpl implements IStorage {
           imageUrl: (data as any)?.imageUrl ?? null,
           linkUrl: (data as any)?.linkUrl ?? null,
           sortOrder: Number.isFinite(sortOrder) ? Math.trunc(sortOrder) : 0,
+          categoryVisibilityMode: visibility.categoryVisibilityMode,
+          categoryIds: visibility.categoryIds,
           createdAt: this.readFirestoreDate((data as any)?.createdAt) ?? new Date(),
           updatedAt: this.readFirestoreDate((data as any)?.updatedAt) ?? new Date(),
         } as StoreShowcaseAdItem;
@@ -5069,6 +5273,10 @@ class FirestoreStorageImpl implements IStorage {
     const id = await this.getNextId(input.kind === "banner" ? "store_showcase_banners" : "store_showcase_popups");
     const now = new Date();
     const sortOrder = input.sortOrder != null ? input.sortOrder : await this.buildNextShowcaseAdSortOrder(storeId, input.kind);
+    const visibility =
+      input.kind === "banner"
+        ? normalizeBannerCategoryVisibility(input.categoryVisibilityMode, input.categoryIds)
+        : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
     const payload: StoreShowcaseAdItem = {
       id,
       storeId,
@@ -5076,6 +5284,8 @@ class FirestoreStorageImpl implements IStorage {
       imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
       linkUrl: input.linkUrl?.trim() ? input.linkUrl.trim() : null,
       sortOrder: Math.trunc(sortOrder),
+      categoryVisibilityMode: visibility.categoryVisibilityMode,
+      categoryIds: visibility.categoryIds,
       createdAt: now,
       updatedAt: now,
     };
@@ -5083,6 +5293,76 @@ class FirestoreStorageImpl implements IStorage {
       input.kind === "banner" ? FIRESTORE_COLLECTIONS.STORE_SHOWCASE_BANNERS : FIRESTORE_COLLECTIONS.STORE_SHOWCASE_POPUPS;
     await this.db.collection(col).doc(String(id)).set(payload);
     return payload;
+  }
+
+  async updateStoreShowcaseAdItem(
+    storeId: number,
+    kind: StoreShowcaseAdKind,
+    itemId: number,
+    input: UpdateStoreShowcaseAdItem,
+  ): Promise<StoreShowcaseAdItem> {
+    if (!this.db) throw new Error("Firestore no configurado");
+    const col =
+      kind === "banner" ? FIRESTORE_COLLECTIONS.STORE_SHOWCASE_BANNERS : FIRESTORE_COLLECTIONS.STORE_SHOWCASE_POPUPS;
+    const ref = this.db.collection(col).doc(String(itemId));
+    const snap = await ref.get();
+    if (!snap.exists) throw new Error("STORE_SHOWCASE_AD_NOT_FOUND");
+    const data = snap.data() as Record<string, unknown>;
+    if (Number(data.storeId) !== storeId) throw new Error("STORE_SHOWCASE_AD_NOT_FOUND");
+
+    const currentImage = (data.imageUrl as string | null | undefined) ?? null;
+    const currentLink = (data.linkUrl as string | null | undefined) ?? null;
+    const nextImage =
+      input.imageUrl !== undefined
+        ? input.imageUrl?.trim()
+          ? input.imageUrl.trim()
+          : null
+        : currentImage;
+    const nextLink =
+      input.linkUrl !== undefined
+        ? input.linkUrl?.trim()
+          ? input.linkUrl.trim()
+          : null
+        : currentLink;
+    if (!nextImage && !nextLink) throw new Error("STORE_SHOWCASE_AD_EMPTY");
+
+    const sortOrderRaw = data.sortOrder;
+    const currentSort = Number.isFinite(Number(sortOrderRaw)) ? Math.trunc(Number(sortOrderRaw)) : 0;
+    const currentVisibility = normalizeBannerCategoryVisibility(
+      data.categoryVisibilityMode,
+      data.categoryIds,
+    );
+    const visibility =
+      kind === "banner"
+        ? normalizeBannerCategoryVisibility(
+            input.categoryVisibilityMode !== undefined
+              ? input.categoryVisibilityMode
+              : currentVisibility.categoryVisibilityMode,
+            input.categoryIds !== undefined ? input.categoryIds : currentVisibility.categoryIds,
+          )
+        : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
+    const now = new Date();
+    const patch = {
+      imageUrl: nextImage,
+      linkUrl: nextLink,
+      sortOrder: input.sortOrder != null ? Math.trunc(input.sortOrder) : currentSort,
+      categoryVisibilityMode: visibility.categoryVisibilityMode,
+      categoryIds: visibility.categoryIds,
+      updatedAt: now,
+    };
+    await ref.update(patch);
+    return {
+      id: itemId,
+      storeId,
+      kind,
+      imageUrl: nextImage,
+      linkUrl: nextLink,
+      sortOrder: patch.sortOrder,
+      categoryVisibilityMode: visibility.categoryVisibilityMode,
+      categoryIds: visibility.categoryIds,
+      createdAt: this.readFirestoreDate(data.createdAt) ?? now,
+      updatedAt: now,
+    };
   }
 
   async deleteStoreShowcaseAdItem(
@@ -5194,6 +5474,8 @@ class FirestoreStorageImpl implements IStorage {
       ...input,
       packRideId: input.packRideId ?? null,
       deliveryUnreadCount: input.deliveryUnreadCount ?? 0,
+      stockImpact: input.stockImpact ?? [],
+      stockCommitted: input.stockCommitted ?? false,
       status: input.status ?? "pagado",
       createdAt: now,
       updatedAt: now,
@@ -5262,7 +5544,18 @@ class FirestoreStorageImpl implements IStorage {
     storeId: number,
     orderId: number,
     patch: Partial<
-      Pick<StoreOrder, "status" | "packRideId" | "deliveryUnreadCount" | "branchId" | "branchName" | "storeLocation" | "reference">
+      Pick<
+        StoreOrder,
+        | "status"
+        | "packRideId"
+        | "deliveryUnreadCount"
+        | "branchId"
+        | "branchName"
+        | "storeLocation"
+        | "reference"
+        | "stockCommitted"
+        | "stockImpact"
+      >
     >,
   ): Promise<StoreOrder> {
     if (!this.db) throw new Error("Firestore no configurado");
@@ -5416,6 +5709,18 @@ class FirestoreStorageImpl implements IStorage {
       deliveryUnreadCount: Number.isFinite(Number(data.deliveryUnreadCount))
         ? Math.max(0, Number(data.deliveryUnreadCount))
         : 0,
+      stockImpact: Array.isArray(data.stockImpact)
+        ? data.stockImpact
+            .map((row: { productId?: unknown; quantity?: unknown }) => ({
+              productId: Number(row?.productId),
+              quantity: Math.max(0, Math.trunc(Number(row?.quantity) || 0)),
+            }))
+            .filter(
+              (row: { productId: number; quantity: number }) =>
+                Number.isFinite(row.productId) && row.productId > 0 && row.quantity > 0,
+            )
+        : [],
+      stockCommitted: data.stockCommitted === true,
       status:
         data.status === "pending"
           ? "pagado"
@@ -5666,6 +5971,32 @@ class FirestoreStorageImpl implements IStorage {
         ? String(data.description).trim()
         : null,
       hideFromShowcaseAll: data.hideFromShowcaseAll === true,
+      sortOrder:
+        typeof data.sortOrder === "number" && Number.isFinite(data.sortOrder) && data.sortOrder > 0
+          ? Math.trunc(data.sortOrder)
+          : 0,
+      createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
+      updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
+    };
+  }
+
+  private mapStoreSubcategoryDoc(
+    docId: string,
+    data: Record<string, unknown> | undefined,
+  ): StoreSubcategory | undefined {
+    if (!data) return undefined;
+    const id = Number(data.id ?? docId);
+    if (!Number.isFinite(id)) return undefined;
+    const categoryId = Number(data.categoryId);
+    if (!Number.isFinite(categoryId) || categoryId <= 0) return undefined;
+    return {
+      id,
+      storeId: Number(data.storeId),
+      categoryId,
+      name: String(data.name ?? ""),
+      description: data.description != null && String(data.description).trim()
+        ? String(data.description).trim()
+        : null,
       createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
       updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
     };
@@ -5696,22 +6027,39 @@ class FirestoreStorageImpl implements IStorage {
       weight: data.weight,
       sizes,
     });
+    const stockFields = normalizeStoreProductStockFields({
+      hasStock: data.hasStock === true,
+      stock: data.stock as number | null | undefined,
+    });
     return {
       id,
       storeId: Number(data.storeId),
       name: String(data.name ?? ""),
       description: data.description != null ? String(data.description) : null,
+      codigo:
+        data.codigo != null && String(data.codigo).trim()
+          ? String(data.codigo).trim().slice(0, 120)
+          : null,
       price,
       pricesByCurrency,
       sizes: weightFields.sizes,
       categoryIds: Array.isArray(data.categoryIds)
         ? data.categoryIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
         : [],
+      subcategoryIds: Array.isArray(data.subcategoryIds)
+        ? data.subcategoryIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
+        : [],
       ...ingredientOptions,
       imageUrls: Array.isArray(data.imageUrls)
         ? data.imageUrls.map((x) => String(x).trim()).filter((u) => u.length > 0).slice(0, STORE_PRODUCT_MAX_IMAGES)
         : [],
-      showOnShowcase: data.showOnShowcase !== false,
+      showOnShowcase: resolveStoreProductShowOnShowcase({
+        showOnShowcase: data.showOnShowcase !== false,
+        hasStock: stockFields.hasStock,
+        stock: stockFields.stock,
+      }),
+      hasStock: stockFields.hasStock,
+      stock: stockFields.stock,
       hasWeight: weightFields.hasWeight,
       weight: weightFields.weight,
       createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),

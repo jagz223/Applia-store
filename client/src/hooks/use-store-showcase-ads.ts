@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { InsertStoreShowcaseAdItem } from "@shared/store-showcase-ads-schema";
+import type {
+  InsertStoreShowcaseAdItem,
+  UpdateStoreShowcaseAdItem,
+} from "@shared/store-showcase-ads-schema";
 
 export type StoreShowcaseAdSummary = {
   id: number;
@@ -8,6 +11,8 @@ export type StoreShowcaseAdSummary = {
   imageUrl: string | null;
   linkUrl: string | null;
   sortOrder: number;
+  categoryVisibilityMode?: "all" | "exclude" | "include";
+  categoryIds?: number[];
   createdAt?: string | null;
   updatedAt?: string | null;
 };
@@ -65,6 +70,34 @@ export function useCreateStoreShowcaseAd(storeId: number) {
   });
 }
 
+export function useUpdateStoreShowcaseAd(storeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      kind,
+      adId,
+      body,
+    }: {
+      kind: "banner" | "popup";
+      adId: number;
+      body: UpdateStoreShowcaseAdItem;
+    }) => {
+      const res = await fetch(`/api/stores/${storeId}/showcase-ads/${kind}/${adId}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudo actualizar el banner o popup");
+      }
+      const data = (await res.json()) as { item: StoreShowcaseAdSummary };
+      return data.item;
+    },
+    onSuccess: () => invalidateStoreShowcaseAds(qc, storeId),
+  });
+}
+
 export function useDeleteStoreShowcaseAd(storeId: number) {
   const qc = useQueryClient();
   return useMutation({
@@ -81,4 +114,3 @@ export function useDeleteStoreShowcaseAd(storeId: number) {
     onSuccess: () => invalidateStoreShowcaseAds(qc, storeId),
   });
 }
-
