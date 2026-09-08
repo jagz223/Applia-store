@@ -257,32 +257,32 @@ export function StoreAdminProductsPanel({
   return (
     <>
       <Card className={cn(storeAdminSectionCardClass, "overflow-hidden border-border/70 shadow-sm")}>
-        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
-          <div>
+        <CardHeader className="flex flex-col gap-4 space-y-0 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <CardTitle className="font-display">Productos</CardTitle>
             <CardDescription>Administra el catálogo de tu tienda.</CardDescription>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" className="h-10 gap-1.5 rounded-full" asChild>
+          <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:shrink-0 sm:flex-row sm:flex-wrap sm:items-center">
+            <Button size="sm" variant="outline" className="h-10 w-full gap-1.5 rounded-full sm:w-auto" asChild>
               <Link href={`/tienda/${encodeURIComponent(slug)}/admin/productos/importar`}>
                 <FileSpreadsheet className="h-4 w-4" />
                 Importar Excel/CSV
               </Link>
             </Button>
-            <Button size="sm" className="h-10 shrink-0 gap-1.5 rounded-full" onClick={openCreate}>
+            <Button size="sm" className="h-10 w-full shrink-0 gap-1.5 rounded-full sm:w-auto" onClick={openCreate}>
               <Plus className="h-4 w-4" />
               Crear producto
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="relative">
+        <CardContent className="min-w-0 space-y-4 overflow-x-hidden">
+          <div className="relative min-w-0">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Filtrar por nombre…"
-              className={cn(storeAdminFieldClass, "pl-9")}
+              className={cn(storeAdminFieldClass, "w-full min-w-0 pl-9")}
               aria-label="Filtrar productos por nombre"
             />
           </div>
@@ -310,14 +310,16 @@ export function StoreAdminProductsPanel({
                 {products.map((product) => (
                   <li
                     key={product.id}
-                    className="rounded-2xl border border-border/70 bg-card/95 p-3.5 shadow-sm"
+                    className="min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card/95 p-3.5 shadow-sm"
                   >
-                    <div className="flex gap-3">
+                    <div className="flex min-w-0 gap-3">
                       <ProductThumbnail imageUrls={product.imageUrls ?? []} />
-                      <div className="min-w-0 flex-1 space-y-2">
+                      <div className="min-w-0 flex-1 space-y-2 overflow-hidden">
                         <div className="min-w-0">
-                          <p className="truncate font-medium">{product.name}</p>
-                          <p className="text-sm text-muted-foreground">
+                          <p className="break-words text-sm font-medium leading-snug line-clamp-2">
+                            {product.name}
+                          </p>
+                          <p className="mt-0.5 text-sm text-muted-foreground">
                             {formatPrice(
                               product.price,
                               product.displayCurrencyLabel ??
@@ -325,12 +327,14 @@ export function StoreAdminProductsPanel({
                             )}
                           </p>
                         </div>
-                        <ShowcaseToggle storeId={storeId} product={product} />
-                        <ProductRowActions
-                          onDetail={() => setDetailProduct(product)}
-                          onEdit={() => openEdit(product)}
-                          onDelete={() => setDeleteTarget(product)}
-                        />
+                        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                          <ShowcaseToggle storeId={storeId} product={product} />
+                          <ProductRowActions
+                            onDetail={() => setDetailProduct(product)}
+                            onEdit={() => openEdit(product)}
+                            onDelete={() => setDeleteTarget(product)}
+                          />
+                        </div>
                       </div>
                     </div>
                   </li>

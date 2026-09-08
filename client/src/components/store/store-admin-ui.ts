@@ -27,7 +27,7 @@ export const storeAdminDialogFooterClass = cn(
 );
 
 export const storeAdminFieldClass =
-  "h-11 rounded-2xl border-border/80 bg-muted/40 px-4 shadow-none focus-visible:ring-secondary dark:focus-visible:ring-primary";
+  "h-11 w-full min-w-0 rounded-2xl border-border/80 bg-muted/40 px-4 shadow-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0 dark:focus-visible:ring-ring";
 
 export const storeAdminSectionCardClass =
-  "rounded-[1.5rem] border border-border/70 bg-card/95 shadow-sm";
+  "min-w-0 overflow-hidden rounded-[1.5rem] border border-border/70 bg-card/95 shadow-sm";

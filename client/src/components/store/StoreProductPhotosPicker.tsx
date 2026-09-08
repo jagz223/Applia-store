@@ -106,7 +106,7 @@ export function StoreProductPhotosPicker({
       toast({
         variant: "destructive",
         title: "Archivo muy grande",
-        description: "Máximo 5 MB por imagen.",
+        description: "Máximo 200 MB por imagen.",
       });
       return;
     }
@@ -328,7 +328,7 @@ export function StoreProductPhotosPicker({
 
       <p className="text-xs text-muted-foreground">
         Al subir se abre el recorte cuadrado. Se guarda al pulsar «Guardar» o «Crear». JPG, PNG, WebP
-        o GIF. Máximo 5 MB por imagen.
+        o GIF. Máximo 200 MB por imagen.
       </p>
 
       <SquareImageCropDialog

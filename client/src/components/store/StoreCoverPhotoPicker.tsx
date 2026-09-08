@@ -161,7 +161,7 @@ export function StoreCoverPhotoPicker({
 
       <p className="text-xs text-muted-foreground">
         Sube un archivo o pega una URL para ver la vista previa. Los cambios se aplican al pulsar «Guardar».
-        JPG, PNG, WebP o GIF. Máximo 5 MB por archivo.
+        JPG, PNG, WebP o GIF. Máximo 200 MB por archivo.
       </p>
     </div>
   );

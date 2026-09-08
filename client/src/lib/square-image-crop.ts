@@ -1,5 +1,8 @@
 export const SQUARE_CROP_OUTPUT_SIZE = 1024;
-export const SQUARE_CROP_MAX_FILE_BYTES = 5 * 1024 * 1024;
+/** Límite de archivo de entrada (antes del recorte). Alineado con reglas Firebase Storage (~200 MB). */
+export const SQUARE_CROP_MAX_FILE_BYTES = 200 * 1024 * 1024;
+/** Tras recortar a 1024×1024 el archivo suele ser pequeño; tope generoso por PNG con alfa. */
+export const SQUARE_CROP_OUTPUT_MAX_BYTES = 25 * 1024 * 1024;
 
 export async function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -122,8 +125,8 @@ export async function cropSquareImageToFile(
       format.quality,
     );
   });
-  if (blob.size > SQUARE_CROP_MAX_FILE_BYTES) {
-    throw new Error("La imagen recortada supera 5 MB. Reduce el zoom o usa otra foto.");
+  if (blob.size > SQUARE_CROP_OUTPUT_MAX_BYTES) {
+    throw new Error("La imagen recortada es demasiado pesada. Prueba otra foto o reduce la calidad.");
   }
   const outName = withOutputExtension(fileName, format.ext);
   return new File([blob], outName, { type: format.mime });

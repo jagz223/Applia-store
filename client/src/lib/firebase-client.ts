@@ -236,7 +236,7 @@ export async function uploadProfessionalCredential(userId: string, file: File): 
   return getDownloadURL(storageRef);
 }
 
-const MAX_STORE_PRODUCT_IMAGE_MB = 5;
+const MAX_STORE_PRODUCT_IMAGE_MB = 200;
 
 /** Fotos de producto en tienda online (1–4 por producto). */
 export async function uploadStoreProductImage(storeId: number, file: File): Promise<string> {

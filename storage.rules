@@ -1,96 +1,65 @@
 rules_version = '2';
 // Desplegar: Firebase Console → Storage → Rules, o `firebase deploy --only storage`
-// IMPORTANTE: el match `/{allPaths=**}` de cierre debe ser el ÚLTIMO bloque (nada debajo).
+// Límite de escritura de imágenes de tienda: 200 MB (alineado con la app).
 
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Fotos de perfil — imágenes, máx. 5 MB
-    match /avatars/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
     }
 
-    // Documento de identidad — JPG/PNG, máx. ~6 MB
-    match /verification_ids/{userId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 6 * 1024 * 1024
-        && (request.resource.contentType == 'image/jpeg'
-            || request.resource.contentType == 'image/png');
+    function under200MB() {
+      return request.resource.size < 200 * 1024 * 1024;
     }
 
-    // Documento profesional — JPG, PNG o PDF, hasta ~13 MB
-    match /professional_credentials/{userId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 13 * 1024 * 1024
-        && (request.resource.contentType == 'image/jpeg'
-            || request.resource.contentType == 'image/png'
-            || request.resource.contentType == 'application/pdf');
-    }
-
-    // Comprobantes de pago en chat — imágenes, máx. 9 MB
-    match /chat_payment_proofs/{conversationId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 9 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    // Iconos de categoría (admin) — solo PNG, máx. 2 MB
-    match /category-icons/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 2 * 1024 * 1024
-        && request.resource.contentType == 'image/png';
-    }
-
-    // Foto / portada de la tienda — imágenes, máx. 5 MB
-    // Path en código: stores/{storeId}/{uuid}.{ext}
-    match /stores/{storeId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    // Fotos de productos de la tienda — imágenes, máx. 5 MB
-    // Path en código: store-products/{storeId}/{uuid}.{ext}
-    match /store-products/{storeId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    // Imágenes de promociones — máx. 5 MB
-    match /store-promotions/{storeId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    // Banners / popups de vitrina — path: store-showcase-ads/{kind}/{storeId}/{file}
-    match /store-showcase-ads/{kind}/{storeId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    // QR / imagen de métodos de pago — máx. 5 MB
-    match /store-payment-methods/{storeId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    // Comprobantes de pedido en tienda — máx. 8 MB
-    match /store-orders/{storeId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 8 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    // Todo lo demás: sin acceso público
+    // Lectura pública (URLs de productos, avatar, QR de pago, etc.)
     match /{allPaths=**} {
-      allow read: if false;
-      allow write: if false;
+      allow read: if true;
+    }
+
+    match /avatars/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /category-icons/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /stores/{storeId}/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /store-products/{storeId}/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /store-promotions/{storeId}/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /store-payment-methods/{storeId}/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /store-orders/{storeId}/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /chat_payment_proofs/{conversationId}/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /verification_ids/{userId}/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /professional_credentials/{userId}/{fileName} {
+      allow write: if isImage() && under200MB();
+    }
+
+    match /store-showcase-ads/{kind}/{storeId}/{fileName} {
+      allow write: if isImage() && under200MB();
     }
   }
 }
