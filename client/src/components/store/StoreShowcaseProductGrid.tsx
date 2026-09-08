@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Package } from "lucide-react";
 import type { StoreShowcaseProduct } from "@/hooks/use-store-showcase";
 import {
@@ -5,7 +6,13 @@ import {
   showcaseCartItemKey,
 } from "@/components/store/StoreShowcaseAddToCartButton";
 import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
+import {
+  STORE_ADMIN_LIST_PAGE_SIZE,
+  StoreAdminListPagination,
+} from "@/components/store/StoreAdminListPagination";
 import { cn } from "@/lib/utils";
+
+export const STORE_SHOWCASE_PAGE_SIZE = STORE_ADMIN_LIST_PAGE_SIZE;
 
 function formatPrice(value: number, currencyLabel?: string) {
   const amount = new Intl.NumberFormat("es-VE", {
@@ -50,15 +57,15 @@ function ShowcaseProductCard({
           : undefined
       }
       className={cn(
-        "group flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-white shadow-sm",
+        "group flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-card shadow-sm",
         "min-h-0 sm:min-h-[17.5rem]",
-        "transition-all dark:bg-card dark:border-border",
+        "transition-all",
         onSelect && "cursor-pointer hover:border-border hover:shadow-md",
         selected && "border-foreground/40 ring-2 ring-foreground/80 shadow-md",
       )}
     >
-      <div className="relative bg-muted/20 p-2 sm:p-3 pb-0">
-        <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-muted/40">
+      <div className="relative bg-background p-2 sm:p-3 pb-0">
+        <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-background">
           <StoreProductDualImage
             primaryUrl={imageUrl}
             secondaryUrl={secondaryImageUrl}
@@ -131,6 +138,26 @@ export function StoreShowcaseProductGrid({
   selectedProductId,
   addToCartBusyKey,
 }: StoreShowcaseProductGridProps) {
+  const [page, setPage] = useState(1);
+  const topRef = useRef<HTMLDivElement>(null);
+  const listKey = useMemo(() => products.map((p) => p.id).join(","), [products]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [listKey]);
+
+  const totalPages = Math.max(1, Math.ceil(products.length / STORE_SHOWCASE_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageProducts = useMemo(() => {
+    const start = (safePage - 1) * STORE_SHOWCASE_PAGE_SIZE;
+    return products.slice(start, start + STORE_SHOWCASE_PAGE_SIZE);
+  }, [products, safePage]);
+
+  const goToPage = (next: number) => {
+    setPage(next);
+    topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   if (isLoading) {
     return (
       <div className={cn("py-12 flex justify-center", className)}>
@@ -149,7 +176,7 @@ export function StoreShowcaseProductGrid({
     return (
       <div
         className={cn(
-          "rounded-[1.25rem] border border-dashed border-border bg-white/60 py-12 px-6 text-center dark:bg-card/40",
+          "rounded-[1.25rem] border border-dashed border-border bg-card/60 py-12 px-6 text-center",
           className,
         )}
       >
@@ -166,25 +193,28 @@ export function StoreShowcaseProductGrid({
       : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-4";
 
   return (
-    <div className={cn(gridClass, className)}>
-      {products.map((product) => (
-        <div
-          key={product.id}
-          className={centered && !largeCards ? "w-[calc(50%-0.5rem)] sm:w-[180px]" : undefined}
-        >
-          <ShowcaseProductCard
-            product={product}
-            addBusyKey={addToCartBusyKey}
-            selected={selectedProductId === product.id}
-            onSelect={onSelectProduct ? () => onSelectProduct(product) : undefined}
-            onAddToCart={
-              onAddProductToCart && !onSelectProduct
-                ? () => onAddProductToCart(product.id)
-                : undefined
-            }
-          />
-        </div>
-      ))}
+    <div ref={topRef} className={cn("space-y-4", className)}>
+      <div className={gridClass}>
+        {pageProducts.map((product) => (
+          <div
+            key={product.id}
+            className={centered && !largeCards ? "w-[calc(50%-0.5rem)] sm:w-[180px]" : undefined}
+          >
+            <ShowcaseProductCard
+              product={product}
+              addBusyKey={addToCartBusyKey}
+              selected={selectedProductId === product.id}
+              onSelect={onSelectProduct ? () => onSelectProduct(product) : undefined}
+              onAddToCart={
+                onAddProductToCart && !onSelectProduct
+                  ? () => onAddProductToCart(product.id)
+                  : undefined
+              }
+            />
+          </div>
+        ))}
+      </div>
+      <StoreAdminListPagination page={safePage} totalPages={totalPages} onPageChange={goToPage} />
     </div>
   );
 }

@@ -9,17 +9,11 @@
     "build": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production NODE_OPTIONS=--use-system-ca node dist/index.cjs",
     "check": "tsc",
-    "test:matching": "cross-env NODE_OPTIONS=--use-system-ca tsx script/simulate-classic-offer-matching.ts",
     "db:push": "drizzle-kit push",
     "seed:firestore": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-firestore.ts",
-    "migrate:provider-categories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/migrate-provider-categories.ts",
-    "migrate:subcategories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/migrate-subcategories-category.ts",
-    "migrate:remove-marketplace-go-brands": "cross-env NODE_OPTIONS=--use-system-ca tsx script/migrate-remove-marketplace-from-go-brands.ts",
-    "sync:provider-category-slots": "cross-env NODE_OPTIONS=--use-system-ca tsx script/sync-provider-category-slots.ts",
-    "remove:legal-financial-categories": "cross-env NODE_OPTIONS=--use-system-ca tsx script/remove-legal-financial-categories.ts",
     "seed:roles": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-roles.ts",
     "seed:users": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-users.ts",
-    "seed:wallet-fields": "cross-env NODE_OPTIONS=--use-system-ca tsx script/seed-wallet-fields.ts",
+    "seed": "npm run seed:firestore && npm run seed:roles && npm run seed:users",
     "prod": "npm run build && npm run start"
   },
   "dependencies": {

@@ -1,6 +1,13 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ImageIcon, Loader2, Percent } from "lucide-react";
 import type { StoreShowcasePromotion } from "@/hooks/use-store-showcase";
+import {
+  STORE_ADMIN_LIST_PAGE_SIZE,
+  StoreAdminListPagination,
+} from "@/components/store/StoreAdminListPagination";
 import { cn } from "@/lib/utils";
+
+const PAGE_SIZE = STORE_ADMIN_LIST_PAGE_SIZE;
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("es-VE", {
@@ -43,23 +50,23 @@ function ShowcasePromotionCard({
           : undefined
       }
       className={cn(
-        "group flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-white shadow-sm",
+        "group flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-card shadow-sm",
         "min-h-0 sm:min-h-[17.5rem]",
-        "transition-all dark:bg-card dark:border-border",
+        "transition-all",
         onSelect && "cursor-pointer hover:border-border hover:shadow-md",
         selected && "border-foreground/40 ring-2 ring-foreground/80 shadow-md",
       )}
     >
-      <div className="relative bg-muted/20 p-2 sm:p-3 pb-0">
-        <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-muted/40">
+      <div className="relative bg-background p-2 sm:p-3 pb-0">
+        <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-background">
           {imageUrl ? (
             <img
               src={imageUrl}
               alt=""
-              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+              className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center">
+            <div className="flex h-full w-full items-center justify-center bg-background">
               <Percent className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground/40" aria-hidden />
             </div>
           )}
@@ -110,6 +117,26 @@ export function StoreShowcasePromotionGrid({
   onSelectPromotion,
   selectedPromotionId,
 }: StoreShowcasePromotionGridProps) {
+  const [page, setPage] = useState(1);
+  const topRef = useRef<HTMLDivElement>(null);
+  const listKey = useMemo(() => promotions.map((p) => p.id).join(","), [promotions]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [listKey]);
+
+  const totalPages = Math.max(1, Math.ceil(promotions.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagePromotions = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return promotions.slice(start, start + PAGE_SIZE);
+  }, [promotions, safePage]);
+
+  const goToPage = (next: number) => {
+    setPage(next);
+    topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   if (isLoading) {
     return (
       <div className={cn("py-12 flex justify-center", className)}>
@@ -128,7 +155,7 @@ export function StoreShowcasePromotionGrid({
     return (
       <div
         className={cn(
-          "rounded-[1.25rem] border border-dashed border-border bg-white/60 py-12 px-6 text-center dark:bg-card/40",
+          "rounded-[1.25rem] border border-dashed border-border bg-card/60 py-12 px-6 text-center",
           className,
         )}
       >
@@ -145,19 +172,22 @@ export function StoreShowcasePromotionGrid({
       : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-4";
 
   return (
-    <div className={cn(gridClass, className)}>
-      {promotions.map((promotion) => (
-        <div
-          key={promotion.id}
-          className={centered && !largeCards ? "w-[calc(50%-0.5rem)] sm:w-[180px]" : undefined}
-        >
-          <ShowcasePromotionCard
-            promotion={promotion}
-            selected={selectedPromotionId === promotion.id}
-            onSelect={onSelectPromotion ? () => onSelectPromotion(promotion) : undefined}
-          />
-        </div>
-      ))}
+    <div ref={topRef} className={cn("space-y-4", className)}>
+      <div className={gridClass}>
+        {pagePromotions.map((promotion) => (
+          <div
+            key={promotion.id}
+            className={centered && !largeCards ? "w-[calc(50%-0.5rem)] sm:w-[180px]" : undefined}
+          >
+            <ShowcasePromotionCard
+              promotion={promotion}
+              selected={selectedPromotionId === promotion.id}
+              onSelect={onSelectPromotion ? () => onSelectPromotion(promotion) : undefined}
+            />
+          </div>
+        ))}
+      </div>
+      <StoreAdminListPagination page={safePage} totalPages={totalPages} onPageChange={goToPage} />
     </div>
   );
 }

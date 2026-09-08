@@ -20,7 +20,8 @@ type StoreProductDualImageProps = {
 
 /**
  * Imagen principal con segunda imagen opcional en esquina inferior derecha.
- * Nota: el contenedor clicable es un div (no button) para poder anidar el thumb clicable.
+ * Fondo `bg-background` (sigue el tema) para PNG/WebP sin fondo.
+ * `object-contain` para no recortar productos recortados.
  */
 export function StoreProductDualImage({
   primaryUrl,
@@ -45,7 +46,7 @@ export function StoreProductDualImage({
         <img
           src={primary}
           alt={alt}
-          className={cn("h-full w-full object-cover", imgClassName)}
+          className={cn("h-full w-full object-contain", imgClassName)}
           loading={loading}
           referrerPolicy="no-referrer"
           draggable={false}
@@ -53,7 +54,7 @@ export function StoreProductDualImage({
       ) : (
         <div
           className={cn(
-            "flex h-full w-full items-center justify-center text-muted-foreground/50",
+            "flex h-full w-full items-center justify-center bg-background text-muted-foreground/50",
             placeholderClassName,
           )}
         >
@@ -65,7 +66,7 @@ export function StoreProductDualImage({
           <button
             type="button"
             className={cn(
-              "absolute bottom-1.5 right-1.5 z-10 overflow-hidden rounded-md border-2 border-background bg-muted shadow-md",
+              "absolute bottom-1.5 right-1.5 z-10 overflow-hidden rounded-md border-2 border-border bg-background shadow-md",
               "h-11 w-11 sm:h-12 sm:w-12",
               "ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               secondaryClassName,
@@ -79,7 +80,7 @@ export function StoreProductDualImage({
             <img
               src={secondary!}
               alt=""
-              className="h-full w-full object-cover"
+              className="h-full w-full object-contain"
               loading={loading}
               referrerPolicy="no-referrer"
               draggable={false}
@@ -88,7 +89,7 @@ export function StoreProductDualImage({
         ) : (
           <div
             className={cn(
-              "pointer-events-none absolute bottom-1.5 right-1.5 z-10 overflow-hidden rounded-md border-2 border-background bg-muted shadow-md",
+              "pointer-events-none absolute bottom-1.5 right-1.5 z-10 overflow-hidden rounded-md border-2 border-border bg-background shadow-md",
               "h-9 w-9 sm:h-11 sm:w-11",
               secondaryClassName,
             )}
@@ -97,7 +98,7 @@ export function StoreProductDualImage({
             <img
               src={secondary!}
               alt=""
-              className="h-full w-full object-cover"
+              className="h-full w-full object-contain"
               loading={loading}
               referrerPolicy="no-referrer"
               draggable={false}
@@ -114,7 +115,7 @@ export function StoreProductDualImage({
         role="button"
         tabIndex={0}
         className={cn(
-          "relative block w-full cursor-pointer overflow-hidden bg-muted/40 text-left",
+          "relative block w-full cursor-pointer overflow-hidden bg-background text-left",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           frameClassName,
           className,
@@ -134,7 +135,7 @@ export function StoreProductDualImage({
   }
 
   return (
-    <div className={cn("relative overflow-hidden bg-muted/40", frameClassName, className)}>
+    <div className={cn("relative overflow-hidden bg-background", frameClassName, className)}>
       {content}
     </div>
   );
