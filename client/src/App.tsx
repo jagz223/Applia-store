@@ -12,6 +12,7 @@ import { SocketProvider } from "@/hooks/use-socket";
 import { AccountRecoveryGate } from "@/components/AccountRecoveryGate";
 
 import HomePage from "@/pages/Home";
+import AboutPage from "@/pages/About";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Settings from "@/pages/Settings";
@@ -32,6 +33,7 @@ function MainRouter() {
   return (
     <Switch>
       <Route path="/" component={HomePage} />
+      <Route path="/acerca-de" component={AboutPage} />
       <Route path="/login" component={Login} />
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/register" component={Register} />

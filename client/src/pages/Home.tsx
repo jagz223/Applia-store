@@ -1,266 +1,199 @@
 import { Link } from "wouter";
-import { motion } from "framer-motion";
-import { ArrowRight, ShoppingBag, Flame } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { motion, useReducedMotion } from "framer-motion";
+import { ArrowUpRight } from "lucide-react";
 import { getPrimaryStoreVitrinaHref, usePrimaryStore } from "@/hooks/use-primary-store";
+import {
+  CELOSIAS_BRAND_NAME,
+  CELOSIAS_HERO_IMAGE,
+  CELOSIAS_HISTORY,
+  CELOSIAS_HOME_CATEGORIES,
+  CELOSIAS_LOGO_SRC,
+  CELOSIAS_TAGLINE,
+} from "@/lib/celosias-brand";
 import { cn } from "@/lib/utils";
-
-const HERO_BURGER =
-  "https://static.vecteezy.com/system/resources/previews/047/827/646/non_2x/delicious-fast-food-burger-hamburger-cheeseburger-transparent-background-free-png.png";
-
-/** Imagen anterior del bloque Destacado (se veía mejor ahí). */
-const FEATURED_BURGER =
-  "https://png.pngtree.com/png-clipart/20231017/original/pngtree-burger-food-png-free-download-png-image_13329458.png";
-
-/** Velocidad media en px/s (sube/baja). */
-const BURGER_FLOAT_SPEED_PX_PER_SEC = 7;
-/** Recorrido máximo hacia arriba (px). */
-const BURGER_FLOAT_AMPLITUDE_PX = 10;
-
-/**
- * Flotado a velocidad media ~speedPxPerSec, con rebote suave (seno):
- * en los extremos la velocidad llega a 0 y vuelve a arrancar.
- */
-function useSoftSpeedFloat(speedPxPerSec: number, amplitudePx: number) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    // Un tramo (0 → amp) dura amplitude/speed; el ciclo completo es ida y vuelta.
-    const halfPeriodSec = amplitudePx / Math.max(speedPxPerSec, 0.001);
-    const periodSec = halfPeriodSec * 2;
-    const start = performance.now();
-    let frame = 0;
-
-    const tick = (now: number) => {
-      const t = (now - start) / 1000;
-      // 0 → amp → 0 con derivada 0 en los extremos (rebote suave)
-      const y = (amplitudePx / 2) * (1 - Math.cos((Math.PI * 2 * t) / periodSec));
-      el.style.transform = `translate3d(0, ${-y}px, 0)`;
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [speedPxPerSec, amplitudePx]);
-
-  return ref;
-}
 
 export default function HomePage() {
   const { data: primaryStore } = usePrimaryStore();
   const tiendaHref = getPrimaryStoreVitrinaHref(primaryStore);
-  const burgerFloatRef = useSoftSpeedFloat(
-    BURGER_FLOAT_SPEED_PX_PER_SEC,
-    BURGER_FLOAT_AMPLITUDE_PX,
-  );
+  const reduceMotion = useReducedMotion();
+
+  const fadeUp = (delay = 0) =>
+    reduceMotion
+      ? undefined
+      : {
+          initial: { opacity: 0, y: 18 },
+          animate: { opacity: 1, y: 0 },
+          transition: { duration: 0.55, delay, ease: [0.22, 1, 0.36, 1] },
+        };
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-background">
-      {/* Hero Burgee-style: tipografía enorme + burger PNG sin fondo */}
-      <section className="relative isolate min-h-[calc(100dvh-4rem)] overflow-hidden">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_70%_35%,hsl(var(--secondary)/0.16),transparent_55%),radial-gradient(ellipse_at_15%_85%,hsl(var(--primary)/0.06),transparent_45%)]"
-        />
-
-        <div className="relative mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-[100rem] flex-col px-4 pt-6 min-[400px]:px-6 sm:px-8 lg:px-10 lg:pt-4">
-          {/* CTAs superiores estilo Burgee */}
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45 }}
-            className="relative z-20 flex flex-wrap items-center justify-end gap-2"
-          >
-            <Link
-              href={tiendaHref}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full border border-border/80 bg-card/80 px-4 py-2",
-                "text-sm font-semibold text-foreground backdrop-blur-sm transition-colors hover:bg-muted",
-              )}
-            >
-              <ShoppingBag className="h-4 w-4 text-secondary dark:text-primary" />
-              Menú
-            </Link>
-            <Link
-              href={tiendaHref}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2",
-                "text-sm font-semibold text-primary-foreground shadow-md shadow-primary/20",
-                "transition-opacity hover:opacity-95",
-              )}
-            >
-              Pedir ahora
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </motion.div>
-
-          {/* Escena central: texto detrás + burger delante */}
-          <div className="relative flex flex-1 flex-col items-center justify-center pb-8 pt-4 lg:pb-12">
-            <motion.div
-              aria-hidden
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.8 }}
-              className={cn(
-                "pointer-events-none absolute left-1/2 top-[8%] z-0 w-[120%] max-w-none -translate-x-1/2 select-none text-center",
-                "font-display font-extrabold uppercase leading-[0.8] tracking-[-0.055em]",
-                "text-foreground/[0.08] dark:text-foreground/[0.11]",
-              )}
-            >
-              <p className="text-[clamp(4rem,15vw,11rem)]">Smoky</p>
-              <p className="text-[clamp(4rem,15vw,11rem)]">Cheesy</p>
-              <p className="text-[clamp(4rem,15vw,11rem)]">Burger</p>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 28, scale: 0.94 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.75, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-              className="relative z-10 w-[min(92vw,28rem)] sm:w-[min(78vw,34rem)] lg:w-[min(52vw,40rem)]"
-            >
-              {/* Sombra estática: animar filtros baja el FPS */}
+    <div className="flex min-w-0 flex-1 flex-col bg-white text-neutral-900 dark:bg-background dark:text-foreground">
+      <section className="mx-auto w-full max-w-[88rem] px-4 pt-6 min-[400px]:px-6 sm:px-8 lg:px-10 lg:pt-8">
+        <motion.div
+          {...(reduceMotion
+            ? {}
+            : {
+                initial: { opacity: 0, y: 12 },
+                animate: { opacity: 1, y: 0 },
+                transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1] },
+              })}
+          className="relative overflow-hidden rounded-[1.75rem] sm:rounded-[2rem] lg:rounded-[2.25rem]"
+        >
+          <div className="relative aspect-[16/11] w-full sm:aspect-[21/10] lg:aspect-[2.35/1]">
+              <img
+                src={CELOSIAS_HERO_IMAGE}
+                alt="Acabados y espacios con cerámica y porcelanato"
+                className="absolute inset-0 h-full w-full object-cover"
+                decoding="async"
+                fetchPriority="high"
+              />
               <div
                 aria-hidden
-                className="pointer-events-none absolute bottom-[6%] left-1/2 h-[18%] w-[70%] -translate-x-1/2 rounded-[100%] bg-black/25 blur-2xl dark:bg-black/40"
+                className="absolute inset-0 bg-gradient-to-t from-[hsl(220,70%,12%)]/75 via-[hsl(220,70%,16%)]/25 to-transparent"
               />
-              {/* Float manual: N px/s con requestAnimationFrame */}
+
+              {/* Motivo geométrico intencional: esquina superior izquierda */}
               <div
-                ref={burgerFloatRef}
-                className="will-change-transform [backface-visibility:hidden] [transform:translateZ(0)]"
+                aria-hidden
+                className="absolute left-5 top-5 z-[2] h-[4.75rem] w-[4.75rem] sm:left-8 sm:top-8 sm:h-28 sm:w-28 lg:left-10 lg:top-10"
               >
-                <img
-                  src={HERO_BURGER}
-                  alt="Hamburguesa"
-                  className="relative w-full"
-                  decoding="async"
-                  fetchPriority="high"
-                  draggable={false}
-                />
+                <span className="absolute inset-0 border-2 border-white/90" />
+                <span className="absolute left-0 top-0 h-8 w-8 bg-white sm:h-11 sm:w-11" />
+                <span className="absolute bottom-0 right-0 h-3.5 w-3.5 bg-[hsl(220,70%,22%)] sm:h-4 sm:w-4" />
               </div>
-            </motion.div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.28 }}
-              className="relative z-20 mt-2 max-w-lg text-center lg:mt-0 lg:absolute lg:bottom-16 lg:left-0 lg:max-w-sm lg:text-left"
-            >
-              <p className="font-display text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
-                Applia
-              </p>
-              <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.22em] text-secondary dark:text-primary sm:text-sm">
-                Store
-              </p>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground sm:text-base">
-                Buena, jugosa y lista pa&apos; pedir. Comida rápida con sabor, sin vueltas.
-              </p>
-            </motion.div>
-          </div>
-        </div>
-      </section>
-
-      {/* Bento promocional debajo del hero */}
-      <section className="px-4 pb-14 pt-2 min-[400px]:px-6 sm:px-8 lg:px-10">
-        <div className="mx-auto grid w-full max-w-[100rem] gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-5">
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.45 }}
-            className="relative overflow-hidden rounded-[1.75rem] bg-secondary p-6 text-secondary-foreground dark:bg-primary dark:text-primary-foreground md:col-span-2 lg:col-span-2 lg:min-h-[14rem]"
-          >
-            <div className="relative z-10 flex h-full max-w-md flex-col justify-between gap-6">
-              <div>
-                <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] opacity-90">
-                  <Flame className="h-3.5 w-3.5" />
-                  Destacado
-                </p>
-                <h2 className="mt-3 font-display text-2xl font-extrabold leading-tight tracking-tight sm:text-3xl">
-                  Sabor que se nota en cada bocado
-                </h2>
-                <p className="mt-2 text-sm leading-relaxed opacity-90 sm:text-base">
-                  Hamburguesas y Pepitos listos para comer acá o por delivery.
-                </p>
+              <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-start gap-4 p-5 sm:p-8 lg:flex-row lg:items-end lg:justify-between lg:p-10">
+                <div className="max-w-2xl">
+                  {/* Marcador editorial alineado al título */}
+                  <span
+                    aria-hidden
+                    className="mb-4 block h-2.5 w-2.5 bg-white sm:mb-5 sm:h-3 sm:w-3"
+                  />
+                  <img
+                    src={CELOSIAS_LOGO_SRC}
+                    alt=""
+                    aria-hidden
+                    className="mb-4 h-10 w-auto max-w-[11rem] object-contain brightness-0 invert sm:h-12 sm:max-w-[14rem]"
+                    decoding="async"
+                  />
+                  <h1 className="font-display text-[clamp(1.85rem,4.5vw,3.75rem)] font-semibold uppercase leading-[0.95] tracking-[0.04em] text-white">
+                    {CELOSIAS_BRAND_NAME}
+                  </h1>
+                </div>
+                <div className="flex flex-wrap gap-2.5">
+                  <Link
+                    href={tiendaHref}
+                    className="inline-flex items-center gap-2 rounded-full bg-[hsl(0,72%,42%)] px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-white transition-opacity hover:opacity-90 sm:text-sm"
+                  >
+                    Ver catálogo
+                    <ArrowUpRight className="h-4 w-4" />
+                  </Link>
+                  <Link
+                    href="/acerca-de"
+                    className="inline-flex items-center rounded-full border border-white/40 bg-white/10 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-white backdrop-blur-sm transition-colors hover:bg-white/20 sm:text-sm"
+                  >
+                    Acerca de nosotros
+                  </Link>
+                </div>
               </div>
-              <Link
-                href={tiendaHref}
-                className={cn(
-                  "inline-flex w-fit items-center gap-2 rounded-full bg-primary-foreground/95 px-5 py-2.5",
-                  "text-sm font-semibold text-foreground transition-opacity hover:opacity-90",
-                  "dark:bg-background dark:text-foreground",
-                )}
-              >
-                Ver el menú
-                <ArrowRight className="h-4 w-4" />
-              </Link>
             </div>
-            <img
-              src={FEATURED_BURGER}
-              alt=""
-              aria-hidden
-              className="pointer-events-none absolute -bottom-8 -right-6 w-[min(55%,16rem)] rotate-6 drop-shadow-xl sm:w-[min(48%,20rem)] lg:-right-2 lg:w-64"
-            />
-          </motion.div>
+        </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.45, delay: 0.06 }}
-            className="flex flex-col justify-between rounded-[1.75rem] bg-primary p-6 text-primary-foreground"
-          >
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary-foreground/70">
-                Promo
-              </p>
-              <h3 className="mt-3 font-display text-xl font-bold leading-snug sm:text-2xl">
-                Pide hoy y disfrúta de una buena comida
-              </h3>
-            </div>
+        <motion.p
+          {...fadeUp(0.12)}
+          className="mx-auto mt-12 max-w-2xl text-center text-[0.95rem] leading-relaxed text-neutral-600 dark:text-muted-foreground sm:mt-14 sm:text-base"
+        >
+          {CELOSIAS_HISTORY.lead} {CELOSIAS_TAGLINE}: calidad, variedad y entrega oportuna para obra y
+          acabados.
+        </motion.p>
+
+        <motion.div
+          {...fadeUp(0.18)}
+          className="mt-8 flex flex-wrap justify-center gap-2 sm:mt-10"
+        >
+          {CELOSIAS_HOME_CATEGORIES.map((cat) => (
             <Link
+              key={cat.name}
               href={tiendaHref}
-              className="mt-8 inline-flex items-center gap-1.5 text-sm font-semibold underline-offset-4 hover:underline"
+              className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-neutral-700 transition-colors hover:border-[hsl(220,70%,22%)] hover:text-[hsl(220,70%,22%)] dark:border-border dark:bg-card dark:text-foreground"
             >
-              Ir a la tienda
-              <ArrowRight className="h-4 w-4" />
+              {cat.name}
             </Link>
-          </motion.div>
+          ))}
+        </motion.div>
+      </section>
 
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.45, delay: 0.1 }}
-            className="rounded-[1.75rem] border border-border/70 bg-card p-6 md:col-span-2 lg:col-span-3"
+      <section className="mx-auto w-full max-w-[88rem] px-4 py-16 min-[400px]:px-6 sm:px-8 lg:px-10 lg:py-24">
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-4 sm:mb-10">
+          <h2 className="font-display text-2xl font-semibold uppercase tracking-[0.16em] text-[hsl(220,70%,22%)] dark:text-foreground sm:text-3xl">
+            Nuestros productos
+          </h2>
+          <Link
+            href={tiendaHref}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[hsl(0,72%,42%)] transition-opacity hover:opacity-80"
           >
-            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
-              <div>
-                <h3 className="font-display text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-                  Descubre las mejores hamburguesas del menú
-                </h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Entra a la tienda, escoge tu combo y listo.
-                </p>
-              </div>
+            Ver todo
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:gap-5">
+          {CELOSIAS_HOME_CATEGORIES.map((cat, i) => (
+            <motion.div
+              key={cat.name}
+              {...(reduceMotion
+                ? {}
+                : {
+                    initial: { opacity: 0, y: 16 },
+                    whileInView: { opacity: 1, y: 0 },
+                    viewport: { once: true, margin: "-40px" },
+                    transition: { duration: 0.45, delay: Math.min(i * 0.05, 0.25) },
+                  })}
+            >
               <Link
                 href={tiendaHref}
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-2 rounded-full bg-secondary px-5 py-2.5",
-                  "text-sm font-semibold text-secondary-foreground dark:bg-primary dark:text-primary-foreground",
-                  "transition-opacity hover:opacity-95",
-                )}
+                className="group block overflow-hidden rounded-[1.25rem] sm:rounded-[1.5rem]"
               >
-                Explorar
-                <ArrowRight className="h-4 w-4" />
+                <div className="relative aspect-[4/5] overflow-hidden bg-neutral-100 dark:bg-muted">
+                  <img
+                    src={cat.image}
+                    alt={cat.name}
+                    className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.04]"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <div
+                    aria-hidden
+                    className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/5 to-transparent"
+                  />
+                  <div className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-between gap-2 p-3.5 sm:p-5">
+                    <span className="font-display text-sm font-semibold uppercase tracking-[0.12em] text-white sm:text-base">
+                      {cat.name}
+                    </span>
+                    <span
+                      className={cn(
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition-colors",
+                        "group-hover:bg-[hsl(220,70%,22%)]",
+                      )}
+                    >
+                      <ArrowUpRight className="h-4 w-4" />
+                    </span>
+                  </div>
+                </div>
               </Link>
-            </div>
-          </motion.div>
+            </motion.div>
+          ))}
         </div>
       </section>
+
+      <footer className="mt-auto border-t border-neutral-200 bg-neutral-50 px-4 py-12 text-center dark:border-border dark:bg-card/40">
+        <p className="font-display text-sm font-semibold uppercase tracking-[0.18em] text-[hsl(220,70%,22%)] dark:text-foreground sm:text-base">
+          Barquisimeto · desde 1996
+        </p>
+        <p className="mt-2 text-sm text-neutral-500 dark:text-muted-foreground">
+          Cerámicas, porcelanatos y sanitarios · {CELOSIAS_BRAND_NAME}
+        </p>
+      </footer>
     </div>
   );
 }

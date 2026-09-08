@@ -2,6 +2,7 @@ import { Palette } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "@/contexts/ThemeContext";
+import { CELOSIAS_LEGAL_NAME } from "@/lib/celosias-brand";
 import { cn } from "@/lib/utils";
 
 /** Preferencia de tema claro/oscuro (local al navegador). */
@@ -22,7 +23,7 @@ export function ThemeAppearanceCard({ className }: { className?: string }) {
         <div className="min-w-0">
           <h2 className="font-display text-base font-bold tracking-tight text-foreground">Tema</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Elige cómo se ve Applia Store en este dispositivo.
+            Elige cómo se ve {CELOSIAS_LEGAL_NAME} en este dispositivo.
           </p>
         </div>
       </div>

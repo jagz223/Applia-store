@@ -4,7 +4,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useSearch } from "wouter";
-import { ArrowLeft, Loader2, ShoppingBag, User } from "lucide-react";
+import { ArrowLeft, Loader2, User } from "lucide-react";
+import { CELOSIAS_LEGAL_NAME, CELOSIAS_LOGO_SRC } from "@/lib/celosias-brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -144,12 +145,15 @@ export default function Settings() {
         )}
       >
         <div className="w-full max-w-md rounded-[1.75rem] border border-border/70 bg-card/90 p-8 text-center shadow-xl shadow-black/5 backdrop-blur-sm">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-            <ShoppingBag className="h-5 w-5" strokeWidth={2.25} />
-          </div>
+          <img
+            src={CELOSIAS_LOGO_SRC}
+            alt={CELOSIAS_LEGAL_NAME}
+            className="mx-auto mb-4 h-14 w-auto max-w-[14rem] object-contain"
+            decoding="async"
+          />
           <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Tu cuenta</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Entra para ver y editar tus datos en Applia Store.
+            Entra para ver y editar tus datos en {CELOSIAS_LEGAL_NAME}.
           </p>
           <Button asChild className="mt-6 h-11 w-full rounded-full font-semibold">
             <Link href="/login">Iniciar sesión</Link>
@@ -188,9 +192,18 @@ export default function Settings() {
             </Link>
           </Button>
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-secondary dark:text-primary">
-              Applia Store
-            </p>
+            <div className="mb-1 flex items-center gap-2.5">
+              <img
+                src={CELOSIAS_LOGO_SRC}
+                alt=""
+                aria-hidden
+                className="h-8 w-auto max-w-[7.5rem] object-contain object-left"
+                decoding="async"
+              />
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-secondary dark:text-primary">
+                {CELOSIAS_LEGAL_NAME}
+              </p>
+            </div>
             <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
               Mi cuenta
             </h1>

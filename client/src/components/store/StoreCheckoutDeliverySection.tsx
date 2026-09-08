@@ -72,8 +72,8 @@ function themeHsl(cssVar: string, fallback: string): string {
 function createLabeledMarkerIcon(label: string, variant: "origin" | "destination") {
   const bg =
     variant === "origin"
-      ? themeHsl("--primary", "#2e2a27")
-      : themeHsl("--secondary", "#d94a3d");
+      ? themeHsl("--primary", "#0F2744")
+      : themeHsl("--secondary", "#D62828");
   return L.divIcon({
     className: "",
     html: `
@@ -489,7 +489,7 @@ export function StoreCheckoutDeliverySection({
               {overlayPerimeter && overlayPerimeter.length >= 3 ? (
                 <StoreDeliveryPerimeterMask
                   points={overlayPerimeter}
-                  strokeColor={themeHsl("--secondary", "#d94a3d")}
+                  strokeColor={themeHsl("--secondary", "#D62828")}
                 />
               ) : null}
               {routeAvoidSegments.map((s) => {

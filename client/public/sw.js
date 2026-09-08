@@ -6,12 +6,12 @@ importScripts("https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"
 importScripts("https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js");
 
 firebase.initializeApp({
-  apiKey: "AIzaSyAeXIzf2xWoq_3G1b9OOcWGsz5JPol2Fng",
-  authDomain: "aplify-store.firebaseapp.com",
-  projectId: "aplify-store",
-  storageBucket: "aplify-store.firebasestorage.app",
-  messagingSenderId: "43941588078",
-  appId: "1:43941588078:web:517a7f3e0d3034d9378a7f",
+  apiKey: "AIzaSyB7Jo5UI2x2I07NnyceQcE2wNm6StY777I",
+  authDomain: "celosias-larense.firebaseapp.com",
+  projectId: "celosias-larense",
+  storageBucket: "celosias-larense.firebasestorage.app",
+  messagingSenderId: "990247948412",
+  appId: "1:990247948412:web:6cb16905dd19a051a379f9",
 });
 
 firebase.messaging();

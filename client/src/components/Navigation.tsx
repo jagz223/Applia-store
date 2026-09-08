@@ -1,4 +1,4 @@
-﻿import { Link, useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { isClientRole, hasAdminRole } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import {
   Settings,
   ShoppingBag,
   Store,
-} from "lucide-react";import {
+} from "lucide-react";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -19,7 +20,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { useState, useMemo, type ReactNode } from "react";import { NotificationBell } from "@/components/NotificationBell";
+import { useState, useMemo, type ReactNode } from "react";
+import { NotificationBell } from "@/components/NotificationBell";
 import { ThemeToggleHeaderButton } from "@/components/ThemeToggle";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -31,7 +33,9 @@ import {
   getStoreAdminChatHref,
   useMyStaffStore,
   useMyStore,
-} from "@/hooks/use-my-store";import { cn } from "@/lib/utils";
+} from "@/hooks/use-my-store";
+import { CELOSIAS_BRAND_NAME, CELOSIAS_LOGO_SRC } from "@/lib/celosias-brand";
+import { cn } from "@/lib/utils";
 
 function MobileDarkModePreference() {
   const { theme, setTheme } = useTheme();
@@ -71,7 +75,7 @@ function NavPill({
       className={cn(
         "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
         active
-          ? "bg-primary text-primary-foreground shadow-sm"
+          ? "bg-[hsl(220,70%,22%)] text-white shadow-sm dark:bg-primary dark:text-primary-foreground"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
     >
@@ -80,7 +84,24 @@ function NavPill({
   );
 }
 
-type NavSection = "home" | "tienda" | "chat" | "admin";
+function BrandLogoLink({ className, imgClassName }: { className?: string; imgClassName?: string }) {
+  return (
+    <Link href="/" className={cn("group flex shrink-0 items-center", className)} title={CELOSIAS_BRAND_NAME}>
+      <img
+        src={CELOSIAS_LOGO_SRC}
+        alt={CELOSIAS_BRAND_NAME}
+        className={cn(
+          "h-10 w-auto max-w-[11rem] object-contain object-left transition-opacity group-hover:opacity-90 sm:h-11 sm:max-w-[13rem]",
+          imgClassName,
+        )}
+        decoding="async"
+        draggable={false}
+      />
+    </Link>
+  );
+}
+
+type NavSection = "home" | "about" | "tienda" | "chat" | "admin";
 
 function resolveNavSection(
   location: string,
@@ -88,6 +109,7 @@ function resolveNavSection(
 ): NavSection | null {
   const path = location.split("?")[0];
   if (path === "/") return "home";
+  if (path === "/acerca-de" || path.startsWith("/acerca-de/")) return "about";
   if (
     options.storeChatHref &&
     (path === options.storeChatHref || path.startsWith(`${options.storeChatHref}/`))
@@ -131,6 +153,7 @@ export function Navigation() {
   );
 
   const homeActive = navSection === "home";
+  const aboutActive = navSection === "about";
   const tiendaActive = navSection === "tienda";
   const chatActive = navSection === "chat";
   const adminActive = navSection === "admin";
@@ -138,26 +161,17 @@ export function Navigation() {
 
   return (
     <header className="sticky top-0 z-50 w-full shrink-0">
-      <nav className="border-b border-border/60 bg-card/95 shadow-[0_1px_0_0_hsl(var(--secondary)/0.18)] backdrop-blur-md supports-[backdrop-filter]:bg-card/90">
+      <nav className="border-b border-border/60 bg-card/95 shadow-[0_1px_0_0_hsl(220,40%,20%,0.08)] backdrop-blur-md supports-[backdrop-filter]:bg-card/90">
         <div className="mx-auto flex h-16 w-full max-w-[100rem] min-w-0 items-center justify-between gap-3 px-3 min-[400px]:px-5 sm:px-6 xl:px-8">
           <div className="flex min-w-0 flex-1 items-center gap-3 lg:gap-8">
-            <Link href={tiendaHref} className="group flex shrink-0 items-center gap-2.5" title="Applia Store">
-              <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:scale-[1.03]">
-                <ShoppingBag className="h-4 w-4" strokeWidth={2.25} />
-              </span>
-              <span className="leading-tight">
-                <span className="block text-base font-bold tracking-tight text-foreground min-[400px]:text-lg">
-                  Applia
-                </span>
-                <span className="hidden text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-secondary dark:text-primary min-[400px]:block">
-                  Store
-                </span>
-              </span>
-            </Link>
+            <BrandLogoLink />
 
             <div className="hidden items-center gap-1 rounded-full bg-muted/60 p-1 lg:flex">
               <NavPill href="/" active={homeActive}>
                 Inicio
+              </NavPill>
+              <NavPill href="/acerca-de" active={aboutActive}>
+                Acerca de nosotros
               </NavPill>
               <NavPill href={tiendaHref} active={tiendaActive}>
                 Tienda
@@ -184,7 +198,7 @@ export function Navigation() {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-[hsl(220,70%,22%)] text-white shadow-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-primary dark:text-primary-foreground"
                     aria-label="Abrir menú de cuenta"
                   >
                     <User className="h-4 w-4" />
@@ -195,14 +209,14 @@ export function Navigation() {
                   align="end"
                   sideOffset={10}
                 >
-                  <div className="bg-primary px-4 py-4 text-primary-foreground">
+                  <div className="bg-[hsl(220,70%,22%)] px-4 py-4 text-white dark:bg-primary dark:text-primary-foreground">
                     <div className="flex items-center gap-3">
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-foreground/15 ring-1 ring-primary-foreground/25">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
                         <User className="h-5 w-5" />
                       </span>
                       <DropdownMenuLabel className="min-w-0 flex-1 p-0 font-normal">
                         <p className="text-sm font-semibold">Mi cuenta</p>
-                        <p className="mt-0.5 truncate text-xs text-primary-foreground/75">{user?.email}</p>
+                        <p className="mt-0.5 truncate text-xs text-white/75">{user?.email}</p>
                       </DropdownMenuLabel>
                     </div>
                   </div>
@@ -210,11 +224,27 @@ export function Navigation() {
                   <div className="py-1">
                     <DropdownMenuItem
                       asChild
-                      className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-secondary/10 focus:text-secondary"
+                      className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-muted"
+                    >
+                      <Link href="/" className="flex w-full items-center justify-between gap-2">
+                        <span className="flex items-center gap-2.5">Inicio</span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-muted"
+                    >
+                      <Link href="/acerca-de" className="flex w-full items-center justify-between gap-2">
+                        <span className="flex items-center gap-2.5">Acerca de nosotros</span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-muted"
                     >
                       <Link href={tiendaHref} className="flex w-full items-center justify-between gap-2">
                         <span className="flex items-center gap-2.5">
-                          <Store className="h-4 w-4 text-primary" />
+                          <Store className="h-4 w-4" />
                           Tienda
                         </span>
                       </Link>
@@ -222,11 +252,11 @@ export function Navigation() {
                     {showStoreStaffNav && storeAdminHref ? (
                       <DropdownMenuItem
                         asChild
-                        className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-secondary/10 focus:text-secondary"
+                        className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-muted"
                       >
                         <Link href={storeAdminHref} className="flex w-full items-center justify-between gap-2">
                           <span className="flex items-center gap-2.5">
-                            <LayoutDashboard className="h-4 w-4 text-primary" />
+                            <LayoutDashboard className="h-4 w-4" />
                             Panel de administración
                           </span>
                         </Link>
@@ -235,11 +265,11 @@ export function Navigation() {
                     {showStoreStaffNav && storeChatHref ? (
                       <DropdownMenuItem
                         asChild
-                        className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-secondary/10 focus:text-secondary"
+                        className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-muted"
                       >
                         <Link href={storeChatHref} className="flex w-full items-center justify-between gap-2">
                           <span className="flex items-center gap-2.5">
-                            <MessageCircle className="h-4 w-4 text-primary" />
+                            <MessageCircle className="h-4 w-4" />
                             Chat
                           </span>
                         </Link>
@@ -248,11 +278,11 @@ export function Navigation() {
                     {showMyOrders ? (
                       <DropdownMenuItem
                         asChild
-                        className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-secondary/10 focus:text-secondary"
+                        className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-muted"
                       >
                         <Link href="/pedidos-tienda" className="flex w-full items-center justify-between gap-2">
                           <span className="flex items-center gap-2.5">
-                            <ShoppingBag className="h-4 w-4 text-secondary" />
+                            <ShoppingBag className="h-4 w-4" />
                             Mis pedidos
                           </span>
                         </Link>
@@ -260,7 +290,7 @@ export function Navigation() {
                     ) : null}
                     <DropdownMenuItem
                       asChild
-                      className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-secondary/10 focus:text-secondary"
+                      className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-muted"
                     >
                       <Link href="/settings" className="flex w-full items-center justify-between gap-2">
                         <span className="flex items-center gap-2.5">
@@ -287,7 +317,10 @@ export function Navigation() {
                 <Button variant="ghost" className="rounded-full text-muted-foreground" asChild>
                   <Link href="/login">Entrar</Link>
                 </Button>
-                <Button className="rounded-full bg-secondary px-4 text-secondary-foreground hover:bg-secondary/90" asChild>
+                <Button
+                  className="rounded-full bg-[hsl(220,70%,22%)] px-4 text-white hover:bg-[hsl(220,70%,18%)] dark:bg-primary dark:text-primary-foreground dark:hover:opacity-90"
+                  asChild
+                >
                   <Link href="/register">Crear cuenta</Link>
                 </Button>
               </div>
@@ -295,8 +328,9 @@ export function Navigation() {
 
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full lg:hidden">
+                <Button variant="ghost" size="icon" className="rounded-full lg:hidden" aria-label="Menú">
                   <Menu className="h-5 w-5" />
+                  <span className="sr-only">Menú</span>
                 </Button>
               </SheetTrigger>
               <SheetContent
@@ -304,14 +338,21 @@ export function Navigation() {
                 className="flex h-full w-[min(100%,19rem)] min-h-0 flex-col overflow-hidden border-l border-border bg-card p-0"
               >
                 <div className="border-b border-border/60 px-5 py-5">
-                  <p className="text-lg font-bold tracking-tight">Applia</p>
-                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-secondary">Store</p>
+                  <img
+                    src={CELOSIAS_LOGO_SRC}
+                    alt={CELOSIAS_BRAND_NAME}
+                    className="h-12 w-auto max-w-full object-contain object-left"
+                    decoding="async"
+                  />
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] pt-5">
                   <MobileDarkModePreference />
                   <div className="mt-5 flex flex-col gap-2">
                     <NavPill href="/" active={homeActive} onClick={() => setMobileOpen(false)}>
                       Inicio
+                    </NavPill>
+                    <NavPill href="/acerca-de" active={aboutActive} onClick={() => setMobileOpen(false)}>
+                      Acerca de nosotros
                     </NavPill>
                     <NavPill href={tiendaHref} active={tiendaActive} onClick={() => setMobileOpen(false)}>
                       Tienda
@@ -349,7 +390,10 @@ export function Navigation() {
                             Entrar
                           </Link>
                         </Button>
-                        <Button asChild className="w-full rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/90">
+                        <Button
+                          asChild
+                          className="w-full rounded-full bg-[hsl(220,70%,22%)] text-white hover:bg-[hsl(220,70%,18%)] dark:bg-primary dark:text-primary-foreground"
+                        >
                           <Link href="/register" onClick={() => setMobileOpen(false)}>
                             Crear cuenta
                           </Link>
