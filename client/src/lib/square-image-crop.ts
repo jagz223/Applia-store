@@ -46,6 +46,26 @@ export function computeSquareCropFromViewport(
   return clampSquareCrop(imgW, imgH, cropX, cropY, cropSize);
 }
 
+type CropOutputFormat = {
+  mime: "image/jpeg" | "image/png" | "image/webp";
+  quality?: number;
+  ext: string;
+};
+
+/** JPEG no admite transparencia: PNG/WebP se exportan con alfa para no pintar negro. */
+export function resolveSquareCropOutputFormat(fileName: string): CropOutputFormat {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".png")) return { mime: "image/png", ext: "png" };
+  if (lower.endsWith(".webp")) return { mime: "image/webp", quality: 0.92, ext: "webp" };
+  if (lower.endsWith(".gif")) return { mime: "image/png", ext: "png" };
+  return { mime: "image/jpeg", quality: 0.92, ext: "jpg" };
+}
+
+function withOutputExtension(fileName: string, ext: string): string {
+  const base = fileName.replace(/\.[^.]+$/, "").trim() || "producto";
+  return `${base}.${ext}`;
+}
+
 export async function cropSquareImageToFile(
   imageSrc: string,
   crop: { x: number; y: number; size: number },
@@ -53,21 +73,30 @@ export async function cropSquareImageToFile(
   outputSize = SQUARE_CROP_OUTPUT_SIZE,
 ): Promise<File> {
   const img = await loadImageElement(imageSrc);
+  const format = resolveSquareCropOutputFormat(fileName);
   const canvas = document.createElement("canvas");
   canvas.width = outputSize;
   canvas.height = outputSize;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { alpha: format.mime !== "image/jpeg" });
   if (!ctx) throw new Error("Canvas no disponible");
+  if (format.mime === "image/jpeg") {
+    // JPEG sin alfa: fondo blanco (evita el negro por defecto del canvas)
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, outputSize, outputSize);
+  } else {
+    ctx.clearRect(0, 0, outputSize, outputSize);
+  }
   ctx.drawImage(img, crop.x, crop.y, crop.size, crop.size, 0, 0, outputSize, outputSize);
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error("No se pudo exportar la imagen."))),
-      "image/jpeg",
-      0.92,
+      format.mime,
+      format.quality,
     );
   });
   if (blob.size > SQUARE_CROP_MAX_FILE_BYTES) {
     throw new Error("La imagen recortada supera 5 MB. Reduce el zoom o usa otra foto.");
   }
-  return new File([blob], fileName, { type: "image/jpeg" });
+  const outName = withOutputExtension(fileName, format.ext);
+  return new File([blob], outName, { type: format.mime });
 }

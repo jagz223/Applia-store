@@ -133,12 +133,13 @@ export function SquareImageCropDialog({
           <DialogTitle>Recortar foto</DialogTitle>
           <DialogDescription>
             Ajusta la imagen dentro del cuadrado. Arrastra para mover y usa el zoom si necesitas.
+            PNG/WebP conservan el fondo transparente; JPG usa fondo blanco.
           </DialogDescription>
         </DialogHeader>
 
         <div className={storeAdminDialogBodyClass}>
           <div
-            className="relative mx-auto overflow-hidden rounded-xl border border-border bg-muted/30 touch-none"
+            className="relative mx-auto overflow-hidden rounded-xl border border-border bg-background touch-none"
             style={{ width: VIEWPORT_SIZE, height: VIEWPORT_SIZE }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
