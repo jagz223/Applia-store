@@ -31,7 +31,7 @@ export function StoreProductPhotosPicker({
   const [urlInput, setUrlInput] = useState("");
   const [urlLoading, setUrlLoading] = useState(false);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
-  const [cropFileName, setCropFileName] = useState("producto.jpg");
+  const [cropFileName, setCropFileName] = useState("producto.png");
   const [cropOpen, setCropOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState(0);
 
@@ -110,11 +110,7 @@ export function StoreProductPhotosPicker({
       });
       return;
     }
-    openCropper(
-      editingIndex,
-      URL.createObjectURL(file),
-      file.name.replace(/\.\w+$/, "") + ".jpg",
-    );
+    openCropper(editingIndex, URL.createObjectURL(file), file.name || "producto.png");
   }
 
   async function handleAddUrl(index: number) {
@@ -137,7 +133,9 @@ export function StoreProductPhotosPicker({
         img.onerror = () => reject(new Error("No se pudo cargar la imagen desde esa URL."));
         img.src = trimmed;
       });
-      openCropper(index, trimmed, "producto-url.jpg");
+      const fromUrl = trimmed.split("?")[0]?.split("/").pop() || "producto.png";
+      const safeName = /\.(png|jpe?g|webp|gif)$/i.test(fromUrl) ? fromUrl : "producto.png";
+      openCropper(index, trimmed, safeName);
       setUrlInput("");
     } catch (e) {
       toast({
@@ -166,7 +164,7 @@ export function StoreProductPhotosPicker({
 
         {draft ? (
           <div className="space-y-2">
-            <div className="relative mx-auto max-w-[160px] aspect-square rounded-lg border border-border overflow-hidden bg-muted/30">
+            <div className="relative mx-auto max-w-[160px] aspect-square rounded-lg border border-border overflow-hidden bg-background">
               <img src={draft.previewUrl} alt="" className="h-full w-full object-cover" />
               {draft.pendingFile ? (
                 <span className="absolute bottom-1 left-1 rounded bg-background/90 px-1.5 py-0.5 text-[10px] text-muted-foreground">
@@ -208,7 +206,12 @@ export function StoreProductPhotosPicker({
                   openCropper(
                     index,
                     draft.previewUrl,
-                    draft.pendingFile?.name ?? "producto.jpg",
+                    draft.pendingFile?.name ??
+                      (/\.png(\?|$)/i.test(draft.previewUrl)
+                        ? "producto.png"
+                        : /\.webp(\?|$)/i.test(draft.previewUrl)
+                          ? "producto.webp"
+                          : "producto.png"),
                   )
                 }
               >

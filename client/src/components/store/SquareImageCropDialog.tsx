@@ -37,7 +37,7 @@ export function SquareImageCropDialog({
   open,
   onOpenChange,
   imageSrc,
-  fileName = "producto.jpg",
+  fileName = "producto.png",
   onConfirm,
 }: SquareImageCropDialogProps) {
   const dragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);

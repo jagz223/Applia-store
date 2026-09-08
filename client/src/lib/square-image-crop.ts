@@ -11,6 +11,31 @@ export async function loadImageElement(src: string): Promise<HTMLImageElement> {
   });
 }
 
+/** Muestrea el canvas: si hay píxeles con alfa &lt; 255, la imagen tiene transparencia. */
+export function canvasImageHasTransparency(
+  img: HTMLImageElement,
+  sampleSize = 96,
+): boolean {
+  const w = Math.max(1, Math.min(img.naturalWidth || img.width, sampleSize));
+  const h = Math.max(1, Math.min(img.naturalHeight || img.height, sampleSize));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true, alpha: true });
+  if (!ctx) return false;
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  try {
+    const { data } = ctx.getImageData(0, 0, w, h);
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i]! < 250) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 export function clampSquareCrop(
   imgW: number,
   imgH: number,
@@ -73,14 +98,17 @@ export async function cropSquareImageToFile(
   outputSize = SQUARE_CROP_OUTPUT_SIZE,
 ): Promise<File> {
   const img = await loadImageElement(imageSrc);
-  const format = resolveSquareCropOutputFormat(fileName);
+  let format = resolveSquareCropOutputFormat(fileName);
+  // Si el archivo se renombró a .jpg pero el contenido tiene alfa, conservar PNG.
+  if (format.mime === "image/jpeg" && canvasImageHasTransparency(img)) {
+    format = { mime: "image/png", ext: "png" };
+  }
   const canvas = document.createElement("canvas");
   canvas.width = outputSize;
   canvas.height = outputSize;
   const ctx = canvas.getContext("2d", { alpha: format.mime !== "image/jpeg" });
   if (!ctx) throw new Error("Canvas no disponible");
   if (format.mime === "image/jpeg") {
-    // JPEG sin alfa: fondo blanco (evita el negro por defecto del canvas)
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, outputSize, outputSize);
   } else {
