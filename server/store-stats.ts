@@ -88,7 +88,10 @@ export async function buildStoreStats({
     status: statusScope === "completed" ? ("completado" as StoreOrderStatus) : undefined,
   };
 
-  const orders = await appliaStorage.listStoreOrders(storeId, listFilters as any);
+  const orders = await appliaStorage.listStoreOrders(storeId, {
+    ...listFilters,
+    limit: 5000,
+  } as any);
 
   const filtered = orders.filter((o) => {
     if (statusScope === "non_rejected") return o.status !== "rechazado";

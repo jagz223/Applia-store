@@ -1,7 +1,7 @@
 /**
- * Determina si una ficha de servicio pertenece a una marca/categoría (Pro Go, Man Go, etc.).
+ * Determina si una ficha de servicio pertenece a una marca/categoría (Servicios profesionales, Servicios técnicos, etc.).
  * Solo la categoría de la **ficha** (`services.categoryId`), no las marcas del proveedor:
- * un asociado mixto debe listar pintura en Man Go y legal en Pro Go por separado.
+ * un asociado mixto debe listar pintura en Servicios técnicos y legal en Servicios profesionales por separado.
  */
 export function serviceBelongsToBrand(
   s: {

@@ -52,7 +52,7 @@ NODE_ENV=development
 ## Estructura del Proyecto
 
 ```
-mango-applia/
+Applia-store/
 ├── client/                 # Frontend React
 │   ├── src/
 │   │   ├── components/    # Componentes UI

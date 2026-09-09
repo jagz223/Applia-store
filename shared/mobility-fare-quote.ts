@@ -47,7 +47,7 @@ export function isMobilityNightHour(date = new Date()): boolean {
   return hour >= 19 || hour < 6;
 }
 
-/** Tarifa sugerida Car Go (taxi) según tarifas admin y distancia de ruta en metros. */
+/** Tarifa sugerida Transporte (taxi) según tarifas admin y distancia de ruta en metros. */
 export function computeMobilitySuggestedUsd(
   fares: MobilityFaresQuote,
   vehicleType: GoVehicleType,
@@ -76,7 +76,7 @@ export function computeMobilitySuggestedUsd(
   return null;
 }
 
-/** Tarifa sugerida Pack Go (delivery) según tarifas admin y distancia de ruta en metros. */
+/** Tarifa sugerida envíos (delivery) según tarifas admin y distancia de ruta en metros. */
 export function computePackSuggestedUsd(
   fares: PackFaresQuote,
   vehicleType: Exclude<GoVehicleType, "pet_car">,
@@ -156,7 +156,7 @@ export function computePackSuggestedByVehicle(
   return out;
 }
 
-/** Tarifa delivery más económica entre moto, auto y camioneta (Pack Go). */
+/** Tarifa delivery más económica entre moto, auto y camioneta (envíos). */
 export function computeLowestPackSuggestedUsd(fares: PackFaresQuote, distanceM: number): number {
   const byVehicle = computePackSuggestedByVehicle(fares, distanceM);
   let min: number | null = null;

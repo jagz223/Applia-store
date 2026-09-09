@@ -7,15 +7,15 @@ export async function bootstrapActiveMobilityRidesFromFirestore(): Promise<void>
   if (!isFirebaseConfigured()) return;
 
   try {
-    const [{ hydrateCargoMobilityRidesFromFirestore }, { hydratePackMobilityRidesFromFirestore }] =
+    const [{ hydrateTaxiMobilityRidesFromFirestore }, { hydratePackMobilityRidesFromFirestore }] =
       await Promise.all([import("./mobility-rides"), import("./pack-rides")]);
-    const [cargoCount, packCount] = await Promise.all([
-      hydrateCargoMobilityRidesFromFirestore(),
+    const [taxiCount, packCount] = await Promise.all([
+      hydrateTaxiMobilityRidesFromFirestore(),
       hydratePackMobilityRidesFromFirestore(),
     ]);
-    if (cargoCount > 0 || packCount > 0) {
+    if (taxiCount > 0 || packCount > 0) {
       console.log(
-        `[mobility-active] Viajes activos restaurados desde Firestore: ${cargoCount} taxi, ${packCount} delivery`,
+        `[mobility-active] Viajes activos restaurados desde Firestore: ${taxiCount} taxi, ${packCount} delivery`,
       );
       const { getIO } = await import("./socket");
       const { scheduleReconcileSearchingClassicRides } = await import("./go-driver-classic-offer-reconcile");

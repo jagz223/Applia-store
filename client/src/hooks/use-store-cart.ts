@@ -85,8 +85,41 @@ export function useStoreCart(storeId: number, enabled = true) {
   });
 }
 
-function invalidateCart(qc: ReturnType<typeof useQueryClient>, storeId: number) {
-  void qc.invalidateQueries({ queryKey: storeCartQueryKey(storeId) });
+function cacheCart(qc: ReturnType<typeof useQueryClient>, storeId: number, cart: StoreCartSummary) {
+  qc.setQueryData(storeCartQueryKey(storeId), cart);
+}
+
+function applyOptimisticQuantity(
+  cart: StoreCartSummary,
+  body: UpdateStoreCartItem,
+): StoreCartSummary {
+  const key =
+    body.lineKey?.trim() ||
+    (body.kind === "promotion"
+      ? `m:${body.promotionId}`
+      : body.productId
+        ? `p-${body.productId}`
+        : "");
+  if (!key) return cart;
+  const items =
+    body.quantity <= 0
+      ? cart.items.filter((line) => (line.lineKey || "") !== key && cartLineFallbackKey(line) !== key)
+      : cart.items.map((line) => {
+          const lineKey = line.lineKey || cartLineFallbackKey(line);
+          if (lineKey !== key && line.lineKey !== body.lineKey) return line;
+          return {
+            ...line,
+            quantity: body.quantity,
+            lineTotal: line.price * body.quantity,
+          };
+        });
+  const itemCount = items.reduce((sum, line) => sum + line.quantity, 0);
+  const subtotal = items.reduce((sum, line) => sum + line.lineTotal, 0);
+  return { ...cart, items, itemCount, subtotal };
+}
+
+function cartLineFallbackKey(line: StoreCartLine) {
+  return line.kind === "product" ? `p-${line.productId}` : `m-${line.promotionId}`;
 }
 
 export function useAddToStoreCart(storeId: number) {
@@ -105,7 +138,7 @@ export function useAddToStoreCart(storeId: number) {
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;
     },
-    onSuccess: () => invalidateCart(qc, storeId),
+    onSuccess: (cart) => cacheCart(qc, storeId, cart),
   });
 }
 
@@ -125,7 +158,19 @@ export function useUpdateStoreCartItem(storeId: number) {
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;
     },
-    onSuccess: () => invalidateCart(qc, storeId),
+    onMutate: async (body) => {
+      const key = storeCartQueryKey(storeId);
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<StoreCartSummary>(key);
+      if (previous) {
+        qc.setQueryData(key, applyOptimisticQuantity(previous, body));
+      }
+      return { previous };
+    },
+    onError: (_err, _body, ctx) => {
+      if (ctx?.previous) cacheCart(qc, storeId, ctx.previous);
+    },
+    onSuccess: (cart) => cacheCart(qc, storeId, cart),
   });
 }
 
@@ -148,7 +193,9 @@ export function useSubmitStoreCheckout(storeId: number) {
         gatewayKind?: "stripe" | "paypal" | "dlocalgo" | null;
       }>;
     },
-    onSuccess: () => invalidateCart(qc, storeId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: storeCartQueryKey(storeId) });
+    },
   });
 }
 
@@ -168,7 +215,7 @@ export function useRemoveFromStoreCart(storeId: number) {
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;
     },
-    onSuccess: () => invalidateCart(qc, storeId),
+    onSuccess: (cart) => cacheCart(qc, storeId, cart),
   });
 }
 
@@ -188,6 +235,6 @@ export function useUpdateStoreCartFulfillment(storeId: number) {
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;
     },
-    onSuccess: () => invalidateCart(qc, storeId),
+    onSuccess: (cart) => cacheCart(qc, storeId, cart),
   });
 }

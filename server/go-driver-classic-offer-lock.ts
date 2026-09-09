@@ -2,7 +2,7 @@
  * Oferta clásica pendiente por conductor (taxi + delivery comparten un solo lock).
  * Evita dos modales clásicos a la vez en modo híbrido.
  */
-export type ClassicOfferModule = "cargo" | "pack";
+export type ClassicOfferModule = "taxi" | "pack";
 
 export type ClassicOfferPending = {
   rideId: string;

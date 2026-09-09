@@ -1,4 +1,4 @@
-import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
+import type { GoDriverReceiveMode } from "@/lib/taxi-driver-storage";
 import { MOBILITY_UI } from "@shared/mobility-ui-labels";
 
 export type ReceiveModeCaptionTone = "off" | "taxi" | "delivery" | "both";

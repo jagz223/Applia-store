@@ -251,7 +251,7 @@ export type StoreOrder = {
   /** true si el stock de esta orden ya está descontado del inventario. */
   stockCommitted?: boolean;
 
-  /** Pack Go ride activo o último vinculado. */
+  /** envíos ride activo o último vinculado. */
 
   packRideId: string | null;
 
@@ -515,6 +515,10 @@ export type StoreOrderListFilters = {
   /** Sucursal asignada al pedido. */
 
   branchId?: string;
+
+  /** Tope de documentos a leer en Firestore (evita bajar el histórico entero). */
+
+  limit?: number;
 
 };
 

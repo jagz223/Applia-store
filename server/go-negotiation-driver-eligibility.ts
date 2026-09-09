@@ -1,6 +1,6 @@
 import { catalogService } from "./services";
 import { appliaStorage } from "./storage-applia";
-import { NEGOTIATION_MATCH_MAP_CARGO, NEGOTIATION_MATCH_MAP_PACK } from "@shared/go-negotiation-board-segments";
+import { NEGOTIATION_MATCH_MAP_TAXI, NEGOTIATION_MATCH_MAP_PACK } from "@shared/go-negotiation-board-segments";
 
 export type NegotiationVehicleMatchOptions = {
   petRideKind?: string;
@@ -82,9 +82,9 @@ export async function driverPrimaryVehicleMatchesRideKind(
 export async function driverCanAccessNegotiationBoardSegment(
   driverUserId: string,
   segment: string,
-  module: "cargo" | "pack"
+  module: "taxi" | "pack"
 ): Promise<boolean> {
-  const table = module === "cargo" ? NEGOTIATION_MATCH_MAP_CARGO : NEGOTIATION_MATCH_MAP_PACK;
+  const table = module === "taxi" ? NEGOTIATION_MATCH_MAP_TAXI : NEGOTIATION_MATCH_MAP_PACK;
   if (!Object.prototype.hasOwnProperty.call(table, segment)) return false;
   return driverPrimaryVehicleMatchesRideKind(driverUserId, segment, table, {
     petRideKind: "pet_car",

@@ -1,6 +1,6 @@
 /**
- * Pack Go: emparejamiento cliente ↔ driver para envíos/delivery (memoria + Socket.IO).
- * Clonado de Car Go con eventos `pack:ride:*` y sin Pet Car.
+ * envíos: emparejamiento cliente ↔ driver para envíos/delivery (memoria + Socket.IO).
+ * Clonado de Transporte con eventos `pack:ride:*` y sin Pet Car.
  */
 import type { Express } from "express";
 import type { Server as SocketIOServer, Socket } from "socket.io";
@@ -241,7 +241,7 @@ export function getActivePackRideForStoreOrder(
   return null;
 }
 
-/** Cancela búsqueda Pack Go de una orden de tienda (sin re-lanzar búsqueda). */
+/** Cancela búsqueda envíos de una orden de tienda (sin re-lanzar búsqueda). */
 export function cancelStoreOrderPackSearch(storeOrderId: number): boolean {
   const io = getIO();
   let anyCancelled = false;
@@ -305,7 +305,7 @@ export async function getPackRideDeliveryDetail(rideId: string) {
   };
 }
 
-/** Crea búsqueda Pack Go para una orden de tienda (cliente = dueño de la tienda). */
+/** Crea búsqueda envíos para una orden de tienda (cliente = dueño de la tienda). */
 export async function createPackRideForStoreOrder(input: {
   storeOrderId: number;
   storeId: number;
@@ -2490,7 +2490,7 @@ export function registerPackRideRoutes(app: Express) {
     }
   });
 
-  // POST /api/pack/rides/:rideId/rate - Calificar al otro participante (Pack Go)
+  // POST /api/pack/rides/:rideId/rate - Calificar al otro participante (envíos)
   app.post("/api/pack/rides/:rideId/rate", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id as string;

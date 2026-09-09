@@ -332,7 +332,7 @@
       <li><strong>Título:</strong> «Reserva realizada con éxito».</li>
       <li><strong>Descripción:</strong> «El profesional ha sido notificado. Puedes ver el estado de tu reserva en Mi Cuenta → Mis Reservas.»</li>
     </ul>
-    <p>Los textos están centralizados en constantes (<code>BOOKING_SUCCESS_TOAST</code>, <code>BOOKING_ERROR_TOAST</code>) en el hook <code>useCreateBooking</code> (<code>client/src/hooks/use-mango-data.ts</code>), para mantener un único lugar de definición (SOLID, mantenibilidad). En caso de error al crear la reserva, el toast muestra «Error al crear la reserva» y el mensaje del error o «Intenta de nuevo más tarde.»</p>
+    <p>Los textos están centralizados en constantes (<code>BOOKING_SUCCESS_TOAST</code>, <code>BOOKING_ERROR_TOAST</code>) en el hook <code>useCreateBooking</code> (<code>client/src/hooks/use-provider-data.ts</code>), para mantener un único lugar de definición (SOLID, mantenibilidad). En caso de error al crear la reserva, el toast muestra «Error al crear la reserva» y el mensaje del error o «Intenta de nuevo más tarde.»</p>
   </section>
 
   <!-- ========== CHAT FUNCIONAL Y MEJORAS ========== -->
@@ -440,7 +440,7 @@
     <h3>Frontend</h3>
     <ul>
       <li><code>client/src/lib/auth-utils.ts</code> — Helpers de visibilidad CTA y rol admin.</li>
-      <li><code>client/src/hooks/use-mango-data.ts</code> — <code>useCategories()</code>, <code>useCurrentProvider()</code> (GET /api/me/provider); <code>useServices({ providerCategoryId })</code>; tipo <code>ServiceWithProvider[]</code> en respuesta de servicios.</li>
+      <li><code>client/src/hooks/use-provider-data.ts</code> — <code>useCategories()</code>, <code>useCurrentProvider()</code> (GET /api/me/provider); <code>useServices({ providerCategoryId })</code>; tipo <code>ServiceWithProvider[]</code> en respuesta de servicios.</li>
       <li><code>client/src/pages/BecomePro.tsx</code> — Selector de categoría desde <code>useCategories()</code>; envía <code>categoryId</code> y <code>category</code> (slug) al crear proveedor.</li>
       <li><code>client/src/pages/CreateService.tsx</code> — Categoría en solo lectura (resuelta desde <code>provider.categoryId</code> o <code>provider.category</code> slug); <code>categoryId</code> del formulario fijado por perfil del proveedor.</li>
       <li><code>client/src/pages/Explore.tsx</code> — Una sola fila de filtros «Tipo de servicio:» con opción «Todos» y pills de categorías de proveedor (desde <code>useCategories()</code> filtradas por <code>DEFAULT_CATEGORIES</code>); clic en categoría o pill filtra servicios por <code>providerCategoryId</code>; botón «Volver a categorías» a <code>/categories</code>.</li>
@@ -450,7 +450,7 @@
       <li><code>client/src/pages/ServiceDetails.tsx</code> — Uso de <code>useBookings()</code> para detectar si el usuario tiene reserva del servicio; botón «Chat» (icono MessageSquare) visible cuando el usuario es el profesional del servicio o tiene una reserva del mismo; enlace a <code>/chat</code>. Acceso defensivo a <code>provider.user</code> (optional chaining).</li>
       <li><code>client/src/pages/Bookings.tsx</code> — Página «Mis Reservas» (<code>/bookings</code>): lista con <code>useBookings()</code>, <code>toDate()</code> para fechas; botón «Chat» por reserva; enlace a la ficha del servicio; mensaje de inicio de sesión si no está autenticado.</li>
       <li><code>client/src/pages/ProfessionalDashboard.tsx</code> — Pestaña «Reservas» con <code>ProviderBookingsTab</code>: listado real con <code>useBookingsByProvider()</code>, <code>toDate(booking.date)</code>, muestra notas y precio, botón «Chat» y enlace «Ver servicio» por reserva; actualización de estado con <code>useUpdateBookingStatus()</code> (desplegable).</li>
-      <li><code>client/src/hooks/use-mango-data.ts</code> — Hook <code>useBookingsByProvider(params?)</code> para GET /api/bookings/provider; constantes <code>BOOKING_SUCCESS_TOAST</code> y <code>BOOKING_ERROR_TOAST</code> para notificaciones al crear reserva (mensaje de éxito en español e indicación «Mi Cuenta → Mis Reservas»); en <code>useUpdateBookingStatus</code> se invalida también la query de reservas del profesional.</li>
+      <li><code>client/src/hooks/use-provider-data.ts</code> — Hook <code>useBookingsByProvider(params?)</code> para GET /api/bookings/provider; constantes <code>BOOKING_SUCCESS_TOAST</code> y <code>BOOKING_ERROR_TOAST</code> para notificaciones al crear reserva (mensaje de éxito en español e indicación «Mi Cuenta → Mis Reservas»); en <code>useUpdateBookingStatus</code> se invalida también la query de reservas del profesional.</li>
       <li><code>client/src/App.tsx</code> — Ruta <code>/bookings</code> con componente <code>Bookings</code>.</li>
     </ul>
   </section>

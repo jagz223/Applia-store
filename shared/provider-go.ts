@@ -1,14 +1,14 @@
 /**
- * Marcas Car Go habilitadas para un proveedor (`transport`, `delivery`).
+ * Marcas Transporte habilitadas para un proveedor (`transport`, `delivery`).
  *
  * Modelo:
  * - `providers.category/categoryId` = categoría principal (p. ej. transport, delivery, marketplace).
- * - `goBrands` = módulos Car Go activos (taxi y/o envíos). Marketplace no va en `goBrands`.
+ * - `goBrands` = módulos Transporte activos (taxi y/o envíos). Marketplace no va en `goBrands`.
  *
  * La UI arma la navegación y permisos usando estas funciones.
  */
-import { CAR_GO_BRAND_SLUGS, MARKETPLACE_CATEGORY_SLUG } from "./default-categories";
-import { sanitizeCarGoBrands, type CarGoBrandSlug } from "./go-brands";
+import { TRANSPORT_BRAND_SLUGS, MARKETPLACE_CATEGORY_SLUG } from "./default-categories";
+import { sanitizeTransportBrands, type TransportBrandSlug } from "./go-brands";
 export type ProviderGoRef = {
   category?: string | null;
   categoryId?: number | null;
@@ -23,7 +23,7 @@ function normalizeSlug(v: unknown): string {
 
 export function providerHasGoBrand(
   provider: ProviderGoRef | null | undefined,
-  slug: CarGoBrandSlug,
+  slug: TransportBrandSlug,
   categories?: readonly CategorySlugRow[]
 ): boolean {
   if (!provider) return false;
@@ -41,7 +41,7 @@ export function providerHasGoBrand(
     return false;
   }
 
-  const brands = sanitizeCarGoBrands(provider.goBrands).map(normalizeSlug);
+  const brands = sanitizeTransportBrands(provider.goBrands).map(normalizeSlug);
   if (brands.includes(target)) return true;
 
   const direct = normalizeSlug(provider.category);

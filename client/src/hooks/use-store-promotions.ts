@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InsertStorePromotion, UpdateStorePromotion } from "@shared/store-schema";
 import type { StoreAdminListPage } from "@/hooks/use-store-products";
 
@@ -90,6 +90,7 @@ export function useStorePromotionsPage(
       };
     },
     enabled: enabled && storeId > 0,
+    placeholderData: keepPreviousData,
   });
 }
 

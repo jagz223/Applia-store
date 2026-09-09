@@ -22,7 +22,7 @@ export const PROVIDER_CATEGORIES: ReadonlyArray<{
   label: string;
   professionLabel?: string;
 }> = [
-  { code: "technical", label: "Man Go", professionLabel: "Ingeniero Civil" },
+  { code: "technical", label: "Servicios técnicos", professionLabel: "Ingeniero Civil" },
   { code: "professional", label: "Servicios Profesionales" },
   { code: "delivery", label: "Delivery" },
   { code: "marketplace", label: "Marketplace" },

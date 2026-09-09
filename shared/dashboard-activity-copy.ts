@@ -6,7 +6,7 @@ export function resolveDashboardActivityViewer(hasProviderProfile: boolean): Das
 
 export function dashboardActivityPageSubtitle(viewer: DashboardActivityViewer): string {
   if (viewer === "client_only") {
-    return "Resumen de tus servicios completados como cliente y viajes Car Go finalizados.";
+    return "Resumen de tus servicios completados como cliente y viajes Transporte finalizados.";
   }
   if (viewer === "both") {
     return "Mensualidades, servicios que realizaste como profesional y resumen de los que solicitaste como cliente.";
@@ -16,19 +16,19 @@ export function dashboardActivityPageSubtitle(viewer: DashboardActivityViewer): 
 
 export function dashboardActivityCardDescription(viewer: DashboardActivityViewer): string {
   if (viewer === "client_only") {
-    return "Tus reservas y viajes completados. En Mis reservas y en Car Go verás el detalle completo.";
+    return "Tus reservas y viajes completados. En Mis reservas y en Transporte verás el detalle completo.";
   }
   if (viewer === "both") {
-    return "Como profesional: mensualidades y servicios realizados. Como cliente: reservas y Car Go completados (sin cancelados).";
+    return "Como profesional: mensualidades y servicios realizados. Como cliente: reservas y Transporte completados (sin cancelados).";
   }
-  return "Mensualidades de visibilidad y servicios que realizaste (Man Go y Pro Go sin monto aquí; Car Go con tarifa acordada).";
+  return "Mensualidades de visibilidad y servicios que realizaste (Servicios técnicos y Servicios profesionales sin monto aquí; Transporte con tarifa acordada).";
 }
 
 export function dashboardActivityTransactionsDescription(viewer: DashboardActivityViewer): string {
   if (viewer === "client_only") {
-    return "Pagos de viajes Car Go y cargos en Saldo Applia. Toca un registro para ver el resumen.";
+    return "Pagos de viajes de transporte y movimientos en Saldo Applia. Toca un registro para ver el resumen.";
   }
-  return "Mensualidades de visibilidad y pagos de viajes Car Go. Toca un registro para ver el detalle.";
+  return "Mensualidades de visibilidad y pagos de viajes Transporte. Toca un registro para ver el detalle.";
 }
 
 export function dashboardServiceHistoryDescription(viewer: DashboardActivityViewer): string {
@@ -53,5 +53,5 @@ export function dashboardProfessionalDetailHint(): string {
 }
 
 export function dashboardClientDetailHint(): string {
-  return "En Mis reservas y en la app Car Go encontrarás el historial completo de cada servicio.";
+  return "En Mis reservas y en la app Transporte encontrarás el historial completo de cada servicio.";
 }

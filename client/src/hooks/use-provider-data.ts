@@ -244,13 +244,13 @@ export function usePatchPlatformSubscriptionFees() {
   });
 }
 
-/** Tarifas Pack Go (envíos/delivery) */
+/** Tarifas envíos (envíos/delivery) */
 export function usePlatformPackFares(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["/api/platform/pack-fares"],
     queryFn: async () => {
       const res = await fetch("/api/platform/pack-fares");
-      if (!res.ok) throw new Error("No se pudo cargar las tarifas Pack Go");
+      if (!res.ok) throw new Error("No se pudo cargar las tarifas envíos");
       return res.json() as Promise<{ fares: { moto: any; auto: any; camioneta: any } }>;
     },
     staleTime: 30_000,
@@ -270,13 +270,13 @@ export function usePatchPlatformPackFares() {
         body: JSON.stringify({ fares }),
       });
       const data = (await res.json().catch(() => ({}))) as { message?: string };
-      if (!res.ok) throw new Error(data.message || "No se pudo guardar tarifas Pack Go");
+      if (!res.ok) throw new Error(data.message || "No se pudo guardar tarifas envíos");
       return data as { fares: any };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/platform/pack-fares"] });
       debouncedRefetch(queryClient, ["/api/platform/pack-fares"]);
-      toast({ title: "Guardado", description: "Tarifas Pack Go actualizadas." });
+      toast({ title: "Guardado", description: "Tarifas envíos actualizadas." });
     },
   });
 }
@@ -311,7 +311,7 @@ export function useProvider(id: number) {
   });
 }
 
-/** Vehículo principal del proveedor (Car Go / taxi / delivery). */
+/** Vehículo principal del proveedor (Transporte / taxi / delivery). */
 export type ProviderPrimaryVehicle = {
   vehicle_type: string;
   brand?: string | null;

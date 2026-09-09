@@ -1,5 +1,5 @@
 /**
- * Car Go (taxi): mapas interactivos solo con Leaflet + react-leaflet.
+ * Transporte (taxi): mapas interactivos solo con Leaflet + react-leaflet.
  * Importar este módulo una vez antes de montar componentes que usen `MapContainer`.
  */
 import "leaflet/dist/leaflet.css";

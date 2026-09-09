@@ -27,7 +27,7 @@ import { notificationService } from "./services/notification.service";
 import { getPlatformCommissionRate, setPlatformCommissionRate } from "./platform-commission-rate";
 import { getMobilityFares, setMobilityFares } from "./mobility-fares";
 import { getPackFares, setPackFares } from "./pack-fares";
-import { listCargoGoActiveRidesForAdmin } from "./mobility-rides";
+import { listTaxiActiveRidesForAdmin } from "./mobility-rides";
 import {
   countMobilityRideHistoryByOutcome,
   listMobilityRideHistoryForAdmin,
@@ -227,7 +227,7 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  /** Lectura pública de tarifas Car Go / envíos (UI). */
+  /** Lectura pública de tarifas Transporte / envíos (UI). */
   app.get("/api/platform/mobility-fares", async (_req, res) => {
     try {
       const fares = await getMobilityFares();
@@ -238,7 +238,7 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  /** Lectura pública de tarifas Pack Go (UI). */
+  /** Lectura pública de tarifas envíos (UI). */
   app.get("/api/platform/pack-fares", async (_req, res) => {
     try {
       const fares = await getPackFares();
@@ -498,7 +498,7 @@ export function registerAdminRoutes(app: Express): void {
         transacction_date: string | null;
         transacction_verified: "pending" | "verified" | "rejected";
         transacction_code?: string | null;
-        /** Slug de categoría del proveedor (p. ej. `transport` = Car Go). */
+        /** Slug de categoría del proveedor (p. ej. `transport` = Transporte). */
         providerCategorySlug?: string | null;
         /** ISO fin de suscripción vigente (si existe). */
         visibilitySubscriptionEndsAt?: string | null;
@@ -1295,7 +1295,7 @@ export function registerAdminRoutes(app: Express): void {
             console.error("Error actualizando reporte financiero:", err);
           }
         } else {
-          // Rechazo: marcar cargo pendiente como rechazado para poder crear uno nuevo al reenviar comprobante
+          // Rechazo: marcar cobro pendiente como rechazado para poder crear uno nuevo al reenviar comprobante
           try {
             const reports = await appliaStorage.getFinancialReports(userId);
             const pendingFee = reports.find(r => r.type === "verification_fee" && r.status === "pending");
@@ -1485,7 +1485,7 @@ export function registerAdminRoutes(app: Express): void {
   /**
    * GET /api/admin/services/active
    * Staff (admin o Soporte TI): asociados con servicios activos, agrupados por proveedor (una fila por persona).
-   * Filtro de marca: Man Go, Pro Go o Go unificado (Car · Delivery · Shop), incluye vehículo y goBrands.
+   * Filtro de marca: Servicios técnicos, Servicios profesionales o Go unificado (Car · Delivery · Shop), incluye vehículo y goBrands.
    */
   app.get("/api/admin/services/active", authenticateJWT, requireStaffFromDb, async (req: any, res) => {
     try {
@@ -1637,7 +1637,7 @@ export function registerAdminRoutes(app: Express): void {
 
   /**
    * GET /api/admin/service-brands
-   * Admin-only: lista marcas (Fix Go / Man Go / Pro Go / etc.) con conteos de servicios activos/inactivos.
+   * Admin-only: lista marcas (Servicios técnicos / Servicios técnicos / Servicios profesionales / etc.) con conteos de servicios activos/inactivos.
    * Nota: "marca" aquí = categoría (categories) cuyo slug está en DEFAULT_CATEGORIES.
    */
   app.get("/api/admin/service-brands", authenticateJWT, requireFullAdmin, async (_req, res) => {
@@ -2349,10 +2349,10 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   /**
-   * GET /api/admin/cargo-go/rides
-   * Servicios Car Go en curso / completados / cancelados (estado en memoria del proceso).
+   * GET /api/admin/taxi/rides
+   * Servicios Transporte en curso / completados / cancelados (estado en memoria del proceso).
    */
-  app.get("/api/admin/cargo-go/rides", authenticateJWT, requireStaffFromDb, async (req, res) => {
+  app.get("/api/admin/taxi/rides", authenticateJWT, requireStaffFromDb, async (req, res) => {
     try {
       const bucketRaw = String(req.query.bucket ?? "active").trim().toLowerCase();
       const bucket =
@@ -2360,9 +2360,9 @@ export function registerAdminRoutes(app: Express): void {
       const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
       const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
 
-      let list: Awaited<ReturnType<typeof listCargoGoActiveRidesForAdmin>>;
+      let list: Awaited<ReturnType<typeof listTaxiActiveRidesForAdmin>>;
       if (bucket === "active") {
-        list = await listCargoGoActiveRidesForAdmin();
+        list = await listTaxiActiveRidesForAdmin();
       } else {
         const history = await listMobilityRideHistoryForAdmin(bucket);
         list = history.map((h) => ({
@@ -2389,7 +2389,7 @@ export function registerAdminRoutes(app: Express): void {
       const rides = list.slice(start, start + limit);
 
       const historyCounts = await countMobilityRideHistoryByOutcome();
-      const activeCount = (await listCargoGoActiveRidesForAdmin()).length;
+      const activeCount = (await listTaxiActiveRidesForAdmin()).length;
 
       return res.status(200).json({
         rides,
@@ -2405,8 +2405,8 @@ export function registerAdminRoutes(app: Express): void {
         },
       });
     } catch (error) {
-      console.error("Error listing admin cargo-go rides:", error);
-      return res.status(500).json({ message: "Error al listar servicios Car Go" });
+      console.error("Error listing admin taxi rides:", error);
+      return res.status(500).json({ message: "Error al listar servicios Transporte" });
     }
   });
 

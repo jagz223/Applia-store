@@ -6,7 +6,6 @@ import {
   promotionProductsFromItems,
   type StorePromotionSummary,
 } from "@/hooks/use-store-promotions";
-import { useStoreProducts } from "@/hooks/use-store-products";
 import {
   StorePromotionProductPicker,
   type SelectedPromotionProduct,
@@ -51,7 +50,6 @@ export function StorePromotionFormDialog({
 }) {
   const { toast } = useToast();
   const isEdit = promotion != null;
-  const { data: products = [] } = useStoreProducts(storeId, open);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -72,6 +70,7 @@ export function StorePromotionFormDialog({
       setPrice(String(promotion.price));
       setImagePreviewUrl(promotion.imageUrl ?? null);
       setPendingImageFile(null);
+      setSelectedProducts(promotionProductsFromItems([], promotion.items));
     } else {
       setName("");
       setDescription("");
@@ -81,11 +80,6 @@ export function StorePromotionFormDialog({
       setPendingImageFile(null);
     }
   }, [open, promotion]);
-
-  useEffect(() => {
-    if (!open || !promotion) return;
-    setSelectedProducts(promotionProductsFromItems(products, promotion.items));
-  }, [open, promotion, products]);
 
   function handleOpenChange(next: boolean) {
     if (!next) {

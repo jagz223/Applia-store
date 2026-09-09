@@ -64,7 +64,7 @@ export function invoiceNotesFromReport(report: Record<string, unknown>): string[
   const kind = report.paymentKind as string | undefined;
   const freeMonths = report.freeMonthsGranted != null ? Number(report.freeMonthsGranted) : null;
   if (code && freeMonths != null && freeMonths > 0) {
-    lines.push(`Código promocional ${code}: ${freeMonths} mes${freeMonths === 1 ? "" : "es"} activados sin cargo.`);
+    lines.push(`Código promocional ${code}: ${freeMonths} mes${freeMonths === 1 ? "" : "es"} activados sin costo.`);
   } else if (code && report.promotionalDiscountPercent != null) {
     const pct = Number(report.promotionalDiscountPercent);
     const orig = report.subscriptionOriginalTotalUsd != null ? Number(report.subscriptionOriginalTotalUsd) : null;

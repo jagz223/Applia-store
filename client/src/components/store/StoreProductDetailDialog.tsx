@@ -1,6 +1,7 @@
 import type { StoreProductSummary } from "@/hooks/use-store-products";
 import { categoriesFromIds, useStoreCategories } from "@/hooks/use-store-categories";
 import { currencyLabelForId } from "@shared/store-currency-schema";
+import { priceWithIva } from "@shared/store-price-iva";
 import {
   Dialog,
   DialogContent,
@@ -96,6 +97,17 @@ export function StoreProductDetailDialog({
               </dd>
             </div>
           )}
+          <div>
+            <dt className="font-medium text-muted-foreground">Precio + IVA (16%)</dt>
+            <dd className="text-base font-semibold">
+              {formatPrice(
+                typeof product.priceWithIva === "number"
+                  ? product.priceWithIva
+                  : priceWithIva(product.price),
+                product.displayCurrencyLabel,
+              )}
+            </dd>
+          </div>
           {product.description ? (
             <div>
               <dt className="font-medium text-muted-foreground">Descripción</dt>

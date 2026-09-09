@@ -64,7 +64,7 @@ export function StoreAdminDeliveryChat({ packRide, orderId, chatLocked = false }
   if (!packRide) {
     return (
       <p className="text-sm text-muted-foreground py-6 text-center">
-        Aún no hay un envío Pack Go vinculado a esta orden.
+        Aún no hay un envío vinculado a esta orden.
       </p>
     );
   }
@@ -125,7 +125,7 @@ export function StoreAdminDeliveryChat({ packRide, orderId, chatLocked = false }
         hasMoreMessages={messagesQuery.hasNextPage}
         onLoadMoreMessages={() => void messagesQuery.fetchNextPage()}
         isLoadingMoreMessages={messagesQuery.isFetchingNextPage}
-        reminderText={`Orden #${orderId} · Envío Pack Go`}
+        reminderText={`Orden #${orderId} · Envío`}
         chatLocked={locked}
       />
     </div>

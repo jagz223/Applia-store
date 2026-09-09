@@ -51,7 +51,7 @@ export async function generateInvoice(data: InvoiceData): Promise<Buffer> {
       doc
         .fontSize(24)
         .font("Helvetica-Bold")
-        .fillColor("#f59e0b") // Mango orange
+        .fillColor("#f59e0b") // naranja de marca
         .text("APPLIA", 50, 50)
         .fillColor("#000000")
         .fontSize(10)

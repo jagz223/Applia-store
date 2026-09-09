@@ -1,5 +1,5 @@
 /**
- * Car Go: emparejamiento pasajero ↔ conductor en tiempo real (memoria + Socket.IO).
+ * Transporte: emparejamiento pasajero ↔ conductor en tiempo real (memoria + Socket.IO).
  * Un solo proceso; no persiste en DB (MVP).
  */
 import type { Express } from "express";
@@ -59,7 +59,7 @@ import { toCentralActiveServiceForPanel } from "@shared/central-active-service-f
 import { emitCentralFleetUpdate, CENTRAL_FLEET_IN_SERVICE_RECEIVING } from "./central-fleet-notify";
 import { persistMobilityRideToHistory } from "./mobility-ride-archive-helper";
 import {
-  clearCargoDriverPresence,
+  clearTaxiDriverPresence,
   getGoDriverPresenceRow,
   getMobilityOnlineDriversSnapshot,
   getTaxiPresenceRow,
@@ -68,7 +68,7 @@ import {
   markGoDriverPresenceDisconnected,
   isReceivingTaxiForMatching,
   type TaxiDriverPresenceView,
-  upsertCargoDriverPresence,
+  upsertTaxiDriverPresence,
   updateGoDriverPresenceLocation,
 } from "./go-driver-presence-store";
 import {
@@ -206,7 +206,7 @@ registerClassicOfferActiveScanner(() => {
       driverId: ride.currentOfferDriverId,
       rideId: ride.id,
       expiresAt: ride.offerExpiresAt,
-      module: "cargo",
+      module: "taxi",
     });
   }
   return rows;
@@ -266,13 +266,13 @@ const rideTimers = new Map<
   { offerTimeoutId: NodeJS.Timeout | null; expireTimeoutId: NodeJS.Timeout | null }
 >();
 
-function commitCargoRide(ride: RideRecord): void {
+function commitTaxiRide(ride: RideRecord): void {
   rides.set(ride.id, ride);
   const epoch = nextActiveMobilityRidePersistEpoch(ride.id);
-  void persistActiveMobilityRide("cargo", ride as unknown as ActiveMobilityRidePayload, epoch);
+  void persistActiveMobilityRide("taxi", ride as unknown as ActiveMobilityRidePayload, epoch);
 }
 
-function dropCargoActiveRide(rideId: string): void {
+function dropTaxiActiveRide(rideId: string): void {
   nextActiveMobilityRidePersistEpoch(rideId);
   void deleteActiveMobilityRide(rideId);
 }
@@ -285,14 +285,14 @@ function isTerminalRideStatus(status: RideStatus): boolean {
   return status === "cancelled" || status === "expired";
 }
 
-async function ensureCargoRideInMemory(rideId: string): Promise<RideRecord | undefined> {
+async function ensureTaxiRideInMemory(rideId: string): Promise<RideRecord | undefined> {
   const cached = rides.get(rideId);
   if (cached) {
     if (isTerminalRideStatus(cached.status)) return undefined;
     return cached;
   }
   const loaded = await loadActiveMobilityRideById(rideId);
-  if (!loaded || loaded.module !== "cargo") return undefined;
+  if (!loaded || loaded.module !== "taxi") return undefined;
   const ride = loaded.ride as RideRecord;
   if (isTerminalRideStatus(ride.status)) {
     void deleteActiveMobilityRide(rideId);
@@ -323,7 +323,7 @@ export async function refreshMobilityPresenceDispatchCompany(driverUserId: strin
     (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
   );
   if (dispatchCompanyId === row.dispatchCompanyId) return;
-  upsertCargoDriverPresence({
+  upsertTaxiDriverPresence({
     userId: driverUserId,
     receiving: row.receivingTaxi,
     vehicleType: row.vehicleType,
@@ -424,29 +424,29 @@ function clearStaleActiveOffer(ride: RideRecord): void {
   }
 }
 
-function isClassicSearchingCargoRide(ride: RideRecord): boolean {
+function isClassicSearchingTaxiRide(ride: RideRecord): boolean {
   if (ride.status !== "searching" || ride.driverUserId != null) return false;
   if (ride.isNegotiated) return false;
   if (typeof ride.marketVisibleUntil === "number") return false;
   return true;
 }
 
-function collectStalledClassicSearchingCargoRides(): StalledClassicSearchingRide[] {
+function collectStalledClassicSearchingTaxiRides(): StalledClassicSearchingRide[] {
   const out: StalledClassicSearchingRide[] = [];
   for (const ride of rides.values()) {
-    if (!isClassicSearchingCargoRide(ride)) continue;
+    if (!isClassicSearchingTaxiRide(ride)) continue;
     clearStaleActiveOffer(ride);
     if (!ride.currentOfferDriverId) {
-      out.push({ rideId: ride.id, module: "cargo", createdAt: ride.createdAt });
+      out.push({ rideId: ride.id, module: "taxi", createdAt: ride.createdAt });
     }
   }
   return out;
 }
 
-async function reconcileClassicSearchingCargoRide(io: SocketIOServer, rideId: string): Promise<void> {
+async function reconcileClassicSearchingTaxiRide(io: SocketIOServer, rideId: string): Promise<void> {
   let ride = rides.get(rideId);
-  if (!ride) ride = await ensureCargoRideInMemory(rideId);
-  if (!ride || !isClassicSearchingCargoRide(ride)) return;
+  if (!ride) ride = await ensureTaxiRideInMemory(rideId);
+  if (!ride || !isClassicSearchingTaxiRide(ride)) return;
   clearStaleActiveOffer(ride);
   if (ride.currentOfferDriverId) return;
   const rider = await buildRiderPublic(ride.riderUserId);
@@ -505,15 +505,15 @@ function releaseClassicOfferFromDriver(rideId: string, ride: RideRecord, driverU
     clearTimeout(timers.offerTimeoutId);
     timers.offerTimeoutId = null;
   }
-  commitCargoRide(ride);
+  commitTaxiRide(ride);
 }
 
 function emitRideFailed(io: SocketIOServer, ride: RideRecord, reason: "timeout" | "no_driver") {
   ride.status = "expired";
   clearRideTimers(ride.id);
-  void persistMobilityRideToHistory(ride, "cargo", "expired", { failReason: reason });
-  dropCargoActiveRide(ride.id);
-  io.to(`user:${ride.riderUserId}`).emit("cargo:ride:failed", { rideId: ride.id, reason });
+  void persistMobilityRideToHistory(ride, "taxi", "expired", { failReason: reason });
+  dropTaxiActiveRide(ride.id);
+  io.to(`user:${ride.riderUserId}`).emit("taxi:ride:failed", { rideId: ride.id, reason });
 }
 
 function emitRideCancelled(
@@ -531,24 +531,24 @@ function emitRideCancelled(
     if (ride.currentOfferDriverId) notify.add(ride.currentOfferDriverId);
   }
   for (const uid of notify) {
-    io.to(`user:${uid}`).emit("cargo:ride:cancelled", payload);
+    io.to(`user:${uid}`).emit("taxi:ride:cancelled", payload);
   }
 
   // Push al pasajero si no está viendo Go (Taxi).
   try {
     const pth = getUserActivePath(String(ride.riderUserId));
-    if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
+    if (!pth || !pth.startsWith("/go/taxi")) {
       void notificationService.sendPushToUser(ride.riderUserId, {
         title: "Servicio de taxi",
         body: cancelledBy === "driver" ? "El conductor canceló el viaje." : "El viaje fue cancelado.",
-        data: { url: "/go/taxi", type: "cargo_ride_cancelled", rideId: ride.id },
+        data: { url: "/go/taxi", type: "taxi_ride_cancelled", rideId: ride.id },
       });
     }
   } catch {}
 }
 
-function archiveCargoRideCancelled(ride: RideRecord, cancelledBy: "rider" | "driver") {
-  void persistMobilityRideToHistory(ride, "cargo", "cancelled", { cancelledBy });
+function archiveTaxiRideCancelled(ride: RideRecord, cancelledBy: "rider" | "driver") {
+  void persistMobilityRideToHistory(ride, "taxi", "cancelled", { cancelledBy });
 }
 
 async function offerNextDriver(
@@ -586,7 +586,7 @@ async function offerNextDriver(
     ride.currentOfferDriverId = driverId;
     ride.offerExpiresAt = Date.now() + offerTtlMs;
 
-    io.to(`user:${driverId}`).emit("cargo:ride:offer", {
+    io.to(`user:${driverId}`).emit("taxi:ride:offer", {
       rideId: ride.id,
       rider,
       start: ride.start,
@@ -604,7 +604,7 @@ async function offerNextDriver(
     });
 
     // Guardar oferta pendiente para “recovery” si el driver no estaba en Go (Taxi driver).
-    setClassicOfferPending(driverId, ride.id, ride.offerExpiresAt!, "cargo");
+    setClassicOfferPending(driverId, ride.id, ride.offerExpiresAt!, "taxi");
 
     // Push al driver si no tiene la app en primer plano en la vista conductor.
     try {
@@ -618,7 +618,7 @@ async function offerNextDriver(
           urgent: true,
           data: {
             url: "/go/driver",
-            type: "cargo_ride_offer",
+            type: "taxi_ride_offer",
             rideId: ride.id,
             expiresAt: String(ride.offerExpiresAt ?? ""),
           },
@@ -633,20 +633,20 @@ async function offerNextDriver(
       if (live.currentOfferDriverId !== fixedDriverId) return;
       live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
       live.declinedAtByDriverId[fixedDriverId] = Date.now();
-      io.to(`user:${fixedDriverId}`).emit("cargo:ride:offer_expired", { rideId: live.id });
+      io.to(`user:${fixedDriverId}`).emit("taxi:ride:offer_expired", { rideId: live.id });
       clearClassicOfferPending(fixedDriverId);
       live.currentOfferDriverId = null;
       live.offerExpiresAt = null;
-      commitCargoRide(live);
+      commitTaxiRide(live);
       void offerNextDriver(io, live, rider);
       scheduleReconcileSearchingClassicRides(io);
     }, offerTtlMs + 150);
-    commitCargoRide(ride);
+    commitTaxiRide(ride);
     return;
   }
 
   // No finalizamos la búsqueda solo porque no hay conductores en este instante.
-  commitCargoRide(ride);
+  commitTaxiRide(ride);
   scheduleReconcileSearchingClassicRides(io);
 }
 
@@ -748,13 +748,13 @@ export async function mobilityPanicResolveContext(rideId: string) {
 }
 
 function emitNegotiationOffersUpdated(io: SocketIOServer, ride: RideRecord) {
-  io.to(`user:${ride.riderUserId}`).emit("cargo:ride:negotiation:offers_updated", {
+  io.to(`user:${ride.riderUserId}`).emit("taxi:ride:negotiation:offers_updated", {
     rideId: ride.id,
     offers: ride.offers ?? [],
     /** Oferta publicada por el pasajero (referencia en UI de regateo). */
     riderOfferUsd: ride.estimatedUsd,
   });
-  commitCargoRide(ride);
+  commitTaxiRide(ride);
 }
 
 /** Quita al conductor de las listas de regateo de otros viajes (mismo módulo). */
@@ -770,7 +770,7 @@ function withdrawDriverMobilityNegotiationOffersElsewhere(
     if (!list.some((o) => o.driverUserId === driverUserId)) continue;
     ride.offers = list.filter((o) => o.driverUserId !== driverUserId);
     emitNegotiationOffersUpdated(io, ride);
-    io.to(`user:${driverUserId}`).emit("cargo:ride:negotiation:offer_removed", {
+    io.to(`user:${driverUserId}`).emit("taxi:ride:negotiation:offer_removed", {
       rideId: ride.id,
       reason: NEGOTIATION_OFFER_REMOVED_REASON_WITHDRAWN,
     });
@@ -804,8 +804,8 @@ async function broadcastNegotiationInvites(
     if (!driverIdInOfferedList(ride.offeredDriverIds, driverId)) {
       ride.offeredDriverIds.push(driverId);
     }
-    commitCargoRide(ride);
-    io.to(`user:${driverId}`).emit("cargo:ride:offer", {
+    commitTaxiRide(ride);
+    io.to(`user:${driverId}`).emit("taxi:ride:offer", {
       rideId: ride.id,
       rider,
       start: ride.start,
@@ -822,7 +822,7 @@ async function broadcastNegotiationInvites(
       expiresAt,
       isNegotiated: true,
     });
-    setClassicOfferPending(driverId, ride.id, expiresAt, "cargo");
+    setClassicOfferPending(driverId, ride.id, expiresAt, "taxi");
     try {
       if (shouldSendDriverClassicOfferPush(String(driverId)) && shouldSendClassicOfferPushForRide(driverId, ride.id)) {
         void notificationService.sendPushToUser(driverId, {
@@ -831,7 +831,7 @@ async function broadcastNegotiationInvites(
           urgent: true,
           data: {
             url: "/go/driver",
-            type: "cargo_ride_offer",
+            type: "taxi_ride_offer",
             rideId: ride.id,
             expiresAt: String(expiresAt),
           },
@@ -843,12 +843,12 @@ async function broadcastNegotiationInvites(
   emitNegotiationOffersUpdated(io, ride);
 }
 
-/** Vista admin: servicios Car Go en memoria (activos, completados, cancelados/expirados). */
-export type AdminCargoGoRideBucket = "active" | "completed" | "cancelled";
+/** Vista admin: servicios Transporte en memoria (activos, completados, cancelados/expirados). */
+export type AdminTaxiRideBucket = "active" | "completed" | "cancelled";
 
-export type AdminCargoGoRideListItem = {
+export type AdminTaxiRideListItem = {
   id: string;
-  bucket: AdminCargoGoRideBucket;
+  bucket: AdminTaxiRideBucket;
   status: RideStatus | "completed";
   statusLabel: string;
   riderUserId: string;
@@ -862,21 +862,21 @@ export type AdminCargoGoRideListItem = {
   createdAt: string;
 };
 
-const CARGO_VEHICLE_LABELS: Record<TaxiVehicleKind, string> = {
+const TAXI_VEHICLE_LABELS: Record<TaxiVehicleKind, string> = {
   moto: "Moto",
   auto: "Auto",
   pet_car: "Pet Car",
   camioneta: "Camioneta",
 };
 
-function cargoGoAdminBucket(r: RideRecord): AdminCargoGoRideBucket {
+function taxiAdminBucket(r: RideRecord): AdminTaxiRideBucket {
   if (r.status === "cancelled") return "cancelled";
   if (r.status === "expired" && r.financialsSettled) return "completed";
   if (r.status === "expired") return "cancelled";
   return "active";
 }
 
-function cargoGoAdminStatusLabel(r: RideRecord): string {
+function taxiAdminStatusLabel(r: RideRecord): string {
   if (r.status === "expired" && r.financialsSettled) return "Completado";
   if (r.status === "expired") return "Expirado (sin viaje)";
   if (r.status === "searching") return "Buscando conductor";
@@ -886,16 +886,16 @@ function cargoGoAdminStatusLabel(r: RideRecord): string {
   return r.status;
 }
 
-function cargoGoAdminDisplayStatus(r: RideRecord): RideStatus | "completed" {
+function taxiAdminDisplayStatus(r: RideRecord): RideStatus | "completed" {
   if (r.status === "expired" && r.financialsSettled) return "completed";
   return r.status;
 }
 
-/** Viajes Car Go activos en memoria (en curso). El historial va en Firestore. */
-export async function listCargoGoActiveRidesForAdmin(): Promise<AdminCargoGoRideListItem[]> {
-  const rows: AdminCargoGoRideListItem[] = [];
+/** Viajes Transporte activos en memoria (en curso). El historial va en Firestore. */
+export async function listTaxiActiveRidesForAdmin(): Promise<AdminTaxiRideListItem[]> {
+  const rows: AdminTaxiRideListItem[] = [];
   for (const r of rides.values()) {
-    if (cargoGoAdminBucket(r) !== "active") continue;
+    if (taxiAdminBucket(r) !== "active") continue;
     const rider = await buildRiderPublic(r.riderUserId);
     const driver = r.driverUserId ? await buildDriverPublic(r.driverUserId) : null;
     const riderName = [rider.name, rider.lastName].filter(Boolean).join(" ").trim() || rider.name;
@@ -905,14 +905,14 @@ export async function listCargoGoActiveRidesForAdmin(): Promise<AdminCargoGoRide
     rows.push({
       id: r.id,
       bucket: "active",
-      status: cargoGoAdminDisplayStatus(r),
-      statusLabel: cargoGoAdminStatusLabel(r),
+      status: taxiAdminDisplayStatus(r),
+      statusLabel: taxiAdminStatusLabel(r),
       riderUserId: r.riderUserId,
       riderName,
       driverUserId: r.driverUserId,
       driverName,
       vehicleType: r.vehicleType,
-      vehicleLabel: CARGO_VEHICLE_LABELS[r.vehicleType] ?? r.vehicleType,
+      vehicleLabel: TAXI_VEHICLE_LABELS[r.vehicleType] ?? r.vehicleType,
       startLabel: r.start.label,
       endLabel: r.destinationPending || !r.end ? "Sin destino" : r.end.label,
       createdAt: new Date(r.createdAt).toISOString(),
@@ -923,10 +923,10 @@ export async function listCargoGoActiveRidesForAdmin(): Promise<AdminCargoGoRide
 }
 
 /** Restaura viajes clásicos en búsqueda desde Firestore (multi-instancia / cold start). */
-async function hydrateSearchingClassicCargoRides(): Promise<void> {
+async function hydrateSearchingClassicTaxiRides(): Promise<void> {
   const all = await loadAllActiveMobilityRides();
   for (const row of all) {
-    if (row.module !== "cargo") continue;
+    if (row.module !== "taxi") continue;
     const ride = row.ride as RideRecord;
     if (isTerminalRideStatus(ride.status)) continue;
     if (ride.status !== "searching" || ride.isNegotiated) continue;
@@ -934,7 +934,7 @@ async function hydrateSearchingClassicCargoRides(): Promise<void> {
   }
 }
 
-async function syncClassicPollCargoPresence(
+async function syncClassicPollTaxiPresence(
   driverUserId: string,
   role: string | undefined,
   body: ClassicOfferPollBody,
@@ -950,7 +950,7 @@ async function syncClassicPollCargoPresence(
   if (!subscriptionOk) return null;
 
   const provider = await catalogService.getProviderByUserId(driverUserId);
-  return upsertCargoDriverPresence({
+  return upsertTaxiDriverPresence({
     userId: driverUserId,
     receiving: true,
     vehicleType,
@@ -964,14 +964,14 @@ async function syncClassicPollCargoPresence(
   });
 }
 
-async function buildClassicCargoOfferResponse(driverUserId: string): Promise<{ offer: Record<string, unknown> | null }> {
+async function buildClassicTaxiOfferResponse(driverUserId: string): Promise<{ offer: Record<string, unknown> | null }> {
   let p: ClassicOfferPending | null = getClassicOfferPending(driverUserId);
   let ride: RideRecord | undefined;
   if (p) {
-    ride = await ensureCargoRideInMemory(p.rideId);
+    ride = await ensureTaxiRideInMemory(p.rideId);
   }
   if (!ride) {
-    const fromStore = await findActiveClassicOfferForDriver("cargo", driverUserId);
+    const fromStore = await findActiveClassicOfferForDriver("taxi", driverUserId);
     if (fromStore) {
       const existing = rides.get(fromStore.id);
       if (existing && isTerminalRideStatus(existing.status)) {
@@ -980,7 +980,7 @@ async function buildClassicCargoOfferResponse(driverUserId: string): Promise<{ o
         ride = fromStore as RideRecord;
         rides.set(ride.id, ride);
         if (typeof ride.offerExpiresAt === "number") {
-          setClassicOfferPending(driverUserId, ride.id, ride.offerExpiresAt, "cargo");
+          setClassicOfferPending(driverUserId, ride.id, ride.offerExpiresAt, "taxi");
           p = getClassicOfferPending(driverUserId);
         }
       }
@@ -1035,13 +1035,13 @@ async function buildClassicCargoOfferResponse(driverUserId: string): Promise<{ o
 }
 
 /** Estilo tablero regateo: HTTP poll registra presencia, re-asigna al más cercano y devuelve oferta. */
-async function runClassicCargoOfferPoll(
+async function runClassicTaxiOfferPoll(
   driverUserId: string,
   role: string | undefined,
   body: ClassicOfferPollBody,
 ): Promise<{ offer: Record<string, unknown> | null }> {
-  await hydrateSearchingClassicCargoRides();
-  const pres = await syncClassicPollCargoPresence(driverUserId, role, body);
+  await hydrateSearchingClassicTaxiRides();
+  const pres = await syncClassicPollTaxiPresence(driverUserId, role, body);
   const io = getIO();
   if (pres && io) {
     for (const ride of rides.values()) {
@@ -1051,7 +1051,7 @@ async function runClassicCargoOfferPoll(
     await reconcilePendingRidesForDriver(io, pres);
     scheduleReconcileSearchingClassicRides(io);
   }
-  return buildClassicCargoOfferResponse(driverUserId);
+  return buildClassicTaxiOfferResponse(driverUserId);
 }
 
 export function registerMobilityRideRoutes(app: Express) {
@@ -1078,7 +1078,7 @@ export function registerMobilityRideRoutes(app: Express) {
     try {
       const driverUserId = req.user?.id as string;
       if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
-      const payload = await buildClassicCargoOfferResponse(driverUserId);
+      const payload = await buildClassicTaxiOfferResponse(driverUserId);
       return res.json(payload);
     } catch (e: any) {
       return res.status(500).json({ message: e?.message ?? "Error" });
@@ -1095,7 +1095,7 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!driverUserId) return res.status(401).json({ message: "Unauthorized" });
       const parsed = classicOfferPollBodySchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ message: "Payload inválido", offer: null });
-      const payload = await runClassicCargoOfferPoll(driverUserId, req.user?.role, parsed.data);
+      const payload = await runClassicTaxiOfferPoll(driverUserId, req.user?.role, parsed.data);
       return res.json(payload);
     } catch (e: any) {
       console.error("[mobility] classic-offer-poll", e);
@@ -1104,7 +1104,7 @@ export function registerMobilityRideRoutes(app: Express) {
   });
 
   /**
-   * Tablero de regateo (Car Go): listado dedicado para conductores verificados con vehículo compatible.
+   * Tablero de regateo (Transporte): listado dedicado para conductores verificados con vehículo compatible.
    * No confundir con GET /rides/market (flujo legacy distinto / marketplace).
    */
   app.get("/api/mobility/rides/negotiation-board", authenticateJWT, async (req: any, res) => {
@@ -1117,7 +1117,7 @@ export function registerMobilityRideRoutes(app: Express) {
       }
       const segmentRaw = typeof req.query?.vehicleSegment === "string" ? String(req.query.vehicleSegment).trim() : "";
       if (segmentRaw) {
-        const allowed = await driverCanAccessNegotiationBoardSegment(driverUserId, segmentRaw, "cargo");
+        const allowed = await driverCanAccessNegotiationBoardSegment(driverUserId, segmentRaw, "taxi");
         if (!allowed) return res.status(403).json({ message: "No puedes ver esta vista de regateo" });
       }
       const now = Date.now();
@@ -1354,13 +1354,13 @@ export function registerMobilityRideRoutes(app: Express) {
         declinedAtByDriverId: {},
       };
       rides.set(id, ride);
-      commitCargoRide(ride);
+      commitTaxiRide(ride);
 
       const rider = await buildRiderPublic(riderUserId);
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
 
-      io.to(`user:${riderUserId}`).emit("cargo:ride:searching", {
+      io.to(`user:${riderUserId}`).emit("taxi:ride:searching", {
         rideId: id,
         candidateCount: candidates.length,
         isNegotiated: negotiated,
@@ -1471,7 +1471,7 @@ export function registerMobilityRideRoutes(app: Express) {
       const io = getIO();
       if (io) {
         emitNegotiationOffersUpdated(io, ride);
-        io.to(`user:${driverId}`).emit("cargo:ride:negotiation:offer_removed", {
+        io.to(`user:${driverId}`).emit("taxi:ride:negotiation:offer_removed", {
           rideId,
           reason: NEGOTIATION_OFFER_REMOVED_REASON_RIDER_REJECTED,
         });
@@ -1508,7 +1508,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.declinedAtByDriverId[driverUserId] = Date.now();
       ride.offeredDriverIds = ride.offeredDriverIds.filter((id) => String(id) !== String(driverUserId));
       clearClassicOfferPending(driverUserId);
-      commitCargoRide(ride);
+      commitTaxiRide(ride);
       res.json({ ok: true });
     } catch (e: any) {
       console.error("[mobility] negotiation decline-invite", e);
@@ -1549,7 +1549,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.paymentConfirmed = false;
       await applyDriverFareToRide(ride, driverId, "taxi");
       clearRideTimers(ride.id);
-      commitCargoRide(ride);
+      commitTaxiRide(ride);
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
@@ -1581,7 +1581,7 @@ export function registerMobilityRideRoutes(app: Express) {
       }
 
       const rider = await buildRiderPublic(ride.riderUserId);
-      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:matched", {
+      io.to(`user:${ride.riderUserId}`).emit("taxi:ride:matched", {
         rideId,
         driver,
         driverLat,
@@ -1590,22 +1590,22 @@ export function registerMobilityRideRoutes(app: Express) {
         estimatedUsd: ride.estimatedUsd,
         isNegotiated: !!ride.isNegotiated,
       });
-      io.to(`user:${driverId}`).emit("cargo:ride:accepted", { rideId, rider, conversationId });
+      io.to(`user:${driverId}`).emit("taxi:ride:accepted", { rideId, rider, conversationId });
 
       for (const uid of notifyTaken) {
         if (uid === driverId) continue;
-        io.to(`user:${uid}`).emit("cargo:ride:taken", { rideId });
+        io.to(`user:${uid}`).emit("taxi:ride:taken", { rideId });
         clearClassicOfferPending(uid);
       }
       clearClassicOfferPending(driverId);
 
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
+        if (!pth || !pth.startsWith("/go/taxi")) {
           void notificationService.sendPushToUser(ride.riderUserId, {
             title: "Servicio de taxi",
             body: "Tu viaje fue aceptado. Abre para ver a tu conductor.",
-            data: { url: "/go/taxi", type: "cargo_ride_matched", rideId },
+            data: { url: "/go/taxi", type: "taxi_ride_matched", rideId },
           });
         }
       } catch {}
@@ -1628,7 +1628,7 @@ export function registerMobilityRideRoutes(app: Express) {
       const rideId = req.params.rideId as string;
       const accept = !!req.body?.accept;
       let ride = rides.get(rideId);
-      if (!ride) ride = await ensureCargoRideInMemory(rideId);
+      if (!ride) ride = await ensureTaxiRideInMemory(rideId);
       if (!ride) {
         if (!accept) {
           clearClassicOfferPending(driverUserId);
@@ -1689,7 +1689,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.offerExpiresAt = null;
       clearRideTimers(ride.id);
       clearClassicOfferPending(driverUserId);
-      commitCargoRide(ride);
+      commitTaxiRide(ride);
 
       withdrawDriverNegotiationOffersEverywhere(io, driverUserId, rideId);
 
@@ -1721,7 +1721,7 @@ export function registerMobilityRideRoutes(app: Express) {
 
           const rider = await buildRiderPublic(ride.riderUserId);
 
-          io.to(`user:${ride.riderUserId}`).emit("cargo:ride:matched", {
+          io.to(`user:${ride.riderUserId}`).emit("taxi:ride:matched", {
             rideId,
             driver,
             driverLat,
@@ -1733,21 +1733,21 @@ export function registerMobilityRideRoutes(app: Express) {
 
           try {
             const pth = getUserActivePath(String(ride.riderUserId));
-            if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
+            if (!pth || !pth.startsWith("/go/taxi")) {
               void notificationService.sendPushToUser(ride.riderUserId, {
                 title: "Servicio de taxi",
                 body: "Tu viaje fue aceptado. Abre para ver a tu conductor.",
-                data: { url: "/go/taxi", type: "cargo_ride_matched", rideId },
+                data: { url: "/go/taxi", type: "taxi_ride_matched", rideId },
               });
             }
           } catch {}
 
           for (const oid of ride.offeredDriverIds) {
             if (oid === driverUserId) continue;
-            io.to(`user:${oid}`).emit("cargo:ride:taken", { rideId });
+            io.to(`user:${oid}`).emit("taxi:ride:taken", { rideId });
           }
 
-          io.to(`user:${driverUserId}`).emit("cargo:ride:accepted", {
+          io.to(`user:${driverUserId}`).emit("taxi:ride:accepted", {
             rideId,
             rider,
             conversationId,
@@ -1791,7 +1791,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.counterOffers[driverUserId] = { amountUsd: ride.estimatedUsd, expiresAt };
 
       const driver = await buildDriverPublic(driverUserId);
-      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:counteroffer", {
+      io.to(`user:${ride.riderUserId}`).emit("taxi:ride:counteroffer", {
         rideId,
         driver,
         amountUsd: ride.estimatedUsd,
@@ -1830,7 +1830,7 @@ export function registerMobilityRideRoutes(app: Express) {
       const io = getIO();
       if (io) {
         const driver = await buildDriverPublic(driverUserId);
-        io.to(`user:${ride.riderUserId}`).emit("cargo:ride:counteroffer", {
+        io.to(`user:${ride.riderUserId}`).emit("taxi:ride:counteroffer", {
           rideId,
           driver,
           amountUsd: amt,
@@ -1870,7 +1870,7 @@ export function registerMobilityRideRoutes(app: Express) {
       ride.marketVisibleUntil = undefined;
       ride.counterOffers = undefined;
       clearRideTimers(ride.id);
-      commitCargoRide(ride);
+      commitTaxiRide(ride);
 
       const io = getIO();
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
@@ -1894,7 +1894,7 @@ export function registerMobilityRideRoutes(app: Express) {
       } catch {}
 
       const rider = await buildRiderPublic(ride.riderUserId);
-      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:matched", {
+      io.to(`user:${ride.riderUserId}`).emit("taxi:ride:matched", {
         rideId,
         driver,
         driverLat,
@@ -1903,7 +1903,7 @@ export function registerMobilityRideRoutes(app: Express) {
         estimatedUsd: ride.estimatedUsd,
         isNegotiated: !!ride.isNegotiated,
       });
-      io.to(`user:${driverId}`).emit("cargo:ride:accepted", { rideId, rider, conversationId });
+      io.to(`user:${driverId}`).emit("taxi:ride:accepted", { rideId, rider, conversationId });
 
       res.json({ ok: true, accepted: true, rideId, conversationId });
     } catch (e: any) {
@@ -1960,8 +1960,8 @@ export function registerMobilityRideRoutes(app: Express) {
       clearPendingOffersForRide(ride.id);
 
       emitRideCancelled(io, ride, cancelledBy, prevStatus);
-      archiveCargoRideCancelled(ride, cancelledBy);
-      dropCargoActiveRide(ride.id);
+      archiveTaxiRideCancelled(ride, cancelledBy);
+      dropTaxiActiveRide(ride.id);
 
       if (needsFeedback && feedbackParsed?.success) {
         const fb = feedbackParsed.data;
@@ -1970,7 +1970,7 @@ export function registerMobilityRideRoutes(app: Express) {
           (prevStatus === "in_progress" || ride.driverSearchingClient ? "at_pickup" : "en_route");
         void createGoCancellationFeedback({
           rideId,
-          module: "cargo",
+          module: "taxi",
           cancelledBy,
           cancellerUserId: uid,
           otherPartyUserId: isDriver ? ride.riderUserId : ride.driverUserId ?? null,
@@ -2014,7 +2014,7 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
 
       ride.status = "in_progress";
-      commitCargoRide(ride);
+      commitTaxiRide(ride);
       if (ride.conversationId != null) {
         try {
           await onMobilityRideChatStarted(appliaStorage, ride.conversationId);
@@ -2033,15 +2033,15 @@ export function registerMobilityRideRoutes(app: Express) {
           console.error("[mobility] seed chat message", me);
         }
       }
-      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:started", { rideId });
-      io.to(`user:${driverUserId}`).emit("cargo:ride:started", { rideId });
+      io.to(`user:${ride.riderUserId}`).emit("taxi:ride:started", { rideId });
+      io.to(`user:${driverUserId}`).emit("taxi:ride:started", { rideId });
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
+        if (!pth || !pth.startsWith("/go/taxi")) {
           void notificationService.sendPushToUser(ride.riderUserId, {
             title: "Servicio de taxi",
             body: "Tu viaje inició.",
-            data: { url: "/go/taxi", type: "cargo_ride_started", rideId },
+            data: { url: "/go/taxi", type: "taxi_ride_started", rideId },
           });
         }
       } catch {}
@@ -2070,18 +2070,18 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
 
       ride.driverSearchingClient = true;
-      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:driver_searching", { rideId });
-      io.to(`user:${driverUserId}`).emit("cargo:ride:driver_searching", { rideId });
+      io.to(`user:${ride.riderUserId}`).emit("taxi:ride:driver_searching", { rideId });
+      io.to(`user:${driverUserId}`).emit("taxi:ride:driver_searching", { rideId });
       void appendMobilityRideSystemMessage(
         ride.conversationId,
-        riderDriverSearchStartedCopy("cargo").chatMessage,
+        riderDriverSearchStartedCopy("taxi").chatMessage,
       );
       try {
-        const searchCopy = riderDriverSearchStartedCopy("cargo");
+        const searchCopy = riderDriverSearchStartedCopy("taxi");
         void notificationService.sendPushToUser(ride.riderUserId, {
           title: searchCopy.pushTitle,
           body: searchCopy.pushBody,
-          data: { url: "/go/taxi", type: "cargo_driver_searching", rideId },
+          data: { url: "/go/taxi", type: "taxi_driver_searching", rideId },
         });
       } catch {}
       res.json({ ok: true, rideId });
@@ -2105,8 +2105,8 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
 
       ride.paymentConfirmed = true;
-      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:payment_confirmed", { rideId });
-      io.to(`user:${driverUserId}`).emit("cargo:ride:payment_confirmed", { rideId });
+      io.to(`user:${ride.riderUserId}`).emit("taxi:ride:payment_confirmed", { rideId });
+      io.to(`user:${driverUserId}`).emit("taxi:ride:payment_confirmed", { rideId });
       res.json({ ok: true, rideId });
     } catch (e: any) {
       console.error("[mobility] confirm-payment", e);
@@ -2134,12 +2134,12 @@ export function registerMobilityRideRoutes(app: Express) {
       if (!io) return res.status(500).json({ message: "Socket no disponible" });
 
       ride.status = "expired";
-      void persistMobilityRideToHistory(ride, "cargo", "completed");
-      dropCargoActiveRide(ride.id);
+      void persistMobilityRideToHistory(ride, "taxi", "completed");
+      dropTaxiActiveRide(ride.id);
       void bumpGoUserCompletedTrips(ride.riderUserId);
       void bumpGoUserCompletedTrips(driverUserId);
-      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:completed", { rideId });
-      io.to(`user:${driverUserId}`).emit("cargo:ride:completed", { rideId });
+      io.to(`user:${ride.riderUserId}`).emit("taxi:ride:completed", { rideId });
+      io.to(`user:${driverUserId}`).emit("taxi:ride:completed", { rideId });
 
       if (ride.conversationId != null && ride.driverUserId) {
         try {
@@ -2154,11 +2154,11 @@ export function registerMobilityRideRoutes(app: Express) {
       }
       try {
         const pth = getUserActivePath(String(ride.riderUserId));
-        if (!pth || (!pth.startsWith("/go/taxi") && !pth.startsWith("/go/cargo"))) {
+        if (!pth || !pth.startsWith("/go/taxi")) {
           void notificationService.sendPushToUser(ride.riderUserId, {
             title: "Servicio de taxi",
             body: "Tu viaje terminó.",
-            data: { url: "/go/taxi", type: "cargo_ride_completed", rideId },
+            data: { url: "/go/taxi", type: "taxi_ride_completed", rideId },
           });
         }
       } catch {}
@@ -2213,7 +2213,7 @@ export function registerMobilityRideRoutes(app: Express) {
       const uid = req.user?.id as string;
       const rideId = req.params.rideId as string;
       let ride = rides.get(rideId);
-      if (!ride) ride = await ensureCargoRideInMemory(rideId);
+      if (!ride) ride = await ensureTaxiRideInMemory(rideId);
       if (!ride) return res.status(404).json({ message: "No encontrado" });
       if (ride.riderUserId !== uid && ride.driverUserId !== uid) {
         return res.status(403).json({ message: "Sin acceso" });
@@ -2253,12 +2253,12 @@ export function registerMobilityRideRoutes(app: Express) {
 }
 
 /** Restaura viajes taxi activos desde Firestore tras reinicio (Render). */
-export async function hydrateCargoMobilityRidesFromFirestore(): Promise<number> {
+export async function hydrateTaxiMobilityRidesFromFirestore(): Promise<number> {
   const { loadAllActiveMobilityRides } = await import("./mobility-active-rides-store");
   const all = await loadAllActiveMobilityRides();
   let count = 0;
   for (const row of all) {
-    if (row.module !== "cargo") continue;
+    if (row.module !== "taxi") continue;
     const ride = row.ride as RideRecord;
     rides.set(ride.id, ride);
     count += 1;
@@ -2268,7 +2268,7 @@ export async function hydrateCargoMobilityRidesFromFirestore(): Promise<number> 
       ride.currentOfferDriverId &&
       typeof ride.offerExpiresAt === "number"
     ) {
-      setClassicOfferPending(ride.currentOfferDriverId, ride.id, ride.offerExpiresAt, "cargo");
+      setClassicOfferPending(ride.currentOfferDriverId, ride.id, ride.offerExpiresAt, "taxi");
     }
   }
 
@@ -2291,11 +2291,11 @@ export async function hydrateCargoMobilityRidesFromFirestore(): Promise<number> 
           if (live.currentOfferDriverId !== fixedDriverId) return;
           live.declinedAtByDriverId = live.declinedAtByDriverId ?? {};
           live.declinedAtByDriverId[fixedDriverId] = Date.now();
-          io.to(`user:${fixedDriverId}`).emit("cargo:ride:offer_expired", { rideId: live.id });
+          io.to(`user:${fixedDriverId}`).emit("taxi:ride:offer_expired", { rideId: live.id });
           clearClassicOfferPending(fixedDriverId);
           live.currentOfferDriverId = null;
           live.offerExpiresAt = null;
-          commitCargoRide(live);
+          commitTaxiRide(live);
           void offerNextDriver(io, live, rider);
           scheduleReconcileSearchingClassicRides(io);
         }, remaining + 150);
@@ -2306,7 +2306,7 @@ export async function hydrateCargoMobilityRidesFromFirestore(): Promise<number> 
       clearClassicOfferPending(ride.currentOfferDriverId);
       ride.currentOfferDriverId = null;
       ride.offerExpiresAt = null;
-      commitCargoRide(ride);
+      commitTaxiRide(ride);
     }
     if (!ride.currentOfferDriverId) {
       await offerNextDriver(io, ride, rider);
@@ -2317,13 +2317,13 @@ export async function hydrateCargoMobilityRidesFromFirestore(): Promise<number> 
   return count;
 }
 
-export function registerCargoMobilitySocket(io: SocketIOServer) {
+export function registerTaxiMobilitySocket(io: SocketIOServer) {
   io.on("connection", (socket: Socket) => {
     const user = socket.data.user as { id: string } | undefined;
     if (!user?.id) return;
 
     socket.on(
-      "cargo:driver:presence",
+      "taxi:driver:presence",
       (data: { receiving: boolean; vehicleType: string; isPetFriendly?: boolean; lat: number; lon: number }) => {
         if (!data) return;
         if (!data.receiving) {
@@ -2345,7 +2345,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
                   (provider as { dispatchCompanyId?: unknown } | null)?.dispatchCompanyId,
                 );
               if (!posOk && !prev) return;
-              const pres = upsertCargoDriverPresence({
+              const pres = upsertTaxiDriverPresence({
                 userId: user.id,
                 receiving: false,
                 vehicleType: (data.vehicleType || prev?.vehicleType || "car").trim(),
@@ -2362,7 +2362,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
           if (driverIsBusyCrossModule(user.id)) {
             const prev = getTaxiPresenceRow(user.id);
             if (prev && !prev.idleOnMapDuringRide) {
-              clearCargoDriverPresence(user.id);
+              clearTaxiDriverPresence(user.id);
               emitCentralFleetUpdate(
                 getIO(),
                 { ...prev, updatedAt: Date.now() },
@@ -2372,18 +2372,18 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
             return;
           }
           const prev = getTaxiPresenceRow(user.id);
-          clearCargoDriverPresence(user.id);
+          clearTaxiDriverPresence(user.id);
           if (prev) emitCentralFleetUpdate(getIO(), { ...prev, updatedAt: Date.now() }, { offline: true, receivingStopped: true });
           return;
         }
         void (async () => {
           const subscriptionOk = await driverGoSubscriptionAllowsOperation(user.id, (user as { role?: string }).role);
           if (!subscriptionOk) {
-            clearCargoDriverPresence(user.id);
+            clearTaxiDriverPresence(user.id);
             return;
           }
         const provider = await catalogService.getProviderByUserId(user.id);
-        const pres = upsertCargoDriverPresence({
+        const pres = upsertTaxiDriverPresence({
           userId: user.id,
           receiving: true,
           vehicleType: (data.vehicleType || "").trim(),
@@ -2410,7 +2410,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
       }
     );
 
-    socket.on("cargo:ride:location", (data: { rideId: string; lat: number; lon: number }) => {
+    socket.on("taxi:ride:location", (data: { rideId: string; lat: number; lon: number }) => {
       if (!data?.rideId) return;
       const ride = rides.get(data.rideId);
       if (!ride || ride.driverUserId !== user.id || (ride.status !== "matched" && ride.status !== "in_progress"))
@@ -2434,12 +2434,12 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
             void notificationService.sendPushToUser(ride.riderUserId, {
               title: "Servicio de taxi",
               body: "Tu conductor está cerca de tu ubicación de recogida.",
-              data: { url: "/go/taxi", type: "cargo_driver_near_pickup", rideId: data.rideId },
+              data: { url: "/go/taxi", type: "taxi_driver_near_pickup", rideId: data.rideId },
             });
           } catch {}
         }
       }
-      io.to(`user:${ride.riderUserId}`).emit("cargo:ride:driver_location", {
+      io.to(`user:${ride.riderUserId}`).emit("taxi:ride:driver_location", {
         rideId: data.rideId,
         lat: data.lat,
         lon: data.lon,
@@ -2454,7 +2454,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
         ) {
           const provider = await catalogService.getProviderByUserId(user.id);
           const vehicle = await appliaStorage.getPrimaryVehicleByUserId(user.id);
-          presRow = upsertCargoDriverPresence({
+          presRow = upsertTaxiDriverPresence({
             userId: user.id,
             receiving: false,
             vehicleType: String(vehicle?.vehicle_type ?? ride.vehicleType ?? "car").trim(),
@@ -2495,7 +2495,7 @@ export function registerCargoMobilitySocket(io: SocketIOServer) {
 }
 
 registerClassicSearchingReconciler({
-  module: "cargo",
-  collectStalled: collectStalledClassicSearchingCargoRides,
-  reconcileRide: reconcileClassicSearchingCargoRide,
+  module: "taxi",
+  collectStalled: collectStalledClassicSearchingTaxiRides,
+  reconcileRide: reconcileClassicSearchingTaxiRide,
 });

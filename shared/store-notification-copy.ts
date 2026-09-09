@@ -49,7 +49,7 @@ export function storeOwnerOrdersAdminPath(storeSlug: string, orderId?: number | 
   return orderId != null ? `${base}?orderId=${orderId}` : base;
 }
 
-/** Dueño: seguimiento delivery Pack Go de una orden. */
+/** Dueño: seguimiento delivery envíos de una orden. */
 export function storeOwnerDeliveryAdminPath(storeSlug: string, orderId: number): string {
   return `/tienda/${encodeURIComponent(storeSlug)}/admin/ordenes/delivery/${orderId}`;
 }

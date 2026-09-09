@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useStoreProducts } from "@/hooks/use-store-products";
+import { useStoreProductPickerSearch } from "@/hooks/use-store-products";
 
 export type SelectedPromotionProduct = {
   id: number;
@@ -34,22 +34,22 @@ export function StorePromotionProductPicker({
   onChange,
   disabled,
 }: StorePromotionProductPickerProps) {
-  const { data: products = [], isLoading } = useStoreProducts(storeId);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const { data: options = [], isFetching } = useStoreProductPickerSearch(storeId, debouncedSearch);
   const selectedIds = useMemo(() => new Set(selected.map((s) => s.id)), [selected]);
 
-  const options = useMemo(() => products.map((p) => ({ id: p.id, name: p.name })), [products]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return options.filter((opt) => {
-      if (selectedIds.has(opt.id)) return false;
-      if (!q) return true;
-      return opt.name.toLowerCase().includes(q);
-    });
-  }, [options, search, selectedIds]);
+  const filtered = useMemo(
+    () => options.filter((opt) => !selectedIds.has(opt.id)),
+    [options, selectedIds],
+  );
 
   function add(item: { id: number; name: string }) {
     if (selectedIds.has(item.id)) return;
@@ -76,7 +76,7 @@ export function StorePromotionProductPicker({
             type="button"
             variant="outline"
             className="w-full justify-start font-normal"
-            disabled={disabled || isLoading}
+            disabled={disabled || isFetching}
           >
             <Search className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" />
             Buscar y añadir productos…
@@ -93,7 +93,7 @@ export function StorePromotionProductPicker({
           </div>
           <Command shouldFilter={false}>
             <CommandList className="max-h-56">
-              {isLoading ? (
+              {isFetching ? (
                 <div className="py-6 flex justify-center">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>

@@ -1,4 +1,5 @@
 import { appliaStorage } from "./storage-applia";
+import { storeCatalogNameKey } from "@shared/store-slug";
 
 export function productIdsForSubcategory(
   products: { id: number; subcategoryIds?: number[] }[],
@@ -48,10 +49,9 @@ export async function removeSubcategoryFromAllProducts(
   storeId: number,
   subcategoryId: number,
 ): Promise<void> {
-  const products = await appliaStorage.listStoreProducts(storeId);
-  for (const product of products) {
+  const members = await appliaStorage.listStoreProductsBySubcategoryId(storeId, subcategoryId);
+  for (const product of members) {
     const ids = product.subcategoryIds ?? [];
-    if (!ids.includes(subcategoryId)) continue;
     await appliaStorage.updateStoreProduct(storeId, product.id, {
       subcategoryIds: ids.filter((id) => id !== subcategoryId),
     });
@@ -74,12 +74,13 @@ export async function createSubcategoriesForCategory(
   categoryId: number,
   names: string[],
 ): Promise<void> {
-  const seen = new Set<string>();
+  const existing = await appliaStorage.listStoreSubcategories(storeId, { categoryId });
+  const seen = new Set(existing.map((s) => storeCatalogNameKey(s.name)));
   for (const raw of names) {
     const name = raw.trim();
     if (!name) continue;
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
+    const key = storeCatalogNameKey(name);
+    if (!key || seen.has(key)) continue;
     seen.add(key);
     await appliaStorage.createStoreSubcategory(storeId, {
       categoryId,

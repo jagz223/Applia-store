@@ -76,6 +76,7 @@ import {
   type InsertStorePromotion,
   type UpdateStorePromotion,
 } from "@shared/store-schema";
+import { invalidateStoreProductsCache } from "./store-catalog-cache";
 import type {
   StoreShowcaseAdItem,
   InsertStoreShowcaseAdItem,
@@ -106,6 +107,7 @@ import {
   ingredientMaterialKey,
   normalizeIngredientMaterialName,
   resolveUniqueStoreSlug,
+  storeCatalogNameKey,
 } from "@shared/store-slug";
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { extendStoreVisibilitySubscriptionEndsAt } from "@shared/store-subscription-fee";
@@ -218,9 +220,9 @@ export interface IStorage
   getPendingAccountChangeRequests(): Promise<any[]>;
   resolveAccountChangeRequest(args: { id: number; action: "approve" | "reject"; adminUserId: string }): Promise<any>;
   
-  // Integración ManGo
-  syncWithMango(userId: string, mangoUserId: string): Promise<any>;
-  getMangoSyncStatus(userId: string): Promise<any | undefined>;
+  // Integración cuenta externa
+  syncWithExternalAccount(userId: string, externalUserId: string): Promise<any>;
+  getExternalAccountSyncStatus(userId: string): Promise<any | undefined>;
   
   // Reseñas y Ratings
   getReviews(params: { targetId?: string; targetType?: string; limit?: number; offset?: number }): Promise<any[]>;
@@ -462,7 +464,7 @@ export interface IStorage
 
   getAdminDashboardStats(params: { from: Date; to: Date }): Promise<AdminDashboardStatsResult>;
 
-  /** Car Go: al completar viaje, aplica comisiones y movimientos de wallet. */
+  /** Transporte: al completar viaje, aplica comisiones y movimientos de wallet. */
   applyMobilityRideSettlement(input: {
     rideId: string;
     riderUserId: string;
@@ -490,6 +492,7 @@ export interface IStorage
   createIngredientMaterial(input: InsertIngredientMaterial): Promise<IngredientMaterial>;
   findIngredientMaterialByNormalizedName(normalizedName: string): Promise<IngredientMaterial | undefined>;
   getIngredientMaterial(id: number): Promise<IngredientMaterial | undefined>;
+  getIngredientMaterialsByIds(ids: number[]): Promise<IngredientMaterial[]>;
   updateIngredientMaterial(id: number, input: InsertIngredientMaterial): Promise<IngredientMaterial>;
   deleteIngredientMaterial(id: number): Promise<void>;
   /** Extiende vigencia tras pago aprobado (Prompt 3). */
@@ -511,13 +514,19 @@ export interface IStorage
     },
   ): Promise<Store>;
   listStoreProducts(storeId: number): Promise<StoreProduct[]>;
+  listStoreProductsByCategoryId(storeId: number, categoryId: number): Promise<StoreProduct[]>;
+  listStoreProductsBySubcategoryId(storeId: number, subcategoryId: number): Promise<StoreProduct[]>;
   getStoreProduct(storeId: number, productId: number): Promise<StoreProduct | undefined>;
+  getStoreProductsByIds(storeId: number, ids: number[]): Promise<StoreProduct[]>;
   getStoreProductByCodigo(storeId: number, codigo: string): Promise<StoreProduct | undefined>;
   createStoreProduct(storeId: number, input: InsertStoreProduct): Promise<StoreProduct>;
   updateStoreProduct(storeId: number, productId: number, input: UpdateStoreProduct): Promise<StoreProduct>;
   deleteStoreProduct(storeId: number, productId: number): Promise<void>;
   deleteStoreProduct(storeId: number, productId: number): Promise<void>;
-  listStoreCategories(storeId: number): Promise<StoreCategory[]>;
+  listStoreCategories(
+    storeId: number,
+    options?: { persistRenumber?: boolean },
+  ): Promise<StoreCategory[]>;
   getStoreCategory(storeId: number, categoryId: number): Promise<StoreCategory | undefined>;
   createStoreCategory(
     storeId: number,
@@ -549,6 +558,7 @@ export interface IStorage
   deleteStoreSubcategory(storeId: number, subcategoryId: number): Promise<void>;
   listStorePromotions(storeId: number): Promise<StorePromotion[]>;
   getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined>;
+  getStorePromotionsByIds(storeId: number, ids: number[]): Promise<StorePromotion[]>;
   createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion>;
   updateStorePromotion(
     storeId: number,
@@ -798,7 +808,7 @@ export class InMemoryStorage implements IStorage {
   private notifications: any[] = [];
   private accountChangeRequests: any[] = [];
   private accountChangeRequestIdCounter = 1;
-  private mangoSyncs: any[] = [];
+  private accountSyncs: any[] = [];
   private paymentIdCounter = 1;
   private documentIdCounter = 1;
   private conversationIdCounter = 1;
@@ -1076,7 +1086,7 @@ export class InMemoryStorage implements IStorage {
     const driverEarnings = typeof (driverUser as { totalEarnings?: number }).totalEarnings === "number" ? (driverUser as { totalEarnings: number }).totalEarnings : 0;
     const driverTrips = typeof (driverUser as { completedTrips?: number }).completedTrips === "number" ? (driverUser as { completedTrips: number }).completedTrips : 0;
 
-    const refId = `cargo:${input.rideId}`;
+    const refId = `taxi:${input.rideId}`;
     const now = new Date();
 
     if (input.paymentMethod === "applia") {
@@ -1098,7 +1108,7 @@ export class InMemoryStorage implements IStorage {
         amount: cost,
         transferType: "payment",
         status: "completed",
-        description: "Pago viaje Car Go (Saldo Applia)",
+        description: "Pago viaje Transporte (Saldo Applia)",
         referenceId: refId,
         currency: "USD",
         createdAt: now,
@@ -1110,7 +1120,7 @@ export class InMemoryStorage implements IStorage {
         amount: providerNet,
         transferType: "service_payment",
         status: "completed",
-        description: "Ingreso neto viaje Car Go",
+        description: "Ingreso neto viaje Transporte",
         referenceId: refId,
         currency: "USD",
         createdAt: now,
@@ -1122,7 +1132,7 @@ export class InMemoryStorage implements IStorage {
         amount: commission,
         transferType: "service_payment",
         status: "completed",
-        description: "Comisión de plataforma (Car Go, applia)",
+        description: "Comisión de plataforma (Transporte, applia)",
         referenceId: refId,
         currency: "USD",
         createdAt: now,
@@ -1146,7 +1156,7 @@ export class InMemoryStorage implements IStorage {
           amount: commission,
           transferType: "service_payment",
           status: "completed",
-          description: `Comisión de plataforma (Car Go, ${input.paymentMethod})`,
+          description: `Comisión de plataforma (Transporte, ${input.paymentMethod})`,
           referenceId: refId,
           currency: "USD",
           createdAt: now,
@@ -1158,7 +1168,7 @@ export class InMemoryStorage implements IStorage {
           amount: commission,
           transferType: "service_payment",
           status: "completed",
-          description: `Comisión de plataforma (Car Go, ${input.paymentMethod}) — plataforma`,
+          description: `Comisión de plataforma (Transporte, ${input.paymentMethod}) — plataforma`,
           referenceId: refId,
           currency: "USD",
           createdAt: now,
@@ -1873,31 +1883,31 @@ export class InMemoryStorage implements IStorage {
     return updated;
   }
 
-  // ============== MANGO SYNC ==============
+  // ============== ACCOUNT SYNC ==============
   
-  async syncWithMango(userId: string, mangoUserId: string): Promise<any> {
-    const existing = this.mangoSyncs.find(s => s.localUserId === userId);
+  async syncWithExternalAccount(userId: string, externalUserId: string): Promise<any> {
+    const existing = this.accountSyncs.find(s => s.localUserId === userId);
     if (existing) {
-      existing.mangoUserId = mangoUserId;
+      existing.externalUserId = externalUserId;
       existing.lastSyncAt = new Date();
       existing.syncStatus = 'completed';
       return existing;
     }
     
     const newSync = {
-      id: this.mangoSyncs.length + 1,
+      id: this.accountSyncs.length + 1,
       userId,
-      mangoUserId,
+      externalUserId,
       lastSyncAt: new Date(),
       syncStatus: 'completed',
       syncData: { contacts: true, bookings: true, payments: true }
     };
-    this.mangoSyncs.push(newSync);
+    this.accountSyncs.push(newSync);
     return newSync;
   }
   
-  async getMangoSyncStatus(userId: string): Promise<any | undefined> {
-    return this.mangoSyncs.find(s => s.localUserId === userId);
+  async getExternalAccountSyncStatus(userId: string): Promise<any | undefined> {
+    return this.accountSyncs.find(s => s.localUserId === userId);
   }
 
   // ============== EXISTENTES ==============
@@ -3511,6 +3521,12 @@ export class InMemoryStorage implements IStorage {
     return this.ingredientsMaterials.find((item) => item.id === id);
   }
 
+  async getIngredientMaterialsByIds(ids: number[]): Promise<IngredientMaterial[]> {
+    const wanted = new Set(ids.filter((id) => Number.isInteger(id) && id > 0));
+    if (wanted.size === 0) return [];
+    return this.ingredientsMaterials.filter((item) => wanted.has(item.id));
+  }
+
   async updateIngredientMaterial(id: number, input: InsertIngredientMaterial): Promise<IngredientMaterial> {
     const existing = await this.getIngredientMaterial(id);
     if (!existing) throw new Error("INGREDIENT_MATERIAL_NOT_FOUND");
@@ -3541,8 +3557,28 @@ export class InMemoryStorage implements IStorage {
       });
   }
 
+  async listStoreProductsByCategoryId(storeId: number, categoryId: number): Promise<StoreProduct[]> {
+    if (categoryId <= 0) return [];
+    return this.storeProducts.filter(
+      (p) => p.storeId === storeId && p.categoryIds.includes(categoryId),
+    );
+  }
+
+  async listStoreProductsBySubcategoryId(storeId: number, subcategoryId: number): Promise<StoreProduct[]> {
+    if (subcategoryId <= 0) return [];
+    return this.storeProducts.filter(
+      (p) => p.storeId === storeId && (p.subcategoryIds ?? []).includes(subcategoryId),
+    );
+  }
+
   async getStoreProduct(storeId: number, productId: number): Promise<StoreProduct | undefined> {
     return this.storeProducts.find((p) => p.storeId === storeId && p.id === productId);
+  }
+
+  async getStoreProductsByIds(storeId: number, ids: number[]): Promise<StoreProduct[]> {
+    const wanted = new Set(ids.filter((id) => Number.isInteger(id) && id > 0));
+    if (wanted.size === 0) return [];
+    return this.storeProducts.filter((p) => p.storeId === storeId && wanted.has(p.id));
   }
 
   async getStoreProductByCodigo(storeId: number, codigo: string): Promise<StoreProduct | undefined> {
@@ -3600,6 +3636,7 @@ export class InMemoryStorage implements IStorage {
       updatedAt: now,
     };
     this.storeProducts.push(product);
+    invalidateStoreProductsCache(storeId);
     return product;
   }
 
@@ -3678,6 +3715,7 @@ export class InMemoryStorage implements IStorage {
       updatedAt: new Date(),
     };
     this.storeProducts[idx] = next;
+    invalidateStoreProductsCache(storeId);
     return next;
   }
 
@@ -3685,12 +3723,16 @@ export class InMemoryStorage implements IStorage {
     const idx = this.storeProducts.findIndex((p) => p.storeId === storeId && p.id === productId);
     if (idx === -1) throw new Error("STORE_PRODUCT_NOT_FOUND");
     this.storeProducts.splice(idx, 1);
+    invalidateStoreProductsCache(storeId);
   }
 
   private storeCategories: StoreCategory[] = [];
   private storeCategoryIdCounter = 1;
 
-  async listStoreCategories(storeId: number): Promise<StoreCategory[]> {
+  async listStoreCategories(
+    storeId: number,
+    options?: { persistRenumber?: boolean },
+  ): Promise<StoreCategory[]> {
     const list = this.storeCategories
       .filter((c) => c.storeId === storeId)
       .map((c) => ({
@@ -3704,6 +3746,7 @@ export class InMemoryStorage implements IStorage {
       new Set(list.map((c) => c.sortOrder)).size !== list.length;
     if (!needsRenumber) return list;
     const renumbered = assignContiguousStoreCategorySortOrders(list);
+    if (options?.persistRenumber !== true) return renumbered;
     for (const row of renumbered) {
       const idx = this.storeCategories.findIndex((c) => c.id === row.id);
       if (idx >= 0) {
@@ -3728,7 +3771,11 @@ export class InMemoryStorage implements IStorage {
     input: Omit<InsertStoreCategory, "productIds" | "subcategoryNames">,
   ): Promise<StoreCategory> {
     const now = new Date();
-    const existing = await this.listStoreCategories(storeId);
+    const existing = await this.listStoreCategories(storeId, { persistRenumber: false });
+    const nameKey = storeCatalogNameKey(input.name);
+    if (existing.some((c) => storeCatalogNameKey(c.name) === nameKey)) {
+      throw new Error("STORE_CATEGORY_NAME_EXISTS");
+    }
     const category: StoreCategory = {
       id: this.storeCategoryIdCounter++,
       storeId,
@@ -3753,6 +3800,16 @@ export class InMemoryStorage implements IStorage {
   ): Promise<StoreCategory> {
     const idx = this.storeCategories.findIndex((c) => c.storeId === storeId && c.id === categoryId);
     if (idx === -1) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    if (input.name !== undefined) {
+      const nameKey = storeCatalogNameKey(input.name);
+      const clash = this.storeCategories.some(
+        (c) =>
+          c.storeId === storeId &&
+          c.id !== categoryId &&
+          storeCatalogNameKey(c.name) === nameKey,
+      );
+      if (clash) throw new Error("STORE_CATEGORY_NAME_EXISTS");
+    }
     const cur = this.storeCategories[idx];
     const next: StoreCategory = {
       ...cur,
@@ -3839,6 +3896,14 @@ export class InMemoryStorage implements IStorage {
   ): Promise<StoreSubcategory> {
     const category = await this.getStoreCategory(storeId, input.categoryId);
     if (!category) throw new Error("STORE_CATEGORY_NOT_FOUND");
+    const nameKey = storeCatalogNameKey(input.name);
+    const clash = this.storeSubcategories.some(
+      (s) =>
+        s.storeId === storeId &&
+        s.categoryId === input.categoryId &&
+        storeCatalogNameKey(s.name) === nameKey,
+    );
+    if (clash) throw new Error("STORE_SUBCATEGORY_NAME_EXISTS");
     const now = new Date();
     const subcategory: StoreSubcategory = {
       id: this.storeSubcategoryIdCounter++,
@@ -3867,6 +3932,18 @@ export class InMemoryStorage implements IStorage {
       if (!category) throw new Error("STORE_CATEGORY_NOT_FOUND");
     }
     const cur = this.storeSubcategories[idx];
+    if (input.name !== undefined) {
+      const nextCategoryId = input.categoryId ?? cur.categoryId;
+      const nameKey = storeCatalogNameKey(input.name);
+      const clash = this.storeSubcategories.some(
+        (s) =>
+          s.storeId === storeId &&
+          s.id !== subcategoryId &&
+          s.categoryId === nextCategoryId &&
+          storeCatalogNameKey(s.name) === nameKey,
+      );
+      if (clash) throw new Error("STORE_SUBCATEGORY_NAME_EXISTS");
+    }
     const next: StoreSubcategory = {
       ...cur,
       ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
@@ -3902,6 +3979,12 @@ export class InMemoryStorage implements IStorage {
 
   async getStorePromotion(storeId: number, promotionId: number): Promise<StorePromotion | undefined> {
     return this.storePromotions.find((p) => p.storeId === storeId && p.id === promotionId);
+  }
+
+  async getStorePromotionsByIds(storeId: number, ids: number[]): Promise<StorePromotion[]> {
+    const wanted = new Set(ids.filter((id) => Number.isInteger(id) && id > 0));
+    if (wanted.size === 0) return [];
+    return this.storePromotions.filter((p) => p.storeId === storeId && wanted.has(p.id));
   }
 
   async createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion> {

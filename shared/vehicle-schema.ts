@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Car Go / transport: vehicle types offered by the driver. */
+/** Transporte / transport: vehicle types offered by the driver. */
 export const vehicleTypeSchema = z.enum(["motorcycle", "car", "pickup_truck", "truck"]);
 
 /** Operational state for dispatch and compliance. */

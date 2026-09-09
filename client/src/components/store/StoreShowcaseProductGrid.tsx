@@ -1,18 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Package } from "lucide-react";
 import type { StoreShowcaseProduct } from "@/hooks/use-store-showcase";
+import { STORE_SHOWCASE_PAGE_SIZE } from "@/hooks/use-store-showcase";
 import {
   StoreShowcaseAddToCartButton,
   showcaseCartItemKey,
 } from "@/components/store/StoreShowcaseAddToCartButton";
 import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
-import {
-  STORE_ADMIN_LIST_PAGE_SIZE,
-  StoreAdminListPagination,
-} from "@/components/store/StoreAdminListPagination";
+import { StoreAdminListPagination } from "@/components/store/StoreAdminListPagination";
 import { cn } from "@/lib/utils";
-
-export const STORE_SHOWCASE_PAGE_SIZE = STORE_ADMIN_LIST_PAGE_SIZE;
 
 function formatPrice(value: number, currencyLabel?: string) {
   const amount = new Intl.NumberFormat("es-VE", {
@@ -114,6 +110,7 @@ function ShowcaseProductCard({
 type StoreShowcaseProductGridProps = {
   products: StoreShowcaseProduct[];
   isLoading?: boolean;
+  isFetching?: boolean;
   error?: Error | null;
   emptyMessage?: string;
   className?: string;
@@ -123,11 +120,15 @@ type StoreShowcaseProductGridProps = {
   onSelectProduct?: (product: StoreShowcaseProduct) => void;
   selectedProductId?: number | null;
   addToCartBusyKey?: string | null;
+  page?: number;
+  totalPages?: number;
+  onPageChange?: (page: number) => void;
 };
 
 export function StoreShowcaseProductGrid({
   products,
   isLoading,
+  isFetching,
   error,
   emptyMessage = "Esta tienda aún no tiene productos visibles en la vitrina.",
   className,
@@ -137,24 +138,32 @@ export function StoreShowcaseProductGrid({
   onSelectProduct,
   selectedProductId,
   addToCartBusyKey,
+  page: pageProp,
+  totalPages: totalPagesProp,
+  onPageChange,
 }: StoreShowcaseProductGridProps) {
   const [page, setPage] = useState(1);
   const topRef = useRef<HTMLDivElement>(null);
+  const serverPaged = pageProp != null && totalPagesProp != null && onPageChange != null;
   const listKey = useMemo(() => products.map((p) => p.id).join(","), [products]);
 
   useEffect(() => {
-    setPage(1);
-  }, [listKey]);
+    if (!serverPaged) setPage(1);
+  }, [listKey, serverPaged]);
 
-  const totalPages = Math.max(1, Math.ceil(products.length / STORE_SHOWCASE_PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
+  const totalPages = serverPaged
+    ? Math.max(1, totalPagesProp)
+    : Math.max(1, Math.ceil(products.length / STORE_SHOWCASE_PAGE_SIZE));
+  const safePage = Math.min(serverPaged ? pageProp : page, totalPages);
   const pageProducts = useMemo(() => {
+    if (serverPaged) return products;
     const start = (safePage - 1) * STORE_SHOWCASE_PAGE_SIZE;
     return products.slice(start, start + STORE_SHOWCASE_PAGE_SIZE);
-  }, [products, safePage]);
+  }, [products, safePage, serverPaged]);
 
   const goToPage = (next: number) => {
-    setPage(next);
+    if (serverPaged) onPageChange(next);
+    else setPage(next);
     topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -214,7 +223,12 @@ export function StoreShowcaseProductGrid({
           </div>
         ))}
       </div>
-      <StoreAdminListPagination page={safePage} totalPages={totalPages} onPageChange={goToPage} />
+      <StoreAdminListPagination
+        page={safePage}
+        totalPages={totalPages}
+        isFetching={isFetching}
+        onPageChange={goToPage}
+      />
     </div>
   );
 }

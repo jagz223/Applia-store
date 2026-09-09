@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { useCurrentProvider } from "@/hooks/use-mango-data";
+import { useCurrentProvider } from "@/hooks/use-provider-data";
 import { userCanActAsAssociate } from "@/lib/user-permissions";
 import {
   clearAssociateOnboardingStarted,

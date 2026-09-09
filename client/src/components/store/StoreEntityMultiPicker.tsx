@@ -25,6 +25,9 @@ type StoreEntityMultiPickerProps = {
   disabled?: boolean;
   /** Dentro de Dialog usar `modal` para que el listado quede por encima del modal. */
   popoverLayer?: "default" | "modal";
+  /** `remote`: el padre filtra (p. ej. búsqueda en servidor). */
+  searchMode?: "local" | "remote";
+  onSearchChange?: (value: string) => void;
 };
 
 export function StoreEntityMultiPicker({
@@ -37,6 +40,8 @@ export function StoreEntityMultiPicker({
   isLoading,
   disabled,
   popoverLayer = "modal",
+  searchMode = "local",
+  onSearchChange,
 }: StoreEntityMultiPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -47,10 +52,10 @@ export function StoreEntityMultiPicker({
     const q = search.trim().toLowerCase();
     return options.filter((opt) => {
       if (selectedIds.has(opt.id)) return false;
-      if (!q) return true;
+      if (searchMode === "remote" || !q) return true;
       return opt.name.toLowerCase().includes(q);
     });
-  }, [options, search, selectedIds]);
+  }, [options, search, searchMode, selectedIds]);
 
   function add(item: SelectedEntity) {
     if (selectedIds.has(item.id)) return;
@@ -86,7 +91,11 @@ export function StoreEntityMultiPicker({
             <Input
               placeholder="Escribe para filtrar…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSearch(next);
+                onSearchChange?.(next);
+              }}
               autoFocus
             />
           </div>

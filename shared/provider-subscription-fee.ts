@@ -37,7 +37,7 @@ export function providerSubscriptionFeeSlugs(
   return [...new Set(out.filter(Boolean))];
 }
 
-/** Mensualidad USD: la tarifa más alta entre todas las líneas del asociado (Man Go, Pro Go, Car Go, Marketplace, etc.). */
+/** Mensualidad USD: la tarifa más alta entre todas las líneas del asociado (Servicios técnicos, Servicios profesionales, Transporte, Marketplace, etc.). */
 export function subscriptionMonthlyUsdForProvider(
   provider: ProviderForSubscriptionFee | null | undefined,
   fees: Record<string, number> | null | undefined,

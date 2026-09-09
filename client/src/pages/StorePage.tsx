@@ -7,7 +7,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { hasAdminRole } from "@/lib/auth-utils";
 import { useStoreBySlug } from "@/hooks/use-my-store";
 import {
+  useStoreShowcaseProduct,
   useStoreShowcaseProducts,
+  STORE_SHOWCASE_PAGE_SIZE,
   type StoreShowcaseProduct,
   type StoreShowcasePromotion,
 } from "@/hooks/use-store-showcase";
@@ -34,7 +36,6 @@ import { StoreShowcaseBannersCarousel } from "@/components/store/StoreShowcaseBa
 import { StoreShowcasePopupsModal } from "@/components/store/StoreShowcasePopupsModal";
 import { StoreContactChannels } from "@/components/store/StoreContactChannels";
 import { bannerVisibleForShowcaseCategoryFilter } from "@shared/store-showcase-ads-schema";
-import { compareProductsByCategorySortOrder } from "@shared/store-schema";
 
 type StorePayload = {
   id: number;
@@ -101,9 +102,11 @@ export default function StorePage() {
   const isAdmin = hasAdminRole(user);
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<ShowcaseCategoryFilter>("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState<number | null>(null);
-  const [selectedProduct, setSelectedProduct] = useState<StoreShowcaseProduct | null>(null);
+  const [productPage, setProductPage] = useState(1);
+  const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [selectedPromotion, setSelectedPromotion] = useState<StoreShowcasePromotion | null>(null);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [isLgUp, setIsLgUp] = useState(
@@ -118,12 +121,45 @@ export default function StorePage() {
     storeId,
     Boolean(storeId) && isAuthenticated && !canManageStorePreview,
   );
-  const canLoadShowcase = Boolean(slug) && !isLoading && Boolean(data?.store);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+      setProductPage(1);
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
+
+  const showingPromotions = categoryFilter === "promotions";
+  const showcaseCategoryId = typeof categoryFilter === "number" ? categoryFilter : null;
   const {
     data: showcaseData,
     isLoading: showcaseLoading,
+    isFetching: showcaseFetching,
     error: showcaseError,
-  } = useStoreShowcaseProducts(slug, canLoadShowcase);
+  } = useStoreShowcaseProducts(slug, Boolean(slug), {
+    page: productPage,
+    limit: STORE_SHOWCASE_PAGE_SIZE,
+    search: showingPromotions ? "" : debouncedSearch,
+    categoryId: showcaseCategoryId,
+    subcategoryId: subcategoryFilter,
+  });
+
+  const {
+    data: selectedProduct,
+    isLoading: selectedProductLoading,
+    error: selectedProductError,
+  } = useStoreShowcaseProduct(slug, selectedProductId);
+
+  useEffect(() => {
+    if (!selectedProductError) return;
+    toast({
+      variant: "destructive",
+      title: "No se pudo abrir el producto",
+      description: selectedProductError.message,
+    });
+    setSelectedProductId(null);
+  }, [selectedProductError, toast]);
 
   const banners = useMemo(() => {
     const all = showcaseData?.banners ?? [];
@@ -134,8 +170,11 @@ export default function StorePage() {
 
   useEffect(() => {
     setSearchQuery("");
+    setDebouncedSearch("");
     setCategoryFilter("all");
-    setSelectedProduct(null);
+    setSubcategoryFilter(null);
+    setProductPage(1);
+    setSelectedProductId(null);
     setSelectedPromotion(null);
     setMobilePanelOpen(false);
     setPopupsOpen(false);
@@ -179,46 +218,12 @@ export default function StorePage() {
   const showcaseCategories = showcaseData?.categories ?? [];
   const showcaseSubcategories = showcaseData?.subcategories ?? [];
   const showcasePromotions = showcaseData?.promotions ?? [];
-  const hasShowcaseFilters = showcaseProducts.length > 0 || showcasePromotions.length > 0;
-  const showingPromotions = categoryFilter === "promotions";
-
-  const filteredShowcaseProducts = useMemo(() => {
-    let list = showcaseProducts;
-    if (categoryFilter === "all") {
-      const exclusiveCategoryIds = new Set(
-        showcaseCategories.filter((c) => c.hideFromShowcaseAll).map((c) => c.id),
-      );
-      if (exclusiveCategoryIds.size > 0) {
-        list = list.filter(
-          (p) => !(p.categoryIds ?? []).some((id) => exclusiveCategoryIds.has(id)),
-        );
-      }
-    } else if (typeof categoryFilter === "number") {
-      list = list.filter((p) => (p.categoryIds ?? []).includes(categoryFilter));
-      if (subcategoryFilter != null) {
-        list = list.filter((p) => (p.subcategoryIds ?? []).includes(subcategoryFilter));
-      }
-    }
-    const q = searchQuery.trim().toLowerCase();
-    if (q) {
-      list = list.filter((p) => p.name.toLowerCase().includes(q));
-    }
-    const categorySortOrderById = new Map(
-      showcaseCategories.map((c) => [
-        c.id,
-        c.sortOrder != null && c.sortOrder > 0 ? c.sortOrder : Number.MAX_SAFE_INTEGER,
-      ]),
-    );
-    return list
-      .slice()
-      .sort((a, b) => compareProductsByCategorySortOrder(a, b, categorySortOrderById));
-  }, [
-    showcaseProducts,
-    showcaseCategories,
-    categoryFilter,
-    subcategoryFilter,
-    searchQuery,
-  ]);
+  const catalogTotal = showcaseData?.catalogTotal ?? 0;
+  const productTotalPages = showcaseData?.totalPages ?? 1;
+  const hasShowcaseFilters =
+    catalogTotal > 0 ||
+    showcaseCategories.length > 0 ||
+    showcasePromotions.length > 0;
 
   const filteredShowcasePromotions = useMemo(() => {
     let list = showcasePromotions;
@@ -266,7 +271,7 @@ export default function StorePage() {
   const showSidePanel = true;
   const showCustomerCart = !canManageStore;
   const cartActionsEnabled = showCustomerCart && isAuthenticated;
-  const customizing = showCustomerCart && selectedProduct != null;
+  const customizing = showCustomerCart && selectedProductId != null;
   const viewingPromotion = showCustomerCart && selectedPromotion != null;
   const detailing = customizing || viewingPromotion;
 
@@ -280,13 +285,13 @@ export default function StorePage() {
   function handleSelectProduct(product: StoreShowcaseProduct) {
     if (!showCustomerCart) return;
     setSelectedPromotion(null);
-    setSelectedProduct(product);
+    setSelectedProductId(product.id);
     setMobilePanelOpen(true);
   }
 
   function handleSelectPromotion(promotion: StoreShowcasePromotion) {
     if (!showCustomerCart) return;
-    setSelectedProduct(null);
+    setSelectedProductId(null);
     setSelectedPromotion(promotion);
     setMobilePanelOpen(true);
   }
@@ -310,7 +315,7 @@ export default function StorePage() {
         additionalIngredientMaterialIds: selection.additionalIngredientMaterialIds,
       });
       toast({ title: "Añadido al carrito", description: selection.displayName });
-      setSelectedProduct(null);
+      setSelectedProductId(null);
       setMobilePanelOpen(true);
     } catch (e) {
       toast({
@@ -335,6 +340,8 @@ export default function StorePage() {
         kind: "promotion",
         promotionId: selection.promotionId,
         quantity: selection.quantity,
+        removedIngredientMaterialIds: [],
+        additionalIngredientMaterialIds: [],
       });
       toast({ title: "Promoción añadida al carrito", description: selection.displayName });
       setSelectedPromotion(null);
@@ -350,12 +357,19 @@ export default function StorePage() {
 
   function renderSidePanelContent() {
     if (showCustomerCart) {
-      if (customizing && selectedProduct) {
+      if (customizing) {
+        if (selectedProductLoading || !selectedProduct) {
+          return (
+            <div className="flex h-full min-h-[12rem] items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          );
+        }
         return (
           <StoreProductCustomizePanel
             key={`product-${selectedProduct.id}`}
             product={selectedProduct}
-            onClose={() => setSelectedProduct(null)}
+            onClose={() => setSelectedProductId(null)}
             onConfirm={handleConfirmCustomize}
             confirming={addToCartMutation.isPending}
             canAddToCart={cartActionsEnabled}
@@ -418,13 +432,15 @@ export default function StorePage() {
               onCategoryChange={(next) => {
                 setCategoryFilter(next);
                 setSubcategoryFilter(null);
-                setSelectedProduct(null);
+                setProductPage(1);
+                setSelectedProductId(null);
                 setSelectedPromotion(null);
               }}
               subcategoryFilter={subcategoryFilter}
               onSubcategoryChange={(next) => {
                 setSubcategoryFilter(next);
-                setSelectedProduct(null);
+                setProductPage(1);
+                setSelectedProductId(null);
                 setSelectedPromotion(null);
               }}
               categories={showcaseCategories}
@@ -451,14 +467,18 @@ export default function StorePage() {
             <StoreShowcaseProductGrid
               largeCards
               centered={false}
-              products={filteredShowcaseProducts}
+              products={showcaseProducts}
               isLoading={showcaseLoading}
+              isFetching={showcaseFetching}
               error={showcaseError as Error | null}
-              selectedProductId={selectedProduct?.id ?? null}
+              selectedProductId={selectedProductId}
               onSelectProduct={showCustomerCart ? handleSelectProduct : undefined}
               addToCartBusyKey={addToCartBusyKey}
+              page={productPage}
+              totalPages={productTotalPages}
+              onPageChange={setProductPage}
               emptyMessage={
-                showcaseProducts.length === 0
+                catalogTotal === 0
                   ? canManageStore
                     ? "Activa «En vitrina» en tus productos desde el panel para mostrarlos aquí."
                     : "no hay articulos aún"
@@ -532,7 +552,7 @@ export default function StorePage() {
                 className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-3 text-left"
                 onClick={() => {
                   setMobilePanelOpen(false);
-                  if (customizing) setSelectedProduct(null);
+                  if (customizing) setSelectedProductId(null);
                   if (viewingPromotion) setSelectedPromotion(null);
                 }}
               >

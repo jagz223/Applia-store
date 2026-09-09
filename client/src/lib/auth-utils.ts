@@ -66,7 +66,7 @@ export function canAccessActivityDashboard(
 }
 
 /**
- * Panel /promociones: admins, asociados con proveedor, profesionales y conductores Go (Car Go / delivery).
+ * Panel /promociones: admins, asociados con proveedor, profesionales y conductores Go (Transporte / delivery).
  */
 export function canAccessPromocionesPanel(
   user: { role?: string; provider?: unknown } | null | undefined,

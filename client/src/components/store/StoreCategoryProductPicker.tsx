@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import { StoreEntityMultiPicker, type SelectedEntity } from "@/components/store/StoreEntityMultiPicker";
-import { useStoreProducts } from "@/hooks/use-store-products";
+import { useStoreProductPickerSearch } from "@/hooks/use-store-products";
 
 export function StoreCategoryProductPicker({
   storeId,
@@ -13,12 +13,15 @@ export function StoreCategoryProductPicker({
   onChange: (next: SelectedEntity[]) => void;
   disabled?: boolean;
 }) {
-  const { data: products = [], isLoading } = useStoreProducts(storeId);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  const options = useMemo(
-    () => products.map((p) => ({ id: p.id, name: p.name })),
-    [products],
-  );
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const { data: options = [], isFetching } = useStoreProductPickerSearch(storeId, debouncedSearch);
 
   return (
     <StoreEntityMultiPicker
@@ -28,8 +31,10 @@ export function StoreCategoryProductPicker({
       selected={selected}
       onChange={onChange}
       options={options}
-      isLoading={isLoading}
+      isLoading={isFetching}
       disabled={disabled}
+      searchMode="remote"
+      onSearchChange={setSearch}
     />
   );
 }

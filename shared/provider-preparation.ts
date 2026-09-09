@@ -2,9 +2,9 @@
  * Campos de preparación del asociado (Firestore): `preparationLevel` es el nombre canónico;
  * `coursesCompleted` se mantiene por compatibilidad con datos antiguos.
  */
-import { MAN_GO_CATEGORY_SLUG, normalizeProviderCategorySlug } from "./default-categories";
+import { TECHNICAL_CATEGORY_SLUG, normalizeProviderCategorySlug } from "./default-categories";
 
-export const TRADE_LISTING_CATEGORY_SLUGS = new Set<string>([MAN_GO_CATEGORY_SLUG]);
+export const TRADE_LISTING_CATEGORY_SLUGS = new Set<string>([TECHNICAL_CATEGORY_SLUG]);
 
 export const PROFESSIONAL_CATEGORY_SLUG = "professional";
 

@@ -1,4 +1,4 @@
-import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
+import type { GoDriverReceiveMode } from "@/lib/taxi-driver-storage";
 import {
   isDriverBubbleOverlaySupported,
   shouldAutoMinimizeDriverBubbleOnHide,
@@ -41,7 +41,7 @@ export function isDriverBubbleMainPath(pathname: string): boolean {
   if (p === "/go/driver" || p === "/driver/go-applia") return true;
   if (
     p.startsWith("/go/taxi/driver") ||
-    p.startsWith("/go/cargo/driver") ||
+    p.startsWith("/go/taxi/driver") ||
     p.startsWith("/go/delivery/driver") ||
     p.startsWith("/go/pack/driver")
   ) {

@@ -19,7 +19,7 @@ type NhtsaResults<T> = {
 const BASE = "https://vpic.nhtsa.dot.gov/api/vehicles";
 const FETCH_TIMEOUT_MS = 4500;
 
-/** Año mínimo que ofrecemos para Car Go. */
+/** Año mínimo que ofrecemos para Transporte. */
 const YEAR_MIN = 1980;
 const YEAR_CHECK_CONCURRENCY = 6;
 const COARSE_STEP_YEARS = 5;

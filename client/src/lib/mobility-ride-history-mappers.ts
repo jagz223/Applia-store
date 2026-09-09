@@ -1,22 +1,22 @@
 import type { MobilityRideHistoryListItem } from "@shared/mobility-ride-history";
-import type { CargoDriverTripLog } from "@/lib/cargo-driver-storage";
-import type { CargoRiderTripLog } from "@/lib/cargo-rider-trip-log";
+import type { TaxiDriverTripLog } from "@/lib/taxi-driver-storage";
+import type { TaxiRiderTripLog } from "@/lib/taxi-rider-trip-log";
 
-export function historyToDriverTripLog(row: MobilityRideHistoryListItem): CargoDriverTripLog {
+export function historyToDriverTripLog(row: MobilityRideHistoryListItem): TaxiDriverTripLog {
   return {
     id: row.id,
     endedAt: row.endedAt,
     durationMin: row.durationMin,
     amountUsd: row.amountUsd,
     payment: row.payment,
-    goSlug: row.module === "pack" ? "pack" : "cargo",
+    goSlug: row.module === "pack" ? "pack" : "taxi",
     outcome: row.outcome,
     statusLabel: row.statusLabel,
     destinationPending: row.destinationPending === true,
   };
 }
 
-export function historyToRiderTripLog(row: MobilityRideHistoryListItem): CargoRiderTripLog & {
+export function historyToRiderTripLog(row: MobilityRideHistoryListItem): TaxiRiderTripLog & {
   outcome: MobilityRideHistoryListItem["outcome"];
   statusLabel: string;
 } {
@@ -27,7 +27,7 @@ export function historyToRiderTripLog(row: MobilityRideHistoryListItem): CargoRi
     amountUsd: row.amountUsd,
     payment: row.payment,
     driverName: row.driverName ?? "—",
-    goSlug: row.module === "pack" ? "pack" : "cargo",
+    goSlug: row.module === "pack" ? "pack" : "taxi",
     outcome: row.outcome,
     statusLabel: row.statusLabel,
   };

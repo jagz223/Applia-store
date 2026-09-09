@@ -1,5 +1,5 @@
-/** Campana audible para ofertas Car Go (sin archivo de audio). */
-export function playCargoOfferBell(): void {
+/** Campana audible para ofertas Transporte (sin archivo de audio). */
+export function playTaxiOfferBell(): void {
   try {
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
@@ -22,12 +22,12 @@ export function playCargoOfferBell(): void {
   }
 }
 
-export function startCargoOfferBellLoop(): { stop: () => void } {
+export function startTaxiOfferBellLoop(): { stop: () => void } {
   let stopped = false;
-  playCargoOfferBell();
+  playTaxiOfferBell();
   const id = window.setInterval(() => {
     if (stopped) return;
-    playCargoOfferBell();
+    playTaxiOfferBell();
   }, 900);
   return {
     stop: () => {

@@ -50,10 +50,10 @@ function chatPushUrlForMobilityConversation(
   const rideId = String(conv.mobilityRideId ?? "").trim();
   const module =
     conv.mobilityRideModule === "delivery" ? ("delivery" as const) : ("taxi" as const);
-  const cargo = rideId ? getMobilityRideChatParticipants(rideId) : null;
-  const pack = rideId && !cargo ? getPackRideChatParticipants(rideId) : null;
-  const participants = cargo ?? pack;
-  const rideModule = cargo ? ("taxi" as const) : pack ? ("delivery" as const) : module;
+  const taxiRide = rideId ? getMobilityRideChatParticipants(rideId) : null;
+  const pack = rideId && !taxiRide ? getPackRideChatParticipants(rideId) : null;
+  const participants = taxiRide ?? pack;
+  const rideModule = taxiRide ? ("taxi" as const) : pack ? ("delivery" as const) : module;
   return buildGoMobilityChatPath(conversationId, {
     recipientUserId: String(recipientUserId),
     module: rideModule,
@@ -1955,28 +1955,28 @@ export async function registerAppliaRoutes(
     }
   });
   
-  // ---------- INTEGRACIÓN CON APP MANGO ----------
+  // ---------- SINCRONIZACIÓN DE CUENTA EXTERNA (legado) ----------
   
-  // POST /api/mango/sync - Sincronizar con ManGo
-  app.post("/api/mango/sync", async (req, res) => {
+  // POST /api/account-sync - Sincronizar cuenta externa (legado)
+  app.post("/api/account-sync", async (req, res) => {
     try {
       const userId = req.headers["x-user-id"] as string;
-      const mangoUserId = req.body.mangoUserId as string;
+      const externalUserId = req.body.externalUserId as string;
       
       if (!userId) {
         return res.status(401).json({ message: "Unauthorized" });
       }
       
-      const sync = await storage.syncWithMango(userId, mangoUserId);
+      const sync = await storage.syncWithExternalAccount(userId, externalUserId);
       res.json(sync);
     } catch (error) {
-      console.error("Error syncing with ManGo:", error);
+      console.error("Error syncing external account:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
   
-  // GET /api/mango/sync/status - Estado de sincronización
-  app.get("/api/mango/sync/status", async (req, res) => {
+  // GET /api/account-sync/status - Estado de sincronización
+  app.get("/api/account-sync/status", async (req, res) => {
     try {
       const userId = req.headers["x-user-id"] as string;
       
@@ -1984,10 +1984,10 @@ export async function registerAppliaRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
       
-      const status = await storage.getMangoSyncStatus(userId);
+      const status = await storage.getExternalAccountSyncStatus(userId);
       res.json(status);
     } catch (error) {
-      console.error("Error fetching ManGo sync status:", error);
+      console.error("Error fetching external account sync status:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });

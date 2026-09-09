@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InsertStoreProduct, UpdateStoreProduct } from "@shared/store-schema";
 import { ingredientMaterialKey } from "@shared/store-slug";
 
@@ -7,6 +7,7 @@ export type StoreProductSizeSummary = {
   name: string;
   pricesByCurrency: Record<string, number>;
   price?: number;
+  priceWithIva?: number;
   weight?: number;
 };
 
@@ -24,6 +25,8 @@ export type StoreProductSummary = {
   description: string | null;
   codigo?: string | null;
   price: number;
+  /** Precio + 16 % IVA (calculado en servidor). */
+  priceWithIva?: number;
   pricesByCurrency?: Record<string, number>;
   sizes?: StoreProductSizeSummary[];
   displayCurrencyId?: string;
@@ -76,24 +79,114 @@ export function useStoreProducts(storeId: number, enabled = true) {
   });
 }
 
+export type StoreProductPickerOption = {
+  id: number;
+  name: string;
+};
+
+export function useStoreProductPickerSearch(
+  storeId: number,
+  search: string,
+  enabled = true,
+) {
+  const q = search.trim();
+  return useQuery({
+    queryKey: [...storeProductsQueryKey(storeId), "picker", q || null],
+    queryFn: async (): Promise<StoreProductPickerOption[]> => {
+      const params = new URLSearchParams({
+        fields: "picker",
+        page: "1",
+        limit: "30",
+      });
+      if (q) params.set("q", q);
+      const res = await fetch(`/api/stores/${storeId}/products?${params}`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+          (err as { message?: string }).message ?? "No se pudieron cargar los productos",
+        );
+      }
+      const data = (await res.json()) as { products: StoreProductPickerOption[] };
+      return data.products;
+    },
+    enabled: enabled && storeId > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export type StoreProductsPageFilters = {
+  search?: string;
+  categoryId?: number | null;
+  subcategoryId?: number | null;
+  priceMin?: number | null;
+  priceMax?: number | null;
+  priceIvaMin?: number | null;
+  priceIvaMax?: number | null;
+};
+
 export function useStoreProductsPage(
   storeId: number,
   page: number,
   limit = 10,
   enabled = true,
-  search = "",
+  filters: StoreProductsPageFilters | string = "",
 ) {
   const safePage = Math.max(1, page);
   const safeLimit = Math.max(1, limit);
-  const q = search.trim();
+  const normalized: StoreProductsPageFilters =
+    typeof filters === "string" ? { search: filters } : filters ?? {};
+  const q = (normalized.search ?? "").trim();
+  const categoryId =
+    normalized.categoryId != null && normalized.categoryId > 0 ? normalized.categoryId : null;
+  const subcategoryId =
+    normalized.subcategoryId != null && normalized.subcategoryId > 0
+      ? normalized.subcategoryId
+      : null;
+  const priceMin =
+    normalized.priceMin != null && Number.isFinite(normalized.priceMin)
+      ? normalized.priceMin
+      : null;
+  const priceMax =
+    normalized.priceMax != null && Number.isFinite(normalized.priceMax)
+      ? normalized.priceMax
+      : null;
+  const priceIvaMin =
+    normalized.priceIvaMin != null && Number.isFinite(normalized.priceIvaMin)
+      ? normalized.priceIvaMin
+      : null;
+  const priceIvaMax =
+    normalized.priceIvaMax != null && Number.isFinite(normalized.priceIvaMax)
+      ? normalized.priceIvaMax
+      : null;
+
   return useQuery({
-    queryKey: [...storeProductsQueryKey(storeId), "page", safePage, safeLimit, q || null],
+    queryKey: [
+      ...storeProductsQueryKey(storeId),
+      "page",
+      safePage,
+      safeLimit,
+      q || null,
+      categoryId,
+      subcategoryId,
+      priceMin,
+      priceMax,
+      priceIvaMin,
+      priceIvaMax,
+    ],
     queryFn: async (): Promise<StoreAdminListPage<StoreProductSummary>> => {
       const params = new URLSearchParams({
         page: String(safePage),
         limit: String(safeLimit),
       });
       if (q) params.set("q", q);
+      if (categoryId) params.set("categoryId", String(categoryId));
+      if (subcategoryId) params.set("subcategoryId", String(subcategoryId));
+      if (priceMin != null) params.set("priceMin", String(priceMin));
+      if (priceMax != null) params.set("priceMax", String(priceMax));
+      if (priceIvaMin != null) params.set("priceIvaMin", String(priceIvaMin));
+      if (priceIvaMax != null) params.set("priceIvaMax", String(priceIvaMax));
       const res = await fetch(`/api/stores/${storeId}/products?${params}`, {
         headers: authHeaders(),
       });
@@ -119,6 +212,7 @@ export function useStoreProductsPage(
       };
     },
     enabled: enabled && storeId > 0,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -253,6 +347,7 @@ export function useIngredientsMaterials(
         useSearchEndpoint: Boolean(q),
       }),
     enabled,
+    placeholderData: keepPreviousData,
   });
 }
 

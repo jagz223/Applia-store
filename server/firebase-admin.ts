@@ -149,7 +149,7 @@ export const FIRESTORE_COLLECTIONS = {
   CATEGORIES: "categories",
   SUB_CATEGORIES: "sub_categories",
   PROVIDERS: "providers",
-  /** Car Go: one document per registered vehicle (linked to `providerId`). */
+  /** Transporte: one document per registered vehicle (linked to `providerId`). */
   VEHICLES: "vehicles",
   SERVICES: "services",
   SERVICE_ADDONS: "service_addons",
@@ -167,7 +167,7 @@ export const FIRESTORE_COLLECTIONS = {
   FINANCIAL_REPORTS: "financial_reports",
   REVIEWS: "reviews",
   REVIEW_STATS: "review_stats",
-  MANGO_SYNC: "mango_sync",
+  ACCOUNT_SYNC: "account_sync",
   PAYMENTS: "payments",
   INVOICES: "invoices",
   _COUNTERS: "_counters",
@@ -191,7 +191,7 @@ export const FIRESTORE_COLLECTIONS = {
    * Usado para popularidad en la home (Explorar).
    */
   STATS_SUBCATEGORY_BOOKINGS_MONTHLY: "stats_subcategory_bookings_monthly",
-  /** Historial persistente de viajes Car Go / Pack Go (completados, cancelados, expirados). */
+  /** Historial persistente de viajes Transporte / envíos (completados, cancelados, expirados). */
   MOBILITY_RIDE_HISTORY: "mobility_ride_history",
   /** Motivos de cancelación Go (taxi + delivery) para revisión admin. */
   GO_CANCELLATION_FEEDBACK: "go_cancellation_feedback",

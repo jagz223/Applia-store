@@ -180,12 +180,12 @@
 
 @layer components {
   /* Card with brand gradient */
-  .card-mango {
+  .card-brand {
     @apply bg-card border border-border rounded-lg p-6 shadow-lg;
     background: linear-gradient(145deg, hsl(var(--card)), hsl(var(--card)) / 0.9);
   }
   
-  .card-mango:hover {
+  .card-brand:hover {
     @apply border-primary/50;
     box-shadow:
       0 4px 30px hsl(var(--primary) / 0.12),
@@ -193,7 +193,7 @@
   }
   
   /* Glassmorphism effect */
-  .glass-mango {
+  .glass-brand {
     @apply bg-card/80 backdrop-blur-xl border border-white/10;
   }
   
@@ -253,7 +253,7 @@
   }
   
   /* Input styles */
-  .input-mango {
+  .input-brand {
     @apply bg-input border-border text-foreground placeholder:text-muted-foreground;
     @apply focus:ring-2 focus:ring-primary/50 focus:border-primary;
     @apply transition-all duration-200;
@@ -317,7 +317,7 @@
 
 @layer components {
   /**
-   * Car Go (Leaflet): el contenedor raíz debe tener altura en px/vh.
+   * Transporte (Leaflet): el contenedor raíz debe tener altura en px/vh.
    * Si solo hay `height: 100%` en `.leaflet-container` sin padre con alto, el mapa queda en 0 px.
    */
   .taxi-leaflet-wrapper {
@@ -374,7 +374,7 @@
     border-radius: 0.75rem;
   }
 
-  /** Car Go conductor (zoom a la derecha): margen fino para no pegar al borde / cabecera del shell. */
+  /** Transporte conductor (zoom a la derecha): margen fino para no pegar al borde / cabecera del shell. */
   .applia-driver-map-fs .leaflet-top.leaflet-right {
     margin-top: 0.5rem !important;
     margin-right: 0.5rem !important;
@@ -390,7 +390,7 @@
   }
 
   /**
-   * Car Go cliente (mapa fullscreen en móvil): anular min-height fijo del wrapper taxi para que flex/100%
+   * Transporte cliente (mapa fullscreen en móvil): anular min-height fijo del wrapper taxi para que flex/100%
    * rellene el main; si no, el mapa queda colapsado al reiniciar (padre sin alto).
    */
   .taxi-leaflet-wrapper.applia-taxi-route-fs {
@@ -406,7 +406,7 @@
   }
   /**
    * Zoom cliente móvil: esquina inferior izquierda.
-   * IMPORTANTE: en Car Go móvil hay overlays (Continuar / cards) encima del mapa; si el zoom queda muy abajo,
+   * IMPORTANTE: en Transporte móvil hay overlays (Continuar / cards) encima del mapa; si el zoom queda muy abajo,
    * el botón "−" se tapa y deja de recibir tap. Por eso lo subimos.
    */
   .applia-taxi-route-fs .leaflet-bottom.leaflet-left {

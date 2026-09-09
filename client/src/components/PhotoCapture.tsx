@@ -148,7 +148,7 @@ export function PhotoCapture({ isOpen, onOpenChange, onCapture }: PhotoCapturePr
               <img 
                 src={capturedImage} 
                 alt="Captura" 
-                className="w-[85%] h-[85%] object-cover rounded-full ring-4 ring-mango-orange shadow-2xl" 
+                className="w-[85%] h-[85%] object-cover rounded-full ring-4 ring-primary shadow-2xl" 
               />
             </div>
           )}
@@ -188,7 +188,7 @@ export function PhotoCapture({ isOpen, onOpenChange, onCapture }: PhotoCapturePr
               </Button>
               <Button
                 onClick={confirmPhoto}
-                className="flex-1 h-12 bg-mango-orange hover:bg-mango-orange/90 text-white font-bold"
+                className="flex-1 h-12 bg-primary hover:bg-primary/90 text-white font-bold"
               >
                 <Check className="h-4 w-4 mr-2" />
                 Aceptar

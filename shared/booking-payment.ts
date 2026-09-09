@@ -1,4 +1,4 @@
-/** Reserva de servicio (no Car Go): efectivo o transferencia no pasan por el flujo de pago seguro en cartera. */
+/** Reserva de servicio (no Transporte): efectivo o transferencia no pasan por el flujo de pago seguro en cartera. */
 export function isOffPlatformServiceBookingPayment(method: string | undefined | null): boolean {
   return method === "cash" || method === "bank_transfer";
 }

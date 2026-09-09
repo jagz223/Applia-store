@@ -12,7 +12,7 @@ export function validateAssignableServiceCategory(category: Category | undefined
   if (!isCatalogAssignableServiceCategorySlug(slug)) {
     return {
       ok: false,
-      message: "Solo puedes publicar en categorías de catálogo: Man Go o Pro Go.",
+      message: "Solo puedes publicar en categorías de catálogo: Servicios técnicos o Servicios profesionales.",
     };
   }
   return { ok: true };
@@ -25,7 +25,7 @@ export type ProviderServiceRow = {
 };
 
 /**
- * Man Go / Pro Go: una ficha por subcategoría (p. ej. computación y plomería por separado).
+ * Servicios técnicos / Servicios profesionales: una ficha por subcategoría (p. ej. computación y plomería por separado).
  * Otras categorías de catálogo sin subcategoría obligatoria: una ficha por categoría.
  */
 export function providerHasDuplicateCatalogService(

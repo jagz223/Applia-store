@@ -265,7 +265,7 @@ export function getPackOnlineDriversSnapshot(): ReadonlyMap<string, PackDriverPr
   return out;
 }
 
-export type UpsertCargoPresenceInput = {
+export type UpsertTaxiPresenceInput = {
   userId: string;
   receiving: boolean;
   vehicleType: string;
@@ -276,7 +276,7 @@ export type UpsertCargoPresenceInput = {
   idleOnMapDuringRide?: boolean;
 };
 
-export function upsertCargoDriverPresence(input: UpsertCargoPresenceInput): TaxiDriverPresenceView {
+export function upsertTaxiDriverPresence(input: UpsertTaxiPresenceInput): TaxiDriverPresenceView {
   const prev = memory.get(input.userId);
   const receiving = !!input.receiving;
   const idle = !!input.idleOnMapDuringRide;
@@ -331,7 +331,7 @@ export function upsertPackDriverPresence(input: UpsertPackPresenceInput): PackDr
 }
 
 /** Marca taxi offline; conserva delivery si aplica. */
-export function clearCargoDriverPresence(userId: string, opts?: { idleOnMapDuringRide?: boolean }): void {
+export function clearTaxiDriverPresence(userId: string, opts?: { idleOnMapDuringRide?: boolean }): void {
   const prev = memory.get(userId);
   if (!prev) return;
   const idle = !!opts?.idleOnMapDuringRide;

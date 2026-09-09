@@ -1,5 +1,5 @@
 /**
- * Car Go = categoría de proveedor con slug `transport` (nombre comercial Car Go).
+ * Transporte = categoría de proveedor con slug `transport`.
  */
 
 import { isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categories";
@@ -12,8 +12,8 @@ export type ProviderCategoryRef = {
 export type CategorySlugRow = { id: number; slug?: string | null };
 
 /**
- * Conductor Go con vehículo: categoría o marcas Car Go (`transport`, `delivery`).
- * @see CAR_GO_BRAND_SLUGS
+ * Conductor con vehículo: categoría o marcas de transporte (`transport`, `delivery`).
+ * @see TRANSPORT_BRAND_SLUGS
  */
 export function isGoVehicleProvider(
   provider: ProviderCategoryRef | null | undefined,
@@ -36,11 +36,10 @@ export function isGoVehicleProvider(
   return false;
 }
 
-export function isCarGoProvider(
+export function isTransportProvider(
   provider: ProviderCategoryRef | null | undefined,
   categories?: readonly CategorySlugRow[]
 ): boolean {
-  // Back-compat: Car Go es el módulo "transport". Si el provider tiene `goBrands`, también lo respetamos.
   const p = provider as (ProviderCategoryRef & { goBrands?: string[] | null }) | null | undefined;
   if (!p) return false;
   if (Array.isArray(p.goBrands) && p.goBrands.map((s) => String(s ?? "").trim().toLowerCase()).includes("transport")) return true;

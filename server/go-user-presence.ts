@@ -2,7 +2,7 @@
 const DRIVER_VIEW_PATH_PREFIXES = [
   "/go/driver",
   "/go/taxi/driver",
-  "/go/cargo/driver",
+  "/go/taxi/driver",
   "/go/delivery/driver",
   "/go/pack/driver",
 ] as const;

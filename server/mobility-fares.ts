@@ -1,5 +1,5 @@
 /**
- * Tarifas de Movilidad y envíos (Car Go / Delivery / Carga) configurables.
+ * Tarifas de Movilidad y envíos (Transporte / Delivery / Carga) configurables.
  * Persistencia: Firestore platform_settings/global. Fallback: valores por defecto en memoria.
  */
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";
@@ -15,7 +15,7 @@ export type MobilityFares = {
 export const DEFAULT_MOBILITY_FARES: MobilityFares = {
   // Delivery / Compras
   moto: { baseUsd: 1.75, perKmUsd: 0.5 },
-  // Transporte personas (Car Go)
+  // Transporte personas (Transporte)
   auto: { baseDayUsd: 1.5, baseNightUsd: 1.75, perKmUsd: 0.85, petExtraUsd: 1.0 },
   // Carga / Personas+ (flete local)
   camioneta: { baseUsd: 20.0, perKmUsd: 1.25, petExtraUsd: 2.0 },

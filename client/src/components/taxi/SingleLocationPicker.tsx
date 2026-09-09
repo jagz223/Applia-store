@@ -56,7 +56,7 @@ export interface SingleLocationPickerProps {
 }
 
 /**
- * Un solo punto en el mapa (Leaflet + misma API `/api/maps/*` que Car Go): búsqueda, toque en mapa o GPS.
+ * Un solo punto en el mapa (Leaflet + misma API `/api/maps/*` que Transporte): búsqueda, toque en mapa o GPS.
  */
 export function SingleLocationPicker({
   value,

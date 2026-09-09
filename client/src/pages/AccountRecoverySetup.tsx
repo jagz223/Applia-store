@@ -111,7 +111,7 @@ export default function AccountRecoverySetup() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-mango-orange/15 via-background to-mango-green/15 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/15 via-background to-secondary/15 p-4">
       <Card className="w-full max-w-xl">
         <CardHeader>
           <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InsertStoreCategory, UpdateStoreCategory } from "@shared/store-schema";
 import {
   storeProductsQueryKey,
@@ -14,6 +14,7 @@ export type StoreCategorySummary = {
   sortOrder?: number;
   productIds: number[];
   productCount: number;
+  productSummaries?: { id: number; name: string }[];
   createdAt: string;
   updatedAt: string;
 };
@@ -86,6 +87,25 @@ export function useStoreCategoriesPage(
       };
     },
     enabled: enabled && storeId > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useStoreCategory(storeId: number, categoryId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: [...storeCategoriesQueryKey(storeId), "detail", categoryId],
+    queryFn: async (): Promise<StoreCategorySummary> => {
+      const res = await fetch(`/api/stores/${storeId}/categories/${categoryId}`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { message?: string }).message ?? "No se pudo cargar la categoría");
+      }
+      const data = (await res.json()) as { category: StoreCategorySummary };
+      return data.category;
+    },
+    enabled: enabled && storeId > 0 && categoryId != null && categoryId > 0,
   });
 }
 

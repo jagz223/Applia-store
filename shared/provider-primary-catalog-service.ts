@@ -1,7 +1,7 @@
 import { isCatalogAssignableServiceCategorySlug } from "./catalog-service-categories";
 import { normalizeProviderCategorySlug } from "./default-categories";
 
-/** Referencia mínima de un servicio de catálogo (Man Go / Pro Go). */
+/** Referencia mínima de un servicio de catálogo (Servicios técnicos / Servicios profesionales). */
 export type CatalogServiceIdentity = {
   id: number;
   categoryId?: number | null;

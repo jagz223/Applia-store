@@ -52,11 +52,11 @@ Actividades transversales durante el mes:
 
 Durante el período se realizaron mejoras importantes en siete áreas principales:
 
-  1. TIENDA EN LÍNEA (Marketplace / Shop Go)
+  1. TIENDA EN LÍNEA (Marketplace / Marketplace)
      Módulo completo de vitrina, carrito, checkout, pedidos, entrega y admin
      de tienda (API REST + Firestore + notificaciones).
 
-  2. SERVICIO DE TAXI Y DELIVERY (Go — Car Go / Pack Go)
+  2. SERVICIO DE TAXI Y DELIVERY (Go — Transporte / envíos)
      Correcciones en TaxiRide, DriverGoApplia, negociación, cancelaciones con
      feedback y APIs mobility-rides / pack-rides.
 
@@ -98,7 +98,7 @@ Cambios para el DUEÑO DE TIENDA:
     de entrega, tarifas de envío).
 
 Integración en categorías:
-  - Carta Shop Go en Home y Categorías, con enlace a /tiendas (catálogo de
+  - Carta Marketplace en Home y Categorías, con enlace a /tiendas (catálogo de
     todas las tiendas).
 
 Detalle técnico (código) — commit "market place" (~60 archivos, +8544 líneas):
@@ -163,7 +163,7 @@ Detalle técnico — cancelaciones Go (23 archivos, +1601 líneas):
   Cliente:
     - GoCancellationFeedbackDialog.tsx integrado en TaxiRide y DriverGoApplia.
     - TaxiVehicleSearchModal / CargoIncomingRideDialog — validación búsqueda y
-      ofertas negociadas vía Socket.IO (cargo:ride:* / pack:ride:*).
+      ofertas negociadas vía Socket.IO (taxi:ride:* / pack:ride:*).
 
 Iteraciones Fix Taxi 1.0–1.4:
   - Ajustes en TaxiRide.tsx, mobility-rides.ts, mapas y flujo de match.
@@ -179,7 +179,7 @@ Iteraciones Fix Taxi 1.0–1.4:
 
 Detalle técnico:
   - Código Android / Capacitor / TWA en repo (switch functions and bubble app).
-  - Sincronización con GoDriverSessionContext y socket cargo:ride:location.
+  - Sincronización con GoDriverSessionContext y socket taxi:ride:location.
   - Permiso SYSTEM_ALERT_WINDOW (overlay) documentado en flujo conductor.
 
 
@@ -223,13 +223,13 @@ Detalle técnico — Map fixes:
     - TaxiRide.tsx, DriverGoApplia.tsx — handleDriverRoutePosition refactorizado.
     - CentralDashboard.tsx + CentralAdminScopeTabs.tsx — vista flota global admin.
     - use-central.ts — useCentralFleetAll(), CENTRAL_FLEET_ALL_QUERY_KEY.
-    - Home.tsx / Categories.tsx — carta Shop Go → /tiendas.
+    - Home.tsx / Categories.tsx — carta Marketplace → /tiendas.
   Servidor:
     - maps-route-service.ts — caché live 45 s vs planificación 5 min.
     - routes-central.ts — GET /api/central/fleet/all, buildCentralFleetDriver().
     - central-fleet-notify.ts — sala central:fleet:all (Socket.IO).
   Shared:
-    - default-categories.ts — display name "Shop Go" (slug marketplace).
+    - default-categories.ts — display name "Marketplace" (slug marketplace).
 
 
 --------------------------------------------------------------------------------
@@ -253,7 +253,7 @@ Detalle técnico — Map fixes:
   8. Estabilización pre-burbuja, pruebas de ofertas conductor.
   9. Modo burbuja, alertas conductor, scroll menú, APK.
  10. Cancelaciones Go + admin, registro/cámara, ProviderTermsGate.
- 11. Pruebas de integración, rutas en vivo, Shop Go en categorías.
+ 11. Pruebas de integración, rutas en vivo, Marketplace en categorías.
  12. Map fixes — Geoapify live, panel central todos los conductores.
  13. Consolidación y pruebas pre-producción.
  14. Redespliegue en Render (producción).
@@ -285,7 +285,7 @@ Detalle técnico — Map fixes:
     server/routes-admin.ts, client/src/pages/Admin.tsx
 
   REALTIME
-    Socket.IO: cargo:ride:*, pack:ride:*, central:fleet:update
+    Socket.IO: taxi:ride:*, pack:ride:*, central:fleet:update
 
   BASE DE DATOS
     Firestore (firebase-admin.ts): usuarios, pedidos tienda, viajes Go,
@@ -324,7 +324,7 @@ redespliegue de la aplicación en Render (plataforma de hosting en la nube):
   - Variables de entorno de producción (Firebase, Geoapify, JWT, FRONTEND_URL).
   - Verificación post-deploy: health check /api/health, rutas Go, tiendas y login.
   - Objetivo: publicar en producción todos los cambios del período (marketplace,
-    burbuja, cancelaciones Go, mapas en vivo, panel central y Shop Go).
+    burbuja, cancelaciones Go, mapas en vivo, panel central y Marketplace).
 
 Documentación de referencia en repo: docs/SERVIDORES_GRATUITOS_DEMO.md (Render).
 

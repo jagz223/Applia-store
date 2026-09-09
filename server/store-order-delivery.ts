@@ -111,7 +111,7 @@ function requireDeliveryLocations(
   };
 }
 
-/** Inicia búsqueda Pack Go para una orden ya en listo_para_envio. */
+/** Inicia búsqueda envíos para una orden ya en listo_para_envio. */
 export async function launchStoreOrderDeliverySearch(
   order: StoreOrder,
   store: Store,
@@ -184,7 +184,7 @@ export async function handleStoreOrderStatusListoParaEnvio(
     normalizeStoreLocation(store.location ?? null);
   requireDeliveryLocations(storeLocation, order.deliveryLocation);
 
-  // La tienda envía el pedido; ya no se inicia búsqueda Pack Go automática.
+  // La tienda envía el pedido; ya no se inicia búsqueda envíos automática.
   return appliaStorage.updateStoreOrderStatus(storeId, orderId, "listo_para_envio");
 }
 
@@ -347,6 +347,7 @@ export async function getStoreDeliveryNotificationsSummary(
   const orders = await appliaStorage.listStoreOrders(storeId, {
     deliveryQueue: true,
     branchId: branchId?.trim() || undefined,
+    limit: 150,
   });
   let totalUnread = 0;
   const byOrderId: Record<number, number> = {};

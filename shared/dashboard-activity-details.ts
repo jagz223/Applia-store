@@ -8,14 +8,14 @@ import type {
 
 function brandDisplayName(brand: AssociateActivityBrand): string {
   switch (brand) {
-    case "man_go":
-      return "Man Go";
-    case "pro_go":
-      return "Pro Go";
-    case "car_go":
-      return "Car Go";
-    case "pack_go":
-      return "Pack Go";
+    case "technical":
+      return "Servicios técnicos";
+    case "professional":
+      return "Servicios profesionales";
+    case "transport":
+      return "Transporte";
+    case "delivery":
+      return "Envíos";
     case "marketplace":
       return "Marketplace";
     case "subscription":
@@ -90,9 +90,9 @@ function formatIsoDateTime(iso: string | null | undefined): string {
   });
 }
 
-/** Man Go / Pro Go: no mostrar forma de pago en el resumen del dashboard. */
+/** Servicios técnicos / Servicios profesionales: no mostrar forma de pago en el resumen del dashboard. */
 export function shouldHidePaymentMethodInBookingDetail(brand: AssociateActivityBrand): boolean {
-  return brand === "man_go" || brand === "pro_go";
+  return brand === "technical" || brand === "professional";
 }
 
 function formatPaymentMethod(raw?: string | null): string {
@@ -148,7 +148,7 @@ export function buildBookingActivityDetail(
   }
 
   const cost = typeof booking.cost === "number" ? booking.cost : Number(booking.cost);
-  if (Number.isFinite(cost) && cost > 0 && (brand === "car_go" || brand === "pack_go")) {
+  if (Number.isFinite(cost) && cost > 0 && (brand === "transport" || brand === "delivery")) {
     rows.push(row("Monto acordado", `${cost.toFixed(2)} USD`));
   }
 
@@ -224,7 +224,7 @@ export function buildWalletPaymentActivityDetail(
   if (amountUsd != null && Number.isFinite(amountUsd)) {
     rows.push(row("Monto", `${amountUsd.toFixed(2)} USD`));
   }
-  const mobilityId = referenceId?.match(/^cargo:(.+)$/i)?.[1];
+  const mobilityId = referenceId?.match(/^taxi:(.+)$/i)?.[1];
   return {
     rows,
     mobilityRideId: mobilityId,

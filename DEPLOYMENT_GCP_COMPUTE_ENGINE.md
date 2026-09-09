@@ -203,10 +203,10 @@ gcloud sql instances create applia-db \
     --enable-google-owned-connection-plugin
 
 # Create database
-gcloud sql databases create mango_db --instance=applia-db
+gcloud sql databases create applia_db --instance=applia-db
 
 # Create user
-gcloud sql users create mango --instance=applia-db --password=mango_pass_strong
+gcloud sql users create applia --instance=applia-db --password=applia_pass_strong
 
 # Get connection string
 gcloud sql instances describe applia-db
@@ -215,7 +215,7 @@ gcloud sql instances describe applia-db
 
 **Connection String (for .env):**
 ```
-postgresql://mango:mango_pass_strong@/mango_db?host=/cloudsql/PROJECT_ID:us-central1-a:applia-db
+postgresql://applia:applia_pass_strong@/applia_db?host=/cloudsql/PROJECT_ID:us-central1-a:applia-db
 ```
 
 ### Option B: Self-Hosted PostgreSQL on VM
@@ -234,9 +234,9 @@ sudo apt-get install -y postgresql-16
 sudo -u postgres psql
 
 # In PostgreSQL console:
-CREATE USER mango WITH PASSWORD 'mango_pass_strong';
-CREATE DATABASE mango_db OWNER mango;
-GRANT ALL PRIVILEGES ON DATABASE mango_db TO mango;
+CREATE USER applia WITH PASSWORD 'applia_pass_strong';
+CREATE DATABASE applia_db OWNER applia;
+GRANT ALL PRIVILEGES ON DATABASE applia_db TO applia;
 
 # Exit psql
 \q
@@ -244,7 +244,7 @@ GRANT ALL PRIVILEGES ON DATABASE mango_db TO mango;
 
 **Connection String (for .env):**
 ```
-postgresql://mango:mango_pass_strong@localhost:5432/mango_db
+postgresql://applia:applia_pass_strong@localhost:5432/applia_db
 ```
 
 ---
@@ -553,7 +553,7 @@ Create `/var/www/applia/.env`:
 # ===========================================
 
 # Database - Cloud SQL
-DATABASE_URL=postgresql://mango:mango_pass_strong@/mango_db?host=/cloudsql/PROJECT_ID:us-central1-a:applia-db
+DATABASE_URL=postgresql://applia:applia_pass_strong@/applia_db?host=/cloudsql/PROJECT_ID:us-central1-a:applia-db
 
 # Enable PostgreSQL
 ENABLE_DATABASE=true

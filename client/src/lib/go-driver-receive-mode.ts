@@ -1,4 +1,4 @@
-import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
+import type { GoDriverReceiveMode } from "@/lib/taxi-driver-storage";
 
 export type { GoDriverReceiveMode };
 
@@ -14,10 +14,10 @@ export function isReceivingAnyGoMode(mode: GoDriverReceiveMode): boolean {
   return mode !== "off";
 }
 
-export function receiveModeToGoSlug(mode: GoDriverReceiveMode): "cargo" | "pack" {
-  return mode === "delivery" ? "pack" : "cargo";
+export function receiveModeToGoSlug(mode: GoDriverReceiveMode): "taxi" | "pack" {
+  return mode === "delivery" ? "pack" : "taxi";
 }
 
-export function goSlugToReceiveMode(slug: "cargo" | "pack"): GoDriverReceiveMode {
+export function goSlugToReceiveMode(slug: "taxi" | "pack"): GoDriverReceiveMode {
   return slug === "pack" ? "delivery" : "taxi";
 }

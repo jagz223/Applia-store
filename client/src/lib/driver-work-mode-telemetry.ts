@@ -1,5 +1,5 @@
 import type { Socket } from "socket.io-client";
-import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
+import type { GoDriverReceiveMode } from "@/lib/taxi-driver-storage";
 
 export function emitDriverWorkModeTelemetry(
   socket: Socket | null | undefined,

@@ -5,9 +5,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: mango
-      POSTGRES_PASSWORD: mango_pass
-      POSTGRES_DB: mango_db
+      POSTGRES_USER: applia
+      POSTGRES_PASSWORD: applia_pass
+      POSTGRES_DB: applia_db
     volumes:
       - pgdata:/var/lib/postgresql/data
 volumes:

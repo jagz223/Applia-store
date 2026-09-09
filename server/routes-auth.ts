@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { vehicleChangeProposalSchema } from "@shared/vehicle-change-proposal";
 import { isMobilityGoDriverVehicleCategorySlug } from "@shared/default-categories";
-import { isGoVehicleProvider } from "@shared/provider-car-go";
+import { isGoVehicleProvider } from "@shared/provider-transport";
 import { notifyFullAdminsPendingAccountChangeRequest } from "./account-change-notify-admins";
 import { appliaStorage } from "./storage-applia";
 import { PUBLIC_REGISTER_ROLES, normalizePhone } from "@shared/admin-user-registration";

@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import {
   useCreateStoreCategory,
+  useStoreCategory,
   useUpdateStoreCategory,
-  productsFromIds,
   type StoreCategorySummary,
 } from "@/hooks/use-store-categories";
 import { useStoreSubcategories } from "@/hooks/use-store-subcategories";
-import { useStoreProducts } from "@/hooks/use-store-products";
 import type { SelectedEntity } from "@/components/store/StoreEntityMultiPicker";
 import { StoreCategoryProductPicker } from "@/components/store/StoreCategoryProductPicker";
 import {
@@ -47,7 +46,11 @@ export function StoreCategoryFormDialog({
 }) {
   const { toast } = useToast();
   const isEdit = category != null;
-  const { data: products = [] } = useStoreProducts(storeId, open);
+  const { data: categoryDetail } = useStoreCategory(
+    storeId,
+    isEdit ? category?.id ?? null : null,
+    open && isEdit,
+  );
   const { data: existingSubs = [] } = useStoreSubcategories(
     storeId,
     open && isEdit,
@@ -70,6 +73,7 @@ export function StoreCategoryFormDialog({
       setName(category.name);
       setDescription(category.description ?? "");
       setHideFromShowcaseAll(category.hideFromShowcaseAll === true);
+      setSelectedProducts([]);
     } else {
       setName("");
       setDescription("");
@@ -80,9 +84,16 @@ export function StoreCategoryFormDialog({
   }, [open, category]);
 
   useEffect(() => {
-    if (!open || !category || products.length === 0) return;
-    setSelectedProducts(productsFromIds(products, category.productIds ?? []));
-  }, [open, category, products]);
+    if (!open || !isEdit || !categoryDetail) return;
+    if (category && categoryDetail.id !== category.id) return;
+    if (categoryDetail.productSummaries && categoryDetail.productSummaries.length > 0) {
+      setSelectedProducts(categoryDetail.productSummaries);
+      return;
+    }
+    setSelectedProducts(
+      (categoryDetail.productIds ?? []).map((id) => ({ id, name: `Producto #${id}` })),
+    );
+  }, [open, isEdit, category, categoryDetail]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

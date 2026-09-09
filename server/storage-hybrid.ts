@@ -247,8 +247,8 @@ export class HybridStorage {
   getMyAccountChangeRequests(userId: string) { return this.delegate("getMyAccountChangeRequests", [userId]); }
   getPendingAccountChangeRequests() { return this.delegate("getPendingAccountChangeRequests", []); }
   resolveAccountChangeRequest(args: any) { return this.delegate("resolveAccountChangeRequest", [args]); }
-  syncWithMango(userId: string, mangoUserId: string) { return this.memory.syncWithMango(userId, mangoUserId); }
-  getMangoSyncStatus(userId: string) { return this.memory.getMangoSyncStatus(userId); }
+  syncWithExternalAccount(userId: string, externalUserId: string) { return this.memory.syncWithExternalAccount(userId, externalUserId); }
+  getExternalAccountSyncStatus(userId: string) { return this.memory.getExternalAccountSyncStatus(userId); }
   getReviews(params: any) { return this.memory.getReviews(params); }
   getReviewStats(targetId: string, targetType: string) { return this.memory.getReviewStats(targetId, targetType); }
   createReview(review: any) { return this.memory.createReview(review); }

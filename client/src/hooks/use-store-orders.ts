@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
 import type { StoreLocation } from "@shared/store-schema";
@@ -61,10 +61,16 @@ export type StoreOrderListFilters = {
   dateTo?: string;
   deliveryQueue?: boolean;
   branchId?: string;
+  page?: number;
+  limit?: number;
 };
 
 export type StoreOrdersListResponse = {
   orders: StoreOrderSummary[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
   branchFilterLocked: boolean;
   employeeBranchId: string | null;
   canFilterOrdersByBranch: boolean;
@@ -89,6 +95,8 @@ export function useStoreOrders(storeId: number, filters?: StoreOrderListFilters,
       if (filters?.dateTo?.trim()) params.set("dateTo", filters.dateTo.trim());
       if (filters?.deliveryQueue) params.set("deliveryQueue", "true");
       if (filters?.branchId?.trim()) params.set("branchId", filters.branchId.trim());
+      if (filters?.page && filters.page > 0) params.set("page", String(filters.page));
+      if (filters?.limit && filters.limit > 0) params.set("limit", String(filters.limit));
       const qs = params.toString();
       const res = await fetch(`/api/stores/${storeId}/orders${qs ? `?${qs}` : ""}`, {
         headers: authHeaders(),
@@ -99,18 +107,29 @@ export function useStoreOrders(storeId: number, filters?: StoreOrderListFilters,
       }
       const data = (await res.json()) as {
         orders: StoreOrderSummary[];
+        total?: number;
+        page?: number;
+        limit?: number;
+        totalPages?: number;
         branchFilterLocked?: boolean;
         employeeBranchId?: string | null;
         canFilterOrdersByBranch?: boolean;
       };
+      const total = data.total ?? data.orders.length;
+      const pageLimit = data.limit ?? filters?.limit ?? data.orders.length;
       return {
         orders: data.orders,
+        total,
+        page: data.page ?? filters?.page ?? 1,
+        limit: pageLimit,
+        totalPages: data.totalPages ?? Math.max(1, Math.ceil(total / Math.max(1, pageLimit))),
         branchFilterLocked: Boolean(data.branchFilterLocked),
         employeeBranchId: data.employeeBranchId ?? null,
         canFilterOrdersByBranch: Boolean(data.canFilterOrdersByBranch),
       };
     },
     enabled: enabled && storeId > 0,
+    placeholderData: keepPreviousData,
   });
 }
 

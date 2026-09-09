@@ -150,9 +150,9 @@ export function useGetOrCreateConversation() {
     }: {
       participantId: string;
       serviceId?: number;
-      /** Solo reutiliza el hilo de esa reserva (Pro Go / Man Go). */
+      /** Solo reutiliza el hilo de esa reserva (Servicios profesionales / Servicios técnicos). */
       bookingId?: number;
-      /** Solo reutiliza el hilo de ese viaje (Car Go / Delivery). */
+      /** Solo reutiliza el hilo de ese viaje (Transporte / Delivery). */
       mobilityRideId?: string;
     }) => {
       const list = await chatApi.getConversations();
@@ -166,7 +166,7 @@ export function useGetOrCreateConversation() {
       });
       if (existing) return existing.id;
 
-      // Car Go / Delivery: el hilo lo crea el servidor al emparejar; no abrir chat genérico con el mismo usuario.
+      // Transporte / Delivery: el hilo lo crea el servidor al emparejar; no abrir chat genérico con el mismo usuario.
       if (hasRideScope) {
         throw new Error("El chat del viaje aún no está disponible. Espera a que se confirme el servicio.");
       }

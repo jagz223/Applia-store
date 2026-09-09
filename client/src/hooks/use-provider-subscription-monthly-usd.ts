@@ -4,11 +4,11 @@ import {
   useCurrentProvider,
   useMyServices,
   usePlatformSubscriptionFees,
-} from "@/hooks/use-mango-data";
+} from "@/hooks/use-provider-data";
 import { subscriptionMonthlyUsdForProvider } from "@shared/provider-subscription-fee";
 import { DEFAULT_SUBSCRIPTION_FEE_USD, formatSubscriptionUsdLabel } from "@shared/subscription-category-fees";
 
-/** Mensualidad USD del asociado actual (máximo entre sus líneas Man Go / Pro Go / Car Go, etc.). */
+/** Mensualidad USD del asociado actual (máximo entre sus líneas Servicios técnicos / Servicios profesionales / Transporte, etc.). */
 export function useProviderSubscriptionMonthlyUsd(options?: { enabled?: boolean }) {
   const enabled = options?.enabled !== false;
   const { data: provider } = useCurrentProvider();

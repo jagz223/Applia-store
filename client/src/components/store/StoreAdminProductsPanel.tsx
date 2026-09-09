@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { Eye, FileSpreadsheet, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import {
@@ -7,6 +7,8 @@ import {
   useUpdateStoreProduct,
   type StoreProductSummary,
 } from "@/hooks/use-store-products";
+import { useStoreCategories } from "@/hooks/use-store-categories";
+import { useStoreSubcategories } from "@/hooks/use-store-subcategories";
 import { StoreProductFormDialog } from "@/components/store/StoreProductFormDialog";
 import { StoreProductDetailDialog } from "@/components/store/StoreProductDetailDialog";
 import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
@@ -19,6 +21,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -45,6 +54,7 @@ import {
   currencyLabelForId,
   type StoreCurrencyExtra,
 } from "@shared/store-currency-schema";
+import { priceWithIva } from "@shared/store-price-iva";
 
 function formatPrice(value: number, currencyLabel?: string) {
   const amount = new Intl.NumberFormat("es-VE", {
@@ -52,6 +62,19 @@ function formatPrice(value: number, currencyLabel?: string) {
     maximumFractionDigits: 2,
   }).format(value);
   return currencyLabel ? `${amount} ${currencyLabel}` : amount;
+}
+
+function parseOptionalAmount(raw: string): number | null {
+  const t = raw.trim().replace(",", ".");
+  if (!t) return null;
+  const n = Number.parseFloat(t);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function productPriceWithIva(product: StoreProductSummary): number {
+  return typeof product.priceWithIva === "number" && Number.isFinite(product.priceWithIva)
+    ? product.priceWithIva
+    : priceWithIva(product.price);
 }
 
 function ProductThumbnail({ imageUrls }: { imageUrls: string[] }) {
@@ -194,6 +217,16 @@ export function StoreAdminProductsPanel({
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [categoryId, setCategoryId] = useState<string>("all");
+  const [subcategoryId, setSubcategoryId] = useState<string>("all");
+  const [priceMinInput, setPriceMinInput] = useState("");
+  const [priceMaxInput, setPriceMaxInput] = useState("");
+  const [priceIvaMinInput, setPriceIvaMinInput] = useState("");
+  const [priceIvaMaxInput, setPriceIvaMaxInput] = useState("");
+  const [debouncedPriceMin, setDebouncedPriceMin] = useState<number | null>(null);
+  const [debouncedPriceMax, setDebouncedPriceMax] = useState<number | null>(null);
+  const [debouncedPriceIvaMin, setDebouncedPriceIvaMin] = useState<number | null>(null);
+  const [debouncedPriceIvaMax, setDebouncedPriceIvaMax] = useState<number | null>(null);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -204,12 +237,63 @@ export function StoreAdminProductsPanel({
     return () => window.clearTimeout(t);
   }, [search]);
 
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedPriceMin(parseOptionalAmount(priceMinInput));
+      setDebouncedPriceMax(parseOptionalAmount(priceMaxInput));
+      setDebouncedPriceIvaMin(parseOptionalAmount(priceIvaMinInput));
+      setDebouncedPriceIvaMax(parseOptionalAmount(priceIvaMaxInput));
+      setPage(1);
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [priceMinInput, priceMaxInput, priceIvaMinInput, priceIvaMaxInput]);
+
+  const selectedCategoryId = categoryId === "all" ? null : Number.parseInt(categoryId, 10);
+  const selectedSubcategoryId =
+    subcategoryId === "all" ? null : Number.parseInt(subcategoryId, 10);
+
+  const { data: categories = [] } = useStoreCategories(storeId, true);
+  const { data: subcategories = [] } = useStoreSubcategories(
+    storeId,
+    true,
+    selectedCategoryId,
+  );
+
+  const filteredSubcategories = useMemo(() => {
+    if (!selectedCategoryId) return subcategories;
+    return subcategories.filter((s) => s.categoryId === selectedCategoryId);
+  }, [subcategories, selectedCategoryId]);
+
+  useEffect(() => {
+    if (subcategoryId === "all") return;
+    const stillValid = filteredSubcategories.some((s) => String(s.id) === subcategoryId);
+    if (!stillValid) setSubcategoryId("all");
+  }, [filteredSubcategories, subcategoryId]);
+
+  const hasActiveFilters = Boolean(
+    debouncedSearch ||
+      selectedCategoryId ||
+      selectedSubcategoryId ||
+      debouncedPriceMin != null ||
+      debouncedPriceMax != null ||
+      debouncedPriceIvaMin != null ||
+      debouncedPriceIvaMax != null,
+  );
+
   const { data, isLoading, error, isFetching } = useStoreProductsPage(
     storeId,
     page,
     STORE_ADMIN_LIST_PAGE_SIZE,
     true,
-    debouncedSearch,
+    {
+      search: debouncedSearch,
+      categoryId: selectedCategoryId,
+      subcategoryId: selectedSubcategoryId,
+      priceMin: debouncedPriceMin,
+      priceMax: debouncedPriceMax,
+      priceIvaMin: debouncedPriceIvaMin,
+      priceIvaMax: debouncedPriceIvaMax,
+    },
   );
   const products = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -276,15 +360,108 @@ export function StoreAdminProductsPanel({
           </div>
         </CardHeader>
         <CardContent className="min-w-0 space-y-4 overflow-x-hidden">
-          <div className="relative min-w-0">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filtrar por nombre…"
-              className={cn(storeAdminFieldClass, "w-full min-w-0 pl-9")}
-              aria-label="Filtrar productos por nombre"
-            />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="relative min-w-0 sm:col-span-2 lg:col-span-3">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nombre (aprox.)…"
+                className={cn(storeAdminFieldClass, "w-full min-w-0 pl-9")}
+                aria-label="Filtrar productos por nombre aproximado"
+              />
+            </div>
+
+            <div className="min-w-0 space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Categoría</Label>
+              <Select
+                value={categoryId}
+                onValueChange={(v) => {
+                  setCategoryId(v);
+                  setSubcategoryId("all");
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className={storeAdminFieldClass} aria-label="Filtrar por categoría">
+                  <SelectValue placeholder="Todas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="min-w-0 space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Subcategoría</Label>
+              <Select
+                value={subcategoryId}
+                onValueChange={(v) => {
+                  setSubcategoryId(v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className={storeAdminFieldClass} aria-label="Filtrar por subcategoría">
+                  <SelectValue placeholder="Todas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  {filteredSubcategories.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="min-w-0 space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Precio (mín – máx)</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  inputMode="decimal"
+                  value={priceMinInput}
+                  onChange={(e) => setPriceMinInput(e.target.value)}
+                  placeholder="Mín"
+                  className={storeAdminFieldClass}
+                  aria-label="Precio mínimo"
+                />
+                <Input
+                  inputMode="decimal"
+                  value={priceMaxInput}
+                  onChange={(e) => setPriceMaxInput(e.target.value)}
+                  placeholder="Máx"
+                  className={storeAdminFieldClass}
+                  aria-label="Precio máximo"
+                />
+              </div>
+            </div>
+
+            <div className="min-w-0 space-y-1.5 sm:col-span-2 lg:col-span-1">
+              <Label className="text-xs text-muted-foreground">Precio + IVA (mín – máx)</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  inputMode="decimal"
+                  value={priceIvaMinInput}
+                  onChange={(e) => setPriceIvaMinInput(e.target.value)}
+                  placeholder="Mín"
+                  className={storeAdminFieldClass}
+                  aria-label="Precio con IVA mínimo"
+                />
+                <Input
+                  inputMode="decimal"
+                  value={priceIvaMaxInput}
+                  onChange={(e) => setPriceIvaMaxInput(e.target.value)}
+                  placeholder="Máx"
+                  className={storeAdminFieldClass}
+                  aria-label="Precio con IVA máximo"
+                />
+              </div>
+            </div>
           </div>
 
           {isLoading ? (
@@ -295,7 +472,7 @@ export function StoreAdminProductsPanel({
             <p className="text-sm text-destructive py-6 text-center">{(error as Error).message}</p>
           ) : products.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              {debouncedSearch
+              {hasActiveFilters
                 ? "No hay coincidencias con ese filtro."
                 : "Aún no hay productos. Usa «Crear producto» para añadir el primero."}
             </p>
@@ -307,7 +484,10 @@ export function StoreAdminProductsPanel({
               </p>
 
               <ul className="grid gap-3 md:hidden">
-                {products.map((product) => (
+                {products.map((product) => {
+                  const currencyLabel =
+                    product.displayCurrencyLabel ?? currencyLabelForId(visualId, extras);
+                  return (
                   <li
                     key={product.id}
                     className="min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card/95 p-3.5 shadow-sm"
@@ -320,11 +500,10 @@ export function StoreAdminProductsPanel({
                             {product.name}
                           </p>
                           <p className="mt-0.5 text-sm text-muted-foreground">
-                            {formatPrice(
-                              product.price,
-                              product.displayCurrencyLabel ??
-                                currencyLabelForId(visualId, extras),
-                            )}
+                            {formatPrice(product.price, currencyLabel)}
+                          </p>
+                          <p className="text-sm font-medium text-foreground">
+                            IVA: {formatPrice(productPriceWithIva(product), currencyLabel)}
                           </p>
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -338,7 +517,8 @@ export function StoreAdminProductsPanel({
                       </div>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
 
               <div className="hidden rounded-2xl border border-border/70 overflow-hidden md:block">
@@ -348,23 +528,27 @@ export function StoreAdminProductsPanel({
                       <TableHead className="w-[72px]">Foto</TableHead>
                       <TableHead>Nombre</TableHead>
                       <TableHead className="w-[120px]">Precio</TableHead>
+                      <TableHead className="w-[130px]">Precio + IVA</TableHead>
                       <TableHead className="w-[140px]">Vitrina</TableHead>
                       <TableHead className="w-[140px] text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {products.map((product) => (
+                    {products.map((product) => {
+                      const currencyLabel =
+                        product.displayCurrencyLabel ??
+                        currencyLabelForId(visualId, extras);
+                      return (
                       <TableRow key={product.id}>
                         <TableCell>
                           <ProductThumbnail imageUrls={product.imageUrls ?? []} />
                         </TableCell>
                         <TableCell className="font-medium">{product.name}</TableCell>
                         <TableCell>
-                          {formatPrice(
-                            product.price,
-                            product.displayCurrencyLabel ??
-                              currencyLabelForId(visualId, extras),
-                          )}
+                          {formatPrice(product.price, currencyLabel)}
+                        </TableCell>
+                        <TableCell>
+                          {formatPrice(productPriceWithIva(product), currencyLabel)}
                         </TableCell>
                         <TableCell>
                           <ShowcaseToggle storeId={storeId} product={product} />
@@ -377,7 +561,8 @@ export function StoreAdminProductsPanel({
                           />
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>

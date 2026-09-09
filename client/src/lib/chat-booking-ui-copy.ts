@@ -9,4 +9,4 @@ export const CHAT_BOOKING_COORDINATION_HINT =
 
 /** Descripción del modal «Gestión de reserva» (vista asociado desde el chat). Sin referencias a costos ni panel financiero. */
 export const PROVIDER_BOOKING_MODAL_DESCRIPTION =
-  "Consultá el estado y la programación de la reserva, y los enlaces al servicio o al cliente. Para alinear alcance, plazos y condiciones del encargo, podés seguir la conversación en este mismo chat.";
+  "Consultá el estado y la programación de la reserva, y los enlaces al servicio o al cliente. Para alinear alcance, plazos y condiciones del pedido, podés seguir la conversación en este mismo chat.";

@@ -68,9 +68,9 @@ export type ProviderUpdate = Partial<
     /** Empresa despachadora (central); en Firestore en el doc del proveedor. */
     dispatchCompanyId?: string | null;
     subcategoryId?: number | null;
-    /** Módulos Go (taxi / delivery / marketplace) cuando el proveedor opera en Car Go. */
+    /** Módulos Go (taxi / delivery / marketplace) cuando el proveedor opera en Transporte. */
     goBrands?: string[] | null;
-    /** Categorías adicionales (p. ej. Pro Go + conductor: principal Man Go, secundaria transport). */
+    /** Categorías adicionales (p. ej. Servicios profesionales + conductor: principal Servicios técnicos, secundaria transport). */
     secondCategoryId?: number | null;
     thirdCategoryId?: number | null;
     /** Slug de categoría al registrarse; define tarifa de suscripción mensual (no cambia al sumar Go). */
@@ -123,13 +123,13 @@ export interface ICatalogStorage {
   getProvider(id: number | null | undefined): Promise<Provider | undefined>;
   getProviderByUserId(userId: string): Promise<Provider | undefined>;
   createProvider(provider: InsertProvider): Promise<Provider>;
-  /** Car Go: guarda un vehículo vinculado al proveedor (colección `vehicles` en Firestore). */
+  /** Transporte: guarda un vehículo vinculado al proveedor (colección `vehicles` en Firestore). */
   createProviderVehicle(input: {
     providerId: number;
     userId: string;
     vehicle: InsertProviderVehicle;
   }): Promise<{ id: number }>;
-  /** Primer vehículo del proveedor (p. ej. icono en mapa conductor y panel Car Go). */
+  /** Primer vehículo del proveedor (p. ej. icono en mapa conductor y panel Transporte). */
   getPrimaryVehicleByProviderId(
     providerId: number
   ): Promise<{

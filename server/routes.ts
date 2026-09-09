@@ -6,7 +6,7 @@ import { api } from "@shared/routes";
 import { insertProviderSchema, insertServiceSchema, professionalBioFieldSchema } from "@shared/schema";
 import { providerSkillsSchema } from "@shared/skills-schema";
 import { insertProviderVehicleSchema } from "@shared/vehicle-schema";
-import { isCarGoProvider } from "@shared/provider-car-go";
+import { isTransportProvider } from "@shared/provider-transport";
 import { providerHasGoBrand } from "@shared/provider-go";
 import { serviceListingCategorySlug } from "@shared/service-belongs-to-brand";
 import { buildGoDriverEnrollmentCategoryPatch } from "@shared/provider-category-membership";
@@ -50,8 +50,8 @@ import { getIO, sendNotificationToAdmins } from "./socket";
 import { notificationService } from "./services/notification.service";
 import { ensureGoPanicAllowed, markGoPanicSent, notifyGoPanicAdmins } from "./mobility-panic-notify";
 import { getHiddenCategorySlugsForRole } from "./category-visibility";
-import { CAR_GO_BRAND_SLUGS, filterCategoriesExcludedFromPublicApi } from "@shared/default-categories";
-import { defaultGoBrandsForProviderCategory, sanitizeCarGoBrands } from "@shared/go-brands";
+import { TRANSPORT_BRAND_SLUGS, filterCategoriesExcludedFromPublicApi } from "@shared/default-categories";
+import { defaultGoBrandsForProviderCategory, sanitizeTransportBrands } from "@shared/go-brands";
 import { isSelfServiceCatalogActiveToggleDisallowedForCategorySlug } from "@shared/catalog-service-visibility-policy";
 import { catalogServiceMutationBlockedResponse } from "./provider-listing-catalog-guard";
 import {
@@ -212,7 +212,7 @@ export async function registerRoutes(
     res.json(provider ?? null);
   });
 
-  /** Car Go: tipo de vehículo registrado (icono en mapa conductor). */
+  /** Transporte: tipo de vehículo registrado (icono en mapa conductor). */
   app.get("/api/me/provider-vehicle", authenticateJWT, async (req: any, res) => {
     try {
       const userId = req.user?.id;
@@ -297,7 +297,7 @@ export async function registerRoutes(
         .trim()
         .toLowerCase();
       if (direct && ALLOWED.has(direct)) extra.push(direct);
-      const merged = sanitizeCarGoBrands(
+      const merged = sanitizeTransportBrands(
         Array.from(new Set([...current, ...extra, "transport", "delivery"])),
       );
 
@@ -594,9 +594,9 @@ export async function registerRoutes(
       // Guardar también en Mis documentos (bóveda). Esto permite verlo siempre aunque haya subido más tarde.
       try {
         const categories = await catalogService.getCategories();
-        const carGo = isCarGoProvider(provider as any, categories);
+        const transportProvider = isTransportProvider(provider as any, categories);
         const name =
-          parsed.name?.trim() || (carGo ? "Licencia de conducir" : "Documento profesional");
+          parsed.name?.trim() || (transportProvider ? "Licencia de conducir" : "Documento profesional");
         await appliaStorage.createDocument({
           userId,
           name,
@@ -741,7 +741,7 @@ export async function registerRoutes(
         (provider as any)?.isVerified === true ? ("renewal" as const) : ("onboarding" as const);
       await appliaStorage.upsertVerifyingStatusTransactionPending(userId, body.transferDate, requestType as any);
 
-      // Un solo cargo pendiente por usuario: evita duplicados si reenvía comprobante.
+      // Un solo cobro pendiente por usuario: evita duplicados si reenvía comprobante.
       try {
         const reports = await appliaStorage.getFinancialReports(userId);
         const hasPendingVerification = reports.some(
@@ -886,10 +886,10 @@ export async function registerRoutes(
 
     let list = await catalogService.getAllServices(categoryId, search, providerCategoryId, subcategoryId);
 
-    /** Vista general: ocultar fichas Go por categoría del servicio, no por categoría principal del proveedor (perfiles mixtos Pro Go + conductor). */
+    /** Vista general: ocultar fichas Go por categoría del servicio, no por categoría principal del proveedor (perfiles mixtos Servicios profesionales + conductor). */
     const isGeneralCatalogExplore = categoryId == null && providerCategoryId == null;
     if (isGeneralCatalogExplore && list?.length) {
-      const mobilitySlugs = new Set(CAR_GO_BRAND_SLUGS.map((s) => String(s).toLowerCase()));
+      const mobilitySlugs = new Set(TRANSPORT_BRAND_SLUGS.map((s) => String(s).toLowerCase()));
       const cats = await catalogService.getCategoriesForPublicCatalog();
       list = list.filter((s: any) => {
         const serviceSlug = serviceListingCategorySlug(s, cats);
@@ -1200,8 +1200,8 @@ export async function registerRoutes(
   // Registrar rutas de PayPal
   await registerPayPalRoutes(httpServer, app);
 
-  /** Registro Car Go (`transport`): el formulario no pide perfil/servicio; pueden ir vacíos (se derivan o se editan después). */
-  const createProviderBodySchemaCarGo = insertProviderSchema
+  /** Registro Transporte (`transport`): el formulario no pide perfil/servicio; pueden ir vacíos (se derivan o se editan después). */
+  const createProviderBodySchemaTransport = insertProviderSchema
     .extend({
       category: providerCategorySchema.optional(),
       categoryId: z.number().int().positive().optional(),
@@ -1240,9 +1240,9 @@ export async function registerRoutes(
       serviceTitle: z.string().trim().max(500).optional(),
       /** Qué incluye la oferta; si no se envía o va vacío, se usa la biografía como texto inicial del servicio. */
       serviceDescription: z.string().trim().max(5000).optional(),
-      /** Solo categoría Car Go (`transport`): datos del vehículo; validación adicional en el handler. */
+      /** Solo categoría Transporte (`transport`): datos del vehículo; validación adicional en el handler. */
       vehicle: z.any().optional(),
-      /** Fix Go / Man Go: texto libre guardado en el perfil (Firestore). */
+      /** Servicios técnicos / Servicios técnicos: texto libre guardado en el perfil (Firestore). */
       coursesCompleted: z.string().trim().max(8000).optional(),
       /** Alias preferido de `coursesCompleted` (nivel de preparación). */
       preparationLevel: z.string().trim().max(8000).optional(),
@@ -1272,7 +1272,7 @@ export async function registerRoutes(
         ? allCatsForSignup.find((c) => c.id === preCategoryId)
         : undefined;
       const isGoDriverSignup = preCat?.slug === "transport" || preCat?.slug === "delivery";
-      const data = (isGoDriverSignup ? createProviderBodySchemaCarGo : createProviderBodySchemaStrict).parse(req.body);
+      const data = (isGoDriverSignup ? createProviderBodySchemaTransport : createProviderBodySchemaStrict).parse(req.body);
       const {
         serviceTitle: serviceTitleFromClient,
         serviceDescription: serviceDescriptionFromClient,
@@ -1337,7 +1337,7 @@ export async function registerRoutes(
         ...(isGoDriverCategory
           ? {
               goBrands: Array.isArray(goBrands)
-                ? sanitizeCarGoBrands(goBrands)
+                ? sanitizeTransportBrands(goBrands)
                 : defaultGoBrandsForProviderCategory(catForSignup?.slug),
             }
           : {}),

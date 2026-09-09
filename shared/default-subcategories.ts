@@ -5,23 +5,23 @@ import { normalizeProviderCategorySlug } from "./default-categories";
  * Cada subcategoría está asociada a una categoría (por slug de la categoría).
  * Se usan en seed-subcategories; el seeder resuelve categorySlug → categoryId en Firestore.
  *
- * - Pro Go (`professional`): Servicios Legales, Consultoría Financiera, Tutorías.
- * - Man Go (`technical`): oficios técnicos + mantenimiento (plomería, limpieza, aires, etc.).
- * - Car Go (`transport`): tipo de vehículo (moto, auto, etc.).
+ * - Servicios profesionales (`professional`): Servicios Legales, Consultoría Financiera, Tutorías.
+ * - Servicios técnicos (`technical`): oficios técnicos + mantenimiento (plomería, limpieza, aires, etc.).
+ * - Transporte (`transport`): tipo de vehículo (moto, auto, etc.).
  *
- * No usar `maintenance` como categoría padre: está retirada; todo Man Go va bajo `technical`.
+ * No usar `maintenance` como categoría padre: está retirada; todo Servicios técnicos va bajo `technical`.
  */
 export const DEFAULT_SUBCATEGORIES: ReadonlyArray<{  slug: string;
   name: string;
   categorySlug: string;
   icon?: string;
 }> = [
-  /** ——— Pro Go ——— */
+  /** ——— Servicios profesionales ——— */
   { slug: "legal", name: "Servicios Legales", categorySlug: "professional", icon: "Scale" },
   { slug: "financial", name: "Consultoría Financiera", categorySlug: "professional", icon: "TrendingUp" },
   { slug: "tutoring", name: "Tutorías", categorySlug: "professional", icon: "GraduationCap" },
 
-  /** ——— Man Go (slug `technical`) ——— */
+  /** ——— Servicios técnicos (slug `technical`) ——— */
   { slug: "plumbing", name: "Plomería", categorySlug: "technical", icon: "Droplets" },
   { slug: "electrical", name: "Electricidad", categorySlug: "technical", icon: "Zap" },
   { slug: "appliances", name: "Reparación de Electrodomésticos", categorySlug: "technical", icon: "Microwave" },
@@ -32,7 +32,7 @@ export const DEFAULT_SUBCATEGORIES: ReadonlyArray<{  slug: string;
   { slug: "gardening", name: "Jardinería", categorySlug: "technical", icon: "Trees" },
   { slug: "painting", name: "Pintura", categorySlug: "technical", icon: "Paintbrush" },
 
-  /** Car Go (`transport`): tipo de vehículo */
+  /** Transporte (`transport`): tipo de vehículo */
   { slug: "moto", name: "Moto", categorySlug: "transport", icon: "Bike" },
   { slug: "auto", name: "Auto", categorySlug: "transport", icon: "Car" },
   { slug: "camioneta", name: "Camioneta", categorySlug: "transport", icon: "Truck" },

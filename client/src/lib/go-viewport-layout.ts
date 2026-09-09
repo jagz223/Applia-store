@@ -88,8 +88,8 @@ export function isGoDriverMapPath(pathname: string): boolean {
     pathname.startsWith("/go/driver/") ||
     pathname === "/go/taxi/driver" ||
     pathname.startsWith("/go/taxi/driver/") ||
-    pathname === "/go/cargo/driver" ||
-    pathname.startsWith("/go/cargo/driver/") ||
+    pathname === "/go/taxi/driver" ||
+    pathname.startsWith("/go/taxi/driver/") ||
     pathname === "/go/delivery/driver" ||
     pathname.startsWith("/go/delivery/driver/") ||
     pathname === "/go/pack/driver" ||
@@ -107,7 +107,7 @@ export function isGoRiderMapPathWithoutSettings(pathname: string): boolean {
   if (!pathname || pathname.endsWith("/settings")) return false;
   const p = pathname.split("?")[0]?.trim() ?? pathname;
   if (p.includes("/driver")) return false;
-  return /^\/go\/(taxi|cargo|delivery|pack)$/.test(p);
+  return /^\/go\/(taxi|delivery|pack)$/.test(p);
 }
 
 export function shouldShowCompactGoShellHomeFab(isGoMapView: boolean, pathnameClean: string): boolean {

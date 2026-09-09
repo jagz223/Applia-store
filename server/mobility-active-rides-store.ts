@@ -120,7 +120,7 @@ function toStoredDoc(module: MobilityRideHistoryModule, ride: ActiveMobilityRide
 }
 
 function docFromFirestore(id: string, data: Record<string, unknown>): StoredActiveRideDoc | null {
-  const module = data.module === "pack" ? "pack" : "cargo";
+  const module = data.module === "pack" ? "pack" : "taxi";
   const payload = data.payload;
   if (!payload || typeof payload !== "object") return null;
   const ridePayload = deserializePayloadFromFirestore({

@@ -1,5 +1,5 @@
 // Applia - Base de Datos Extendida
-// Incluye roles de usuario, integración con App ManGo y nuevas funcionalidades
+// Incluye roles de usuario, integración con App Servicios técnicos y nuevas funcionalidades
 
 import { pgTable, text, serial, integer, boolean, timestamp, varchar, decimal, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -41,10 +41,10 @@ export const userRoles = pgTable("user_roles", {
   }>().default({ email: true, push: true, sms: false }),
 });
 
-// === INTEGRACIÓN CON APP MANGO ===
-export const mangoSync = pgTable("mango_sync", {
+// === SINCRONIZACIÓN DE CUENTA EXTERNA ===
+export const accountSync = pgTable("account_sync", {
   id: serial("id").primaryKey(),
-  mangoUserId: varchar("mango_user_id").notNull().unique(),
+  externalUserId: varchar("external_user_id").notNull().unique(),
   localUserId: varchar("local_user_id").notNull(),
   lastSyncAt: timestamp("last_sync_at").defaultNow(),
   syncStatus: varchar("sync_status", { length: 20 }).default("pending"),

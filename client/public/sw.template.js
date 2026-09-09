@@ -113,7 +113,7 @@ function parseFcmPushPayload(raw) {
   const body = notification.body || (data && data.body) || "Tienes una nueva notificación";
   const url = (data && data.url) || "/";
   const offerType = String((data && data.type) || "").toLowerCase();
-  const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+  const isRideOffer = offerType === "taxi_ride_offer" || offerType === "pack_ride_offer";
   const rideId = data && data.rideId ? String(data.rideId) : "";
   const tagType =
     (data && (data.type || data.withdrawalType || data.conversationId || data.transferId)) || "applia";

@@ -1,5 +1,5 @@
 import {
-  MAN_GO_CATEGORY_SLUG,
+  TECHNICAL_CATEGORY_SLUG,
   MARKETPLACE_CATEGORY_SLUG,
   normalizeProviderCategorySlug,
 } from "./default-categories";
@@ -18,10 +18,10 @@ import {
 } from "./subscription-invoice";
 
 export type AssociateActivityBrand =
-  | "man_go"
-  | "pro_go"
-  | "car_go"
-  | "pack_go"
+  | "technical"
+  | "professional"
+  | "transport"
+  | "delivery"
   | "marketplace"
   | "subscription"
   | "unknown";
@@ -61,7 +61,7 @@ export type AssociateDashboardActivityItem = {
 export type BuildAssociateDashboardActivityOptions = {
   /** Mensualidades y transferencias de asociado (false para cliente puro). */
   includeSubscriptions?: boolean;
-  /** Pagos e ingresos wallet (Car Go, mensualidad, pago de viaje). */
+  /** Pagos e ingresos wallet (Transporte, mensualidad, pago de viaje). */
   includeWalletTransactions?: boolean;
 };
 
@@ -108,24 +108,24 @@ export type AssociateDashboardTransferLike = {
 
 export function categorySlugToActivityBrand(slug: string | null | undefined): AssociateActivityBrand {
   const s = normalizeProviderCategorySlug(slug);
-  if (s === MAN_GO_CATEGORY_SLUG) return "man_go";
-  if (s === "professional") return "pro_go";
+  if (s === TECHNICAL_CATEGORY_SLUG) return "technical";
+  if (s === "professional") return "professional";
   if (s === MARKETPLACE_CATEGORY_SLUG) return "marketplace";
-  if (s === "transport") return "car_go";
-  if (s === "delivery") return "pack_go";
+  if (s === "transport") return "transport";
+  if (s === "delivery") return "delivery";
   return "unknown";
 }
 
 export function brandDisplayName(brand: AssociateActivityBrand): string {
   switch (brand) {
-    case "man_go":
-      return "Man Go";
-    case "pro_go":
-      return "Pro Go";
-    case "car_go":
-      return "Car Go";
-    case "pack_go":
-      return "Pack Go";
+    case "technical":
+      return "Servicios técnicos";
+    case "professional":
+      return "Servicios profesionales";
+    case "transport":
+      return "Transporte";
+    case "delivery":
+      return "Envíos";
     case "marketplace":
       return "Marketplace";
     case "subscription":
@@ -136,7 +136,7 @@ export function brandDisplayName(brand: AssociateActivityBrand): string {
 }
 
 export function shouldHideServiceAmount(brand: AssociateActivityBrand): boolean {
-  return brand === "man_go" || brand === "pro_go" || brand === "marketplace";
+  return brand === "technical" || brand === "professional" || brand === "marketplace";
 }
 
 export function isSubscriptionWalletTransfer(t: { transferType?: string }): boolean {
@@ -163,8 +163,7 @@ export function isProviderServiceWalletTransfer(t: {
   return (
     desc.includes("completado") ||
     desc.includes("viaje") ||
-    desc.includes("car go") ||
-    desc.includes("pack go") ||
+    desc.includes("envío") ||
     desc.includes("servicio")
   );
 }
@@ -206,7 +205,7 @@ function parseRefBookingId(referenceId?: string | null): number | null {
 
 function parseRefMobilityRideId(referenceId?: string | null): string | null {
   if (!referenceId) return null;
-  const m = String(referenceId).match(/^cargo:(.+)$/i);
+  const m = String(referenceId).match(/^taxi:(.+)$/i);
   return m?.[1] ? m[1] : null;
 }
 
@@ -225,10 +224,10 @@ function bookingServiceTitle(booking: AssociateDashboardBookingLike): string {
 
 function inferBrandFromTransferDescription(desc: string): AssociateActivityBrand {
   const d = desc.toLowerCase();
-  if (d.includes("pack go") || d.includes("delivery")) return "pack_go";
-  if (d.includes("car go") || d.includes("viaje")) return "car_go";
-  if (d.includes("man go") || d.includes("técnico") || d.includes("tecnico")) return "man_go";
-  if (d.includes("pro go") || d.includes("profesional")) return "pro_go";
+  if (d.includes("envío") || d.includes("delivery")) return "delivery";
+  if (d.includes("viaje")) return "transport";
+  if (d.includes("técnico") || d.includes("tecnico")) return "technical";
+  if (d.includes("profesional")) return "professional";
   return "unknown";
 }
 
@@ -239,7 +238,7 @@ function serviceAmountFields(
   if (shouldHideServiceAmount(brand)) {
     return { displayAmountUsd: null, amountMode: "none" };
   }
-  if (brand === "car_go" || brand === "pack_go") {
+  if (brand === "transport" || brand === "delivery") {
     const n = Number.isFinite(agreedUsd) && agreedUsd >= 0 ? agreedUsd : null;
     return { displayAmountUsd: n, amountMode: "agreed" };
   }
@@ -284,9 +283,9 @@ function isWalletPaymentTransfer(t: { transferType?: string }): boolean {
   return type === "payment";
 }
 
-function isCarGoWalletTransaction(t: { description?: string | null; transferType?: string }): boolean {
+function isTransportWalletTransaction(t: { description?: string | null; transferType?: string }): boolean {
   const desc = (t.description ?? "").toLowerCase();
-  if (desc.includes("car go") || desc.includes("pack go") || desc.includes("viaje")) return true;
+  if (desc.includes("viaje") || desc.includes("envío")) return true;
   if (desc.includes("delivery") && String(t.transferType ?? "").toLowerCase() === "service_payment") {
     return true;
   }
@@ -299,7 +298,7 @@ function shouldIncludeWalletTransfer(
 ): boolean {
   if (isSubscriptionWalletTransfer(t)) return includeSubscriptions;
   if (isWalletPaymentTransfer(t)) return true;
-  if (isProviderServiceWalletTransfer(t) && isCarGoWalletTransaction(t)) return true;
+  if (isProviderServiceWalletTransfer(t) && isTransportWalletTransaction(t)) return true;
   return false;
 }
 
@@ -422,7 +421,7 @@ export function buildAssociateDashboardActivity(
     const idKey = `mobility-${perspective}-${ride.id}`;
     if (seen.has(idKey)) return;
     coveredMobilityIds.add(ride.id);
-    const brand: AssociateActivityBrand = ride.module === "pack" ? "pack_go" : "car_go";
+    const brand: AssociateActivityBrand = ride.module === "pack" ? "delivery" : "transport";
     const amountFields = serviceAmountFields(brand, ride.amountUsd);
     const route =
       [ride.startLabel, ride.endLabel].filter(Boolean).join(" → ") || "Viaje completado";
@@ -499,15 +498,15 @@ export function buildAssociateDashboardActivity(
     const amt = typeof t.amount === "number" ? t.amount : Number(t.amount);
     const dateIso = toIsoDate(t.createdAt);
     const isPayment = isWalletPaymentTransfer(t);
-    const isCarGoIncome = isProviderServiceWalletTransfer(t) && isCarGoWalletTransaction(t);
+    const isTransportIncome = isProviderServiceWalletTransfer(t) && isTransportWalletTransaction(t);
 
     if (isPayment) {
       pushTransactionItem(items, seen, {
         id: `transfer-pay-${t.id ?? t.createdAt}`,
         kind: "payment",
-        brand: brand === "unknown" ? "car_go" : brand,
-        title: isCarGoWalletTransaction(t) ? "Pago de viaje Car Go" : "Pago de servicio",
-        subtitle: desc || "Cargo en Saldo Applia",
+        brand: brand === "unknown" ? "transport" : brand,
+        title: isTransportWalletTransaction(t) ? "Pago de viaje Transporte" : "Pago de servicio",
+        subtitle: desc || "Movimiento en Saldo Applia",
         dateIso,
         status: String(t.status ?? "completed"),
         displayAmountUsd: Number.isFinite(amt) ? Math.abs(amt) : null,
@@ -518,7 +517,7 @@ export function buildAssociateDashboardActivity(
       continue;
     }
 
-    if (isCarGoIncome) {
+    if (isTransportIncome) {
       const mobilityId = parseRefMobilityRideId(t.referenceId);
       if (mobilityId && coveredMobilityIds.has(mobilityId)) {
         /* el viaje ya está en historial de servicios */

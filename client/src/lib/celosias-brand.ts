@@ -23,9 +23,9 @@ export const CELOSIAS_HOME_CATEGORIES = [
   },
   {
     name: "Cerámicas",
-    // Baño con porcelanato negro marmoleado y vetas doradas instalado
+    // Baño de lujo: muro y mesada negros con vetas doradas (toma editorial)
     image:
-      "https://images.pexels.com/photos/6394689/pexels-photo-6394689.jpeg?auto=compress&cs=tinysrgb&w=1000",
+      "https://images.unsplash.com/photo-1683640862718-c001169c8514?auto=format&fit=crop&w=1000&q=80",
   },
   {
     name: "Sanitarios",

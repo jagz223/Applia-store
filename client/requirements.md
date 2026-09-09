@@ -14,7 +14,7 @@ fontFamily: {
   body: ["'Quicksand'", "sans-serif"],
 }
 Theme Colors:
-Primary: #FF9F1C (Mango Orange)
+Primary: #FF9F1C (naranja de marca)
 Secondary: #2EC4B6 (Leaf Green)
 Accent: #FFBF69 (Sun Yellow)
 Background: #FDFFFC (Off-white)

@@ -1,5 +1,5 @@
 /**
- * Tarifas predeterminadas Pack Go (envíos/delivery) configurables.
+ * Tarifas predeterminadas envíos (envíos/delivery) configurables.
  * Persistencia: Firestore platform_settings/global. Fallback: valores por defecto en memoria.
  */
 import { getFirestore, FIRESTORE_COLLECTIONS } from "./firebase-admin";

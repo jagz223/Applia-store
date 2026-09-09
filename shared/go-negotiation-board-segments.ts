@@ -3,25 +3,25 @@
  * El conductor solo ve pestañas compatibles con su vehículo registrado.
  */
 
-/** Mapa segmento UI taxi → tipo vehículo proveedor (mismo criterio que el servidor Car Go). */
-export const NEGOTIATION_MATCH_MAP_CARGO: Record<string, string> = {
+/** Mapa segmento UI taxi → tipo vehículo proveedor (mismo criterio que el servidor Transporte). */
+export const NEGOTIATION_MATCH_MAP_TAXI: Record<string, string> = {
   moto: "motorcycle",
   auto: "car",
   pet_car: "car",
   camioneta: "pickup_truck",
 };
 
-/** Mapa segmento UI delivery → tipo vehículo proveedor (Pack Go). */
+/** Mapa segmento UI delivery → tipo vehículo proveedor (envíos). */
 export const NEGOTIATION_MATCH_MAP_PACK: Record<string, string> = {
   moto: "motorcycle",
   auto: "car",
   camioneta: "pickup_truck",
 };
 
-export const NEGOTIATION_CARGO_SEGMENT_IDS = Object.keys(NEGOTIATION_MATCH_MAP_CARGO);
+export const NEGOTIATION_TAXI_SEGMENT_IDS = Object.keys(NEGOTIATION_MATCH_MAP_TAXI);
 export const NEGOTIATION_PACK_SEGMENT_IDS = Object.keys(NEGOTIATION_MATCH_MAP_PACK);
 
-const CARGO_LABEL = {
+const TAXI_SEGMENT_LABEL = {
   moto: "Moto",
   auto: "Carro",
   pet_car: "Pet friendly",
@@ -47,22 +47,22 @@ export function negotiationBoardTabsForProviderVehicle(
 ): NegotiationBoardTab[] {
   const vt = String(providerVehicleType ?? "").trim();
   if (vt === "motorcycle") {
-    return [{ id: "moto", label: CARGO_LABEL.moto }];
+    return [{ id: "moto", label: TAXI_SEGMENT_LABEL.moto }];
   }
   if (vt === "car") {
-    const tabs: NegotiationBoardTab[] = [{ id: "auto", label: CARGO_LABEL.auto }];
-    if (isPetFriendly) tabs.push({ id: "pet_car", label: CARGO_LABEL.pet_car });
+    const tabs: NegotiationBoardTab[] = [{ id: "auto", label: TAXI_SEGMENT_LABEL.auto }];
+    if (isPetFriendly) tabs.push({ id: "pet_car", label: TAXI_SEGMENT_LABEL.pet_car });
     return tabs;
   }
   if (vt === "pickup_truck" || vt === "truck") {
-    return [{ id: "camioneta", label: CARGO_LABEL.camioneta }];
+    return [{ id: "camioneta", label: TAXI_SEGMENT_LABEL.camioneta }];
   }
   return [];
 }
 
-export function negotiationSegmentLabel(segmentId: string, module: "cargo" | "pack"): string {
-  if (module === "cargo") {
-    return (CARGO_LABEL as Record<string, string>)[segmentId] ?? segmentId;
+export function negotiationSegmentLabel(segmentId: string, module: "taxi" | "pack"): string {
+  if (module === "taxi") {
+    return (TAXI_SEGMENT_LABEL as Record<string, string>)[segmentId] ?? segmentId;
   }
   return (PACK_LABEL as Record<string, string>)[segmentId] ?? segmentId;
 }

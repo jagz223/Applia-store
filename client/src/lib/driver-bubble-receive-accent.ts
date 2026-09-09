@@ -1,4 +1,4 @@
-import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
+import type { GoDriverReceiveMode } from "@/lib/taxi-driver-storage";
 
 export type DriverBubbleGlowAccent = "off" | "taxi" | "delivery" | "hybrid";
 

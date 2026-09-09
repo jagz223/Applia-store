@@ -37,7 +37,7 @@ function docToRecord(id: string, data: Record<string, unknown>): GoCancellationF
   return {
     id,
     rideId: String(data.rideId ?? ""),
-    module: data.module === "pack" ? "pack" : "cargo",
+    module: data.module === "pack" ? "pack" : "taxi",
     cancelledBy: data.cancelledBy === "driver" ? "driver" : "rider",
     cancellerUserId: String(data.cancellerUserId ?? ""),
     cancellerName: String(data.cancellerName ?? ""),

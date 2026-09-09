@@ -1,11 +1,11 @@
-import { MAN_GO_CATEGORY_SLUG, MARKETPLACE_CATEGORY_SLUG } from "./default-categories";
+import { TECHNICAL_CATEGORY_SLUG, MARKETPLACE_CATEGORY_SLUG } from "./default-categories";
 
 /** Slug de mensualidad de visibilidad para tiendas online. */
 export const STORE_SUBSCRIPTION_FEE_SLUG = "store";
 
 /** Slugs editables en admin → Suscripción mensual (orden de pantalla). */
 export const SUBSCRIPTION_FEE_ADMIN_SLUGS = [
-  MAN_GO_CATEGORY_SLUG,
+  TECHNICAL_CATEGORY_SLUG,
   "transport",
   MARKETPLACE_CATEGORY_SLUG,
   "professional",
@@ -14,7 +14,7 @@ export const SUBSCRIPTION_FEE_ADMIN_SLUGS = [
 
 export type SubscriptionFeeAdminSlug = (typeof SUBSCRIPTION_FEE_ADMIN_SLUGS)[number];
 
-/** Pack Go comparte la mensualidad de Car Go (`transport`). Marketplace es independiente. */
+/** envíos comparte la mensualidad de Transporte (`transport`). Marketplace es independiente. */
 export const MOBILITY_SUBSCRIPTION_FEE_ALIAS_SLUGS = ["delivery"] as const;
 
 export function subscriptionFeeLookupSlug(slug: string | null | undefined): string {
@@ -23,29 +23,29 @@ export function subscriptionFeeLookupSlug(slug: string | null | undefined): stri
   return s;
 }
 
-/** Al guardar tarifas, replica el valor de Car Go en delivery. */
+/** Al guardar tarifas, replica el valor de transporte en envíos. */
 export function expandSubscriptionFeesBySlugForStorage(fees: Record<string, number>): Record<string, number> {
   const out = { ...fees };
-  const carGo = out.transport;
-  if (carGo !== undefined && Number.isFinite(Number(carGo))) {
+  const transport = out.transport;
+  if (transport !== undefined && Number.isFinite(Number(transport))) {
     for (const alias of MOBILITY_SUBSCRIPTION_FEE_ALIAS_SLUGS) {
-      out[alias] = Number(carGo);
+      out[alias] = Number(transport);
     }
   }
   return out;
 }
 
 export function subscriptionFeeAdminLabel(slug: SubscriptionFeeAdminSlug): string {
-  if (slug === MAN_GO_CATEGORY_SLUG) return "Man Go";
-  if (slug === "transport") return "Car Go";
+  if (slug === TECHNICAL_CATEGORY_SLUG) return "Servicios técnicos";
+  if (slug === "transport") return "Transporte";
   if (slug === MARKETPLACE_CATEGORY_SLUG) return "Marketplace";
-  if (slug === "professional") return "Pro Go";
+  if (slug === "professional") return "Profesionales";
   if (slug === STORE_SUBSCRIPTION_FEE_SLUG) return "Tienda";
   return slug;
 }
 
 export function subscriptionFeeAdminHint(slug: SubscriptionFeeAdminSlug): string | undefined {
-  if (slug === "transport") return "La misma tarifa aplica a Delivery (Pack Go).";
+  if (slug === "transport") return "La misma tarifa aplica a envíos.";
   if (slug === MARKETPLACE_CATEGORY_SLUG) {
     return "Mensualidad de visibilidad para asociados del catálogo Marketplace.";
   }

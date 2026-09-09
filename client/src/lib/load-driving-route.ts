@@ -11,7 +11,7 @@ export type RoadDrivingRouteResult = {
   durationSec: number;
 };
 
-/** Mismo estilo de polyline que Car Go / Pack Go en TaxiRouteMap. */
+/** Mismo estilo de polyline que Transporte / envíos en TaxiRouteMap. */
 export const ROAD_ROUTE_MAP_STYLE = {
   color: "#2563eb",
   weight: 5,

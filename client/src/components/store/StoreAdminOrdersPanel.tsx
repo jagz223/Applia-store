@@ -40,6 +40,10 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import {
+  STORE_ADMIN_LIST_PAGE_SIZE,
+  StoreAdminListPagination,
+} from "@/components/store/StoreAdminListPagination";
 import { StoreOrderStatusRoadmap } from "@/components/store/StoreOrderStatusRoadmap";
 import { StoreOrderDeliveryRouteMap } from "@/components/store/StoreOrderDeliveryRouteMap";
 import { StoreOrderInvoicePdfDialog } from "@/components/store/StoreOrderInvoicePdfDialog";
@@ -543,6 +547,7 @@ export function StoreAdminOrdersPanel({
   const [dateFromFilter, setDateFromFilter] = useState("");
   const [dateToFilter, setDateToFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("all");
+  const [page, setPage] = useState(1);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [invoiceOrderId, setInvoiceOrderId] = useState<number | null>(null);
 
@@ -569,12 +574,19 @@ export function StoreAdminOrdersPanel({
       dateTo: dateToFilter.trim() || undefined,
       branchId:
         canFilterOrdersByBranch && branchFilter !== "all" ? branchFilter : undefined,
+      page,
+      limit: STORE_ADMIN_LIST_PAGE_SIZE,
     }),
-    [statusFilter, orderIdFilter, dateFromFilter, dateToFilter, branchFilter, canFilterOrdersByBranch],
+    [statusFilter, orderIdFilter, dateFromFilter, dateToFilter, branchFilter, canFilterOrdersByBranch, page],
   );
 
-  const { data: ordersData, isLoading, error } = useStoreOrders(storeId, filters);
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, orderIdFilter, dateFromFilter, dateToFilter, branchFilter]);
+
+  const { data: ordersData, isLoading, error, isFetching } = useStoreOrders(storeId, filters);
   const orders = ordersData?.orders ?? [];
+  const totalPages = ordersData?.totalPages ?? 1;
   const branchFilterLocked = ordersData?.branchFilterLocked ?? !canFilterOrdersByBranch;
   const lockedBranchName =
     branches.find((b) => b.id === (ordersData?.employeeBranchId ?? employeeBranchId))?.name ?? null;
@@ -793,6 +805,13 @@ export function StoreAdminOrdersPanel({
                   </TableBody>
                 </Table>
               </div>
+
+              <StoreAdminListPagination
+                page={page}
+                totalPages={totalPages}
+                isFetching={isFetching}
+                onPageChange={setPage}
+              />
             </>
           )}
         </CardContent>

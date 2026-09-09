@@ -1,5 +1,5 @@
 import { CATALOG_ASSIGNABLE_SERVICE_CATEGORY_SLUGS } from "./catalog-service-categories";
-import { MAN_GO_CATEGORY_SLUG, normalizeProviderCategorySlug } from "./default-categories";
+import { TECHNICAL_CATEGORY_SLUG, normalizeProviderCategorySlug } from "./default-categories";
 import {
   isProfessionalListingCategorySlug,
   isTradeListingCategorySlug,
@@ -28,7 +28,7 @@ export function isCatalogAssignableSlug(slug: string | undefined): boolean {
 /** Categorías de catálogo donde un segundo servicio exige subcategoría (misma regla que Become Pro). */
 export function createServiceRequiresSubcategory(slug: string | undefined): boolean {
   const s = normalizeProviderCategorySlug(slug);
-  return s === MAN_GO_CATEGORY_SLUG || s === "professional";
+  return s === TECHNICAL_CATEGORY_SLUG || s === "professional";
 }
 
 export function createServiceIsFocusCatalogSlug(slug: string | undefined): boolean {
@@ -42,8 +42,8 @@ export function getCreateServiceCategoryIntro(slug: string | undefined): string 
   if (s === "professional") {
     return "Para profesionales (abogados, contadores, psicólogos, asesores): describe tu oferta con un título claro, qué incluye y tu enfoque de trabajo.";
   }
-  if (s === MAN_GO_CATEGORY_SLUG) {
-    return "Para Man Go (técnicos, mantenimiento, oficios): detalla qué reparas o instalas, el alcance del trabajo y tu experiencia práctica.";
+  if (s === TECHNICAL_CATEGORY_SLUG) {
+    return "Para Servicios técnicos (técnicos, mantenimiento, oficios): detalla qué reparas o instalas, el alcance del trabajo y tu experiencia práctica.";
   }
   return null;
 }
@@ -67,7 +67,7 @@ export function getCreateServiceFormPlaceholders(slug: string | undefined): Crea
       bio: "Tu experiencia, tu enfoque (cómo trabajas), qué tipo de casos tomas y qué pueden esperar los clientes. 50–700 caracteres.",
     };
   }
-  if (s === MAN_GO_CATEGORY_SLUG) {
+  if (s === TECHNICAL_CATEGORY_SLUG) {
     return {
       profession: "Ej. Técnico en refrigeración, Plomero, Técnico electrónico",
       serviceTitle: "Ej. Reparación de PC o mantenimiento de aires acondicionados",

@@ -1,5 +1,5 @@
-import type { GoDriverReceiveMode } from "@/lib/cargo-driver-storage";
-import { hasGoDriverActiveRide } from "@/lib/cargo-driver-storage";
+import type { GoDriverReceiveMode } from "@/lib/taxi-driver-storage";
+import { hasGoDriverActiveRide } from "@/lib/taxi-driver-storage";
 import { isAndroidTwaApp } from "@/lib/go-driver-bubble-capability";
 
 const APPLIA_DRIVER_BRIDGE = "applia://driver";

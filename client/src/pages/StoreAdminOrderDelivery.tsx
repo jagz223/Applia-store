@@ -92,7 +92,7 @@ export default function StoreAdminOrderDelivery() {
               <Truck className="h-5 w-5" />
               Delivery · Orden #{orderId}
             </CardTitle>
-            <CardDescription>Seguimiento Pack Go, conductor y chat.</CardDescription>
+            <CardDescription>Seguimiento del envío, conductor y chat.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             {isLoading ? (

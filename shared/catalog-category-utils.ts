@@ -2,7 +2,7 @@ import { DEFAULT_SUBCATEGORIES } from "./default-subcategories";
 
 /**
  * Slugs que solo deben existir como subcategorías (`sub_categories`), no como filas en `categories`.
- * Evita que migraciones antiguas (p. ej. legal/financial como categoría superior) aparezcan en Explorar/Home como pares de Pro Go.
+ * Evita que migraciones antiguas (p. ej. legal/financial como categoría superior) aparezcan en Explorar/Home como pares de Servicios profesionales.
  */
 export const RESERVED_SUBCATEGORY_SLUGS: ReadonlySet<string> = new Set(
   DEFAULT_SUBCATEGORIES.map((s) => String(s.slug ?? "").trim().toLowerCase()).filter(Boolean),

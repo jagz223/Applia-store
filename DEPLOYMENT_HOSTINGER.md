@@ -60,8 +60,8 @@ Si tienes un VPS en Hostinger:
 
 3. **Sube los archivos**
    ```bash
-   scp -r ./mango-applia/dist usuario@tu-servidor:/var/www/applia/
-   scp ./mango-applia/.env usuario@tu-servidor:/var/www/applia/
+   scp -r ./Applia-store/dist usuario@tu-servidor:/var/www/applia/
+   scp ./Applia-store/.env usuario@tu-servidor:/var/www/applia/
    ```
 
 4. **Instala dependencias y ejecuta**

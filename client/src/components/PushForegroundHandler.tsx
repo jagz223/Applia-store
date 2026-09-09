@@ -33,7 +33,7 @@ export function PushForegroundHandler() {
           const rideId = String((payload.data as Record<string, string | undefined> | undefined)?.rideId ?? "");
           const offerType = String((payload.data as Record<string, string | undefined> | undefined)?.type ?? "").toLowerCase();
           const isDriverIncomingOffer =
-            offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+            offerType === "taxi_ride_offer" || offerType === "pack_ride_offer";
           const skipRideOfferSound =
             !isDriverIncomingOffer &&
             parsed.isRideOffer &&

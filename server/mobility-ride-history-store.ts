@@ -1,5 +1,5 @@
 /**
- * Persistencia del historial de viajes Go (Car Go / Pack Go).
+ * Persistencia del historial de viajes Go (Transporte / envíos).
  * Completados y cancelados/expirados se guardan en Firestore (o memoria de respaldo en dev).
  */
 
@@ -37,7 +37,7 @@ function docToRecord(id: string, data: Record<string, unknown>): MobilityRideHis
     : [];
   return {
     id,
-    module: (data.module === "pack" ? "pack" : "cargo") as MobilityRideHistoryModule,
+    module: (data.module === "pack" ? "pack" : "taxi") as MobilityRideHistoryModule,
     outcome: (["completed", "cancelled", "expired"].includes(String(data.outcome))
       ? data.outcome
       : "cancelled") as MobilityRideHistoryOutcome,
@@ -229,7 +229,7 @@ async function loadForUserFromFirestore(userId: string, limit: number): Promise<
   return rows.slice(0, limit);
 }
 
-/** Viajes Go terminados con éxito (Car Go + Pack Go) en los que participó el usuario. */
+/** Viajes Go terminados con éxito (Transporte + envíos) en los que participó el usuario. */
 export async function countCompletedMobilityTripsForUser(userId: string): Promise<number> {
   const key = String(userId ?? "").trim();
   if (!key) return 0;
@@ -253,10 +253,10 @@ export async function listMobilityRideHistoryForUser(
   return filtered.map(toListItem);
 }
 
-export type AdminCargoGoHistoryBucket = "completed" | "cancelled";
+export type AdminTaxiHistoryBucket = "completed" | "cancelled";
 
 export async function listMobilityRideHistoryForAdmin(
-  bucket: AdminCargoGoHistoryBucket
+  bucket: AdminTaxiHistoryBucket
 ): Promise<MobilityRideHistoryListItem[]> {
   const all = await loadAllFromFirestore();
   return all
@@ -292,9 +292,9 @@ export async function getDispatchCompanyDriverUserIds(companyId: string): Promis
   return ids;
 }
 
-export type CentralCargoGoHistoryPage = {
+export type CentralTaxiHistoryPage = {
   rides: MobilityRideHistoryListItem[];
-  bucket: AdminCargoGoHistoryBucket;
+  bucket: AdminTaxiHistoryBucket;
   page: number;
   limit: number;
   total: number;
@@ -302,12 +302,12 @@ export type CentralCargoGoHistoryPage = {
   counts: { completed: number; cancelled: number };
 };
 
-/** Historial Car Go / Pack de conductores afiliados a la central (completados y cancelados). */
+/** Historial Transporte / Pack de conductores afiliados a la central (completados y cancelados). */
 export async function listMobilityRideHistoryForCentral(
   companyId: string,
-  bucket: AdminCargoGoHistoryBucket,
+  bucket: AdminTaxiHistoryBucket,
   options: { page: number; limit: number },
-): Promise<CentralCargoGoHistoryPage> {
+): Promise<CentralTaxiHistoryPage> {
   const driverIds = await getDispatchCompanyDriverUserIds(companyId);
   const all = await loadAllFromFirestore();
   const companyRows = all.filter(

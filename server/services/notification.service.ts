@@ -146,7 +146,7 @@ class NotificationService {
     const uid = this.normalizeUserId(userId);
     const data = payload.data ?? {};
     const offerType = String(data.type || "").toLowerCase();
-    const isDriverClassicOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+    const isDriverClassicOffer = offerType === "taxi_ride_offer" || offerType === "pack_ride_offer";
     let tokens: string[] = [];
     try {
       tokens = await this.getUserTokens(

@@ -1,62 +1,62 @@
 /** Motivos de cancelación Go (taxi + delivery) con feedback obligatorio. */
 
-export type GoCancellationModule = "cargo" | "pack";
+export type GoCancellationModule = "taxi" | "pack";
 export type GoCancellationParty = "rider" | "driver";
 export type GoDriverCancelPhase = "en_route" | "at_pickup";
 
 export type GoCancellationReasonOption = {
   code: string;
-  labelRiderCargo: string;
+  labelRiderTaxi: string;
   labelRiderPack: string;
 };
 
 export const GO_RIDER_CANCELLATION_REASONS: GoCancellationReasonOption[] = [
-  { code: "no_longer_needed", labelRiderCargo: "Ya no necesito el servicio", labelRiderPack: "Ya no necesito el envío" },
+  { code: "no_longer_needed", labelRiderTaxi: "Ya no necesito el servicio", labelRiderPack: "Ya no necesito el envío" },
   {
     code: "driver_slow",
-    labelRiderCargo: "El conductor tarda mucho en llegar",
+    labelRiderTaxi: "El conductor tarda mucho en llegar",
     labelRiderPack: "El repartidor tarda mucho en llegar",
   },
   {
     code: "requested_by_mistake",
-    labelRiderCargo: "Solicité el servicio por error",
+    labelRiderTaxi: "Solicité el servicio por error",
     labelRiderPack: "Solicité el envío por error",
   },
-  { code: "fare_too_high", labelRiderCargo: "Tarifa muy alta", labelRiderPack: "Tarifa muy alta" },
+  { code: "fare_too_high", labelRiderTaxi: "Tarifa muy alta", labelRiderPack: "Tarifa muy alta" },
   {
     code: "driver_asked_cancel",
-    labelRiderCargo: "El conductor me pidió cancelar",
+    labelRiderTaxi: "El conductor me pidió cancelar",
     labelRiderPack: "El repartidor me pidió cancelar",
   },
-  { code: "other", labelRiderCargo: "Otro", labelRiderPack: "Otro" },
+  { code: "other", labelRiderTaxi: "Otro", labelRiderPack: "Otro" },
 ];
 
 export const GO_DRIVER_CANCEL_EN_ROUTE_REASONS: GoCancellationReasonOption[] = [
-  { code: "vehicle_issue", labelRiderCargo: "Tengo un inconveniente con mi vehículo", labelRiderPack: "Tengo un inconveniente con mi vehículo" },
-  { code: "client_asked_cancel", labelRiderCargo: "El cliente me pidió cancelar", labelRiderPack: "El cliente me pidió cancelar" },
-  { code: "traffic_blocked", labelRiderCargo: "Tráfico pesado / Ruta obstruida", labelRiderPack: "Tráfico pesado / Ruta obstruida" },
-  { code: "personal_emergency", labelRiderCargo: "Emergencia personal", labelRiderPack: "Emergencia personal" },
-  { code: "other", labelRiderCargo: "Otro", labelRiderPack: "Otro" },
+  { code: "vehicle_issue", labelRiderTaxi: "Tengo un inconveniente con mi vehículo", labelRiderPack: "Tengo un inconveniente con mi vehículo" },
+  { code: "client_asked_cancel", labelRiderTaxi: "El cliente me pidió cancelar", labelRiderPack: "El cliente me pidió cancelar" },
+  { code: "traffic_blocked", labelRiderTaxi: "Tráfico pesado / Ruta obstruida", labelRiderPack: "Tráfico pesado / Ruta obstruida" },
+  { code: "personal_emergency", labelRiderTaxi: "Emergencia personal", labelRiderPack: "Emergencia personal" },
+  { code: "other", labelRiderTaxi: "Otro", labelRiderPack: "Otro" },
 ];
 
 export const GO_DRIVER_CANCEL_AT_PICKUP_REASONS: GoCancellationReasonOption[] = [
-  { code: "client_no_show", labelRiderCargo: "El cliente no se presentó", labelRiderPack: "El cliente no se presentó" },
-  { code: "client_asked_cancel", labelRiderCargo: "El cliente me pidió cancelar", labelRiderPack: "El cliente me pidió cancelar" },
-  { code: "cannot_contact_client", labelRiderCargo: "No puedo contactar al cliente", labelRiderPack: "No puedo contactar al cliente" },
+  { code: "client_no_show", labelRiderTaxi: "El cliente no se presentó", labelRiderPack: "El cliente no se presentó" },
+  { code: "client_asked_cancel", labelRiderTaxi: "El cliente me pidió cancelar", labelRiderPack: "El cliente me pidió cancelar" },
+  { code: "cannot_contact_client", labelRiderTaxi: "No puedo contactar al cliente", labelRiderPack: "No puedo contactar al cliente" },
   {
     code: "excess_passengers_luggage",
-    labelRiderCargo: "Exceso de pasajeros / Equipaje",
+    labelRiderTaxi: "Exceso de pasajeros / Equipaje",
     labelRiderPack: "Exceso de carga / paquete",
   },
-  { code: "unsafe_area", labelRiderCargo: "Zona insegura o inaccesible", labelRiderPack: "Zona insegura o inaccesible" },
-  { code: "other", labelRiderCargo: "Otro", labelRiderPack: "Otro" },
+  { code: "unsafe_area", labelRiderTaxi: "Zona insegura o inaccesible", labelRiderPack: "Zona insegura o inaccesible" },
+  { code: "other", labelRiderTaxi: "Otro", labelRiderPack: "Otro" },
 ];
 
 export function goCancellationReasonLabel(
   option: GoCancellationReasonOption,
   module: GoCancellationModule,
 ): string {
-  return module === "pack" ? option.labelRiderPack : option.labelRiderCargo;
+  return module === "pack" ? option.labelRiderPack : option.labelRiderTaxi;
 }
 
 export function listGoCancellationReasons(input: {

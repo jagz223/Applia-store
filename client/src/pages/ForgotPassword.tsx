@@ -183,7 +183,7 @@ export default function ForgotPassword() {
     new Set(draft.map((d) => d.questionId)).size === 3;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-mango-orange/20 via-background to-mango-green/20 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/20 via-background to-secondary/20 p-4">
       <Card className="w-full max-w-xl">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-primary/10">
@@ -333,7 +333,7 @@ export default function ForgotPassword() {
             </Button>
           ) : null}
           <p className="text-center text-sm text-muted-foreground">
-            <Link href="/login" className="text-mango-orange hover:underline font-medium">
+            <Link href="/login" className="text-primary hover:underline font-medium">
               Volver al inicio de sesión
             </Link>
           </p>

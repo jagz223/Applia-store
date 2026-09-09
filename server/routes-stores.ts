@@ -139,10 +139,11 @@ import {
   resolveProductDisplayPrice,
   STORE_CURRENCY_USD_ID,
 } from "@shared/store-currency-schema";
+import { priceWithIva, pricesByCurrencyWithIva } from "@shared/store-price-iva";
 import { storeSubscriptionPaymentBodySchema } from "@shared/store-subscription-payment";
 import { isStoreVisibilityActive } from "@shared/store-visibility";
 import { filterStoresByCatalogQuery, getStoreRubroLabel } from "@shared/store-rubros";
-import { ingredientMaterialKey } from "@shared/store-slug";
+import { ingredientMaterialKey, storeCatalogNameKey } from "@shared/store-slug";
 import { parsePositiveIntParam, requireStoreAccess, requireStoreOwner, requireStoreStaffManagement, resolveStoreAccess, viewerCanManageStore, type StoreAccessContext } from "./store-product-auth";
 import { isGenlookConfigured, runGenlookVirtualTryOn } from "./genlook";
 import {
@@ -152,6 +153,8 @@ import {
   type ProductImportColumnMap,
   type ProductImportRow,
 } from "./store-product-import";
+import { listStoreProductsCached } from "./store-catalog-read";
+import { getCachedStoreProducts } from "./store-catalog-cache";
 import { buildStoreStaffDirectory } from "./store-staff-directory";
 import {
   appendStoreBranchTransferSystemMessage,
@@ -275,17 +278,22 @@ function serializeStoreProduct(
     description,
     codigo: product.codigo?.trim() || null,
     price: displayPrice,
+    priceWithIva: priceWithIva(displayPrice),
     pricesByCurrency: product.pricesByCurrency ?? {},
-    sizes: sizes.map((s) => ({
-      id: s.id,
-      name: s.name,
-      pricesByCurrency: s.pricesByCurrency ?? {},
-      price: resolveProductDisplayPrice(
+    sizes: sizes.map((s) => {
+      const sizePrice = resolveProductDisplayPrice(
         { price: 0, pricesByCurrency: s.pricesByCurrency },
         visualCurrencyId,
-      ),
-      weight: s.weight ?? 0,
-    })),
+      );
+      return {
+        id: s.id,
+        name: s.name,
+        pricesByCurrency: s.pricesByCurrency ?? {},
+        price: sizePrice,
+        priceWithIva: priceWithIva(sizePrice),
+        weight: s.weight ?? 0,
+      };
+    }),
     displayCurrencyId: visualCurrencyId,
     displayCurrencyLabel: currencyLabelForId(
       visualCurrencyId,
@@ -307,8 +315,7 @@ function serializeStoreProduct(
   };
 }
 
-function serializeStoreCategory(category: StoreCategory, products: StoreProduct[]) {
-  const ids = productIdsForCategory(products, category.id);
+function serializeStoreCategoryLite(category: StoreCategory) {
   return {
     id: category.id,
     storeId: category.storeId,
@@ -316,10 +323,55 @@ function serializeStoreCategory(category: StoreCategory, products: StoreProduct[
     description: category.description,
     hideFromShowcaseAll: category.hideFromShowcaseAll === true,
     sortOrder: category.sortOrder > 0 ? category.sortOrder : 0,
-    productIds: ids,
-    productCount: ids.length,
+    productIds: [] as number[],
+    productCount: 0,
     createdAt: serializeDate(category.createdAt),
     updatedAt: serializeDate(category.updatedAt),
+  };
+}
+
+function serializeStoreCategory(
+  category: StoreCategory,
+  products: StoreProduct[],
+  options?: { includeProductIds?: boolean; includeProductSummaries?: boolean },
+) {
+  const ids = productIdsForCategory(products, category.id);
+  const includeProductIds = options?.includeProductIds !== false;
+  const nameById = options?.includeProductSummaries
+    ? new Map(products.map((p) => [p.id, p.name]))
+    : null;
+  return {
+    id: category.id,
+    storeId: category.storeId,
+    name: category.name,
+    description: category.description,
+    hideFromShowcaseAll: category.hideFromShowcaseAll === true,
+    sortOrder: category.sortOrder > 0 ? category.sortOrder : 0,
+    productIds: includeProductIds ? ids : [],
+    productCount: ids.length,
+    productSummaries: nameById
+      ? ids.map((id) => ({ id, name: nameById.get(id) ?? `Producto #${id}` }))
+      : undefined,
+    createdAt: serializeDate(category.createdAt),
+    updatedAt: serializeDate(category.updatedAt),
+  };
+}
+
+function serializeStoreSubcategoryLite(
+  subcategory: StoreSubcategory,
+  categoryNameById?: Map<number, string>,
+) {
+  return {
+    id: subcategory.id,
+    storeId: subcategory.storeId,
+    categoryId: subcategory.categoryId,
+    categoryName: categoryNameById?.get(subcategory.categoryId) ?? null,
+    name: subcategory.name,
+    description: subcategory.description,
+    productIds: [] as number[],
+    productCount: 0,
+    createdAt: serializeDate(subcategory.createdAt),
+    updatedAt: serializeDate(subcategory.updatedAt),
   };
 }
 
@@ -353,15 +405,43 @@ function serializeShowcaseSubcategory(subcategory: StoreSubcategory) {
 
 async function assertStoreProductIds(storeId: number, productIds: number[]): Promise<void> {
   if (productIds.length === 0) return;
-  const products = await appliaStorage.listStoreProducts(storeId);
-  const valid = new Set(products.map((p) => p.id));
-  for (const id of productIds) {
-    if (!valid.has(id)) throw new Error("STORE_PRODUCT_INVALID");
+  const unique = [...new Set(productIds.filter((id) => Number.isFinite(id) && id > 0))];
+  const cached = getCachedStoreProducts(storeId);
+  if (cached) {
+    const valid = new Set(cached.map((p) => p.id));
+    for (const id of unique) {
+      if (!valid.has(id)) throw new Error("STORE_PRODUCT_INVALID");
+    }
+    return;
   }
+  const found = await appliaStorage.getStoreProductsByIds(storeId, unique);
+  if (found.length !== unique.length) throw new Error("STORE_PRODUCT_INVALID");
 }
 
-function serializeStorePromotion(promotion: StorePromotion, products: StoreProduct[]) {
-  const nameById = new Map(products.map((p) => [p.id, p.name]));
+async function productNameByIdForIds(storeId: number, ids: number[]): Promise<Map<number, string>> {
+  const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  const map = new Map<number, string>();
+  if (unique.length === 0) return map;
+  const cached = getCachedStoreProducts(storeId);
+  let remaining = unique;
+  if (cached) {
+    const need = new Set(unique);
+    for (const product of cached) {
+      if (need.has(product.id)) {
+        map.set(product.id, product.name);
+        need.delete(product.id);
+      }
+    }
+    remaining = [...need];
+  }
+  if (remaining.length > 0) {
+    const extra = await appliaStorage.getStoreProductsByIds(storeId, remaining);
+    for (const product of extra) map.set(product.id, product.name);
+  }
+  return map;
+}
+
+function serializeStorePromotion(promotion: StorePromotion, nameById: Map<number, string>) {
   return {
     id: promotion.id,
     storeId: promotion.storeId,
@@ -381,6 +461,14 @@ function serializeStorePromotion(promotion: StorePromotion, products: StoreProdu
   };
 }
 
+async function serializeStorePromotionResolved(storeId: number, promotion: StorePromotion) {
+  const nameById = await productNameByIdForIds(
+    storeId,
+    promotion.items.map((item) => item.productId),
+  );
+  return serializeStorePromotion(promotion, nameById);
+}
+
 async function assertStorePromotionItems(
   storeId: number,
   items: { productId: number }[] | undefined,
@@ -398,7 +486,9 @@ function serializeStoreShowcaseProduct(
   ingredientNameById: Map<number, string> = new Map(),
 ) {
   const currency = normalizeStoreCurrencyFields(store);
-  const displayPrice = resolveProductDisplayPrice(product, currency.currencyVisualId);
+  const displayPrice = priceWithIva(
+    resolveProductDisplayPrice(product, currency.currencyVisualId),
+  );
   const ingredientMaterialIds = product.ingredientMaterialIds ?? [];
   const removableIngredientMaterialIds = product.removableIngredientMaterialIds ?? [];
   const ingredientAdditionals = product.ingredientAdditionals ?? [];
@@ -410,14 +500,16 @@ function serializeStoreShowcaseProduct(
     name: product.name,
     description,
     price: displayPrice,
-    pricesByCurrency: product.pricesByCurrency ?? {},
+    pricesByCurrency: pricesByCurrencyWithIva(product.pricesByCurrency),
     sizes: sizes.map((s) => ({
       id: s.id,
       name: s.name,
-      pricesByCurrency: s.pricesByCurrency ?? {},
-      price: resolveProductDisplayPrice(
-        { price: 0, pricesByCurrency: s.pricesByCurrency },
-        currency.currencyVisualId,
+      pricesByCurrency: pricesByCurrencyWithIva(s.pricesByCurrency),
+      price: priceWithIva(
+        resolveProductDisplayPrice(
+          { price: 0, pricesByCurrency: s.pricesByCurrency },
+          currency.currencyVisualId,
+        ),
       ),
     })),
     displayCurrencyId: currency.currencyVisualId,
@@ -433,11 +525,46 @@ function serializeStoreShowcaseProduct(
     additionals: ingredientAdditionals.map((a) => ({
       id: a.ingredientMaterialId,
       name: resolveName(a.ingredientMaterialId),
-      price: resolveAdditionalDisplayPrice(a, currency.currencyVisualId),
-      pricesByCurrency: a.pricesByCurrency ?? {},
-      pricesBySize: a.pricesBySize ?? {},
+      price: priceWithIva(resolveAdditionalDisplayPrice(a, currency.currencyVisualId)),
+      pricesByCurrency: pricesByCurrencyWithIva(a.pricesByCurrency),
+      pricesBySize: Object.fromEntries(
+        Object.entries(a.pricesBySize ?? {}).map(([sizeId, map]) => [
+          sizeId,
+          pricesByCurrencyWithIva(map),
+        ]),
+      ),
     })),
   };
+}
+
+function serializeStoreShowcaseProductCard(product: StoreProduct, store: Store) {
+  const currency = normalizeStoreCurrencyFields(store);
+  const displayPrice = priceWithIva(
+    resolveProductDisplayPrice(product, currency.currencyVisualId),
+  );
+  const description = product.description?.trim() || null;
+  return {
+    id: product.id,
+    name: product.name,
+    description:
+      description && description.length > 180 ? `${description.slice(0, 180)}…` : description,
+    price: displayPrice,
+    displayCurrencyId: currency.currencyVisualId,
+    displayCurrencyLabel: currencyLabelForId(currency.currencyVisualId, currency.currencyExtras),
+    imageUrls: (product.imageUrls ?? []).slice(0, 2),
+    categoryIds: product.categoryIds ?? [],
+    subcategoryIds: product.subcategoryIds ?? [],
+  };
+}
+
+async function ingredientNameMapForProduct(product: StoreProduct): Promise<Map<number, string>> {
+  const ids = [
+    ...(product.ingredientMaterialIds ?? []),
+    ...(product.removableIngredientMaterialIds ?? []),
+    ...(product.ingredientAdditionals ?? []).map((a) => a.ingredientMaterialId),
+  ];
+  const items = await appliaStorage.getIngredientMaterialsByIds(ids);
+  return new Map(items.map((i) => [i.id, i.name]));
 }
 
 function assertProductPricesForAcceptedCurrencies(
@@ -545,7 +672,7 @@ function serializeStoreShowcasePromotion(promotion: StorePromotion, products: St
     id: promotion.id,
     name: promotion.name,
     description: promotion.description,
-    price: promotion.price,
+    price: priceWithIva(promotion.price),
     imageUrl,
     promotionImageUrl: promotion.imageUrl?.trim() || null,
     items: promotion.items
@@ -802,9 +929,84 @@ function parseOptionalAdminListNameQuery(query: unknown): string | undefined {
   return q || undefined;
 }
 
+/** Coincidencia aproximada: todas las palabras del query deben aparecer en el nombre (cualquier orden). */
+function nameMatchesApproximateQuery(name: string, q?: string): boolean {
+  if (!q) return true;
+  const hay = name.toLowerCase();
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return true;
+  return tokens.every((token) => hay.includes(token));
+}
+
 function filterSerializedListByName<T extends { name: string }>(items: T[], q?: string): T[] {
   if (!q) return items;
-  return items.filter((item) => item.name.toLowerCase().includes(q));
+  return items.filter((item) => nameMatchesApproximateQuery(item.name, q));
+}
+
+function parseOptionalPositiveIntQuery(query: unknown, key: string): number | undefined {
+  if (!query || typeof query !== "object") return undefined;
+  const raw = (query as Record<string, unknown>)[key];
+  if (raw == null || raw === "") return undefined;
+  const n = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.trunc(n);
+}
+
+function parseOptionalNonNegativeNumberQuery(query: unknown, key: string): number | undefined {
+  if (!query || typeof query !== "object") return undefined;
+  const raw = (query as Record<string, unknown>)[key];
+  if (raw == null || raw === "") return undefined;
+  const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
+}
+
+type AdminProductListFilters = {
+  q?: string;
+  categoryId?: number;
+  subcategoryId?: number;
+  priceMin?: number;
+  priceMax?: number;
+  priceIvaMin?: number;
+  priceIvaMax?: number;
+};
+
+function parseAdminProductListFilters(query: unknown): AdminProductListFilters {
+  return {
+    q: parseOptionalAdminListNameQuery(query),
+    categoryId: parseOptionalPositiveIntQuery(query, "categoryId"),
+    subcategoryId: parseOptionalPositiveIntQuery(query, "subcategoryId"),
+    priceMin: parseOptionalNonNegativeNumberQuery(query, "priceMin"),
+    priceMax: parseOptionalNonNegativeNumberQuery(query, "priceMax"),
+    priceIvaMin: parseOptionalNonNegativeNumberQuery(query, "priceIvaMin"),
+    priceIvaMax: parseOptionalNonNegativeNumberQuery(query, "priceIvaMax"),
+  };
+}
+
+function filterSerializedStoreProducts<
+  T extends {
+    name: string;
+    price: number;
+    priceWithIva: number;
+    categoryIds: number[];
+    subcategoryIds?: number[];
+  },
+>(items: T[], filters: AdminProductListFilters): T[] {
+  return items.filter((item) => {
+    if (!nameMatchesApproximateQuery(item.name, filters.q)) return false;
+    if (filters.categoryId && !(item.categoryIds ?? []).includes(filters.categoryId)) return false;
+    if (
+      filters.subcategoryId &&
+      !(item.subcategoryIds ?? []).includes(filters.subcategoryId)
+    ) {
+      return false;
+    }
+    if (filters.priceMin != null && item.price < filters.priceMin) return false;
+    if (filters.priceMax != null && item.price > filters.priceMax) return false;
+    if (filters.priceIvaMin != null && item.priceWithIva < filters.priceIvaMin) return false;
+    if (filters.priceIvaMax != null && item.priceWithIva > filters.priceIvaMax) return false;
+    return true;
+  });
 }
 
 function paginateSerializedList<T>(
@@ -1202,12 +1404,23 @@ export function registerStoreRoutes(app: Express): void {
         return res.status(400).json({ message: "Parámetros de paginación inválidos." });
       }
       const nameQuery = parseOptionalAdminListNameQuery(req.query);
+      if (!paginationResult.pagination) {
+        const categories = await appliaStorage.listStoreCategories(storeId, {
+          persistRenumber: false,
+        });
+        return res.json({
+          categories: filterSerializedListByName(
+            categories.map(serializeStoreCategoryLite),
+            nameQuery,
+          ),
+        });
+      }
       const [categories, products] = await Promise.all([
-        appliaStorage.listStoreCategories(storeId),
-        appliaStorage.listStoreProducts(storeId),
+        appliaStorage.listStoreCategories(storeId, { persistRenumber: false }),
+        listStoreProductsCached(storeId),
       ]);
       const serialized = filterSerializedListByName(
-        categories.map((c) => serializeStoreCategory(c, products)),
+        categories.map((c) => serializeStoreCategory(c, products, { includeProductIds: false })),
         nameQuery,
       );
       if (!paginationResult.pagination) {
@@ -1258,8 +1471,10 @@ export function registerStoreRoutes(app: Express): void {
         category.id,
         parsed.data.subcategoryNames ?? [],
       );
-      const products = await appliaStorage.listStoreProducts(storeId);
-      return res.status(201).json({ category: serializeStoreCategory(category, products) });
+      const products = await listStoreProductsCached(storeId);
+      return res.status(201).json({
+        category: serializeStoreCategory(category, products, { includeProductIds: false }),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -1268,7 +1483,11 @@ export function registerStoreRoutes(app: Express): void {
       if (msg === "STORE_PRODUCT_INVALID") {
         return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
       }
-      console.error("[stores] create category", e);
+      if (msg === "STORE_CATEGORY_NAME_EXISTS") {
+        return res.status(409).json({
+          message: "Ya existe una categoría con ese nombre. Mayúsculas y minúsculas no cuentan como diferencia.",
+        });
+      }
       return res.status(500).json({ message: "No se pudo crear la categoría." });
     }
   });
@@ -1282,8 +1501,13 @@ export function registerStoreRoutes(app: Express): void {
       await requireStoreOwner(userId, storeId);
       const category = await appliaStorage.getStoreCategory(storeId, categoryId);
       if (!category) return res.status(404).json({ message: "Categoría no encontrada." });
-      const products = await appliaStorage.listStoreProducts(storeId);
-      return res.json({ category: serializeStoreCategory(category, products) });
+      const products = await listStoreProductsCached(storeId);
+      return res.json({
+        category: serializeStoreCategory(category, products, {
+          includeProductIds: true,
+          includeProductSummaries: true,
+        }),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -1323,8 +1547,13 @@ export function registerStoreRoutes(app: Express): void {
       if (parsed.data.subcategoryNames != null && parsed.data.subcategoryNames.length > 0) {
         await createSubcategoriesForCategory(storeId, categoryId, parsed.data.subcategoryNames);
       }
-      const products = await appliaStorage.listStoreProducts(storeId);
-      return res.json({ category: serializeStoreCategory(category, products) });
+      const products = await listStoreProductsCached(storeId);
+      return res.json({
+        category: serializeStoreCategory(category, products, {
+          includeProductIds: true,
+          includeProductSummaries: true,
+        }),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -1333,6 +1562,11 @@ export function registerStoreRoutes(app: Express): void {
       if (msg === "STORE_CATEGORY_NOT_FOUND") return res.status(404).json({ message: "Categoría no encontrada." });
       if (msg === "STORE_PRODUCT_INVALID") {
         return res.status(400).json({ message: "Uno o más productos no pertenecen a esta tienda." });
+      }
+      if (msg === "STORE_CATEGORY_NAME_EXISTS") {
+        return res.status(409).json({
+          message: "Ya existe una categoría con ese nombre. Mayúsculas y minúsculas no cuentan como diferencia.",
+        });
       }
       console.error("[stores] update category", e);
       return res.status(500).json({ message: "No se pudo actualizar la categoría." });
@@ -1375,17 +1609,16 @@ export function registerStoreRoutes(app: Express): void {
       const categoryIdRaw =
         typeof req.query.categoryId === "string" ? req.query.categoryId.trim() : "";
       const categoryId = categoryIdRaw ? Number.parseInt(categoryIdRaw, 10) : undefined;
-      const [subcategories, products, categories] = await Promise.all([
+      const [subcategories, categories] = await Promise.all([
         appliaStorage.listStoreSubcategories(
           storeId,
           Number.isFinite(categoryId) && categoryId! > 0 ? { categoryId } : undefined,
         ),
-        appliaStorage.listStoreProducts(storeId),
-        appliaStorage.listStoreCategories(storeId),
+        appliaStorage.listStoreCategories(storeId, { persistRenumber: false }),
       ]);
       const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
       const serialized = filterSerializedListByName(
-        subcategories.map((s) => serializeStoreSubcategory(s, products, categoryNameById)),
+        subcategories.map((s) => serializeStoreSubcategoryLite(s, categoryNameById)),
         nameQuery,
       );
       if (!paginationResult.pagination) {
@@ -1425,13 +1658,10 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
       const subcategory = await appliaStorage.createStoreSubcategory(storeId, parsed.data);
-      const [products, categories] = await Promise.all([
-        appliaStorage.listStoreProducts(storeId),
-        appliaStorage.listStoreCategories(storeId),
-      ]);
+      const categories = await appliaStorage.listStoreCategories(storeId, { persistRenumber: false });
       const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
       return res.status(201).json({
-        subcategory: serializeStoreSubcategory(subcategory, products, categoryNameById),
+        subcategory: serializeStoreSubcategoryLite(subcategory, categoryNameById),
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1442,6 +1672,11 @@ export function registerStoreRoutes(app: Express): void {
       }
       if (msg === "STORE_CATEGORY_NOT_FOUND") {
         return res.status(400).json({ message: "La categoría indicada no existe." });
+      }
+      if (msg === "STORE_SUBCATEGORY_NAME_EXISTS") {
+        return res.status(409).json({
+          message: "Ya existe una subcategoría con ese nombre en esta categoría. Mayúsculas y minúsculas no cuentan como diferencia.",
+        });
       }
       console.error("[stores] create subcategory", e);
       return res.status(500).json({ message: "No se pudo crear la subcategoría." });
@@ -1467,13 +1702,10 @@ export function registerStoreRoutes(app: Express): void {
         subcategoryId,
         parsed.data,
       );
-      const [products, categories] = await Promise.all([
-        appliaStorage.listStoreProducts(storeId),
-        appliaStorage.listStoreCategories(storeId),
-      ]);
+      const categories = await appliaStorage.listStoreCategories(storeId, { persistRenumber: false });
       const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
       return res.json({
-        subcategory: serializeStoreSubcategory(subcategory, products, categoryNameById),
+        subcategory: serializeStoreSubcategoryLite(subcategory, categoryNameById),
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1487,6 +1719,11 @@ export function registerStoreRoutes(app: Express): void {
       }
       if (msg === "STORE_CATEGORY_NOT_FOUND") {
         return res.status(400).json({ message: "La categoría indicada no existe." });
+      }
+      if (msg === "STORE_SUBCATEGORY_NAME_EXISTS") {
+        return res.status(409).json({
+          message: "Ya existe una subcategoría con ese nombre en esta categoría. Mayúsculas y minúsculas no cuentan como diferencia.",
+        });
       }
       console.error("[stores] update subcategory", e);
       return res.status(500).json({ message: "No se pudo actualizar la subcategoría." });
@@ -1529,24 +1766,31 @@ export function registerStoreRoutes(app: Express): void {
         return res.status(400).json({ message: "Parámetros de paginación inválidos." });
       }
       const nameQuery = parseOptionalAdminListNameQuery(req.query);
-      const [promotions, products] = await Promise.all([
-        appliaStorage.listStorePromotions(storeId),
-        appliaStorage.listStoreProducts(storeId),
-      ]);
-      const serialized = filterSerializedListByName(
-        promotions.map((p) => serializeStorePromotion(p, products)),
-        nameQuery,
+      const promotions = await appliaStorage.listStorePromotions(storeId);
+      const filtered = filterSerializedListByName(promotions, nameQuery);
+      const pageItems = paginationResult.pagination
+        ? paginateSerializedList(filtered, paginationResult.pagination)
+        : {
+            items: filtered,
+            total: filtered.length,
+            page: 1,
+            limit: filtered.length,
+            totalPages: 1,
+          };
+      const nameById = await productNameByIdForIds(
+        storeId,
+        pageItems.items.flatMap((p) => p.items.map((item) => item.productId)),
       );
+      const serialized = pageItems.items.map((p) => serializeStorePromotion(p, nameById));
       if (!paginationResult.pagination) {
         return res.json({ promotions: serialized });
       }
-      const pageResult = paginateSerializedList(serialized, paginationResult.pagination);
       return res.json({
-        promotions: pageResult.items,
-        total: pageResult.total,
-        page: pageResult.page,
-        limit: pageResult.limit,
-        totalPages: pageResult.totalPages,
+        promotions: serialized,
+        total: pageItems.total,
+        page: pageItems.page,
+        limit: pageItems.limit,
+        totalPages: pageItems.totalPages,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1573,8 +1817,9 @@ export function registerStoreRoutes(app: Express): void {
       }
       await assertStorePromotionItems(storeId, parsed.data.items);
       const promotion = await appliaStorage.createStorePromotion(storeId, parsed.data);
-      const products = await appliaStorage.listStoreProducts(storeId);
-      return res.status(201).json({ promotion: serializeStorePromotion(promotion, products) });
+      return res.status(201).json({
+        promotion: await serializeStorePromotionResolved(storeId, promotion),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -1597,8 +1842,9 @@ export function registerStoreRoutes(app: Express): void {
       await requireStoreOwner(userId, storeId);
       const promotion = await appliaStorage.getStorePromotion(storeId, promotionId);
       if (!promotion) return res.status(404).json({ message: "Promoción no encontrada." });
-      const products = await appliaStorage.listStoreProducts(storeId);
-      return res.json({ promotion: serializeStorePromotion(promotion, products) });
+      return res.json({
+        promotion: await serializeStorePromotionResolved(storeId, promotion),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -1627,8 +1873,9 @@ export function registerStoreRoutes(app: Express): void {
         await assertStorePromotionItems(storeId, parsed.data.items);
       }
       const promotion = await appliaStorage.updateStorePromotion(storeId, promotionId, parsed.data);
-      const products = await appliaStorage.listStoreProducts(storeId);
-      return res.json({ promotion: serializeStorePromotion(promotion, products) });
+      return res.json({
+        promotion: await serializeStorePromotionResolved(storeId, promotion),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "UNAUTHORIZED") return res.status(401).json({ message: "Unauthorized" });
@@ -2245,15 +2492,33 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       const access = await requireStoreAccess(userId, storeId, req.user?.role);
 
-      const orders = await appliaStorage.listStoreOrders(
-        storeId,
-        parseStoreOrderListFiltersFromQuery(req.query ?? {}, access),
-      );
+      const paginationResult = parseOptionalAdminListPagination(req.query);
+      if (!paginationResult.ok) {
+        return res.status(400).json({ message: "Parámetros de paginación inválidos." });
+      }
+      const filters = parseStoreOrderListFiltersFromQuery(req.query ?? {}, access);
+      filters.limit = paginationResult.pagination ? 500 : 400;
+      const orders = await appliaStorage.listStoreOrders(storeId, filters);
 
       const store = await appliaStorage.getStoreById(storeId);
-      const serialized = await Promise.all(orders.map((o) => serializeStoreOrder(o, false, store)));
+      const pageOrders = paginationResult.pagination
+        ? paginateSerializedList(orders, paginationResult.pagination)
+        : {
+            items: orders,
+            total: orders.length,
+            page: 1,
+            limit: orders.length,
+            totalPages: 1,
+          };
+      const serialized = await Promise.all(
+        pageOrders.items.map((o) => serializeStoreOrder(o, false, store)),
+      );
       return res.json({
         orders: serialized,
+        total: pageOrders.total,
+        page: pageOrders.page,
+        limit: pageOrders.limit,
+        totalPages: pageOrders.totalPages,
         branchFilterLocked: access.isEmployee && !access.canFilterOrdersByBranch,
         employeeBranchId: access.employeeBranchId,
         canFilterOrdersByBranch: access.canFilterOrdersByBranch,
@@ -3490,24 +3755,49 @@ export function registerStoreRoutes(app: Express): void {
       if (!paginationResult.ok) {
         return res.status(400).json({ message: "Parámetros de paginación inválidos." });
       }
-      const nameQuery = parseOptionalAdminListNameQuery(req.query);
-      const products = await appliaStorage.listStoreProducts(storeId);
-      const currency = normalizeStoreCurrencyFields(store);
-      const serialized = filterSerializedListByName(
-        products.map((p) =>
-          serializeStoreProduct(p, {
-            visualCurrencyId: currency.currencyVisualId,
-            currencyExtras: currency.currencyExtras,
-          }),
-        ),
-        nameQuery,
-      );
-      if (!paginationResult.pagination) {
-        return res.json({ products: serialized });
+      const filters = parseAdminProductListFilters(req.query);
+      const products = await listStoreProductsCached(storeId);
+      const fieldsRaw = typeof req.query.fields === "string" ? req.query.fields.trim() : "";
+      if (fieldsRaw === "picker") {
+        const filtered = products.filter((p) => nameMatchesApproximateQuery(p.name, filters.q));
+        const pagination = paginationResult.pagination ?? { page: 1, limit: 30 };
+        const pageResult = paginateSerializedList(
+          filtered.map((p) => ({ id: p.id, name: p.name })),
+          pagination,
+        );
+        return res.json({
+          products: pageResult.items,
+          total: pageResult.total,
+          page: pageResult.page,
+          limit: pageResult.limit,
+          totalPages: pageResult.totalPages,
+        });
       }
-      const pageResult = paginateSerializedList(serialized, paginationResult.pagination);
+      const currency = normalizeStoreCurrencyFields(store);
+      const storeCurrency = {
+        visualCurrencyId: currency.currencyVisualId,
+        currencyExtras: currency.currencyExtras,
+      };
+      const filterable = products.map((p) => {
+        const displayPrice = resolveProductDisplayPrice(p, currency.currencyVisualId);
+        return {
+          product: p,
+          name: p.name,
+          price: displayPrice,
+          priceWithIva: priceWithIva(displayPrice),
+          categoryIds: p.categoryIds ?? [],
+          subcategoryIds: p.subcategoryIds ?? [],
+        };
+      });
+      const filtered = filterSerializedStoreProducts(filterable, filters);
+      if (!paginationResult.pagination) {
+        return res.json({
+          products: filtered.map((row) => serializeStoreProduct(row.product, storeCurrency)),
+        });
+      }
+      const pageResult = paginateSerializedList(filtered, paginationResult.pagination);
       return res.json({
-        products: pageResult.items,
+        products: pageResult.items.map((row) => serializeStoreProduct(row.product, storeCurrency)),
         total: pageResult.total,
         page: pageResult.page,
         limit: pageResult.limit,
@@ -3655,21 +3945,16 @@ export function registerStoreRoutes(app: Express): void {
       let updated = 0;
       const rowErrors = [...parsed.errors];
 
-      const categoriesCache = await appliaStorage.listStoreCategories(storeIdNum);
+      const categoriesCache = await appliaStorage.listStoreCategories(storeIdNum, {
+        persistRenumber: false,
+      });
       const subcategoriesCache = await appliaStorage.listStoreSubcategories(storeIdNum);
-      const normalizeNameKey = (value: string) =>
-        value
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .trim()
-          .toLowerCase()
-          .replace(/\s+/g, " ");
 
       async function resolveCategoryId(name: string | null): Promise<number | null> {
         if (!name || !name.trim()) return null;
         const trimmed = name.trim().slice(0, 120);
-        const key = normalizeNameKey(trimmed);
-        const existing = categoriesCache.find((c) => normalizeNameKey(c.name) === key);
+        const key = storeCatalogNameKey(trimmed);
+        const existing = categoriesCache.find((c) => storeCatalogNameKey(c.name) === key);
         if (existing) return existing.id;
         const createdCat = await appliaStorage.createStoreCategory(storeIdNum, {
           name: trimmed,
@@ -3689,9 +3974,9 @@ export function registerStoreRoutes(app: Express): void {
           throw new Error("Para importar subcategoría debes mapear también la columna de categoría.");
         }
         const trimmed = name.trim().slice(0, 120);
-        const key = normalizeNameKey(trimmed);
+        const key = storeCatalogNameKey(trimmed);
         const existing = subcategoriesCache.find(
-          (s) => s.categoryId === categoryId && normalizeNameKey(s.name) === key,
+          (s) => s.categoryId === categoryId && storeCatalogNameKey(s.name) === key,
         );
         if (existing) return existing.id;
         const createdSub = await appliaStorage.createStoreSubcategory(storeIdNum, {
@@ -4012,8 +4297,24 @@ export function registerStoreRoutes(app: Express): void {
         isOwner ? await repairStoreSubscriptionVisibilityIfNeeded(store) : store;
       const visibilityActive = isStoreVisibilityActive(storeForView);
 
-      // Vitrina pública: clientes e invitados siempre ven productos (tienda única).
-      const all = await appliaStorage.listStoreProducts(storeForView.id);
+      const paginationParsed = parseOptionalAdminListPagination(req.query);
+      if (!paginationParsed.ok) {
+        return res.status(400).json({ message: "Paginación inválida." });
+      }
+      const page = paginationParsed.pagination?.page ?? 1;
+      const limit = paginationParsed.pagination?.limit ?? 10;
+      const filters = parseAdminProductListFilters(req.query);
+
+      const [all, allCategories, allSubcategories, allPromotions, banners, popups] =
+        await Promise.all([
+          listStoreProductsCached(storeForView.id),
+          appliaStorage.listStoreCategories(storeForView.id, { persistRenumber: false }),
+          appliaStorage.listStoreSubcategories(storeForView.id),
+          appliaStorage.listStorePromotions(storeForView.id),
+          appliaStorage.listStoreShowcaseAds(storeForView.id, "banner"),
+          appliaStorage.listStoreShowcaseAds(storeForView.id, "popup"),
+        ]);
+
       const showcaseList = all.filter((p) =>
         resolveStoreProductShowOnShowcase({
           showOnShowcase: p.showOnShowcase,
@@ -4021,25 +4322,46 @@ export function registerStoreRoutes(app: Express): void {
           stock: p.stock,
         }),
       );
-      const allCategories = await appliaStorage.listStoreCategories(storeForView.id);
+      const catalogTotal = showcaseList.length;
       const categorySortOrderById = new Map(
         allCategories.map((c) => [
           c.id,
           c.sortOrder > 0 ? c.sortOrder : Number.MAX_SAFE_INTEGER,
         ]),
       );
-      const ingredientsPage = await appliaStorage.listIngredientsMaterials({ page: 1, limit: 500 });
-      const ingredientNameById = new Map(ingredientsPage.items.map((i) => [i.id, i.name]));
-      const products = showcaseList
+
+      let filtered = showcaseList;
+      if (filters.categoryId) {
+        filtered = filtered.filter((p) => (p.categoryIds ?? []).includes(filters.categoryId!));
+        if (filters.subcategoryId) {
+          filtered = filtered.filter((p) =>
+            (p.subcategoryIds ?? []).includes(filters.subcategoryId!),
+          );
+        }
+      } else {
+        const exclusiveCategoryIds = new Set(
+          allCategories.filter((c) => c.hideFromShowcaseAll === true).map((c) => c.id),
+        );
+        if (exclusiveCategoryIds.size > 0) {
+          filtered = filtered.filter(
+            (p) => !(p.categoryIds ?? []).some((id) => exclusiveCategoryIds.has(id)),
+          );
+        }
+      }
+      if (filters.q) {
+        filtered = filtered.filter((p) => nameMatchesApproximateQuery(p.name, filters.q));
+      }
+      filtered = filtered
         .slice()
-        .sort((a, b) => compareProductsByCategorySortOrder(a, b, categorySortOrderById))
-        .map((p) => serializeStoreShowcaseProduct(p, storeForView, ingredientNameById));
+        .sort((a, b) => compareProductsByCategorySortOrder(a, b, categorySortOrderById));
+
+      const paged = paginateSerializedList(filtered, { page, limit });
+      const products = paged.items.map((p) => serializeStoreShowcaseProductCard(p, storeForView));
 
       const categories = allCategories
         .filter((c) => productIdsForCategory(showcaseList, c.id).length > 0)
         .map(serializeShowcaseCategory);
 
-      const allSubcategories = await appliaStorage.listStoreSubcategories(storeForView.id);
       const categoryIdSet = new Set(categories.map((c) => c.id));
       const subcategories = allSubcategories
         .filter(
@@ -4049,31 +4371,61 @@ export function registerStoreRoutes(app: Express): void {
         )
         .map(serializeShowcaseSubcategory);
 
-      const allPromotions = await appliaStorage.listStorePromotions(storeForView.id);
       const promotions = allPromotions
         .filter((p) => p.status === "active" && p.items.some((item) => item.status === "active"))
         .map((p) => serializeStoreShowcasePromotion(p, all));
 
-      const [banners, popups] = await Promise.all([
-        appliaStorage.listStoreShowcaseAds(storeForView.id, "banner"),
-        appliaStorage.listStoreShowcaseAds(storeForView.id, "popup"),
-      ]);
-      const serializedBanners = banners.map(serializeShowcaseAdItem);
-      const serializedPopups = popups.map(serializeShowcaseAdItem);
-
       return res.json({
         products,
+        total: paged.total,
+        page: paged.page,
+        limit: paged.limit,
+        totalPages: paged.totalPages,
+        catalogTotal,
         categories,
         subcategories,
         promotions,
-        banners: serializedBanners,
-        popups: serializedPopups,
+        banners: banners.map(serializeShowcaseAdItem),
+        popups: popups.map(serializeShowcaseAdItem),
         visibilityActive,
         isOwner,
       });
     } catch (e) {
       console.error("[stores] showcase-products", e);
       return res.status(500).json({ message: "No se pudieron cargar los productos de la vitrina." });
+    }
+  });
+
+  app.get("/api/stores/:slug/showcase-products/:productId", optionalAuthenticateJWT, async (req: any, res) => {
+    try {
+      const slug = String(req.params.slug ?? "").trim();
+      const productId = parsePositiveIntParam(req.params.productId);
+      if (!slug || !productId) return res.status(400).json({ message: "Solicitud inválida." });
+
+      const store = await appliaStorage.getStoreBySlug(slug);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const viewerId = req.user?.id != null ? String(req.user.id) : null;
+      const isOwner = await viewerCanManageStore(viewerId, store, req.user?.role);
+      const storeForView =
+        isOwner ? await repairStoreSubscriptionVisibilityIfNeeded(store) : store;
+
+      const product = await appliaStorage.getStoreProduct(storeForView.id, productId);
+      if (!product) return res.status(404).json({ message: "Producto no encontrado." });
+      const visible = resolveStoreProductShowOnShowcase({
+        showOnShowcase: product.showOnShowcase,
+        hasStock: product.hasStock,
+        stock: product.stock,
+      });
+      if (!visible) return res.status(404).json({ message: "Producto no encontrado." });
+
+      const ingredientNameById = await ingredientNameMapForProduct(product);
+      return res.json({
+        product: serializeStoreShowcaseProduct(product, storeForView, ingredientNameById),
+      });
+    } catch (e) {
+      console.error("[stores] showcase-product detail", e);
+      return res.status(500).json({ message: "No se pudo cargar el producto." });
     }
   });
 
@@ -4175,7 +4527,9 @@ export function registerStoreRoutes(app: Express): void {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === "INGREDIENT_MATERIAL_ALREADY_EXISTS") {
-        return res.status(409).json({ message: "Ya existe un ingrediente o material con ese nombre." });
+        return res.status(409).json({
+          message: "Ya existe un ingrediente o material con ese nombre. Mayúsculas y minúsculas no cuentan como diferencia.",
+        });
       }
       console.error("[ingredients-materials] create", e);
       return res.status(500).json({ message: "No se pudo crear el ingrediente o material." });
@@ -4206,7 +4560,9 @@ export function registerStoreRoutes(app: Express): void {
         return res.status(404).json({ message: "Ingrediente o material no encontrado." });
       }
       if (msg === "INGREDIENT_MATERIAL_ALREADY_EXISTS") {
-        return res.status(409).json({ message: "Ya existe un ingrediente o material con ese nombre." });
+        return res.status(409).json({
+          message: "Ya existe un ingrediente o material con ese nombre. Mayúsculas y minúsculas no cuentan como diferencia.",
+        });
       }
       console.error("[ingredients-materials] update", e);
       return res.status(500).json({ message: "No se pudo actualizar el ingrediente o material." });

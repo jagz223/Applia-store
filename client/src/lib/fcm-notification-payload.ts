@@ -18,7 +18,7 @@ export function parseFcmNotificationPayload(payload: {
   const body = notification.body || data.body || "Tienes una nueva notificación";
   const url = data.url || "/";
   const offerType = String(data.type || "").toLowerCase();
-  const isRideOffer = offerType === "cargo_ride_offer" || offerType === "pack_ride_offer";
+  const isRideOffer = offerType === "taxi_ride_offer" || offerType === "pack_ride_offer";
   const rideId = data.rideId ? String(data.rideId) : "";
   const tagType = data.type || data.withdrawalType || data.conversationId || data.transferId || "applia";
   const tagId =

@@ -1,7 +1,7 @@
 import type { MobilityRideHistoryListItem } from "@shared/mobility-ride-history";
 import { fetchAdminJson } from "@/lib/admin-api";
 
-export type CargoGoRidesAdminResponse = {
+export type TaxiRidesAdminResponse = {
   rides: Array<{
     id: string;
     bucket: string;
@@ -22,17 +22,17 @@ export type CargoGoRidesAdminResponse = {
   counts: { active: number; completed: number; cancelled: number };
 };
 
-export async function fetchCargoGoRidesAdmin(params: {
+export async function fetchTaxiRidesAdmin(params: {
   bucket: "active" | "completed" | "cancelled";
   page: number;
   limit?: number;
-}): Promise<CargoGoRidesAdminResponse> {
+}): Promise<TaxiRidesAdminResponse> {
   const qs = new URLSearchParams({
     bucket: params.bucket,
     page: String(params.page),
     limit: String(params.limit ?? 10),
   });
-  return fetchAdminJson<CargoGoRidesAdminResponse>(`/api/admin/cargo-go/rides?${qs}`);
+  return fetchAdminJson<TaxiRidesAdminResponse>(`/api/admin/taxi/rides?${qs}`);
 }
 
 export async function fetchMobilityRideHistoryForUser(

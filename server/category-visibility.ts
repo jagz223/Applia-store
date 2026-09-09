@@ -1,5 +1,5 @@
 /**
- * Visibilidad de marcas/categorías (Fix Go / Man Go / Pro Go / Pack Go / Shop Go / Car Go).
+ * Visibilidad de marcas/categorías (Servicios técnicos / Servicios técnicos / Servicios profesionales / envíos / Marketplace / Transporte).
  * Default: slugs delivery y marketplace arrancan ocultos (si no hay configuración aún).
  * Cuando el admin los activa, deben poder mostrarse aunque no tengan usuarios/servicios activos.
  * Persistencia: Firestore (platform_settings/global). Fallback: valores por defecto en memoria.

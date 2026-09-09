@@ -33,6 +33,7 @@ import { isCasheaPaymentMethod } from "@shared/store-cashea";
 import { parseStorePaymentGatewayKind } from "@shared/store-payment-gateways";
 import { resolveProductDisplayPrice } from "@shared/store-currency-schema";
 import type { StoreCurrencyExtra } from "@shared/store-currency-schema";
+import { priceWithIva } from "@shared/store-price-iva";
 import { appliaStorage } from "./storage-applia";
 
 export type EnrichedStoreCartLine = {
@@ -235,6 +236,47 @@ async function isValidCartItem(
   );
 }
 
+async function loadCartLineRecords(storeId: number, items: StoreCartItem[]) {
+  const productIds: number[] = [];
+  const promotionIds: number[] = [];
+  for (const item of items) {
+    if (item.kind === "product") productIds.push(item.productId);
+    else promotionIds.push(item.promotionId);
+  }
+  const [products, promotions] = await Promise.all([
+    appliaStorage.getStoreProductsByIds(storeId, productIds),
+    appliaStorage.getStorePromotionsByIds(storeId, promotionIds),
+  ]);
+  return { products, promotions };
+}
+
+async function loadCartEnrichmentCatalog(storeId: number, items: StoreCartItem[]) {
+  const { products, promotions } = await loadCartLineRecords(storeId, items);
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const nestedIds: number[] = [];
+  for (const promotion of promotions) {
+    for (const line of promotion.items) {
+      if (!productById.has(line.productId)) nestedIds.push(line.productId);
+    }
+  }
+  if (nestedIds.length > 0) {
+    const extra = await appliaStorage.getStoreProductsByIds(storeId, nestedIds);
+    for (const product of extra) productById.set(product.id, product);
+  }
+  const ingredientIds: number[] = [];
+  for (const item of items) {
+    if (item.kind !== "product") continue;
+    ingredientIds.push(...(item.removedIngredientMaterialIds ?? []));
+    ingredientIds.push(...(item.additionalIngredientMaterialIds ?? []));
+  }
+  const ingredients = await appliaStorage.getIngredientMaterialsByIds(ingredientIds);
+  return {
+    products: [...productById.values()],
+    promotions,
+    ingredients,
+  };
+}
+
 export async function enrichStoreCart(cart: StoreCart | undefined, storeId: number): Promise<EnrichedStoreCart> {
   const store = await appliaStorage.getStoreById(storeId);
   const storeOptions = normalizeStoreFulfillmentOptions(store?.fulfillmentOptions);
@@ -266,7 +308,17 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     currencyAcceptedPaymentIds: store?.currencyAcceptedPaymentIds,
   });
 
-  if (!cart) {
+  if (!cart || cart.items.length === 0) {
+    const fulfillmentMode =
+      cart && isStoreFulfillmentModeEnabled(storeOptions, cart.fulfillmentMode)
+        ? cart.fulfillmentMode
+        : null;
+    const expiresAt =
+      cart?.expiresAt instanceof Date
+        ? cart.expiresAt.toISOString()
+        : cart?.expiresAt
+          ? new Date(cart.expiresAt).toISOString()
+          : null;
     return {
       storeId,
       storeName,
@@ -275,8 +327,8 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
       subtotal: 0,
       itemCount: 0,
       cartWeightKg: 0,
-      expiresAt: null,
-      fulfillmentMode: null,
+      expiresAt,
+      fulfillmentMode,
       fulfillmentOptions,
       paymentMethods,
       storeLocation,
@@ -291,15 +343,11 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     ? cart.fulfillmentMode
     : null;
 
-  const [products, promotions, ingredientsPage] = await Promise.all([
-    appliaStorage.listStoreProducts(storeId),
-    appliaStorage.listStorePromotions(storeId),
-    appliaStorage.listIngredientsMaterials({ page: 1, limit: 500 }),
-  ]);
+  const { products, promotions, ingredients } = await loadCartEnrichmentCatalog(storeId, cart.items);
 
   const productById = new Map(products.map((p) => [p.id, p]));
   const promotionById = new Map(promotions.map((p) => [p.id, p]));
-  const ingredientNameById = new Map(ingredientsPage.items.map((i) => [i.id, i.name]));
+  const ingredientNameById = new Map(ingredients.map((i) => [i.id, i.name]));
   const visualCurrencyId = currency.currencyVisualId;
 
   const items: EnrichedStoreCartLine[] = [];
@@ -320,14 +368,18 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
       const extrasPrice = additionals.reduce((sum, id) => {
         const row = (product.ingredientAdditionals ?? []).find((a) => a.ingredientMaterialId === id);
         if (!row) return sum;
-        return sum + resolveAdditionalDisplayPrice(row, visualCurrencyId, sizeId);
+        return (
+          sum + priceWithIva(resolveAdditionalDisplayPrice(row, visualCurrencyId, sizeId))
+        );
       }, 0);
-      const basePrice = size
-        ? resolveProductDisplayPrice(
-            { price: 0, pricesByCurrency: size.pricesByCurrency },
-            visualCurrencyId,
-          )
-        : resolveProductDisplayPrice(product, visualCurrencyId);
+      const basePrice = priceWithIva(
+        size
+          ? resolveProductDisplayPrice(
+              { price: 0, pricesByCurrency: size.pricesByCurrency },
+              visualCurrencyId,
+            )
+          : resolveProductDisplayPrice(product, visualCurrencyId),
+      );
       const unitPrice = basePrice + extrasPrice;
       const additionalNames = additionals.map(
         (id) => ingredientNameById.get(id) ?? `Item #${id}`,
@@ -363,7 +415,8 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
 
     const promotion = promotionById.get(line.promotionId);
     if (!promotion) continue;
-    const lineTotal = promotion.price * line.quantity;
+    const unitPrice = priceWithIva(promotion.price);
+    const lineTotal = unitPrice * line.quantity;
     subtotal += lineTotal;
     itemCount += line.quantity;
     const imageUrl = resolveStorePromotionImageUrl(promotion, products);
@@ -372,7 +425,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
       lineKey: cartLineKey(line),
       promotionId: promotion.id,
       name: promotion.name,
-      price: promotion.price,
+      price: unitPrice,
       quantity: line.quantity,
       lineTotal,
       imageUrl: imageUrl ?? null,
@@ -444,25 +497,23 @@ export async function validateCartFulfillmentForStore(
 }
 
 export async function validateCartItemForStore(storeId: number, item: StoreCartItem): Promise<void> {
-  const [products, promotions] = await Promise.all([
-    appliaStorage.listStoreProducts(storeId),
-    appliaStorage.listStorePromotions(storeId),
-  ]);
   if (item.kind === "product") {
-    const product = products.find((p) => p.id === item.productId && p.storeId === storeId);
+    const product = await appliaStorage.getStoreProduct(storeId, item.productId);
     if (product && !storeProductHasAvailableStock(product)) {
       throw new Error("STORE_PRODUCT_NO_STOCK");
     }
+    const ok = await isValidCartItem(storeId, item, product ? [product] : [], []);
+    if (!ok) throw new Error("STORE_CART_ITEM_INVALID");
+    return;
   }
-  const ok = await isValidCartItem(storeId, item, products, promotions);
+  const promotion = await appliaStorage.getStorePromotion(storeId, item.promotionId);
+  const ok = await isValidCartItem(storeId, item, [], promotion ? [promotion] : []);
   if (!ok) throw new Error("STORE_CART_ITEM_INVALID");
 }
 
 export async function pruneAndSaveCart(userId: string, cart: StoreCart): Promise<StoreCart> {
-  const [products, promotions] = await Promise.all([
-    appliaStorage.listStoreProducts(cart.storeId),
-    appliaStorage.listStorePromotions(cart.storeId),
-  ]);
+  if (cart.items.length === 0) return cart;
+  const { products, promotions } = await loadCartLineRecords(cart.storeId, cart.items);
   const validItems: StoreCartItem[] = [];
   for (const item of cart.items) {
     if (await isValidCartItem(cart.storeId, item, products, promotions)) {

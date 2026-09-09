@@ -24,7 +24,7 @@ export const TRANSFER_TYPE_LABELS: Record<string, string> = {
   service_payment: "Ingreso por servicio",
   payment: "Pago de servicio",
   withdrawal: "Cobro a tu cuenta registrada",
-  verification_fee: "Cargo de verificación profesional",
+  verification_fee: "Cobro de verificación profesional",
 };
 
 export function getTransferTypeLabel(transferType: string): string {

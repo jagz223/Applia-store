@@ -1,6 +1,6 @@
-/** Historial persistente de viajes Car Go / Pack Go (completados, cancelados, expirados). */
+/** Historial persistente de viajes Transporte / envíos (completados, cancelados, expirados). */
 
-export type MobilityRideHistoryModule = "cargo" | "pack";
+export type MobilityRideHistoryModule = "taxi" | "pack";
 
 export type MobilityRideHistoryOutcome = "completed" | "cancelled" | "expired";
 

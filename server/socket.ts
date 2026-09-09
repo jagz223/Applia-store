@@ -2,7 +2,7 @@ import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import { isFullAdmin } from "@shared/roles";
-import { registerCargoMobilitySocket } from "./mobility-rides";
+import { registerTaxiMobilitySocket } from "./mobility-rides";
 import { registerPackMobilitySocket } from "./pack-rides";
 import { registerCentralSocket } from "./routes-central";
 import { startClassicOfferReconcileLoop } from "./go-driver-classic-offer-reconcile";
@@ -54,7 +54,7 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer {
     }
   });
 
-  registerCargoMobilitySocket(io);
+  registerTaxiMobilitySocket(io);
   registerPackMobilitySocket(io);
   registerCentralSocket(io);
 

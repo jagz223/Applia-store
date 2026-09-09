@@ -3,9 +3,9 @@
  * filtros de marca unificados (Go movilidad) y criterios de pertenencia (SOLID: reglas en un solo lugar).
  */
 import {
-  CAR_GO_BRAND_SLUGS,
+  TRANSPORT_BRAND_SLUGS,
   getCategoryDisplayName,
-  MAN_GO_CATEGORY_SLUG,
+  TECHNICAL_CATEGORY_SLUG,
   normalizeProviderCategorySlug,
 } from "./default-categories";
 import { providerHasGoBrand, type CategorySlugRow, type ProviderGoRef } from "./provider-go";
@@ -16,12 +16,12 @@ import {
 } from "./provider-category-membership";
 import { serviceBelongsToBrand, serviceListingCategorySlug } from "./service-belongs-to-brand";
 
-/** Filtro unificado Car Go + Delivery en el listado admin. */
+/** Filtro unificado Transporte + Delivery en el listado admin. */
 export const ADMIN_PROVIDER_LIST_BRAND_FILTER_GO_MOBILITY = "go-mobility" as const;
 
 export type AdminProviderListBrandFilterId =
   | ""
-  | typeof MAN_GO_CATEGORY_SLUG
+  | typeof TECHNICAL_CATEGORY_SLUG
   | "professional"
   | typeof ADMIN_PROVIDER_LIST_BRAND_FILTER_GO_MOBILITY;
 
@@ -30,9 +30,9 @@ export const ADMIN_PROVIDER_LIST_BRAND_FILTERS: ReadonlyArray<{
   label: string;
 }> = [
   { id: "", label: "Todas" },
-  { id: MAN_GO_CATEGORY_SLUG, label: "Man Go" },
-  { id: "professional", label: "Pro Go" },
-  { id: ADMIN_PROVIDER_LIST_BRAND_FILTER_GO_MOBILITY, label: "Go (Car · Delivery)" },
+  { id: TECHNICAL_CATEGORY_SLUG, label: "Servicios técnicos" },
+  { id: "professional", label: "Servicios profesionales" },
+  { id: ADMIN_PROVIDER_LIST_BRAND_FILTER_GO_MOBILITY, label: "Transporte · Envíos" },
 ];
 
 export type AdminActiveServiceSnapshot = {
@@ -57,7 +57,7 @@ export type AdminActiveProviderDirectoryRow = {
 
 type CategoryRow = CategorySlugRow & { name?: string | null };
 
-const MOBILITY_SLUG_SET = new Set<string>(CAR_GO_BRAND_SLUGS);
+const MOBILITY_SLUG_SET = new Set<string>(TRANSPORT_BRAND_SLUGS);
 
 function categoryIdForSlug(slug: string, categories: readonly CategoryRow[]): number | null {
   const target = normalizeProviderCategorySlug(slug);
@@ -96,7 +96,7 @@ function providerHasMobilityGoPresence(
   hasVehicle: boolean,
 ): boolean {
   if (hasVehicle) return true;
-  for (const slug of CAR_GO_BRAND_SLUGS) {
+  for (const slug of TRANSPORT_BRAND_SLUGS) {
     if (providerHasGoBrand(provider, slug, categories)) return true;
     if (providerHasCategorySlug(provider, slug, categories)) return true;
   }
@@ -144,7 +144,7 @@ export function providerMatchesAdminListBrandFilter(args: {
     );
   }
 
-  if (filterId === MAN_GO_CATEGORY_SLUG || filterId === "professional") {
+  if (filterId === TECHNICAL_CATEGORY_SLUG || filterId === "professional") {
     return providerMatchesCatalogBrandFilter(filterId, args.provider, args.services, args.categories);
   }
 
@@ -174,7 +174,7 @@ export function collectProviderGoBrandLabels(
   hasVehicle: boolean,
 ): string[] {
   const labels = new Set<string>();
-  for (const slug of CAR_GO_BRAND_SLUGS) {
+  for (const slug of TRANSPORT_BRAND_SLUGS) {
     if (providerHasGoBrand(provider, slug, categories)) {
       labels.add(getCategoryDisplayName({ slug }));
     }

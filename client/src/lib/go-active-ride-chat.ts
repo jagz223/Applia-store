@@ -1,11 +1,11 @@
-import { loadGoDriverActiveRideId } from "@/lib/cargo-driver-storage";
-import { loadGoRiderActiveRideId } from "@/lib/cargo-rider-storage";
+import { loadGoDriverActiveRideId } from "@/lib/taxi-driver-storage";
+import { loadGoRiderActiveRideId } from "@/lib/taxi-rider-storage";
 import { findActiveMobilityRideConversation } from "@shared/chat-conversation-scope";
 import type { ConversationEnriched } from "@/types/chat";
 
 /** Id del viaje Go activo en este dispositivo (conductor o pasajero). */
 export function loadActiveGoRideId(): string | null {
-  return loadGoDriverActiveRideId("cargo") ?? loadGoDriverActiveRideId("pack") ?? loadGoRiderActiveRideId("cargo") ?? loadGoRiderActiveRideId("pack");
+  return loadGoDriverActiveRideId("taxi") ?? loadGoDriverActiveRideId("pack") ?? loadGoRiderActiveRideId("taxi") ?? loadGoRiderActiveRideId("pack");
 }
 
 /** Conversación del viaje en curso (no cerrada), si existe en la lista. */
@@ -35,7 +35,7 @@ export function conversationBelongsToGoRide(
 /** Obtiene el conversationId del viaje Go desde la API (conductor o pasajero). */
 export async function fetchGoRideConversationId(
   rideId: string,
-  module: "cargo" | "pack",
+  module: "taxi" | "pack",
 ): Promise<number | null> {
   const token = localStorage.getItem("token");
   if (!token) return null;

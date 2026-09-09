@@ -8,7 +8,6 @@ import type { IStorage } from "../storage-applia";
 import type { Category, InsertProvider, InsertService } from "@shared/schema";
 import { getAppliaStatsMonthKey } from "@shared/ecuador-calendar";
 import { excludeLegacySubcategoryCategoryDocuments } from "@shared/catalog-category-utils";
-import { computeListingPublished } from "@shared/professional-listing-subscription";
 import { DEFAULT_CATEGORIES, filterCategoriesExcludedFromPublicApi } from "@shared/default-categories";
 import {
   buildAddProviderCategoryPatch,
@@ -88,7 +87,7 @@ export class CatalogService {
     return this.storage.updateProvider(id, data);
   }
 
-  /** Registra una categoría en el proveedor (principal o secundaria) sin pisar Man Go / Pro Go. */
+  /** Registra una categoría en el proveedor (principal o secundaria) sin pisar Servicios técnicos / Servicios profesionales. */
   async ensureProviderCategoryMembership(providerId: number, categoryId: number): Promise<void> {
     const provider = await this.storage.getProvider(providerId);
     if (!provider) return;
@@ -159,70 +158,13 @@ export class CatalogService {
   }
 
   /**
-   * Conteos reales de asociados por marca para la home.
-   * Man Go = categoría `technical` (Fix + Man unificados). Pro Go = subcategorías bajo professional.
+   * Conteo de tiendas visibles para la home.
    */
   async getHomeCategoryAssociateCounts(): Promise<{
-    fixGo: number;
-    proGo: number;
-    manGo: number;
-    carGo: number;
-    shopGo: number;
-    packGo: number;
+    stores: number;
   }> {
-    const categories = await this.storage.getCategories();
-    const bySlug = (slug: string) => categories.find((c) => (c as { slug?: string }).slug === slug);
-    const technical = bySlug("technical");
-    const professional = bySlug("professional");
-    const transport = bySlug("transport");
-    const marketplace = bySlug("marketplace");
-    const delivery = bySlug("delivery");
-
-    const [allProviders, subcategories] = await Promise.all([
-      this.storage.getAllProviders(),
-      professional ? this.storage.getSubcategories(Number(professional.id)) : Promise.resolve([]),
-    ]);
-    const verifiedProviders = allProviders.filter((p) =>
-      computeListingPublished({
-        isVerifiedIdentity: (p as { isVerified?: boolean | null }).isVerified === true,
-        visibilitySubscriptionEndsAt: (p as { visibilitySubscriptionEndsAt?: unknown }).visibilitySubscriptionEndsAt,
-        isFullAdmin: false,
-      }),
-    );
-
-    const legalSub = subcategories.find((s) => s.slug === "legal");
-    const financialSub = subcategories.find((s) => s.slug === "financial");
-    const tutoringSub = subcategories.find((s) => s.slug === "tutoring");
-
-    const countByCategoryId = (catId: number | undefined) => {
-      if (catId == null || Number.isNaN(Number(catId))) return 0;
-      return verifiedProviders.filter((p) => (p as { categoryId?: number | null }).categoryId === catId).length;
-    };
-
-    const manGoCount = countByCategoryId(technical?.id);
-    /** `fixGo` se mantiene como alias legacy de Man Go (`technical`). */
-    const fixGo = manGoCount;
-    const manGo = manGoCount;
-    const carGo = countByCategoryId(transport?.id);
-    const shopGo = countByCategoryId(marketplace?.id);
-    const packGo = countByCategoryId(delivery?.id);
-
-    const legalId = legalSub?.id;
-    const financialId = financialSub?.id;
-    const tutoringId = tutoringSub?.id;
-    const proGoIds = [legalId, financialId, tutoringId].filter(
-      (id): id is number => id != null && !Number.isNaN(Number(id)),
-    );
-    const proGo =
-      proGoIds.length === 0
-        ? 0
-        : verifiedProviders.filter((p) => {
-            const sid = (p as { subcategoryId?: number | null }).subcategoryId;
-            if (sid == null || Number.isNaN(Number(sid))) return false;
-            return proGoIds.includes(Number(sid));
-          }).length;
-
-    return { fixGo, proGo, manGo, carGo, shopGo, packGo };
+    const stores = await this.storage.listActiveStores({ limit: 500 });
+    return { stores: stores.length };
   }
 
   /** Top subcategorías por reservas en el mes calendario (Ecuador), para la home. */

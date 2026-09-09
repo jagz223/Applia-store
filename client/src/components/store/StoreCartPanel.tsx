@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Link } from "wouter";
 
@@ -67,75 +67,86 @@ function CartLineRow({
 
   const removeMutation = useRemoveFromStoreCart(storeId);
 
-  const busy = updateMutation.isPending || removeMutation.isPending;
+  const busy = removeMutation.isPending;
+  const [displayQty, setDisplayQty] = useState(line.quantity);
+  const qtyTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    setDisplayQty(line.quantity);
+  }, [line.lineKey, line.quantity]);
+
+  useEffect(() => {
+    return () => {
+      if (qtyTimer.current) window.clearTimeout(qtyTimer.current);
+    };
+  }, []);
 
   async function setQuantity(next: number) {
-
     try {
-
-      const body =
-        line.kind === "product"
-          ? {
-              kind: "product" as const,
-              productId: line.productId!,
-              quantity: next,
-              lineKey: line.lineKey,
-              removedIngredientMaterialIds: line.removedIngredientMaterialIds ?? [],
-              additionalIngredientMaterialIds: line.additionalIngredientMaterialIds ?? [],
-            }
-          : { kind: "promotion" as const, promotionId: line.promotionId!, quantity: next, lineKey: line.lineKey };
-
-      await updateMutation.mutateAsync(body);
-
-    } catch (e) {
-
-      toast({
-
-        variant: "destructive",
-
-        title: "No se pudo actualizar",
-
-        description: e instanceof Error ? e.message : "Error desconocido",
-
+      if (line.kind === "product") {
+        await updateMutation.mutateAsync({
+          kind: "product",
+          productId: line.productId!,
+          quantity: next,
+          lineKey: line.lineKey,
+          removedIngredientMaterialIds: line.removedIngredientMaterialIds ?? [],
+          additionalIngredientMaterialIds: line.additionalIngredientMaterialIds ?? [],
+        });
+        return;
+      }
+      await updateMutation.mutateAsync({
+        kind: "promotion",
+        promotionId: line.promotionId!,
+        quantity: next,
+        lineKey: line.lineKey,
+        removedIngredientMaterialIds: [],
+        additionalIngredientMaterialIds: [],
       });
-
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo actualizar",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
     }
-
   }
 
-
+  function scheduleQuantity(next: number) {
+    const max = line.kind === "promotion" ? 99 : 9999;
+    const qty = Math.max(1, Math.min(max, next));
+    setDisplayQty(qty);
+    if (qtyTimer.current) window.clearTimeout(qtyTimer.current);
+    qtyTimer.current = window.setTimeout(() => {
+      void setQuantity(qty);
+    }, 180);
+  }
 
   async function removeLine() {
-
     try {
-
-      const body =
-        line.kind === "product"
-          ? {
-              kind: "product" as const,
-              productId: line.productId!,
-              lineKey: line.lineKey,
-              removedIngredientMaterialIds: line.removedIngredientMaterialIds ?? [],
-              additionalIngredientMaterialIds: line.additionalIngredientMaterialIds ?? [],
-            }
-          : { kind: "promotion" as const, promotionId: line.promotionId!, lineKey: line.lineKey };
-
-      await removeMutation.mutateAsync(body);
-
-    } catch (e) {
-
-      toast({
-
-        variant: "destructive",
-
-        title: "No se pudo quitar",
-
-        description: e instanceof Error ? e.message : "Error desconocido",
-
+      if (line.kind === "product") {
+        await removeMutation.mutateAsync({
+          kind: "product",
+          productId: line.productId!,
+          lineKey: line.lineKey,
+          removedIngredientMaterialIds: line.removedIngredientMaterialIds ?? [],
+          additionalIngredientMaterialIds: line.additionalIngredientMaterialIds ?? [],
+        });
+        return;
+      }
+      await removeMutation.mutateAsync({
+        kind: "promotion",
+        promotionId: line.promotionId!,
+        lineKey: line.lineKey,
+        removedIngredientMaterialIds: [],
+        additionalIngredientMaterialIds: [],
       });
-
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo quitar",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
     }
-
   }
 
 
@@ -205,11 +216,11 @@ function CartLineRow({
 
               className="h-8 w-8 flex items-center justify-center hover:bg-muted disabled:opacity-50 rounded-l-lg"
 
-              disabled={busy || line.quantity <= 1}
+              disabled={busy || displayQty <= 1}
 
               aria-label="Reducir cantidad"
 
-              onClick={() => void setQuantity(line.quantity - 1)}
+              onClick={() => scheduleQuantity(displayQty - 1)}
 
             >
 
@@ -217,7 +228,7 @@ function CartLineRow({
 
             </button>
 
-            <span className="min-w-[2rem] text-center text-sm font-medium">{line.quantity}</span>
+            <span className="min-w-[2rem] text-center text-sm font-medium">{displayQty}</span>
 
             <button
 
@@ -229,7 +240,7 @@ function CartLineRow({
 
               aria-label="Aumentar cantidad"
 
-              onClick={() => void setQuantity(line.quantity + 1)}
+              onClick={() => scheduleQuantity(displayQty + 1)}
 
             >
 

@@ -39,7 +39,7 @@ function conversationPeersMatch(
 }
 
 /**
- * Un hilo por viaje Go (como Pro/Man Go por reserva): reutiliza solo si coincide rideId y sigue activo;
+ * Un hilo por viaje Go (como Pro/Servicios técnicos por reserva): reutiliza solo si coincide rideId y sigue activo;
  * nunca reutiliza chats genéricos ni hilos cerrados de viajes anteriores.
  */
 export async function ensureMobilityRideConversation(

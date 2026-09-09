@@ -411,10 +411,10 @@ export function registerCentralRoutes(app: Express): void {
   });
 
   /**
-   * GET /api/central/cargo-go/rides
-   * Historial de servicios Car Go / Pack de conductores de la central (completados y cancelados).
+   * GET /api/central/taxi/rides
+   * Historial de servicios Transporte / Pack de conductores de la central (completados y cancelados).
    */
-  app.get("/api/central/cargo-go/rides", authenticateJWT, async (req: any, res) => {
+  app.get("/api/central/taxi/rides", authenticateJWT, async (req: any, res) => {
     if (!canAccessCentralPanel(req.user?.role)) {
       return res.status(403).json({ message: "Sin acceso" });
     }
@@ -455,7 +455,7 @@ export function registerCentralRoutes(app: Express): void {
         counts: result.counts,
       });
     } catch (error) {
-      console.error("Error listing central cargo-go rides:", error);
+      console.error("Error listing central taxi rides:", error);
       return res.status(500).json({ message: "Error al cargar historial de servicios" });
     }
   });

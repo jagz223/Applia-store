@@ -6,9 +6,9 @@ function authHeaders(): HeadersInit {
   };
 }
 
-export type CentralCargoGoHistoryRide = {
+export type CentralTaxiHistoryRide = {
   id: string;
-  module: "cargo" | "pack";
+  module: "taxi" | "pack";
   moduleLabel: string;
   bucket: string;
   status: string;
@@ -23,8 +23,8 @@ export type CentralCargoGoHistoryRide = {
   payment: string;
 };
 
-export type CentralCargoGoHistoryResponse = {
-  rides: CentralCargoGoHistoryRide[];
+export type CentralTaxiHistoryResponse = {
+  rides: CentralTaxiHistoryRide[];
   bucket: string;
   page: number;
   limit: number;
@@ -33,20 +33,20 @@ export type CentralCargoGoHistoryResponse = {
   counts: { completed: number; cancelled: number };
 };
 
-export async function fetchCentralCargoGoHistory(params: {
+export async function fetchCentralTaxiHistory(params: {
   companyId: string;
   bucket: "completed" | "cancelled";
   page: number;
   limit?: number;
-}): Promise<CentralCargoGoHistoryResponse> {
+}): Promise<CentralTaxiHistoryResponse> {
   const qs = new URLSearchParams({
     companyId: params.companyId,
     bucket: params.bucket,
     page: String(params.page),
     limit: String(params.limit ?? 10),
   });
-  const res = await fetch(`/api/central/cargo-go/rides?${qs}`, { headers: authHeaders() });
+  const res = await fetch(`/api/central/taxi/rides?${qs}`, { headers: authHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? "Error al cargar historial");
-  return data as CentralCargoGoHistoryResponse;
+  return data as CentralTaxiHistoryResponse;
 }

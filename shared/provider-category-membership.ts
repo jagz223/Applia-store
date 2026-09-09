@@ -1,5 +1,5 @@
 import { isCatalogAssignableServiceCategorySlug } from "./catalog-service-categories";
-import { isMobilityGoDriverVehicleCategorySlug, MAN_GO_CATEGORY_SLUG } from "./default-categories";
+import { isMobilityGoDriverVehicleCategorySlug, TECHNICAL_CATEGORY_SLUG } from "./default-categories";
 
 export type ProviderCategorySlots = {
   categoryId?: number | null;
@@ -52,7 +52,7 @@ function isCatalogPrimarySlug(slug: string): boolean {
 }
 
 /**
- * Añade una categoría al proveedor sin pisar Man Go / Pro Go como categoría principal.
+ * Añade una categoría al proveedor sin pisar Servicios técnicos / Servicios profesionales como categoría principal.
  * Devuelve parche parcial para Firestore o null si ya estaba registrada.
  */
 export function buildAddProviderCategoryPatch(
@@ -99,7 +99,7 @@ export function buildAddProviderCategoryPatch(
 }
 
 /**
- * Tras activar conductor Go: conserva Man Go / Pro Go en `categoryId` y registra movilidad en slots secundarios.
+ * Tras activar conductor Go: conserva Servicios técnicos / Servicios profesionales en `categoryId` y registra movilidad en slots secundarios.
  */
 export function buildGoDriverEnrollmentCategoryPatch(
   provider: ProviderCategorySlots,
@@ -127,14 +127,14 @@ export function buildGoDriverEnrollmentCategoryPatch(
 
   const primarySlug = slugForCategoryId(numId(provider.categoryId), categories);
   if (isCatalogPrimarySlug(primarySlug)) {
-    patch.category = primarySlug === MAN_GO_CATEGORY_SLUG ? MAN_GO_CATEGORY_SLUG : primarySlug;
+    patch.category = primarySlug === TECHNICAL_CATEGORY_SLUG ? TECHNICAL_CATEGORY_SLUG : primarySlug;
   }
 
   return patch;
 }
 
 /**
- * Aprobación de vehículo / cambio mobility: no reemplazar Man Go / Pro Go como categoría principal.
+ * Aprobación de vehículo / cambio mobility: no reemplazar Servicios técnicos / Servicios profesionales como categoría principal.
  */
 export function buildMobilityCategoryApprovalPatch(
   provider: ProviderCategorySlots,

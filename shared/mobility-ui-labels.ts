@@ -1,13 +1,13 @@
 /**
  * Textos de interfaz para flujos taxi y delivery (pasajero y conductor).
- * Evita mostrar marcas internas tipo «Car Go» / «Pack Go» en la UI.
+ * Evita mostrar marcas internas tipo «Transporte» / «envíos» en la UI.
  */
 export const MOBILITY_UI = {
   taxiService: "Servicio de taxi",
   delivery: "Delivery",
 } as const;
 
-export type MobilityGoSlug = "cargo" | "pack";
+export type MobilityGoSlug = "taxi" | "pack";
 
 export function mobilityServiceLabel(goSlug: MobilityGoSlug | undefined): string {
   return goSlug === "pack" ? MOBILITY_UI.delivery : MOBILITY_UI.taxiService;

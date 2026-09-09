@@ -32,3 +32,11 @@ export function normalizeIngredientMaterialName(name: string): string {
 export function ingredientMaterialKey(name: string): string {
   return normalizeIngredientMaterialName(name).toLowerCase();
 }
+
+/**
+ * Clave de unicidad para categorías, subcategorías e ingredientes:
+ * ignora mayúsculas y espacios extra al inicio/final, pero "M a d e r a" ≠ "Madera".
+ */
+export function storeCatalogNameKey(name: string): string {
+  return ingredientMaterialKey(name);
+}

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InsertStoreSubcategory, UpdateStoreSubcategory } from "@shared/store-schema";
 import {
   storeCategoriesQueryKey,
@@ -126,6 +126,7 @@ export function useStoreSubcategoriesPage(
       };
     },
     enabled: enabled && storeId > 0,
+    placeholderData: keepPreviousData,
   });
 }
 
