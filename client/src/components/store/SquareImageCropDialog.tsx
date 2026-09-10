@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Loader2, ZoomIn } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,15 @@ import {
 } from "@/components/store/store-admin-ui";
 
 const VIEWPORT_SIZE = 320;
+/** 1 = cubre el cuadrado; menos de 1 deja margen transparente alrededor. */
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.1;
+const ZOOM_FIT = 1;
+
+function clampZoom(value: number): number {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100));
+}
 
 type SquareImageCropDialogProps = {
   open: boolean;
@@ -40,17 +49,27 @@ export function SquareImageCropDialog({
   fileName = "producto.png",
   onConfirm,
 }: SquareImageCropDialogProps) {
+  const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
+  const zoomRef = useRef(1);
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  zoomRef.current = zoom;
+
+  const applyZoom = useCallback((next: number) => {
+    setZoom(clampZoom(next));
+  }, []);
+
   useEffect(() => {
     if (!open || !imageSrc) {
       setImgSize(null);
-      setZoom(1);
+      setZoom(ZOOM_FIT);
       setOffset({ x: 0, y: 0 });
       setError(null);
       return;
@@ -70,6 +89,18 @@ export function SquareImageCropDialog({
     };
   }, [open, imageSrc]);
 
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el || !open) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const direction = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+      applyZoom(zoomRef.current + direction);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [open, applyZoom]);
+
   const baseScale =
     imgSize != null
       ? Math.max(VIEWPORT_SIZE / imgSize.w, VIEWPORT_SIZE / imgSize.h)
@@ -80,13 +111,35 @@ export function SquareImageCropDialog({
   const imgLeft = (VIEWPORT_SIZE - dispW) / 2 + offset.x;
   const imgTop = (VIEWPORT_SIZE - dispH) / 2 + offset.y;
 
+  function pointerDistance(): number {
+    const pts = [...pointersRef.current.values()];
+    if (pts.length < 2) return 0;
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  }
+
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (!imgSize) return;
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size >= 2) {
+      dragRef.current = null;
+      pinchRef.current = { distance: pointerDistance() || 1, zoom: zoomRef.current };
+      return;
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { x: e.clientX, y: e.clientY, offsetX: offset.x, offsetY: offset.y };
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pointersRef.current.size >= 2 && pinchRef.current) {
+      const dist = pointerDistance();
+      if (dist > 0 && pinchRef.current.distance > 0) {
+        applyZoom(pinchRef.current.zoom * (dist / pinchRef.current.distance));
+      }
+      return;
+    }
     const drag = dragRef.current;
     if (!drag) return;
     setOffset({
@@ -95,8 +148,10 @@ export function SquareImageCropDialog({
     });
   }
 
-  function onPointerUp() {
-    dragRef.current = null;
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    if (pointersRef.current.size === 0) dragRef.current = null;
   }
 
   async function handleApply() {
@@ -122,6 +177,8 @@ export function SquareImageCropDialog({
     }
   }
 
+  const zoomDisabled = !imgSize || loading;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -132,15 +189,25 @@ export function SquareImageCropDialog({
         <DialogHeader className={storeAdminDialogHeaderClass}>
           <DialogTitle>Recortar foto</DialogTitle>
           <DialogDescription>
-            Ajusta la imagen dentro del cuadrado. Arrastra para mover y usa el zoom si necesitas.
-            PNG/WebP conservan el fondo transparente; JPG usa fondo blanco.
+            Ajusta la imagen dentro del cuadrado. Con − la haces más pequeña (el fondo transparente
+            se conserva). Arrastra para mover; + acerca.
           </DialogDescription>
         </DialogHeader>
 
         <div className={storeAdminDialogBodyClass}>
           <div
-            className="relative mx-auto overflow-hidden rounded-xl border border-border bg-background touch-none"
-            style={{ width: VIEWPORT_SIZE, height: VIEWPORT_SIZE }}
+            ref={viewportRef}
+            className="relative mx-auto overflow-hidden rounded-xl border border-border touch-none"
+            style={{
+              width: VIEWPORT_SIZE,
+              height: VIEWPORT_SIZE,
+              touchAction: "none",
+              backgroundColor: "#fff",
+              backgroundImage:
+                "linear-gradient(45deg,#d4d4d4 25%,transparent 25%),linear-gradient(-45deg,#d4d4d4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d4d4d4 75%),linear-gradient(-45deg,transparent 75%,#d4d4d4 75%)",
+              backgroundSize: "16px 16px",
+              backgroundPosition: "0 0,0 8px,8px -8px,-8px 0",
+            }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -168,21 +235,64 @@ export function SquareImageCropDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="crop-zoom" className="flex items-center gap-2 text-sm">
-              <ZoomIn className="h-4 w-4" />
-              Zoom
-            </Label>
-            <input
-              id="crop-zoom"
-              type="range"
-              min={1}
-              max={3}
-              step={0.05}
-              value={zoom}
-              disabled={!imgSize || loading}
-              onChange={(e) => setZoom(Number(e.target.value))}
-              className="w-full accent-primary"
-            />
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="crop-zoom" className="text-sm">
+                Zoom
+              </Label>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {Math.round(zoom * 100)}%
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0 rounded-full"
+                disabled={zoomDisabled || zoom <= ZOOM_MIN}
+                aria-label="Alejar"
+                onClick={() => applyZoom(zoom - ZOOM_STEP)}
+              >
+                <ZoomOut className="h-4 w-4" />
+              </Button>
+              <input
+                id="crop-zoom"
+                type="range"
+                min={ZOOM_MIN}
+                max={ZOOM_MAX}
+                step={0.05}
+                value={zoom}
+                disabled={zoomDisabled}
+                onChange={(e) => applyZoom(Number(e.target.value))}
+                className="w-full accent-primary"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0 rounded-full"
+                disabled={zoomDisabled || zoom >= ZOOM_MAX}
+                aria-label="Acercar"
+                onClick={() => applyZoom(zoom + ZOOM_STEP)}
+              >
+                <ZoomIn className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 shrink-0 rounded-full"
+                disabled={zoomDisabled || (zoom === ZOOM_FIT && offset.x === 0 && offset.y === 0)}
+                aria-label="Llenar el cuadrado"
+                title="Llenar el cuadrado"
+                onClick={() => {
+                  applyZoom(ZOOM_FIT);
+                  setOffset({ x: 0, y: 0 });
+                }}
+              >
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}

@@ -53,7 +53,11 @@ export function clampSquareCrop(
   return { x: cropX, y: cropY, size: cropSize };
 }
 
-/** Recorte cuadrado visible en el viewport (pan + zoom sobre la imagen). */
+/**
+ * Recorte cuadrado visible en el viewport (pan + zoom).
+ * `zoom` 1 = la imagen cubre el cuadrado; menor que 1 deja margen (útil con PNG transparente).
+ * El rectángulo puede salir de la imagen: el export rellena ese margen con transparencia o blanco.
+ */
 export function computeSquareCropFromViewport(
   imgW: number,
   imgH: number,
@@ -63,15 +67,16 @@ export function computeSquareCropFromViewport(
   offsetY: number,
 ): { x: number; y: number; size: number } {
   const baseScale = Math.max(viewportSize / imgW, viewportSize / imgH);
-  const scale = baseScale * zoom;
+  const scale = baseScale * Math.max(zoom, 0.05);
   const dispW = imgW * scale;
   const dispH = imgH * scale;
   const imgLeft = (viewportSize - dispW) / 2 + offsetX;
   const imgTop = (viewportSize - dispH) / 2 + offsetY;
-  const cropX = -imgLeft / scale;
-  const cropY = -imgTop / scale;
-  const cropSize = viewportSize / scale;
-  return clampSquareCrop(imgW, imgH, cropX, cropY, cropSize);
+  return {
+    x: -imgLeft / scale,
+    y: -imgTop / scale,
+    size: viewportSize / scale,
+  };
 }
 
 type CropOutputFormat = {
@@ -117,7 +122,22 @@ export async function cropSquareImageToFile(
   } else {
     ctx.clearRect(0, 0, outputSize, outputSize);
   }
-  ctx.drawImage(img, crop.x, crop.y, crop.size, crop.size, 0, 0, outputSize, outputSize);
+  const srcW = img.naturalWidth || img.width;
+  const srcH = img.naturalHeight || img.height;
+  const destScale = outputSize / Math.max(crop.size, 1);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(
+    img,
+    0,
+    0,
+    srcW,
+    srcH,
+    -crop.x * destScale,
+    -crop.y * destScale,
+    srcW * destScale,
+    srcH * destScale,
+  );
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error("No se pudo exportar la imagen."))),
