@@ -118,6 +118,7 @@ export function useStoreProductPickerSearch(
 
 export type StoreProductsPageFilters = {
   search?: string;
+  codigo?: string;
   categoryId?: number | null;
   subcategoryId?: number | null;
   priceMin?: number | null;
@@ -138,6 +139,7 @@ export function useStoreProductsPage(
   const normalized: StoreProductsPageFilters =
     typeof filters === "string" ? { search: filters } : filters ?? {};
   const q = (normalized.search ?? "").trim();
+  const codigo = (normalized.codigo ?? "").trim();
   const categoryId =
     normalized.categoryId != null && normalized.categoryId > 0 ? normalized.categoryId : null;
   const subcategoryId =
@@ -168,6 +170,7 @@ export function useStoreProductsPage(
       safePage,
       safeLimit,
       q || null,
+      codigo || null,
       categoryId,
       subcategoryId,
       priceMin,
@@ -181,6 +184,7 @@ export function useStoreProductsPage(
         limit: String(safeLimit),
       });
       if (q) params.set("q", q);
+      if (codigo) params.set("codigo", codigo);
       if (categoryId) params.set("categoryId", String(categoryId));
       if (subcategoryId) params.set("subcategoryId", String(subcategoryId));
       if (priceMin != null) params.set("priceMin", String(priceMin));

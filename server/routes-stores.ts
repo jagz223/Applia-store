@@ -929,6 +929,22 @@ function parseOptionalAdminListNameQuery(query: unknown): string | undefined {
   return q || undefined;
 }
 
+function parseOptionalExactCodigoQuery(query: unknown): string | undefined {
+  if (!query || typeof query !== "object") return undefined;
+  const raw = (query as Record<string, unknown>).codigo;
+  if (raw == null) return undefined;
+  const codigo = String(raw).trim();
+  return codigo || undefined;
+}
+
+/** Código completo, sin coincidencias parciales. Ignora mayúsculas. */
+function codigoMatchesExact(codigo: string | null | undefined, q?: string): boolean {
+  if (!q) return true;
+  const value = String(codigo ?? "").trim();
+  if (!value) return false;
+  return value.toLowerCase() === q.toLowerCase();
+}
+
 /** Coincidencia aproximada: todas las palabras del query deben aparecer en el nombre (cualquier orden). */
 function nameMatchesApproximateQuery(name: string, q?: string): boolean {
   if (!q) return true;
@@ -963,6 +979,7 @@ function parseOptionalNonNegativeNumberQuery(query: unknown, key: string): numbe
 
 type AdminProductListFilters = {
   q?: string;
+  codigo?: string;
   categoryId?: number;
   subcategoryId?: number;
   priceMin?: number;
@@ -974,6 +991,7 @@ type AdminProductListFilters = {
 function parseAdminProductListFilters(query: unknown): AdminProductListFilters {
   return {
     q: parseOptionalAdminListNameQuery(query),
+    codigo: parseOptionalExactCodigoQuery(query),
     categoryId: parseOptionalPositiveIntQuery(query, "categoryId"),
     subcategoryId: parseOptionalPositiveIntQuery(query, "subcategoryId"),
     priceMin: parseOptionalNonNegativeNumberQuery(query, "priceMin"),
@@ -986,6 +1004,7 @@ function parseAdminProductListFilters(query: unknown): AdminProductListFilters {
 function filterSerializedStoreProducts<
   T extends {
     name: string;
+    codigo?: string | null;
     price: number;
     priceWithIva: number;
     categoryIds: number[];
@@ -994,6 +1013,7 @@ function filterSerializedStoreProducts<
 >(items: T[], filters: AdminProductListFilters): T[] {
   return items.filter((item) => {
     if (!nameMatchesApproximateQuery(item.name, filters.q)) return false;
+    if (!codigoMatchesExact(item.codigo, filters.codigo)) return false;
     if (filters.categoryId && !(item.categoryIds ?? []).includes(filters.categoryId)) return false;
     if (
       filters.subcategoryId &&
@@ -3783,6 +3803,7 @@ export function registerStoreRoutes(app: Express): void {
         return {
           product: p,
           name: p.name,
+          codigo: p.codigo?.trim() || null,
           price: displayPrice,
           priceWithIva: priceWithIva(displayPrice),
           categoryIds: p.categoryIds ?? [],
@@ -4350,6 +4371,9 @@ export function registerStoreRoutes(app: Express): void {
       }
       if (filters.q) {
         filtered = filtered.filter((p) => nameMatchesApproximateQuery(p.name, filters.q));
+      }
+      if (filters.codigo) {
+        filtered = filtered.filter((p) => codigoMatchesExact(p.codigo, filters.codigo));
       }
       filtered = filtered
         .slice()

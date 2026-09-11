@@ -71,6 +71,11 @@ function parseOptionalAmount(raw: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+function productCodigoLabel(product: StoreProductSummary): string {
+  const codigo = product.codigo?.trim();
+  return codigo || "Sin código";
+}
+
 function productPriceWithIva(product: StoreProductSummary): number {
   return typeof product.priceWithIva === "number" && Number.isFinite(product.priceWithIva)
     ? product.priceWithIva
@@ -217,6 +222,8 @@ export function StoreAdminProductsPanel({
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [codigoSearch, setCodigoSearch] = useState("");
+  const [debouncedCodigo, setDebouncedCodigo] = useState("");
   const [categoryId, setCategoryId] = useState<string>("all");
   const [subcategoryId, setSubcategoryId] = useState<string>("all");
   const [priceMinInput, setPriceMinInput] = useState("");
@@ -232,10 +239,11 @@ export function StoreAdminProductsPanel({
   useEffect(() => {
     const t = window.setTimeout(() => {
       setDebouncedSearch(search.trim());
+      setDebouncedCodigo(codigoSearch.trim());
       setPage(1);
     }, 250);
     return () => window.clearTimeout(t);
-  }, [search]);
+  }, [search, codigoSearch]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -272,6 +280,7 @@ export function StoreAdminProductsPanel({
 
   const hasActiveFilters = Boolean(
     debouncedSearch ||
+      debouncedCodigo ||
       selectedCategoryId ||
       selectedSubcategoryId ||
       debouncedPriceMin != null ||
@@ -287,6 +296,7 @@ export function StoreAdminProductsPanel({
     true,
     {
       search: debouncedSearch,
+      codigo: debouncedCodigo,
       categoryId: selectedCategoryId,
       subcategoryId: selectedSubcategoryId,
       priceMin: debouncedPriceMin,
@@ -361,7 +371,7 @@ export function StoreAdminProductsPanel({
         </CardHeader>
         <CardContent className="min-w-0 space-y-4 overflow-x-hidden">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="relative min-w-0 sm:col-span-2 lg:col-span-3">
+            <div className="relative min-w-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
@@ -369,6 +379,18 @@ export function StoreAdminProductsPanel({
                 placeholder="Buscar por nombre (aprox.)…"
                 className={cn(storeAdminFieldClass, "w-full min-w-0 pl-9")}
                 aria-label="Filtrar productos por nombre aproximado"
+              />
+            </div>
+            <div className="min-w-0">
+              <Input
+                id="product-codigo-filter"
+                value={codigoSearch}
+                onChange={(e) => setCodigoSearch(e.target.value)}
+                placeholder="Código exacto…"
+                className={cn(storeAdminFieldClass, "w-full min-w-0 font-mono")}
+                aria-label="Filtrar por código exacto"
+                autoComplete="off"
+                spellCheck={false}
               />
             </div>
 
@@ -499,6 +521,9 @@ export function StoreAdminProductsPanel({
                           <p className="break-words text-sm font-medium leading-snug line-clamp-2">
                             {product.name}
                           </p>
+                          <p className="mt-0.5 break-all font-mono text-xs text-muted-foreground">
+                            {productCodigoLabel(product)}
+                          </p>
                           <p className="mt-0.5 text-sm text-muted-foreground">
                             {formatPrice(product.price, currencyLabel)}
                           </p>
@@ -521,12 +546,13 @@ export function StoreAdminProductsPanel({
                 })}
               </ul>
 
-              <div className="hidden rounded-2xl border border-border/70 overflow-hidden md:block">
+              <div className="hidden min-w-0 overflow-x-auto rounded-2xl border border-border/70 md:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[72px]">Foto</TableHead>
                       <TableHead>Nombre</TableHead>
+                      <TableHead className="min-w-[7.5rem] w-[8.5rem]">Código</TableHead>
                       <TableHead className="w-[120px]">Precio</TableHead>
                       <TableHead className="w-[130px]">Precio + IVA</TableHead>
                       <TableHead className="w-[140px]">Vitrina</TableHead>
@@ -543,7 +569,14 @@ export function StoreAdminProductsPanel({
                         <TableCell>
                           <ProductThumbnail imageUrls={product.imageUrls ?? []} />
                         </TableCell>
-                        <TableCell className="font-medium">{product.name}</TableCell>
+                        <TableCell className="max-w-[16rem] font-medium">
+                          <span className="break-words">{product.name}</span>
+                        </TableCell>
+                        <TableCell className="max-w-[10rem] font-mono text-xs">
+                          <span className="break-all text-muted-foreground">
+                            {productCodigoLabel(product)}
+                          </span>
+                        </TableCell>
                         <TableCell>
                           {formatPrice(product.price, currencyLabel)}
                         </TableCell>
