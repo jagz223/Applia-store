@@ -370,118 +370,131 @@ export function StoreAdminProductsPanel({
           </div>
         </CardHeader>
         <CardContent className="min-w-0 space-y-4 overflow-x-hidden">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="relative min-w-0">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nombre (aprox.)…"
-                className={cn(storeAdminFieldClass, "w-full min-w-0 pl-9")}
-                aria-label="Filtrar productos por nombre aproximado"
-              />
-            </div>
-            <div className="min-w-0">
-              <Input
-                id="product-codigo-filter"
-                value={codigoSearch}
-                onChange={(e) => setCodigoSearch(e.target.value)}
-                placeholder="Código exacto…"
-                className={cn(storeAdminFieldClass, "w-full min-w-0 font-mono")}
-                aria-label="Filtrar por código exacto"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-
-            <div className="min-w-0 space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Categoría</Label>
-              <Select
-                value={categoryId}
-                onValueChange={(v) => {
-                  setCategoryId(v);
-                  setSubcategoryId("all");
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className={storeAdminFieldClass} aria-label="Filtrar por categoría">
-                  <SelectValue placeholder="Todas" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="min-w-0 space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Subcategoría</Label>
-              <Select
-                value={subcategoryId}
-                onValueChange={(v) => {
-                  setSubcategoryId(v);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className={storeAdminFieldClass} aria-label="Filtrar por subcategoría">
-                  <SelectValue placeholder="Todas" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {filteredSubcategories.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="min-w-0 space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Precio (mín – máx)</Label>
-              <div className="grid grid-cols-2 gap-2">
+          <div className="grid gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0 space-y-1.5">
+                <Label htmlFor="product-name-filter" className="text-xs text-muted-foreground">
+                  Nombre
+                </Label>
+                <div className="relative min-w-0">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="product-name-filter"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Buscar por nombre (aprox.)…"
+                    className={cn(storeAdminFieldClass, "w-full min-w-0 pl-9")}
+                    aria-label="Filtrar productos por nombre aproximado"
+                  />
+                </div>
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <Label htmlFor="product-codigo-filter" className="text-xs text-muted-foreground">
+                  Código
+                </Label>
                 <Input
-                  inputMode="decimal"
-                  value={priceMinInput}
-                  onChange={(e) => setPriceMinInput(e.target.value)}
-                  placeholder="Mín"
-                  className={storeAdminFieldClass}
-                  aria-label="Precio mínimo"
-                />
-                <Input
-                  inputMode="decimal"
-                  value={priceMaxInput}
-                  onChange={(e) => setPriceMaxInput(e.target.value)}
-                  placeholder="Máx"
-                  className={storeAdminFieldClass}
-                  aria-label="Precio máximo"
+                  id="product-codigo-filter"
+                  value={codigoSearch}
+                  onChange={(e) => setCodigoSearch(e.target.value)}
+                  placeholder="Buscar por código (aprox.)…"
+                  className={cn(storeAdminFieldClass, "w-full min-w-0 font-mono")}
+                  aria-label="Filtrar por código aproximado"
+                  autoComplete="off"
+                  spellCheck={false}
                 />
               </div>
             </div>
 
-            <div className="min-w-0 space-y-1.5 sm:col-span-2 lg:col-span-1">
-              <Label className="text-xs text-muted-foreground">Precio + IVA (mín – máx)</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  inputMode="decimal"
-                  value={priceIvaMinInput}
-                  onChange={(e) => setPriceIvaMinInput(e.target.value)}
-                  placeholder="Mín"
-                  className={storeAdminFieldClass}
-                  aria-label="Precio con IVA mínimo"
-                />
-                <Input
-                  inputMode="decimal"
-                  value={priceIvaMaxInput}
-                  onChange={(e) => setPriceIvaMaxInput(e.target.value)}
-                  placeholder="Máx"
-                  className={storeAdminFieldClass}
-                  aria-label="Precio con IVA máximo"
-                />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0 space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Categoría</Label>
+                <Select
+                  value={categoryId}
+                  onValueChange={(v) => {
+                    setCategoryId(v);
+                    setSubcategoryId("all");
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className={storeAdminFieldClass} aria-label="Filtrar por categoría">
+                    <SelectValue placeholder="Todas" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    {categories.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Subcategoría</Label>
+                <Select
+                  value={subcategoryId}
+                  onValueChange={(v) => {
+                    setSubcategoryId(v);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className={storeAdminFieldClass} aria-label="Filtrar por subcategoría">
+                    <SelectValue placeholder="Todas" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    {filteredSubcategories.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0 space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Precio (mín – máx)</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    inputMode="decimal"
+                    value={priceMinInput}
+                    onChange={(e) => setPriceMinInput(e.target.value)}
+                    placeholder="Mín"
+                    className={storeAdminFieldClass}
+                    aria-label="Precio mínimo"
+                  />
+                  <Input
+                    inputMode="decimal"
+                    value={priceMaxInput}
+                    onChange={(e) => setPriceMaxInput(e.target.value)}
+                    placeholder="Máx"
+                    className={storeAdminFieldClass}
+                    aria-label="Precio máximo"
+                  />
+                </div>
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Precio + IVA (mín – máx)</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    inputMode="decimal"
+                    value={priceIvaMinInput}
+                    onChange={(e) => setPriceIvaMinInput(e.target.value)}
+                    placeholder="Mín"
+                    className={storeAdminFieldClass}
+                    aria-label="Precio con IVA mínimo"
+                  />
+                  <Input
+                    inputMode="decimal"
+                    value={priceIvaMaxInput}
+                    onChange={(e) => setPriceIvaMaxInput(e.target.value)}
+                    placeholder="Máx"
+                    className={storeAdminFieldClass}
+                    aria-label="Precio con IVA máximo"
+                  />
+                </div>
               </div>
             </div>
           </div>

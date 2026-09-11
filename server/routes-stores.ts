@@ -929,20 +929,13 @@ function parseOptionalAdminListNameQuery(query: unknown): string | undefined {
   return q || undefined;
 }
 
-function parseOptionalExactCodigoQuery(query: unknown): string | undefined {
+/** Query de código: misma aproximación que el nombre (tokens, no igualdad total). */
+function parseOptionalCodigoQuery(query: unknown): string | undefined {
   if (!query || typeof query !== "object") return undefined;
   const raw = (query as Record<string, unknown>).codigo;
   if (raw == null) return undefined;
-  const codigo = String(raw).trim();
+  const codigo = String(raw).trim().toLowerCase();
   return codigo || undefined;
-}
-
-/** Código completo, sin coincidencias parciales. Ignora mayúsculas. */
-function codigoMatchesExact(codigo: string | null | undefined, q?: string): boolean {
-  if (!q) return true;
-  const value = String(codigo ?? "").trim();
-  if (!value) return false;
-  return value.toLowerCase() === q.toLowerCase();
 }
 
 /** Coincidencia aproximada: todas las palabras del query deben aparecer en el nombre (cualquier orden). */
@@ -991,7 +984,7 @@ type AdminProductListFilters = {
 function parseAdminProductListFilters(query: unknown): AdminProductListFilters {
   return {
     q: parseOptionalAdminListNameQuery(query),
-    codigo: parseOptionalExactCodigoQuery(query),
+    codigo: parseOptionalCodigoQuery(query),
     categoryId: parseOptionalPositiveIntQuery(query, "categoryId"),
     subcategoryId: parseOptionalPositiveIntQuery(query, "subcategoryId"),
     priceMin: parseOptionalNonNegativeNumberQuery(query, "priceMin"),
@@ -1013,7 +1006,7 @@ function filterSerializedStoreProducts<
 >(items: T[], filters: AdminProductListFilters): T[] {
   return items.filter((item) => {
     if (!nameMatchesApproximateQuery(item.name, filters.q)) return false;
-    if (!codigoMatchesExact(item.codigo, filters.codigo)) return false;
+    if (!nameMatchesApproximateQuery(item.codigo ?? "", filters.codigo)) return false;
     if (filters.categoryId && !(item.categoryIds ?? []).includes(filters.categoryId)) return false;
     if (
       filters.subcategoryId &&
@@ -4373,7 +4366,9 @@ export function registerStoreRoutes(app: Express): void {
         filtered = filtered.filter((p) => nameMatchesApproximateQuery(p.name, filters.q));
       }
       if (filters.codigo) {
-        filtered = filtered.filter((p) => codigoMatchesExact(p.codigo, filters.codigo));
+        filtered = filtered.filter((p) =>
+          nameMatchesApproximateQuery(p.codigo ?? "", filters.codigo),
+        );
       }
       filtered = filtered
         .slice()
