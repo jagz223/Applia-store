@@ -1,4 +1,14 @@
+import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
+
+/** Damero para ver PNG/WebP sin fondo (el tema claro no debe parecer “fondo blanco” del archivo). */
+export const storeTransparentImageSurfaceStyle: CSSProperties = {
+  backgroundColor: "#f4f4f5",
+  backgroundImage:
+    "linear-gradient(45deg,#d4d4d4 25%,transparent 25%),linear-gradient(-45deg,#d4d4d4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d4d4d4 75%),linear-gradient(-45deg,transparent 75%,#d4d4d4 75%)",
+  backgroundSize: "16px 16px",
+  backgroundPosition: "0 0,0 8px,8px -8px,-8px 0",
+};
 
 /** Shell del portal: hoja inferior en móvil, centrado en desktop. */
 export const storeAdminDialogShellClass =

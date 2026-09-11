@@ -1,4 +1,5 @@
 import { ImageIcon } from "lucide-react";
+import { storeTransparentImageSurfaceStyle } from "@/components/store/store-admin-ui";
 import { cn } from "@/lib/utils";
 
 type StoreProductDualImageProps = {
@@ -16,6 +17,8 @@ type StoreProductDualImageProps = {
   /** Si true, el thumb es botón (p. ej. swap en lightbox). */
   onSecondaryClick?: () => void;
   loading?: "lazy" | "eager";
+  /** Damero para comprobar PNG sin fondo (p. ej. preview del recorte en admin). */
+  checkerboard?: boolean;
 };
 
 /**
@@ -35,7 +38,10 @@ export function StoreProductDualImage({
   onClick,
   onSecondaryClick,
   loading = "lazy",
+  checkerboard = false,
 }: StoreProductDualImageProps) {
+  const surfaceStyle = checkerboard ? storeTransparentImageSurfaceStyle : undefined;
+  const surfaceClass = checkerboard ? undefined : "bg-background";
   const primary = primaryUrl?.trim() || null;
   const secondary = secondaryUrl?.trim() || null;
   const showSecondary = Boolean(primary && secondary && secondary !== primary);
@@ -54,7 +60,8 @@ export function StoreProductDualImage({
       ) : (
         <div
           className={cn(
-            "flex h-full w-full items-center justify-center bg-background text-muted-foreground/50",
+            "flex h-full w-full items-center justify-center text-muted-foreground/50",
+            surfaceClass,
             placeholderClassName,
           )}
         >
@@ -66,11 +73,13 @@ export function StoreProductDualImage({
           <button
             type="button"
             className={cn(
-              "absolute bottom-1.5 right-1.5 z-10 overflow-hidden rounded-md border-2 border-border bg-background shadow-md",
+              "absolute bottom-1.5 right-1.5 z-10 overflow-hidden rounded-md border-2 border-border shadow-md",
+              surfaceClass,
               "h-11 w-11 sm:h-12 sm:w-12",
               "ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               secondaryClassName,
             )}
+            style={surfaceStyle}
             aria-label="Intercambiar imagen"
             onClick={(e) => {
               e.stopPropagation();
@@ -89,10 +98,12 @@ export function StoreProductDualImage({
         ) : (
           <div
             className={cn(
-              "pointer-events-none absolute bottom-1.5 right-1.5 z-10 overflow-hidden rounded-md border-2 border-border bg-background shadow-md",
+              "pointer-events-none absolute bottom-1.5 right-1.5 z-10 overflow-hidden rounded-md border-2 border-border shadow-md",
+              surfaceClass,
               "h-9 w-9 sm:h-11 sm:w-11",
               secondaryClassName,
             )}
+            style={surfaceStyle}
             aria-hidden
           >
             <img
@@ -115,11 +126,13 @@ export function StoreProductDualImage({
         role="button"
         tabIndex={0}
         className={cn(
-          "relative block w-full cursor-pointer overflow-hidden bg-background text-left",
+          "relative block w-full cursor-pointer overflow-hidden text-left",
+          surfaceClass,
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           frameClassName,
           className,
         )}
+        style={surfaceStyle}
         onClick={onClick}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -135,7 +148,10 @@ export function StoreProductDualImage({
   }
 
   return (
-    <div className={cn("relative overflow-hidden bg-background", frameClassName, className)}>
+    <div
+      className={cn("relative overflow-hidden", surfaceClass, frameClassName, className)}
+      style={surfaceStyle}
+    >
       {content}
     </div>
   );

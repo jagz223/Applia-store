@@ -13,6 +13,7 @@ import {
   type StoreImageDraft,
 } from "@/lib/store-image-draft";
 import { SQUARE_CROP_MAX_FILE_BYTES } from "@/lib/square-image-crop";
+import { storeTransparentImageSurfaceStyle } from "@/components/store/store-admin-ui";
 import { cn } from "@/lib/utils";
 
 const SLOT_LABELS = ["Foto principal", "Segunda imagen"] as const;
@@ -32,6 +33,7 @@ export function StoreProductPhotosPicker({
   const [urlLoading, setUrlLoading] = useState(false);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [cropFileName, setCropFileName] = useState("producto.png");
+  const [cropMimeType, setCropMimeType] = useState<string | undefined>("image/png");
   const [cropOpen, setCropOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState(0);
 
@@ -66,10 +68,11 @@ export function StoreProductPhotosPicker({
     onChange(copy.slice(0, STORE_PRODUCT_MAX_IMAGES));
   }
 
-  function openCropper(index: number, src: string, fileName: string) {
+  function openCropper(index: number, src: string, fileName: string, mimeType?: string) {
     setEditingIndex(index);
     setCropSrc(src);
     setCropFileName(fileName);
+    setCropMimeType(mimeType);
     setCropOpen(true);
   }
 
@@ -110,7 +113,12 @@ export function StoreProductPhotosPicker({
       });
       return;
     }
-    openCropper(editingIndex, URL.createObjectURL(file), file.name || "producto.png");
+    openCropper(
+      editingIndex,
+      URL.createObjectURL(file),
+      file.name || "producto.png",
+      file.type || undefined,
+    );
   }
 
   async function handleAddUrl(index: number) {
@@ -135,7 +143,16 @@ export function StoreProductPhotosPicker({
       });
       const fromUrl = trimmed.split("?")[0]?.split("/").pop() || "producto.png";
       const safeName = /\.(png|jpe?g|webp|gif)$/i.test(fromUrl) ? fromUrl : "producto.png";
-      openCropper(index, trimmed, safeName);
+      openCropper(
+        index,
+        trimmed,
+        safeName,
+        safeName.toLowerCase().endsWith(".png")
+          ? "image/png"
+          : safeName.toLowerCase().endsWith(".webp")
+            ? "image/webp"
+            : undefined,
+      );
       setUrlInput("");
     } catch (e) {
       toast({
@@ -164,8 +181,11 @@ export function StoreProductPhotosPicker({
 
         {draft ? (
           <div className="space-y-2">
-            <div className="relative mx-auto max-w-[160px] aspect-square rounded-lg border border-border overflow-hidden bg-background">
-              <img src={draft.previewUrl} alt="" className="h-full w-full object-cover" />
+            <div
+              className="relative mx-auto max-w-[160px] aspect-square overflow-hidden rounded-lg border border-border"
+              style={storeTransparentImageSurfaceStyle}
+            >
+              <img src={draft.previewUrl} alt="" className="h-full w-full object-contain" />
               {draft.pendingFile ? (
                 <span className="absolute bottom-1 left-1 rounded bg-background/90 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                   Sin guardar
@@ -212,6 +232,7 @@ export function StoreProductPhotosPicker({
                         : /\.webp(\?|$)/i.test(draft.previewUrl)
                           ? "producto.webp"
                           : "producto.png"),
+                    draft.pendingFile?.type,
                   )
                 }
               >
@@ -306,6 +327,7 @@ export function StoreProductPhotosPicker({
               secondaryUrl={secondary?.previewUrl}
               frameClassName="aspect-square rounded-lg border border-border"
               secondaryClassName="h-10 w-10"
+              checkerboard
             />
           </div>
         </div>
@@ -339,6 +361,7 @@ export function StoreProductPhotosPicker({
         }}
         imageSrc={cropSrc}
         fileName={cropFileName}
+        fileMimeType={cropMimeType}
         onConfirm={applyCroppedFile}
       />
     </div>

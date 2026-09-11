@@ -21,6 +21,7 @@ import {
   storeAdminDialogFooterClass,
   storeAdminDialogHeaderClass,
   storeAdminDialogShellClass,
+  storeTransparentImageSurfaceStyle,
 } from "@/components/store/store-admin-ui";
 
 const VIEWPORT_SIZE = 320;
@@ -39,6 +40,7 @@ type SquareImageCropDialogProps = {
   onOpenChange: (open: boolean) => void;
   imageSrc: string | null;
   fileName?: string;
+  fileMimeType?: string;
   onConfirm: (file: File) => void | Promise<void>;
 };
 
@@ -47,6 +49,7 @@ export function SquareImageCropDialog({
   onOpenChange,
   imageSrc,
   fileName = "producto.png",
+  fileMimeType,
   onConfirm,
 }: SquareImageCropDialogProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -167,7 +170,9 @@ export function SquareImageCropDialog({
         offset.x,
         offset.y,
       );
-      const file = await cropSquareImageToFile(imageSrc, crop, fileName);
+      const file = await cropSquareImageToFile(imageSrc, crop, fileName, {
+        mimeType: fileMimeType,
+      });
       await onConfirm(file);
       onOpenChange(false);
     } catch (e) {
@@ -202,11 +207,7 @@ export function SquareImageCropDialog({
               width: VIEWPORT_SIZE,
               height: VIEWPORT_SIZE,
               touchAction: "none",
-              backgroundColor: "#fff",
-              backgroundImage:
-                "linear-gradient(45deg,#d4d4d4 25%,transparent 25%),linear-gradient(-45deg,#d4d4d4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d4d4d4 75%),linear-gradient(-45deg,transparent 75%,#d4d4d4 75%)",
-              backgroundSize: "16px 16px",
-              backgroundPosition: "0 0,0 8px,8px -8px,-8px 0",
+              ...storeTransparentImageSurfaceStyle,
             }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}

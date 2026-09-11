@@ -34,7 +34,8 @@ export function canvasImageHasTransparency(
       if (data[i]! < 250) return true;
     }
   } catch {
-    return false;
+    // Lienzo contaminado (p. ej. URL sin CORS): no arriesgar JPEG que pinta el alfa de blanco.
+    return true;
   }
   return false;
 }
@@ -53,10 +54,25 @@ export function clampSquareCrop(
   return { x: cropX, y: cropY, size: cropSize };
 }
 
+/** El recorte deja margen (imagen encogida o descentrada): ese margen debe ser alfa, no blanco. */
+export function cropRectExtendsOutsideImage(
+  imgW: number,
+  imgH: number,
+  crop: { x: number; y: number; size: number },
+): boolean {
+  const eps = 0.5;
+  return (
+    crop.x < -eps ||
+    crop.y < -eps ||
+    crop.x + crop.size > imgW + eps ||
+    crop.y + crop.size > imgH + eps
+  );
+}
+
 /**
  * Recorte cuadrado visible en el viewport (pan + zoom).
- * `zoom` 1 = la imagen cubre el cuadrado; menor que 1 deja margen (útil con PNG transparente).
- * El rectángulo puede salir de la imagen: el export rellena ese margen con transparencia o blanco.
+ * `zoom` 1 = la imagen cubre el cuadrado; menor que 1 deja margen transparente.
+ * El rectángulo puede salir de la imagen: el export guarda ese margen con alfa (PNG/WebP).
  */
 export function computeSquareCropFromViewport(
   imgW: number,
@@ -85,8 +101,14 @@ type CropOutputFormat = {
   ext: string;
 };
 
-/** JPEG no admite transparencia: PNG/WebP se exportan con alfa para no pintar negro. */
-export function resolveSquareCropOutputFormat(fileName: string): CropOutputFormat {
+/** JPEG no admite transparencia: si hace falta alfa se fuerza PNG. */
+export function resolveSquareCropOutputFormat(
+  fileName: string,
+  mimeType?: string,
+): CropOutputFormat {
+  const mime = (mimeType ?? "").toLowerCase().split(";")[0]?.trim();
+  if (mime === "image/png" || mime === "image/gif") return { mime: "image/png", ext: "png" };
+  if (mime === "image/webp") return { mime: "image/webp", quality: 0.92, ext: "webp" };
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".png")) return { mime: "image/png", ext: "png" };
   if (lower.endsWith(".webp")) return { mime: "image/webp", quality: 0.92, ext: "webp" };
@@ -103,12 +125,17 @@ export async function cropSquareImageToFile(
   imageSrc: string,
   crop: { x: number; y: number; size: number },
   fileName: string,
-  outputSize = SQUARE_CROP_OUTPUT_SIZE,
+  options?: { outputSize?: number; mimeType?: string },
 ): Promise<File> {
+  const outputSize = options?.outputSize ?? SQUARE_CROP_OUTPUT_SIZE;
   const img = await loadImageElement(imageSrc);
-  let format = resolveSquareCropOutputFormat(fileName);
-  // Si el archivo se renombró a .jpg pero el contenido tiene alfa, conservar PNG.
-  if (format.mime === "image/jpeg" && canvasImageHasTransparency(img)) {
+  const srcW = img.naturalWidth || img.width;
+  const srcH = img.naturalHeight || img.height;
+  const needsAlpha =
+    canvasImageHasTransparency(img) || cropRectExtendsOutsideImage(srcW, srcH, crop);
+  let format = resolveSquareCropOutputFormat(fileName, options?.mimeType);
+  // JPEG aplasta el alfa a blanco/negro: si hay transparencia o margen, salir en PNG.
+  if (needsAlpha && format.mime === "image/jpeg") {
     format = { mime: "image/png", ext: "png" };
   }
   const canvas = document.createElement("canvas");
@@ -122,8 +149,6 @@ export async function cropSquareImageToFile(
   } else {
     ctx.clearRect(0, 0, outputSize, outputSize);
   }
-  const srcW = img.naturalWidth || img.width;
-  const srcH = img.naturalHeight || img.height;
   const destScale = outputSize / Math.max(crop.size, 1);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
