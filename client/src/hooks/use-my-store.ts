@@ -23,6 +23,7 @@ export type MyStoreSummary = {
   whatsappDisplay?: string | null;
   whatsappUrl?: string | null;
   casheaEnabled?: boolean;
+  showcaseOnlyWithImage?: boolean;
   visibilityActive: boolean;
   hasPendingSubscriptionPayment?: boolean;
 };

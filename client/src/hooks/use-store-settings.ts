@@ -41,6 +41,7 @@ export function useUpdateStore(storeId: number, slug: string) {
       void qc.invalidateQueries({ queryKey: MY_STORE_QUERY_KEY });
       void qc.invalidateQueries({ queryKey: ["/api/stores", slug] });
       void qc.invalidateQueries({ queryKey: ["/api/stores"] });
+      void qc.invalidateQueries({ queryKey: ["/api/stores", slug, "showcase-products"] });
     },
   });
 }

@@ -497,6 +497,11 @@ export type Store = {
   whatsappPhone: string | null;
   /** Cashea: pago vía WhatsApp (sin orden en sistema). */
   casheaEnabled: boolean;
+  /**
+   * Si true, la vitrina pública solo lista productos con al menos una imagen.
+   * El switch «En vitrina» del producto no se apaga.
+   */
+  showcaseOnlyWithImage: boolean;
   /** Vigencia de visibilidad pública (null = sin pago / inactiva). */
   visibilitySubscriptionEndsAt: Date | string | null;
   createdAt: Date | string;
@@ -517,6 +522,7 @@ export const updateStoreSchema = z.object({
   currencyAcceptedPaymentIds: z.array(z.string().trim().min(1).max(64)).max(40).optional(),
   whatsappPhone: z.string().trim().max(24).nullable().optional(),
   casheaEnabled: z.boolean().optional(),
+  showcaseOnlyWithImage: z.boolean().optional(),
 });
 
 export type UpdateStore = z.infer<typeof updateStoreSchema>;
@@ -627,6 +633,12 @@ export function storeProductHasAvailableStock(product: {
 }): boolean {
   const effective = storeProductEffectiveStock(product);
   return effective === null || effective > 0;
+}
+
+export function storeProductHasShowcaseImage(product: {
+  imageUrls?: Array<string | null | undefined> | null;
+}): boolean {
+  return (product.imageUrls ?? []).some((url) => typeof url === "string" && url.trim().length > 0);
 }
 
 /**

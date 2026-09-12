@@ -47,7 +47,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useUpdateStore } from "@/hooks/use-store-settings";
 import { cn } from "@/lib/utils";
+import { storeProductHasShowcaseImage } from "@shared/store-schema";
 import { storeAdminFieldClass, storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 import {
   STORE_CURRENCY_USD_ID,
@@ -97,9 +99,11 @@ function ProductThumbnail({ imageUrls }: { imageUrls: string[] }) {
 function ShowcaseToggle({
   storeId,
   product,
+  showcaseOnlyWithImage,
 }: {
   storeId: number;
   product: StoreProductSummary;
+  showcaseOnlyWithImage: boolean;
 }) {
   const { toast } = useToast();
   const updateMutation = useUpdateStoreProduct(storeId);
@@ -125,10 +129,13 @@ function ShowcaseToggle({
         productId: product.id,
         body: { showOnShowcase: next },
       });
+      const missingImage = next && showcaseOnlyWithImage && !storeProductHasShowcaseImage(product);
       toast({
-        title: next ? "Visible en vitrina" : "Oculto en vitrina",
+        title: next ? (missingImage ? "Marcado en vitrina" : "Visible en vitrina") : "Oculto en vitrina",
         description: next
-          ? `«${product.name}» se mostrará en la tienda pública.`
+          ? missingImage
+            ? `«${product.name}» sigue marcado, pero no se verá en la vitrina hasta que tenga imagen.`
+            : `«${product.name}» se mostrará en la tienda pública.`
           : `«${product.name}» ya no aparece en la vitrina.`,
       });
     } catch (e) {
@@ -212,14 +219,18 @@ export function StoreAdminProductsPanel({
   currencyAcceptedPaymentIds,
   currencyExtras,
   currencyVisualId,
+  showcaseOnlyWithImage = false,
 }: {
   storeId: number;
   slug: string;
   currencyAcceptedPaymentIds?: string[];
   currencyExtras?: StoreCurrencyExtra[];
   currencyVisualId?: string;
+  showcaseOnlyWithImage?: boolean;
 }) {
   const { toast } = useToast();
+  const updateStore = useUpdateStore(storeId, slug);
+  const [onlyWithImage, setOnlyWithImage] = useState(showcaseOnlyWithImage);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [codigoSearch, setCodigoSearch] = useState("");
@@ -235,6 +246,10 @@ export function StoreAdminProductsPanel({
   const [debouncedPriceIvaMin, setDebouncedPriceIvaMin] = useState<number | null>(null);
   const [debouncedPriceIvaMax, setDebouncedPriceIvaMax] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setOnlyWithImage(showcaseOnlyWithImage);
+  }, [showcaseOnlyWithImage]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -322,6 +337,27 @@ export function StoreAdminProductsPanel({
   const [detailProduct, setDetailProduct] = useState<StoreProductSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StoreProductSummary | null>(null);
 
+  async function handleShowcaseOnlyWithImage(next: boolean) {
+    const prev = onlyWithImage;
+    setOnlyWithImage(next);
+    try {
+      await updateStore.mutateAsync({ showcaseOnlyWithImage: next });
+      toast({
+        title: next ? "Solo productos con imagen" : "Todos los de vitrina",
+        description: next
+          ? "En la vitrina solo se verán productos con foto. Los que no tienen imagen siguen marcados."
+          : "La vitrina vuelve a mostrar todos los productos con «En vitrina» activo.",
+      });
+    } catch (e) {
+      setOnlyWithImage(prev);
+      toast({
+        variant: "destructive",
+        title: "No se pudo guardar",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
+    }
+  }
+
   function openCreate() {
     setEditProduct(null);
     setFormOpen(true);
@@ -370,6 +406,21 @@ export function StoreAdminProductsPanel({
           </div>
         </CardHeader>
         <CardContent className="min-w-0 space-y-4 overflow-x-hidden">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-muted/20 px-3 py-2.5 sm:px-4">
+            <Label
+              htmlFor="showcase-only-with-image"
+              className="min-w-0 cursor-pointer text-sm font-medium leading-snug"
+            >
+              Solo mostrar productos con imagen en vitrina
+            </Label>
+            <Switch
+              id="showcase-only-with-image"
+              checked={onlyWithImage}
+              disabled={updateStore.isPending}
+              onCheckedChange={(v) => void handleShowcaseOnlyWithImage(v)}
+              aria-label="Solo mostrar productos con imagen en vitrina"
+            />
+          </div>
           <div className="grid gap-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="min-w-0 space-y-1.5">
@@ -545,7 +596,11 @@ export function StoreAdminProductsPanel({
                           </p>
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                          <ShowcaseToggle storeId={storeId} product={product} />
+                          <ShowcaseToggle
+                            storeId={storeId}
+                            product={product}
+                            showcaseOnlyWithImage={onlyWithImage}
+                          />
                           <ProductRowActions
                             onDetail={() => setDetailProduct(product)}
                             onEdit={() => openEdit(product)}
@@ -597,7 +652,11 @@ export function StoreAdminProductsPanel({
                           {formatPrice(productPriceWithIva(product), currencyLabel)}
                         </TableCell>
                         <TableCell>
-                          <ShowcaseToggle storeId={storeId} product={product} />
+                          <ShowcaseToggle
+                            storeId={storeId}
+                            product={product}
+                            showcaseOnlyWithImage={onlyWithImage}
+                          />
                         </TableCell>
                         <TableCell className="text-right">
                           <ProductRowActions

@@ -50,6 +50,7 @@ function sectionPanel(
     currencyAcceptedPaymentIds?: string[];
     whatsappPhone?: string | null;
     casheaEnabled?: boolean;
+    showcaseOnlyWithImage?: boolean;
   },
   access: {
     canFilterOrdersByBranch: boolean;
@@ -66,6 +67,7 @@ function sectionPanel(
         currencyAcceptedPaymentIds={store.currencyAcceptedPaymentIds}
         currencyExtras={store.currencyExtras}
         currencyVisualId={store.currencyVisualId}
+        showcaseOnlyWithImage={store.showcaseOnlyWithImage === true}
       />
     );
   }

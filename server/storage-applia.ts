@@ -3376,6 +3376,7 @@ export class InMemoryStorage implements IStorage {
       currencyAcceptedPaymentIds: [STORE_CURRENCY_USD_ID],
       whatsappPhone: null,
       casheaEnabled: false,
+      showcaseOnlyWithImage: false,
       visibilitySubscriptionEndsAt: null,
       createdAt: now,
       updatedAt: now,
@@ -3431,6 +3432,9 @@ export class InMemoryStorage implements IStorage {
           }
         : {}),
       ...(input.casheaEnabled !== undefined ? { casheaEnabled: input.casheaEnabled } : {}),
+      ...(input.showcaseOnlyWithImage !== undefined
+        ? { showcaseOnlyWithImage: input.showcaseOnlyWithImage === true }
+        : {}),
       updatedAt: now,
     };
     this.stores[index] = updated;

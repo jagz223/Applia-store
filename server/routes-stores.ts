@@ -118,6 +118,7 @@ import {
   normalizeStoreProductStockFields,
   resolveStoreProductShowOnShowcase,
   storeProductHasAvailableStock,
+  storeProductHasShowcaseImage,
   compareProductsByCategorySortOrder,
 } from "@shared/store-schema";
 import {
@@ -848,6 +849,7 @@ function serializeStore(
     whatsappDisplay: formatStoreWhatsappDisplay(store.whatsappPhone),
     whatsappUrl: buildStoreWhatsappUrl(store.whatsappPhone),
     casheaEnabled: store.casheaEnabled === true,
+    showcaseOnlyWithImage: store.showcaseOnlyWithImage === true,
     visibilitySubscriptionEndsAt: serializeDate(store.visibilitySubscriptionEndsAt),
     visibilityActive: isStoreVisibilityActive(store),
     hasPendingSubscriptionPayment: extra?.hasPendingSubscriptionPayment ?? false,
@@ -4329,13 +4331,21 @@ export function registerStoreRoutes(app: Express): void {
           appliaStorage.listStoreShowcaseAds(storeForView.id, "popup"),
         ]);
 
-      const showcaseList = all.filter((p) =>
-        resolveStoreProductShowOnShowcase({
-          showOnShowcase: p.showOnShowcase,
-          hasStock: p.hasStock,
-          stock: p.stock,
-        }),
-      );
+      const showcaseList = all.filter((p) => {
+        if (
+          !resolveStoreProductShowOnShowcase({
+            showOnShowcase: p.showOnShowcase,
+            hasStock: p.hasStock,
+            stock: p.stock,
+          })
+        ) {
+          return false;
+        }
+        if (storeForView.showcaseOnlyWithImage === true && !storeProductHasShowcaseImage(p)) {
+          return false;
+        }
+        return true;
+      });
       const catalogTotal = showcaseList.length;
       const categorySortOrderById = new Map(
         allCategories.map((c) => [
@@ -4437,6 +4447,9 @@ export function registerStoreRoutes(app: Express): void {
         stock: product.stock,
       });
       if (!visible) return res.status(404).json({ message: "Producto no encontrado." });
+      if (storeForView.showcaseOnlyWithImage === true && !storeProductHasShowcaseImage(product)) {
+        return res.status(404).json({ message: "Producto no encontrado." });
+      }
 
       const ingredientNameById = await ingredientNameMapForProduct(product);
       return res.json({

@@ -4438,6 +4438,7 @@ class FirestoreStorageImpl implements IStorage {
       currencyAcceptedPaymentIds: [STORE_CURRENCY_USD_ID],
       whatsappPhone: null,
       casheaEnabled: false,
+      showcaseOnlyWithImage: false,
       visibilitySubscriptionEndsAt: null,
       createdAt: now,
       updatedAt: now,
@@ -4494,6 +4495,9 @@ class FirestoreStorageImpl implements IStorage {
     }
     if (input.casheaEnabled !== undefined) {
       patch.casheaEnabled = input.casheaEnabled;
+    }
+    if (input.showcaseOnlyWithImage !== undefined) {
+      patch.showcaseOnlyWithImage = input.showcaseOnlyWithImage === true;
     }
     await this.db.collection(FIRESTORE_COLLECTIONS.STORES).doc(String(storeId)).set(patch, { merge: true });
     const refreshed = await this.getStoreById(storeId);
@@ -6232,6 +6236,7 @@ class FirestoreStorageImpl implements IStorage {
           ? String(data.whatsappPhone).trim()
           : null,
       casheaEnabled: data.casheaEnabled === true,
+      showcaseOnlyWithImage: data.showcaseOnlyWithImage === true,
       visibilitySubscriptionEndsAt: this.readFirestoreDate(data.visibilitySubscriptionEndsAt),
       createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
       updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
