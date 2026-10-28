@@ -43,17 +43,21 @@ export function isLikelyImageUrl(value: string): boolean {
 export function draftsFromSavedUrls(urls: string[]): StoreImageDraft[] {
   return urls.map((previewUrl) => ({
     previewUrl,
+    originalPreviewUrl: previewUrl,
     savedDisplayUrl: previewUrl,
+    savedOriginalUrl: previewUrl,
     transform: { ...DEFAULT_STORE_IMAGE_TRANSFORM },
   }));
 }
 
 export function draftFromStoreImageAsset(asset: StoreImageAsset): StoreImageDraft {
+  const displayUrl = asset.displayUrl.trim();
+  const originalUrl = asset.originalUrl.trim() || displayUrl;
   return {
-    previewUrl: asset.displayUrl,
-    originalPreviewUrl: asset.originalUrl.trim() || undefined,
-    savedDisplayUrl: asset.displayUrl,
-    savedOriginalUrl: asset.originalUrl.trim() || undefined,
+    previewUrl: displayUrl,
+    originalPreviewUrl: originalUrl,
+    savedDisplayUrl: displayUrl,
+    savedOriginalUrl: originalUrl,
     transform: asset.transform ?? { ...DEFAULT_STORE_IMAGE_TRANSFORM },
   };
 }
@@ -63,19 +67,28 @@ export function draftsFromStoreImageAssets(assets: StoreImageAsset[]): StoreImag
 }
 
 export function draftHasEditableOriginal(draft: StoreImageDraft): boolean {
-  return Boolean(draft.originalPreviewUrl?.trim() || draft.pendingOriginalFile || draft.savedOriginalUrl?.trim());
+  return Boolean(
+    draft.pendingOriginalFile ||
+      draft.originalPreviewUrl?.trim() ||
+      draft.savedOriginalUrl?.trim() ||
+      draft.savedDisplayUrl?.trim() ||
+      (draft.previewUrl?.trim() && !draft.previewUrl.startsWith("blob:")),
+  );
 }
 
 export function draftOriginalSource(draft: StoreImageDraft): string | null {
   if (draft.originalPreviewUrl?.trim()) return draft.originalPreviewUrl.trim();
   if (draft.savedOriginalUrl?.trim()) return draft.savedOriginalUrl.trim();
+  if (draft.savedDisplayUrl?.trim()) return draft.savedDisplayUrl.trim();
+  const preview = draft.previewUrl?.trim();
+  if (preview && !preview.startsWith("blob:")) return preview;
   return null;
 }
 
 export function storeImageDraftToAsset(draft: StoreImageDraft): StoreImageAsset | null {
   const displayUrl = (draft.savedDisplayUrl ?? draft.previewUrl)?.trim();
   if (!displayUrl || displayUrl.startsWith("blob:")) return null;
-  const originalUrl = (draft.savedOriginalUrl ?? "").trim();
+  const originalUrl = (draft.savedOriginalUrl ?? "").trim() || displayUrl;
   return {
     originalUrl,
     displayUrl,
@@ -88,9 +101,11 @@ export function singularDraftFromSavedFields(input: {
   originalUrl?: string | null;
   transform?: StoreImageTransform | null;
 }): StoreImageDraft | null {
-  const displayUrl = input.displayUrl?.trim();
+  let displayUrl = input.displayUrl?.trim() || "";
+  let originalUrl = input.originalUrl?.trim() || "";
+  if (!displayUrl && originalUrl) displayUrl = originalUrl;
   if (!displayUrl) return null;
-  const originalUrl = input.originalUrl?.trim() || undefined;
+  if (!originalUrl) originalUrl = displayUrl;
   return {
     previewUrl: displayUrl,
     originalPreviewUrl: originalUrl,
@@ -140,7 +155,19 @@ export function assetsOrLegacyFromProduct(product: {
   imageUrls?: string[] | null;
 }): StoreImageAsset[] {
   if (Array.isArray(product.imageAssets) && product.imageAssets.length > 0) {
-    return product.imageAssets.filter((a) => a.displayUrl?.trim());
+    const filtered = product.imageAssets
+      .map((asset) => {
+        const displayUrl = asset.displayUrl?.trim() || asset.originalUrl?.trim() || "";
+        if (!displayUrl) return null;
+        const originalUrl = asset.originalUrl?.trim() || displayUrl;
+        return {
+          originalUrl,
+          displayUrl,
+          transform: asset.transform ?? { ...DEFAULT_STORE_IMAGE_TRANSFORM },
+        } satisfies StoreImageAsset;
+      })
+      .filter((a): a is StoreImageAsset => a != null);
+    if (filtered.length > 0) return filtered;
   }
   return (product.imageUrls ?? [])
     .map((url) => legacyDisplayUrlToStoreImageAsset(url))
@@ -174,6 +201,7 @@ export async function resolveStoreImageDraftToAsset(
   }
 
   if (!displayUrl) return null;
+  if (!originalUrl) originalUrl = displayUrl;
   return {
     originalUrl,
     displayUrl,

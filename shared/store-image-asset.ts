@@ -48,9 +48,10 @@ export function normalizeStoreImageTransform(raw: unknown): StoreImageTransform 
 }
 
 export function legacyDisplayUrlToStoreImageAsset(displayUrl: string): StoreImageAsset {
+  const url = displayUrl.trim();
   return {
-    originalUrl: "",
-    displayUrl: displayUrl.trim(),
+    originalUrl: url,
+    displayUrl: url,
     transform: { ...DEFAULT_STORE_IMAGE_TRANSFORM },
   };
 }
@@ -62,9 +63,13 @@ export function normalizeStoreImageAsset(raw: unknown): StoreImageAsset | null {
     return legacyDisplayUrlToStoreImageAsset(displayUrl);
   }
   if (!raw || typeof raw !== "object") return null;
-  const displayUrl = String((raw as { displayUrl?: unknown }).displayUrl ?? "").trim();
+  let displayUrl = String((raw as { displayUrl?: unknown }).displayUrl ?? "").trim();
+  let originalUrl = String((raw as { originalUrl?: unknown }).originalUrl ?? "").trim();
+  // Legacy / recortes antiguos: a veces solo quedó una URL (display u original).
+  if (!displayUrl && originalUrl) displayUrl = originalUrl;
   if (!displayUrl) return null;
-  const originalUrl = String((raw as { originalUrl?: unknown }).originalUrl ?? "").trim();
+  // Sin original aparte, la imagen mostrada es la fuente editable.
+  if (!originalUrl) originalUrl = displayUrl;
   return {
     originalUrl,
     displayUrl,
@@ -101,7 +106,8 @@ export function resolveStoreImageAssetsFromProductInput(input: {
   maxImages: number;
 }): StoreImageAsset[] {
   if (input.imageAssets != null) {
-    return normalizeStoreImageAssets(input.imageAssets, input.maxImages);
+    const fromAssets = normalizeStoreImageAssets(input.imageAssets, input.maxImages);
+    if (fromAssets.length > 0) return fromAssets;
   }
   if (Array.isArray(input.imageUrls)) {
     return normalizeStoreImageAssets(input.imageUrls, input.maxImages);
@@ -118,11 +124,13 @@ export function resolveSingularStoreImageFields(input: {
   imageOriginalUrl: string | null;
   imageTransform: StoreImageTransform | null;
 } {
-  const displayUrl = input.displayUrl?.trim() || null;
+  let displayUrl = input.displayUrl?.trim() || null;
+  let originalUrl = input.originalUrl?.trim() || null;
+  if (!displayUrl && originalUrl) displayUrl = originalUrl;
   if (!displayUrl) {
     return { imageUrl: null, imageOriginalUrl: null, imageTransform: null };
   }
-  const originalUrl = input.originalUrl?.trim() || null;
+  if (!originalUrl) originalUrl = displayUrl;
   return {
     imageUrl: displayUrl,
     imageOriginalUrl: originalUrl,
