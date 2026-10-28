@@ -97,8 +97,10 @@ export default function Settings() {
     });
   }, [user, form.reset]);
 
-  const recoveryConfigured =
-    (user as { recoveryQuestionsConfigured?: boolean } | null)?.recoveryQuestionsConfigured === true;
+  const emailVerified = (user as { emailVerified?: boolean } | null)?.emailVerified === true;
+  const authProviders = ((user as { authProviders?: string[] } | null)?.authProviders ??
+    ["password"]) as string[];
+  const hasPasswordProvider = authProviders.includes("password");
 
   const doSubmit = async (data: ProfileForm) => {
     const token = localStorage.getItem("token");
@@ -216,7 +218,10 @@ export default function Settings() {
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12 lg:gap-8">
           <aside className="flex flex-col gap-5 lg:col-span-4 lg:sticky lg:top-24 lg:self-start">
             <ThemeAppearanceCard />
-            <SettingsChangePasswordCard recoveryConfigured={recoveryConfigured} />
+            <SettingsChangePasswordCard
+              emailVerified={emailVerified}
+              hasPasswordProvider={hasPasswordProvider}
+            />
           </aside>
 
           <div className="flex min-w-0 flex-col gap-5 lg:col-span-8">

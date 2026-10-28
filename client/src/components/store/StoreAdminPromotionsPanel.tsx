@@ -8,10 +8,8 @@ import {
 } from "@/hooks/use-store-promotions";
 import { StorePromotionFormDialog } from "@/components/store/StorePromotionFormDialog";
 import { StorePromotionDetailDialog } from "@/components/store/StorePromotionDetailDialog";
-import {
-  STORE_ADMIN_LIST_PAGE_SIZE,
-  StoreAdminListPagination,
-} from "@/components/store/StoreAdminListPagination";
+import { StoreAdminListPagination } from "@/components/store/StoreAdminListPagination";
+import { useStoreAdminListPageSize } from "@/hooks/use-store-admin-list-page-size";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -180,6 +178,7 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useStoreAdminListPageSize();
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -189,10 +188,14 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
     return () => window.clearTimeout(t);
   }, [search]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize]);
+
   const { data, isLoading, error, isFetching } = useStorePromotionsPage(
     storeId,
     page,
-    STORE_ADMIN_LIST_PAGE_SIZE,
+    pageSize,
     true,
     debouncedSearch,
   );
@@ -368,6 +371,8 @@ export function StoreAdminPromotionsPanel({ storeId }: { storeId: number }) {
                 totalPages={totalPages}
                 isFetching={isFetching}
                 onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
               />
             </>
           )}

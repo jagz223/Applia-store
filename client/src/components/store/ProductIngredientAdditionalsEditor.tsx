@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { StoreSelectableChip } from "@/components/store/StoreSelectableChip";
 import type { SelectedIngredient } from "@/components/store/IngredientMaterialPicker";
 import { currencyLabelForId, type StoreCurrencyExtra } from "@shared/store-currency-schema";
+import { getStoreCatalogItemCopy } from "@/lib/store-runtime-flags";
 
 export type ProductIngredientAdditionalDraft = {
   ingredientMaterialId: number;
@@ -111,10 +112,11 @@ export function ProductIngredientAdditionalsEditor({
   }
 
   if (options.length === 0) {
+    const { plural } = getStoreCatalogItemCopy();
     return (
       <p className="text-sm text-muted-foreground">
-        No hay materiales disponibles para adicionales (todos están marcados como «a sacar» o aún no hay
-        ingredientes).
+        No hay {plural} disponibles para adicionales (todos están marcados como «a sacar» o el catálogo
+        está vacío).
       </p>
     );
   }

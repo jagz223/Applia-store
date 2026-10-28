@@ -29,8 +29,15 @@ export const STORE_ADMIN_EMPLOYEE_SECTIONS: StoreAdminSectionId[] = [
 /** Secciones ocultas temporalmente en el menú del admin. */
 export const STORE_ADMIN_SECTIONS_HIDDEN: StoreAdminSectionId[] = ["codigos"];
 
-export function getVisibleStoreAdminSections(options?: { employeeOnly?: boolean; includeStaff?: boolean }) {
-  const hidden = new Set(STORE_ADMIN_SECTIONS_HIDDEN);
+export function getVisibleStoreAdminSections(options?: {
+  employeeOnly?: boolean;
+  includeStaff?: boolean;
+  extraHidden?: readonly StoreAdminSectionId[];
+}) {
+  const hidden = new Set<StoreAdminSectionId>([
+    ...STORE_ADMIN_SECTIONS_HIDDEN,
+    ...(options?.extraHidden ?? []),
+  ]);
   let sections = STORE_ADMIN_SECTIONS.filter((s) => !hidden.has(s.id));
   if (options?.employeeOnly) {
     const allowed = new Set(STORE_ADMIN_EMPLOYEE_SECTIONS);
@@ -40,6 +47,14 @@ export function getVisibleStoreAdminSections(options?: { employeeOnly?: boolean;
     sections = sections.filter((s) => s.id !== "usuarios");
   }
   return sections;
+}
+
+export function isStoreAdminSectionHidden(
+  sectionId: StoreAdminSectionId,
+  extraHidden?: readonly StoreAdminSectionId[],
+): boolean {
+  if (STORE_ADMIN_SECTIONS_HIDDEN.includes(sectionId)) return true;
+  return Boolean(extraHidden?.includes(sectionId));
 }
 
 export function isStoreAdminSection(value: string | undefined): value is StoreAdminSectionId {

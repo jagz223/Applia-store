@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { getStoreCatalogItemCopy, isStoreBoxSizeEnabled } from "@/lib/store-runtime-flags";
 import {
   IngredientMaterialPicker,
   type SelectedIngredient,
@@ -57,10 +58,13 @@ import {
 } from "@/components/store/store-admin-ui";
 import { uploadStoreProductImage } from "@/lib/firebase-client";
 import {
-  draftsFromSavedUrls,
+  assetsOrLegacyFromProduct,
+  draftsFromStoreImageAssets,
+  resolveStoreImageDraftsToAssets,
   revokeBlobPreviews,
   type StoreImageDraft,
 } from "@/lib/store-image-draft";
+import { storeImageAssetsToDisplayUrls } from "@shared/store-image-asset";
 import { cn } from "@/lib/utils";
 import { STORE_PRODUCT_MAX_IMAGES, normalizeWeightKg } from "@shared/store-schema";
 
@@ -117,6 +121,12 @@ function parsePositivePrice(raw: string): number | null {
 
 function parseWeightKg(raw: string): number {
   return normalizeWeightKg(String(raw).trim().replace(",", "."));
+}
+
+function parseBoxSize(raw: string): number {
+  const n = Number(String(raw).trim().replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(1_000_000, Math.round(n * 1000) / 1000);
 }
 
 function resizeSizeDrafts(
@@ -186,6 +196,8 @@ export function StoreProductFormDialog({
   visualCurrencyId?: string;
 }) {
   const { toast } = useToast();
+  const catalogItemCopy = getStoreCatalogItemCopy();
+  const boxSizeEnabled = isStoreBoxSizeEnabled();
   const isEdit = product != null;
 
   const [name, setName] = useState("");
@@ -195,6 +207,8 @@ export function StoreProductFormDialog({
   const [sizeDrafts, setSizeDrafts] = useState<SizeDraft[]>([]);
   const [hasWeight, setHasWeight] = useState(false);
   const [productWeight, setProductWeight] = useState("");
+  const [hasBoxSize, setHasBoxSize] = useState(false);
+  const [boxSizeInput, setBoxSizeInput] = useState("");
   const [hasStock, setHasStock] = useState(false);
   const [stockInput, setStockInput] = useState("");
   const [prices, setPrices] = useState<Record<string, string>>(() => emptyPrices(acceptedPaymentIds));
@@ -284,6 +298,10 @@ export function StoreProductFormDialog({
       setProductWeight(
         product.hasWeight === true && (product.weight ?? 0) > 0 ? String(product.weight) : "",
       );
+      setHasBoxSize(product.hasBoxSize === true);
+      setBoxSizeInput(
+        product.hasBoxSize === true && (product.boxSize ?? 0) > 0 ? String(product.boxSize) : "",
+      );
       setHasStock(product.hasStock === true);
       setStockInput(
         product.hasStock === true && product.stock != null ? String(product.stock) : "",
@@ -321,7 +339,7 @@ export function StoreProductFormDialog({
             setResolving(false);
           });
       }
-      setImageDrafts(draftsFromSavedUrls(product.imageUrls ?? []));
+      setImageDrafts(draftsFromStoreImageAssets(assetsOrLegacyFromProduct(product)));
       setCategories(categoriesFromIds(allCategories, product.categoryIds ?? []));
       setSubcategories(
         subcategoriesFromIds(allSubcategories, product.subcategoryIds ?? []),
@@ -335,6 +353,8 @@ export function StoreProductFormDialog({
       setSizeDrafts([]);
       setHasWeight(false);
       setProductWeight("");
+      setHasBoxSize(false);
+      setBoxSizeInput("");
       setHasStock(false);
       setStockInput("");
       setPrices(emptyPrices(acceptedPaymentIds));
@@ -465,16 +485,11 @@ export function StoreProductFormDialog({
     onOpenChange(next);
   }
 
-  async function resolveImageUrlsFromDrafts(drafts: StoreImageDraft[]): Promise<string[]> {
-    const urls: string[] = [];
-    for (const draft of drafts) {
-      if (draft.pendingFile) {
-        urls.push(await uploadStoreProductImage(storeId, draft.pendingFile));
-      } else {
-        urls.push(draft.previewUrl);
-      }
-    }
-    return urls.slice(0, STORE_PRODUCT_MAX_IMAGES);
+  async function resolveImageAssetsFromDrafts(drafts: StoreImageDraft[]) {
+    const assets = await resolveStoreImageDraftsToAssets(drafts, (file, variant) =>
+      uploadStoreProductImage(storeId, file, variant),
+    );
+    return assets.slice(0, STORE_PRODUCT_MAX_IMAGES);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -642,7 +657,8 @@ export function StoreProductFormDialog({
     }
 
     try {
-      const imageUrls = await resolveImageUrlsFromDrafts(imageDrafts);
+      const imageAssets = await resolveImageAssetsFromDrafts(imageDrafts);
+      const imageUrls = storeImageAssetsToDisplayUrls(imageAssets);
       const payload = {
         name: trimmedName,
         description: description.trim() || null,
@@ -651,6 +667,12 @@ export function StoreProductFormDialog({
         sizes: hasSizes ? sizesPayload : [],
         hasWeight,
         weight: hasWeight && !hasSizes ? parseWeightKg(productWeight) : 0,
+        ...(boxSizeEnabled
+          ? {
+              hasBoxSize,
+              boxSize: hasBoxSize ? parseBoxSize(boxSizeInput) : 0,
+            }
+          : {}),
         hasStock,
         stock: hasStock
           ? stockInput.trim() === ""
@@ -663,6 +685,7 @@ export function StoreProductFormDialog({
         removableIngredientMaterialIds: nextRemovable,
         ingredientAdditionals: nextAdditionals,
         imageUrls,
+        imageAssets,
         showOnShowcase: (() => {
           const tracks = hasStock;
           const units = tracks
@@ -785,6 +808,41 @@ export function StoreProductFormDialog({
                 onCheckedChange={setHasWeight}
               />
             </div>
+
+            {boxSizeEnabled ? (
+              <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="product-has-box-size">Tiene tamaño por caja</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Actívalo si el producto se vende o mide por rendimiento de caja.
+                    </p>
+                  </div>
+                  <Switch
+                    id="product-has-box-size"
+                    checked={hasBoxSize}
+                    disabled={saving}
+                    onCheckedChange={(v) => {
+                      setHasBoxSize(v);
+                      if (!v) setBoxSizeInput("");
+                    }}
+                  />
+                </div>
+                {hasBoxSize ? (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="product-box-size">Tamaño de caja</Label>
+                    <NumberField
+                      id="product-box-size"
+                      min="0"
+                      step="0.001"
+                      value={boxSizeInput}
+                      onChange={setBoxSizeInput}
+                      disabled={saving}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
               <div className="flex items-center justify-between gap-4">
@@ -1014,7 +1072,7 @@ export function StoreProductFormDialog({
 
             <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
               <div className="space-y-0.5">
-                <Label htmlFor="product-has-ingredients">¿Tiene ingredientes o materiales?</Label>
+                <Label htmlFor="product-has-ingredients">¿Tiene {catalogItemCopy.plural}?</Label>
                 <p className="text-xs text-muted-foreground">Opcional. Selecciona de la lista global.</p>
               </div>
               <Switch
@@ -1036,7 +1094,7 @@ export function StoreProductFormDialog({
               resolving ? (
                 <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Cargando ingredientes…
+                  Cargando {catalogItemCopy.plural}…
                 </div>
               ) : (
                 <>
@@ -1045,7 +1103,7 @@ export function StoreProductFormDialog({
                   {showRemovableSection ? (
                     <div className="space-y-2 rounded-2xl border border-border/70 bg-muted/20 p-3.5">
                       <div>
-                        <p className="text-sm font-medium">Ingredientes o materiales a sacar</p>
+                        <p className="text-sm font-medium">{catalogItemCopy.pluralTitle} a sacar</p>
                         <p className="text-xs text-muted-foreground">
                           Elige cuáles de los ya añadidos podrá quitar el cliente.
                         </p>
@@ -1065,7 +1123,7 @@ export function StoreProductFormDialog({
                     </div>
                   ) : ingredients.length === 1 ? (
                     <p className="px-0.5 text-xs text-muted-foreground">
-                      Añade al menos 2 ingredientes o materiales para configurar cuáles se pueden sacar.
+                      Añade al menos 2 {catalogItemCopy.plural} para configurar cuáles se pueden sacar.
                     </p>
                   ) : null}
 

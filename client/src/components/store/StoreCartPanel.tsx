@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Link } from "wouter";
-
 import { ImageIcon, Loader2, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/hooks/use-auth";
@@ -20,6 +18,13 @@ import {
 
 import { StoreCartCheckoutDialog } from "@/components/store/StoreCartCheckoutDialog";
 import { StoreCheckoutSuccessDialog } from "@/components/store/StoreCheckoutSuccessDialog";
+import { CheckoutAuthRequiredDialog } from "@/components/store/CheckoutAuthRequiredDialog";
+import {
+  clearGuestStoreCart,
+  readGuestStoreCart,
+  writeGuestStoreCart,
+  type GuestStoreCartLine,
+} from "@/lib/guest-store-cart";
 
 import { Button } from "@/components/ui/button";
 
@@ -53,19 +58,23 @@ function CartLineRow({
 
   line,
 
+  cartKind = "retail",
+
 }: {
 
   storeId: number;
 
   line: StoreCartLine;
 
+  cartKind?: import("@shared/store-schema").StoreProductCatalogKind;
+
 }) {
 
   const { toast } = useToast();
 
-  const updateMutation = useUpdateStoreCartItem(storeId);
+  const updateMutation = useUpdateStoreCartItem(storeId, cartKind);
 
-  const removeMutation = useRemoveFromStoreCart(storeId);
+  const removeMutation = useRemoveFromStoreCart(storeId, cartKind);
 
   const busy = removeMutation.isPending;
   const [displayQty, setDisplayQty] = useState(line.quantity);
@@ -111,9 +120,14 @@ function CartLineRow({
     }
   }
 
+  const boxSize =
+    line.kind === "product" && line.boxSize != null && line.boxSize > 0 ? line.boxSize : 0;
+  const qtyStep = boxSize > 0 ? boxSize : 1;
+
   function scheduleQuantity(next: number) {
     const max = line.kind === "promotion" ? 99 : 9999;
-    const qty = Math.max(1, Math.min(max, next));
+    const min = boxSize > 0 ? boxSize : 1;
+    const qty = Math.max(min, Math.min(max, next));
     setDisplayQty(qty);
     if (qtyTimer.current) window.clearTimeout(qtyTimer.current);
     qtyTimer.current = window.setTimeout(() => {
@@ -206,6 +220,12 @@ function CartLineRow({
 
         ) : null}
 
+        {boxSize > 0 ? (
+          <p className="text-xs text-muted-foreground leading-snug">
+            Este producto se vende por caja, y cada caja contiene {boxSize} metros.
+          </p>
+        ) : null}
+
         <div className="flex items-center justify-between gap-2">
 
           <div className="inline-flex items-center rounded-lg border border-border bg-background">
@@ -216,11 +236,11 @@ function CartLineRow({
 
               className="h-8 w-8 flex items-center justify-center hover:bg-muted disabled:opacity-50 rounded-l-lg"
 
-              disabled={busy || displayQty <= 1}
+              disabled={busy || displayQty <= (boxSize > 0 ? boxSize : 1)}
 
               aria-label="Reducir cantidad"
 
-              onClick={() => scheduleQuantity(displayQty - 1)}
+              onClick={() => scheduleQuantity(displayQty - qtyStep)}
 
             >
 
@@ -240,7 +260,7 @@ function CartLineRow({
 
               aria-label="Aumentar cantidad"
 
-              onClick={() => scheduleQuantity(displayQty + 1)}
+              onClick={() => scheduleQuantity(displayQty + qtyStep)}
 
             >
 
@@ -272,6 +292,8 @@ export function StoreCartPanel({
 
   enabled,
 
+  cartKind = "retail",
+
 }: {
 
   storeId: number;
@@ -280,21 +302,36 @@ export function StoreCartPanel({
 
   enabled: boolean;
 
+  cartKind?: import("@shared/store-schema").StoreProductCatalogKind;
+
 }) {
 
   const { isAuthenticated } = useAuth();
 
-  const { data: cart, isLoading } = useStoreCart(storeId, enabled && isAuthenticated);
+  const { data: cart, isLoading, refetch } = useStoreCart(
+    storeId,
+    enabled && isAuthenticated,
+    cartKind,
+  );
 
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [authGateOpen, setAuthGateOpen] = useState(false);
   const [checkoutSuccessOpen, setCheckoutSuccessOpen] = useState(false);
   const [checkoutSuccessOrderId, setCheckoutSuccessOrderId] = useState<number | null>(null);
+  const [guestItems, setGuestItems] = useState<GuestStoreCartLine[]>(() =>
+    readGuestStoreCart(storeId, cartKind).items,
+  );
 
+  useEffect(() => {
+    if (!enabled || isAuthenticated) return;
+    setGuestItems(readGuestStoreCart(storeId, cartKind).items);
+  }, [enabled, isAuthenticated, storeId, cartKind, checkoutOpen, authGateOpen]);
 
-
-  const hasItems = (cart?.items.length ?? 0) > 0;
-
-  const canCheckout = isAuthenticated && hasItems && !isLoading;
+  const displayItems = isAuthenticated ? (cart?.items ?? []) : guestItems;
+  const guestSubtotal = guestItems.reduce((sum, row) => sum + row.price * row.quantity, 0);
+  const displaySubtotal = isAuthenticated ? (cart?.subtotal ?? 0) : guestSubtotal;
+  const hasItems = displayItems.length > 0;
+  const canCheckout = hasItems && !isLoading;
 
 
 
@@ -340,56 +377,63 @@ export function StoreCartPanel({
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5">
 
-          {!isAuthenticated ? (
-
-            <div className="py-12 text-center space-y-3">
-
-              <ShoppingBag className="h-10 w-10 mx-auto text-muted-foreground" />
-
-              <p className="text-sm text-muted-foreground">
-
-                Inicia sesión para guardar tu carrito en esta tienda.
-
-              </p>
-
-              <Button asChild size="sm">
-
-                <Link href="/login">Iniciar sesión</Link>
-
-              </Button>
-
-            </div>
-
-          ) : isLoading ? (
-
+          {isAuthenticated && isLoading ? (
             <div className="py-16 flex justify-center">
-
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-
             </div>
-
           ) : !hasItems ? (
-
             <div className="py-16 text-center space-y-2">
-
               <ShoppingBag className="h-10 w-10 mx-auto text-muted-foreground" />
-
               <p className="text-sm text-muted-foreground">Tu carrito está vacío.</p>
-
+              {!isAuthenticated ? (
+                <p className="text-xs text-muted-foreground px-4">
+                  Puedes añadir productos sin cuenta. Al comprar te pediremos registrarte.
+                </p>
+              ) : null}
             </div>
-
-          ) : (
-
+          ) : isAuthenticated ? (
             <ul>
-
               {cart!.items.map((line) => (
-
-                <CartLineRow key={cartLineKey(line)} storeId={storeId} line={line} />
-
+                <CartLineRow
+                  key={cartLineKey(line)}
+                  storeId={storeId}
+                  line={line}
+                  cartKind={cartKind}
+                />
               ))}
-
             </ul>
-
+          ) : (
+            <ul className="divide-y divide-border/60">
+              {guestItems.map((line) => (
+                <li key={line.lineKey} className="flex items-start gap-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium line-clamp-2">{line.name}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {formatPrice(line.price)} × {line.quantity}
+                    </p>
+                    {line.boxSize != null && line.boxSize > 0 ? (
+                      <p className="text-xs text-muted-foreground mt-1 leading-snug">
+                        Este producto se vende por caja, y cada caja contiene {line.boxSize} metros.
+                      </p>
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="shrink-0"
+                    onClick={() => {
+                      const next = readGuestStoreCart(storeId);
+                      next.items = next.items.filter((row) => row.lineKey !== line.lineKey);
+                      writeGuestStoreCart(next, cartKind);
+                      setGuestItems(next.items);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
           )}
 
         </div>
@@ -402,7 +446,7 @@ export function StoreCartPanel({
 
             <span className="text-muted-foreground">Subtotal</span>
 
-            <span className="text-muted-foreground">{formatPrice(cart?.subtotal ?? 0)}</span>
+            <span className="text-muted-foreground">{formatPrice(displaySubtotal)}</span>
 
           </div>
 
@@ -410,7 +454,7 @@ export function StoreCartPanel({
 
             <span className="font-semibold">Total</span>
 
-            <span className="text-xl font-bold text-primary">{formatPrice(cart?.subtotal ?? 0)}</span>
+            <span className="text-xl font-bold text-primary">{formatPrice(displaySubtotal)}</span>
 
           </div>
 
@@ -422,11 +466,17 @@ export function StoreCartPanel({
 
             disabled={!canCheckout}
 
-            onClick={() => setCheckoutOpen(true)}
+            onClick={() => {
+              if (!isAuthenticated) {
+                setAuthGateOpen(true);
+                return;
+              }
+              setCheckoutOpen(true);
+            }}
 
           >
 
-            Comprar
+            {cartKind === "import" ? "Solicitar importación" : "Comprar"}
 
           </Button>
 
@@ -442,26 +492,30 @@ export function StoreCartPanel({
 
 
 
-      {cart && hasItems ? (
-
+      {isAuthenticated && cart && hasItems ? (
         <StoreCartCheckoutDialog
-
           storeId={storeId}
-
           cart={cart}
-
           open={checkoutOpen}
-
           onOpenChange={setCheckoutOpen}
-
           onCheckoutSuccess={(orderId) => {
             setCheckoutSuccessOrderId(orderId);
             setCheckoutSuccessOpen(true);
+            clearGuestStoreCart(storeId, cartKind);
+            setGuestItems([]);
           }}
-
         />
-
       ) : null}
+
+      <CheckoutAuthRequiredDialog
+        open={authGateOpen}
+        onOpenChange={setAuthGateOpen}
+        storeId={storeId}
+        cartKind={cartKind}
+        onAuthenticated={() => {
+          void refetch().then(() => setCheckoutOpen(true));
+        }}
+      />
 
       <StoreCheckoutSuccessDialog
         open={checkoutSuccessOpen}

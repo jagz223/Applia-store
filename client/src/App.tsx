@@ -18,8 +18,10 @@ import Register from "@/pages/Register";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
 import Notifications from "@/pages/Notifications";
-import AccountRecoverySetup from "@/pages/AccountRecoverySetup";
 import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
+import VerifyEmail from "@/pages/VerifyEmail";
+import RevokeRegistration from "@/pages/RevokeRegistration";
 import StorePage from "@/pages/StorePage";
 import StoreCreate from "@/pages/StoreCreate";
 import StoreAdmin from "@/pages/StoreAdmin";
@@ -36,8 +38,10 @@ function MainRouter() {
       <Route path="/acerca-de" component={AboutPage} />
       <Route path="/login" component={Login} />
       <Route path="/forgot-password" component={ForgotPassword} />
+      <Route path="/reset-password" component={ResetPassword} />
+      <Route path="/verify-email" component={VerifyEmail} />
+      <Route path="/revoke-registration" component={RevokeRegistration} />
       <Route path="/register" component={Register} />
-      <Route path="/account-recovery/setup" component={AccountRecoverySetup} />
       <Route path="/settings" component={Settings} />
       <Route path="/notifications" component={Notifications} />
       <Route path="/tienda/crear" component={StoreCreate} />
@@ -47,6 +51,7 @@ function MainRouter() {
       <Route path="/tienda/:slug/admin/productos/importar" component={StoreProductImport} />
       <Route path="/tienda/:slug/admin/:section?" component={StoreAdmin} />
       <Route path="/tienda" component={StoreEntry} />
+      <Route path="/tienda/:slug/para-importar" component={StorePage} />
       <Route path="/tienda/:slug" component={StorePage} />
       <Route component={NotFound} />
     </Switch>
@@ -56,7 +61,8 @@ function MainRouter() {
 function App() {
   const [location] = useLocation();
   const pathname = location.split("?")[0] ?? location;
-  const isStoreVitrinaPage = /^\/tienda\/[^/]+$/.test(pathname);
+  const isStoreVitrinaPage =
+    /^\/tienda\/[^/]+$/.test(pathname) || /^\/tienda\/[^/]+\/para-importar\/?$/.test(pathname);
 
   return (
     <QueryClientProvider client={queryClient}>

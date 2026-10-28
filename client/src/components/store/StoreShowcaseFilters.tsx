@@ -1,11 +1,25 @@
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import type {
   StoreShowcaseCategory,
   StoreShowcaseSubcategory,
 } from "@/hooks/use-store-showcase";
 import { cn } from "@/lib/utils";
+
+const FILTER_CHIP_SKELETON_WIDTHS = [
+  "w-14",
+  "w-24",
+  "w-28",
+  "w-20",
+  "w-24",
+  "w-16",
+  "w-[5.5rem]",
+  "w-28",
+  "w-20",
+  "w-24",
+] as const;
 
 export type ShowcaseCategoryFilter = "all" | "promotions" | number;
 
@@ -149,5 +163,32 @@ function CategoryChip({
     >
       {label}
     </button>
+  );
+}
+
+/** Skeleton con la misma forma que búsqueda + chips de categoría. */
+export function StoreShowcaseFiltersSkeleton({ className }: { className?: string }) {
+  return (
+    <Card
+      className={cn("rounded-2xl border-border shadow-sm", className)}
+      aria-busy="true"
+      aria-label="Cargando filtros"
+    >
+      <CardContent className="p-4 space-y-3">
+        <Skeleton className="h-11 w-full rounded-full" />
+        <div
+          className={cn(
+            "flex flex-nowrap gap-2 overflow-hidden pb-0.5",
+          )}
+        >
+          {FILTER_CHIP_SKELETON_WIDTHS.map((widthClass, i) => (
+            <Skeleton
+              key={i}
+              className={cn("h-9 shrink-0 rounded-full", widthClass)}
+            />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

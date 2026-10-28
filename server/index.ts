@@ -10,6 +10,7 @@
  */
 import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import helmet from "helmet";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -17,12 +18,38 @@ import { initializeSocket } from "./socket";
 import { initializeFirebase, isFirebaseConfigured } from "./firebase-admin";
 import { setAppliaStorage } from "./storage-applia";
 import { getFirestoreStorage } from "./storage-firestore";
+import {
+  createApiRateLimiter,
+  createAuthRateLimiter,
+  createCheckoutRateLimiter,
+} from "./security/request-rate-limit";
 
 const app = express();
 const httpServer = createServer(app);
 
-// Inicializar Socket.IO antes de registrar rutas para que getIO() esté disponible
-// cuando se llame desde cualquier handler (p. ej. notificación de recarga a admins)
+app.set("trust proxy", 1);
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+app.use("/api", createApiRateLimiter());
+app.use(
+  [
+    "/api/auth/login",
+    "/api/auth/register",
+    "/api/auth/social",
+    "/api/auth/forgot-password",
+    "/api/auth/reset-password",
+    "/api/auth/verify-email",
+    "/api/auth/revoke-registration",
+    "/api/auth/resend-verification",
+  ],
+  createAuthRateLimiter(),
+);
+app.use("/api/stores/:storeId/cart/checkout", createCheckoutRateLimiter());
+
 initializeSocket(httpServer);
 
 declare module "http" {

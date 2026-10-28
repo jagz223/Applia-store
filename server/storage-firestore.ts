@@ -12,7 +12,12 @@ import {
   initializeFirebase,
 } from "./firebase-admin";
 import { FieldValue, type DocumentReference, type DocumentSnapshot } from "firebase-admin/firestore";
-import { invalidateStoreProductsCache } from "./store-catalog-cache";
+import { invalidateStoreCatalogCache } from "./store-catalog-cache";
+import {
+  getCachedIngredientsMaterialsCount,
+  invalidateIngredientsMaterialsCountCache,
+  setCachedIngredientsMaterialsCount,
+} from "./ingredients-materials-count-cache";
 import { getAppliaStatsMonthKey } from "@shared/ecuador-calendar";
 import { bookingTransitionCountsForMonthlySubcategoryDemand } from "@shared/subcategory-monthly-demand";
 import type { 
@@ -67,9 +72,12 @@ import {
   deriveProductPricesFromSizes,
   resolveStoreProductPriceFields,
   resolveStoreProductWeightFields,
+  resolveStoreProductBoxSizeFields,
   normalizeStoreProductStockFields,
   resolveStoreProductShowOnShowcase,
   storeProductHasAvailableStock,
+  parseStoreProductCatalogKind,
+  type StoreProductCatalogKind,
   compareStoreCategoriesBySortOrder,
   assignContiguousStoreCategorySortOrders,
   moveStoreCategoryToSortOrder,
@@ -106,6 +114,12 @@ import type {
 } from "@shared/store-showcase-ads-schema";
 import { normalizeBannerCategoryVisibility } from "@shared/store-showcase-ads-schema";
 import { STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
+import {
+  normalizeStoreImageTransform,
+  resolveSingularStoreImageFields,
+  resolveStoreImageAssetsFromProductInput,
+  storeImageAssetsToDisplayUrls,
+} from "@shared/store-image-asset";
 import type {
   InsertStorePaymentMethod,
   StorePaymentMethod,
@@ -159,6 +173,8 @@ export interface WalletTransfer {
   createdAt: Date;
 }
 
+export type AuthProviderKind = "password" | "google" | "facebook";
+
 interface User {
   id: string;
   email: string;
@@ -175,6 +191,9 @@ interface User {
   language?: string;
   isActive?: boolean;
   isVerified?: boolean;
+  emailVerified?: boolean;
+  authProviders?: AuthProviderKind[];
+  firebaseUid?: string | null;
   /** Current wallet balance (default 0). */
   wallet?: number;
   /** Sum of all service_payment transfers for this user (denormalized for reads). */
@@ -376,9 +395,10 @@ class FirestoreStorageImpl implements IStorage {
     const emailNorm = (user.email ?? "").trim().toLowerCase();
     if (!emailNorm) throw new Error("El email es obligatorio");
     const phoneNorm = this.normalizePhone(user.phone ?? "");
-    if (!phoneNorm) throw new Error("El teléfono es obligatorio");
+    const authProviders = Array.isArray(user.authProviders) ? user.authProviders : ["password"];
+    const isPasswordAuth = authProviders.includes("password");
+    if (!phoneNorm && isPasswordAuth) throw new Error("El teléfono es obligatorio");
 
-    // Buscar si el usuario ya existe (incluyendo eliminados)
     const snapshot = await this.db.collection(FIRESTORE_COLLECTIONS.USERS)
       .where("email", "==", emailNorm)
       .limit(1)
@@ -388,16 +408,14 @@ class FirestoreStorageImpl implements IStorage {
       const doc = snapshot.docs[0];
       const existingData = doc.data();
       
-      // Si el usuario existe y NO está eliminado, error
       if (!existingData.deletedAt) {
         throw new Error("Este correo electrónico ya está registrado.");
       }
       
-      // Si está eliminado, lo reactivamos
       const now = new Date();
       const reactivatedUser = {
         ...existingData,
-        ...user, // Actualizar datos con lo nuevo (password, nombre, etc.)
+        ...user,
         email: emailNorm,
         deletedAt: null,
         isActive: true,
@@ -408,9 +426,11 @@ class FirestoreStorageImpl implements IStorage {
       return { id: doc.id, ...reactivatedUser } as User;
     }
 
-    const existingByPhone = await this.getUserByPhone(phoneNorm, true);
-    if (existingByPhone) {
-      throw new Error("Este teléfono ya está registrado.");
+    if (phoneNorm) {
+      const existingByPhone = await this.getUserByPhone(phoneNorm, true);
+      if (existingByPhone) {
+        throw new Error("Este teléfono ya está registrado.");
+      }
     }
 
     const docRef = this.db.collection(FIRESTORE_COLLECTIONS.USERS).doc();
@@ -420,12 +440,15 @@ class FirestoreStorageImpl implements IStorage {
     const newUser: User = {
       id: docRef.id,
       email: emailNorm,
-      password: user.password!,
+      password: user.password ?? "",
       name: user.name!,
       lastName: user.lastName!,
-      phone: phoneNorm,
+      phone: phoneNorm || undefined,
       role,
       avatar: user.avatar,
+      emailVerified: user.emailVerified === true,
+      authProviders,
+      firebaseUid: user.firebaseUid ?? null,
       wallet: user.wallet ?? 0,
       totalEarnings: user.totalEarnings ?? 0,
       pendingBalance: user.pendingBalance ?? 0,
@@ -439,7 +462,10 @@ class FirestoreStorageImpl implements IStorage {
       updatedAt: now,
     };
     
-    await docRef.set({ ...(newUser as any), phoneNormalized: phoneNorm });
+    await docRef.set({
+      ...(newUser as any),
+      ...(phoneNorm ? { phoneNormalized: phoneNorm } : {}),
+    });
     return newUser;
   }
 
@@ -4429,6 +4455,8 @@ class FirestoreStorageImpl implements IStorage {
       description: null,
       rubro: null,
       coverImageUrl: null,
+      coverImageOriginalUrl: null,
+      coverImageTransform: null,
       location: null,
       branches: normalizeStoreBranches([]),
       fulfillmentOptions: [],
@@ -4460,6 +4488,15 @@ class FirestoreStorageImpl implements IStorage {
     if (input.rubro !== undefined) patch.rubro = input.rubro;
     if (input.coverImageUrl !== undefined) {
       patch.coverImageUrl = input.coverImageUrl;
+    }
+    if (input.coverImageOriginalUrl !== undefined) {
+      patch.coverImageOriginalUrl = input.coverImageOriginalUrl;
+    }
+    if (input.coverImageTransform !== undefined) {
+      patch.coverImageTransform =
+        input.coverImageTransform == null
+          ? null
+          : normalizeStoreImageTransform(input.coverImageTransform);
     }
     if (input.fulfillmentOptions !== undefined) {
       patch.fulfillmentOptions = normalizeStoreFulfillmentOptions(input.fulfillmentOptions);
@@ -4569,12 +4606,20 @@ class FirestoreStorageImpl implements IStorage {
     q?: string;
     page: number;
     limit?: number;
-  }): Promise<{ items: IngredientMaterial[]; total: number; page: number; limit: number }> {
+    after?: string | null;
+  }): Promise<{
+    items: IngredientMaterial[];
+    total: number;
+    page: number;
+    limit: number;
+    nextAfter: string | null;
+  }> {
     const limit = options.limit ?? INGREDIENTS_MATERIALS_PAGE_SIZE;
     const page = Math.max(1, options.page);
     const q = (options.q ?? "").trim().toLowerCase();
+    const after = options.after?.trim() || null;
     if (!this.db) {
-      return { items: [], total: 0, page, limit };
+      return { items: [], total: 0, page, limit, nextAfter: null };
     }
     const col = this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS);
 
@@ -4583,7 +4628,7 @@ class FirestoreStorageImpl implements IStorage {
         .where("normalizedName", ">=", q)
         .where("normalizedName", "<=", `${q}\uf8ff`)
         .orderBy("normalizedName")
-        .limit(500)
+        .limit(100)
         .get();
       const all = prefixSnap.docs.map((doc) => this.mapIngredientMaterialDoc(doc.id, doc.data()));
       const filtered = all.filter(
@@ -4591,18 +4636,44 @@ class FirestoreStorageImpl implements IStorage {
       );
       const total = filtered.length;
       const start = (page - 1) * limit;
-      return { items: filtered.slice(start, start + limit), total, page, limit };
+      const items = filtered.slice(start, start + limit);
+      const last = items[items.length - 1];
+      return {
+        items,
+        total,
+        page,
+        limit,
+        nextAfter: last?.normalizedName ?? null,
+      };
     }
 
-    const countSnap = await col.count().get();
-    const total = countSnap.data().count;
-    const offset = (page - 1) * limit;
-    const pageSnap = await col.orderBy("normalizedName").offset(offset).limit(limit).get();
+    let total = getCachedIngredientsMaterialsCount();
+    if (total == null) {
+      const countSnap = await col.count().get();
+      total = countSnap.data().count;
+      setCachedIngredientsMaterialsCount(total);
+    }
+
+    let pageSnap;
+    if (after) {
+      pageSnap = await col.orderBy("normalizedName").startAfter(after).limit(limit).get();
+    } else if (page > 1) {
+      pageSnap = await col
+        .orderBy("normalizedName")
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .get();
+    } else {
+      pageSnap = await col.orderBy("normalizedName").limit(limit).get();
+    }
+    const items = pageSnap.docs.map((doc) => this.mapIngredientMaterialDoc(doc.id, doc.data()));
+    const last = items[items.length - 1];
     return {
-      items: pageSnap.docs.map((doc) => this.mapIngredientMaterialDoc(doc.id, doc.data())),
+      items,
       total,
       page,
       limit,
+      nextAfter: last?.normalizedName ?? null,
     };
   }
 
@@ -4629,6 +4700,7 @@ class FirestoreStorageImpl implements IStorage {
     const now = new Date();
     const payload: IngredientMaterial = { id, name, normalizedName, createdAt: now };
     await this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS).doc(String(id)).set(payload);
+    invalidateIngredientsMaterialsCountCache();
     return payload;
   }
 
@@ -4656,6 +4728,7 @@ class FirestoreStorageImpl implements IStorage {
     if (dup && dup.id !== id) throw new Error("INGREDIENT_MATERIAL_ALREADY_EXISTS");
     const payload: IngredientMaterial = { ...existing, name, normalizedName };
     await this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS).doc(String(id)).set(payload);
+    invalidateIngredientsMaterialsCountCache();
     return payload;
   }
 
@@ -4664,6 +4737,7 @@ class FirestoreStorageImpl implements IStorage {
     const existing = await this.getIngredientMaterial(id);
     if (!existing) throw new Error("INGREDIENT_MATERIAL_NOT_FOUND");
     await this.db.collection(FIRESTORE_COLLECTIONS.INGREDIENTS_MATERIALS).doc(String(id)).delete();
+    invalidateIngredientsMaterialsCountCache();
   }
 
   async extendStoreVisibilitySubscription(args: {
@@ -4838,6 +4912,10 @@ class FirestoreStorageImpl implements IStorage {
       weight: input.weight,
       sizes,
     });
+    const boxSizeFields = resolveStoreProductBoxSizeFields({
+      hasBoxSize: input.hasBoxSize,
+      boxSize: input.boxSize,
+    });
     const stockFields = normalizeStoreProductStockFields({
       hasStock: input.hasStock,
       stock: input.stock,
@@ -4859,17 +4937,30 @@ class FirestoreStorageImpl implements IStorage {
       categoryIds: input.categoryIds ?? [],
       subcategoryIds: input.subcategoryIds ?? [],
       ...ingredientOptions,
-      imageUrls: input.imageUrls ?? [],
+      ...(() => {
+        const imageAssets = resolveStoreImageAssetsFromProductInput({
+          imageAssets: input.imageAssets,
+          imageUrls: input.imageUrls,
+          maxImages: STORE_PRODUCT_MAX_IMAGES,
+        });
+        return {
+          imageAssets,
+          imageUrls: storeImageAssetsToDisplayUrls(imageAssets),
+        };
+      })(),
       showOnShowcase,
+      isToImport: input.isToImport === true,
       hasStock: stockFields.hasStock,
       stock: stockFields.stock,
       hasWeight: weightFields.hasWeight,
       weight: weightFields.weight,
+      hasBoxSize: boxSizeFields.hasBoxSize,
+      boxSize: boxSizeFields.boxSize,
       createdAt: now,
       updatedAt: now,
     };
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS).doc(String(id)).set(payload);
-    invalidateStoreProductsCache(storeId);
+    invalidateStoreCatalogCache(storeId);
     return payload;
   }
 
@@ -4940,7 +5031,20 @@ class FirestoreStorageImpl implements IStorage {
       patch.removableIngredientMaterialIds = ingredientOptions.removableIngredientMaterialIds;
       patch.ingredientAdditionals = ingredientOptions.ingredientAdditionals;
     }
-    if (input.imageUrls !== undefined) patch.imageUrls = input.imageUrls;
+    if (input.imageAssets !== undefined || input.imageUrls !== undefined) {
+      const imageAssets = resolveStoreImageAssetsFromProductInput({
+        imageAssets: input.imageAssets !== undefined ? input.imageAssets : existing.imageAssets,
+        imageUrls:
+          input.imageAssets !== undefined
+            ? undefined
+            : input.imageUrls !== undefined
+              ? input.imageUrls
+              : existing.imageUrls,
+        maxImages: STORE_PRODUCT_MAX_IMAGES,
+      });
+      patch.imageAssets = imageAssets;
+      patch.imageUrls = storeImageAssetsToDisplayUrls(imageAssets);
+    }
     const stockFields = normalizeStoreProductStockFields({
       hasStock: input.hasStock !== undefined ? input.hasStock : existing.hasStock,
       stock: input.stock !== undefined ? input.stock : existing.stock,
@@ -4957,6 +5061,9 @@ class FirestoreStorageImpl implements IStorage {
       hasStock: stockFields.hasStock,
       stock: stockFields.stock,
     });
+    if (input.isToImport !== undefined) {
+      patch.isToImport = input.isToImport === true;
+    }
     if (
       input.sizes !== undefined ||
       input.hasWeight !== undefined ||
@@ -4975,8 +5082,16 @@ class FirestoreStorageImpl implements IStorage {
       patch.hasWeight = weightFields.hasWeight;
       patch.weight = weightFields.weight;
     }
+    if (input.hasBoxSize !== undefined || input.boxSize !== undefined) {
+      const boxSizeFields = resolveStoreProductBoxSizeFields({
+        hasBoxSize: input.hasBoxSize ?? existing.hasBoxSize,
+        boxSize: input.boxSize !== undefined ? input.boxSize : existing.boxSize,
+      });
+      patch.hasBoxSize = boxSizeFields.hasBoxSize;
+      patch.boxSize = boxSizeFields.boxSize;
+    }
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS).doc(String(productId)).update(patch);
-    invalidateStoreProductsCache(storeId);
+    invalidateStoreCatalogCache(storeId);
     return { ...existing, ...patch, updatedAt: now } as StoreProduct;
   }
 
@@ -4985,7 +5100,7 @@ class FirestoreStorageImpl implements IStorage {
     const existing = await this.getStoreProduct(storeId, productId);
     if (!existing) throw new Error("STORE_PRODUCT_NOT_FOUND");
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PRODUCTS).doc(String(productId)).delete();
-    invalidateStoreProductsCache(storeId);
+    invalidateStoreCatalogCache(storeId);
   }
 
   async listStoreCategories(
@@ -5053,8 +5168,11 @@ class FirestoreStorageImpl implements IStorage {
     };
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(id)).set(payload);
     if (input.sortOrder != null && input.sortOrder > 0) {
-      return this.setStoreCategorySortOrder(storeId, id, input.sortOrder);
+      const ordered = await this.setStoreCategorySortOrder(storeId, id, input.sortOrder);
+      invalidateStoreCatalogCache(storeId);
+      return ordered;
     }
+    invalidateStoreCatalogCache(storeId);
     return payload;
   }
 
@@ -5084,8 +5202,11 @@ class FirestoreStorageImpl implements IStorage {
     }
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CATEGORIES).doc(String(categoryId)).update(patch);
     if (input.sortOrder != null && input.sortOrder > 0) {
-      return this.setStoreCategorySortOrder(storeId, categoryId, input.sortOrder);
+      const ordered = await this.setStoreCategorySortOrder(storeId, categoryId, input.sortOrder);
+      invalidateStoreCatalogCache(storeId);
+      return ordered;
     }
+    invalidateStoreCatalogCache(storeId);
     return { ...existing, ...patch, updatedAt: now } as StoreCategory;
   }
 
@@ -5105,6 +5226,7 @@ class FirestoreStorageImpl implements IStorage {
       batch.update(ref, { sortOrder: row.sortOrder, updatedAt: now });
     }
     await batch.commit();
+    invalidateStoreCatalogCache(storeId);
     return (await this.getStoreCategory(storeId, categoryId))!;
   }
 
@@ -5124,6 +5246,7 @@ class FirestoreStorageImpl implements IStorage {
       }
       await batch.commit();
     }
+    invalidateStoreCatalogCache(storeId);
   }
 
   async listStoreSubcategories(
@@ -5185,6 +5308,7 @@ class FirestoreStorageImpl implements IStorage {
       updatedAt: now,
     };
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_SUBCATEGORIES).doc(String(id)).set(payload);
+    invalidateStoreCatalogCache(storeId);
     return payload;
   }
 
@@ -5219,6 +5343,7 @@ class FirestoreStorageImpl implements IStorage {
       .collection(FIRESTORE_COLLECTIONS.STORE_SUBCATEGORIES)
       .doc(String(subcategoryId))
       .update(patch);
+    invalidateStoreCatalogCache(storeId);
     return { ...existing, ...patch, updatedAt: now } as StoreSubcategory;
   }
 
@@ -5230,6 +5355,7 @@ class FirestoreStorageImpl implements IStorage {
       .collection(FIRESTORE_COLLECTIONS.STORE_SUBCATEGORIES)
       .doc(String(subcategoryId))
       .delete();
+    invalidateStoreCatalogCache(storeId);
   }
 
   async listStorePromotions(storeId: number): Promise<StorePromotion[]> {
@@ -5267,12 +5393,19 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("store_promotions");
     const now = new Date();
+    const imageFields = resolveSingularStoreImageFields({
+      displayUrl: input.imageUrl,
+      originalUrl: input.imageOriginalUrl,
+      transform: input.imageTransform,
+    });
     const payload: StorePromotion = {
       id,
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ? input.description.trim() : null,
-      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      imageUrl: imageFields.imageUrl,
+      imageOriginalUrl: imageFields.imageOriginalUrl,
+      imageTransform: imageFields.imageTransform,
       price: input.price,
       items: this.normalizePromotionItems(input.items),
       status: input.status ?? "active",
@@ -5280,6 +5413,7 @@ class FirestoreStorageImpl implements IStorage {
       updatedAt: now,
     };
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PROMOTIONS).doc(String(id)).set(payload);
+    invalidateStoreCatalogCache(storeId);
     return payload;
   }
 
@@ -5297,13 +5431,27 @@ class FirestoreStorageImpl implements IStorage {
     if (input.description !== undefined) {
       patch.description = input.description?.trim() ? input.description.trim() : null;
     }
-    if (input.imageUrl !== undefined) {
-      patch.imageUrl = input.imageUrl?.trim() ? input.imageUrl.trim() : null;
+    if (
+      input.imageUrl !== undefined ||
+      input.imageOriginalUrl !== undefined ||
+      input.imageTransform !== undefined
+    ) {
+      const imageFields = resolveSingularStoreImageFields({
+        displayUrl: input.imageUrl !== undefined ? input.imageUrl : existing.imageUrl,
+        originalUrl:
+          input.imageOriginalUrl !== undefined ? input.imageOriginalUrl : existing.imageOriginalUrl,
+        transform:
+          input.imageTransform !== undefined ? input.imageTransform : existing.imageTransform,
+      });
+      patch.imageUrl = imageFields.imageUrl;
+      patch.imageOriginalUrl = imageFields.imageOriginalUrl;
+      patch.imageTransform = imageFields.imageTransform;
     }
     if (input.price !== undefined) patch.price = input.price;
     if (input.items !== undefined) patch.items = this.normalizePromotionItems(input.items);
     if (input.status !== undefined) patch.status = input.status;
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PROMOTIONS).doc(String(promotionId)).update(patch);
+    invalidateStoreCatalogCache(storeId);
     return { ...existing, ...patch, updatedAt: now } as StorePromotion;
   }
 
@@ -5312,6 +5460,7 @@ class FirestoreStorageImpl implements IStorage {
     const existing = await this.getStorePromotion(storeId, promotionId);
     if (!existing) throw new Error("STORE_PROMOTION_NOT_FOUND");
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_PROMOTIONS).doc(String(promotionId)).delete();
+    invalidateStoreCatalogCache(storeId);
   }
 
   // ==================== Banners / Popups (vitrina) ====================
@@ -5353,11 +5502,18 @@ class FirestoreStorageImpl implements IStorage {
                 (data as any)?.categoryIds,
               )
             : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
+        const imageFields = resolveSingularStoreImageFields({
+          displayUrl: (data as any)?.imageUrl,
+          originalUrl: (data as any)?.imageOriginalUrl,
+          transform: (data as any)?.imageTransform,
+        });
         return {
           id,
           storeId: Number((data as any)?.storeId),
           kind,
-          imageUrl: (data as any)?.imageUrl ?? null,
+          imageUrl: imageFields.imageUrl,
+          imageOriginalUrl: imageFields.imageOriginalUrl,
+          imageTransform: imageFields.imageTransform,
           linkUrl: (data as any)?.linkUrl ?? null,
           sortOrder: Number.isFinite(sortOrder) ? Math.trunc(sortOrder) : 0,
           categoryVisibilityMode: visibility.categoryVisibilityMode,
@@ -5382,11 +5538,18 @@ class FirestoreStorageImpl implements IStorage {
       input.kind === "banner"
         ? normalizeBannerCategoryVisibility(input.categoryVisibilityMode, input.categoryIds)
         : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
+    const imageFields = resolveSingularStoreImageFields({
+      displayUrl: input.imageUrl,
+      originalUrl: input.imageOriginalUrl,
+      transform: input.imageTransform,
+    });
     const payload: StoreShowcaseAdItem = {
       id,
       storeId,
       kind: input.kind,
-      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      imageUrl: imageFields.imageUrl,
+      imageOriginalUrl: imageFields.imageOriginalUrl,
+      imageTransform: imageFields.imageTransform,
       linkUrl: input.linkUrl?.trim() ? input.linkUrl.trim() : null,
       sortOrder: Math.trunc(sortOrder),
       categoryVisibilityMode: visibility.categoryVisibilityMode,
@@ -5397,6 +5560,7 @@ class FirestoreStorageImpl implements IStorage {
     const col =
       input.kind === "banner" ? FIRESTORE_COLLECTIONS.STORE_SHOWCASE_BANNERS : FIRESTORE_COLLECTIONS.STORE_SHOWCASE_POPUPS;
     await this.db.collection(col).doc(String(id)).set(payload);
+    invalidateStoreCatalogCache(storeId);
     return payload;
   }
 
@@ -5415,21 +5579,36 @@ class FirestoreStorageImpl implements IStorage {
     const data = snap.data() as Record<string, unknown>;
     if (Number(data.storeId) !== storeId) throw new Error("STORE_SHOWCASE_AD_NOT_FOUND");
 
-    const currentImage = (data.imageUrl as string | null | undefined) ?? null;
+    const currentImageFields = resolveSingularStoreImageFields({
+      displayUrl: data.imageUrl as string | null | undefined,
+      originalUrl: data.imageOriginalUrl as string | null | undefined,
+      transform: data.imageTransform,
+    });
     const currentLink = (data.linkUrl as string | null | undefined) ?? null;
-    const nextImage =
-      input.imageUrl !== undefined
-        ? input.imageUrl?.trim()
-          ? input.imageUrl.trim()
-          : null
-        : currentImage;
+    const nextImageFields =
+      input.imageUrl !== undefined ||
+      input.imageOriginalUrl !== undefined ||
+      input.imageTransform !== undefined
+        ? resolveSingularStoreImageFields({
+            displayUrl:
+              input.imageUrl !== undefined ? input.imageUrl : currentImageFields.imageUrl,
+            originalUrl:
+              input.imageOriginalUrl !== undefined
+                ? input.imageOriginalUrl
+                : currentImageFields.imageOriginalUrl,
+            transform:
+              input.imageTransform !== undefined
+                ? input.imageTransform
+                : currentImageFields.imageTransform,
+          })
+        : currentImageFields;
     const nextLink =
       input.linkUrl !== undefined
         ? input.linkUrl?.trim()
           ? input.linkUrl.trim()
           : null
         : currentLink;
-    if (!nextImage && !nextLink) throw new Error("STORE_SHOWCASE_AD_EMPTY");
+    if (!nextImageFields.imageUrl && !nextLink) throw new Error("STORE_SHOWCASE_AD_EMPTY");
 
     const sortOrderRaw = data.sortOrder;
     const currentSort = Number.isFinite(Number(sortOrderRaw)) ? Math.trunc(Number(sortOrderRaw)) : 0;
@@ -5448,7 +5627,9 @@ class FirestoreStorageImpl implements IStorage {
         : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
     const now = new Date();
     const patch = {
-      imageUrl: nextImage,
+      imageUrl: nextImageFields.imageUrl,
+      imageOriginalUrl: nextImageFields.imageOriginalUrl,
+      imageTransform: nextImageFields.imageTransform,
       linkUrl: nextLink,
       sortOrder: input.sortOrder != null ? Math.trunc(input.sortOrder) : currentSort,
       categoryVisibilityMode: visibility.categoryVisibilityMode,
@@ -5456,11 +5637,14 @@ class FirestoreStorageImpl implements IStorage {
       updatedAt: now,
     };
     await ref.update(patch);
+    invalidateStoreCatalogCache(storeId);
     return {
       id: itemId,
       storeId,
       kind,
-      imageUrl: nextImage,
+      imageUrl: nextImageFields.imageUrl,
+      imageOriginalUrl: nextImageFields.imageOriginalUrl,
+      imageTransform: nextImageFields.imageTransform,
       linkUrl: nextLink,
       sortOrder: patch.sortOrder,
       categoryVisibilityMode: visibility.categoryVisibilityMode,
@@ -5479,6 +5663,7 @@ class FirestoreStorageImpl implements IStorage {
     const col =
       kind === "banner" ? FIRESTORE_COLLECTIONS.STORE_SHOWCASE_BANNERS : FIRESTORE_COLLECTIONS.STORE_SHOWCASE_POPUPS;
     await this.db.collection(col).doc(String(itemId)).delete();
+    invalidateStoreCatalogCache(storeId);
   }
 
   async listStorePaymentMethods(storeId: number): Promise<StorePaymentMethod[]> {
@@ -5515,13 +5700,20 @@ class FirestoreStorageImpl implements IStorage {
     if (!this.db) throw new Error("Firestore no configurado");
     const id = await this.getNextId("store_payment_methods");
     const now = new Date();
+    const imageFields = resolveSingularStoreImageFields({
+      displayUrl: input.imageUrl,
+      originalUrl: input.imageOriginalUrl,
+      transform: input.imageTransform,
+    });
     const payload: StorePaymentMethod = {
       id,
       storeId,
       name: input.name.trim(),
       accountNumber: (input.accountNumber ?? "").trim(),
       extraFields: normalizeStorePaymentMethodExtraFields(input.extraFields),
-      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      imageUrl: imageFields.imageUrl,
+      imageOriginalUrl: imageFields.imageOriginalUrl,
+      imageTransform: imageFields.imageTransform,
       systemKind: input.systemKind?.trim() ? input.systemKind.trim() : null,
       createdAt: now,
       updatedAt: now,
@@ -5545,8 +5737,21 @@ class FirestoreStorageImpl implements IStorage {
     if (input.extraFields !== undefined) {
       patch.extraFields = normalizeStorePaymentMethodExtraFields(input.extraFields);
     }
-    if (input.imageUrl !== undefined) {
-      patch.imageUrl = input.imageUrl?.trim() ? input.imageUrl.trim() : null;
+    if (
+      input.imageUrl !== undefined ||
+      input.imageOriginalUrl !== undefined ||
+      input.imageTransform !== undefined
+    ) {
+      const imageFields = resolveSingularStoreImageFields({
+        displayUrl: input.imageUrl !== undefined ? input.imageUrl : existing.imageUrl,
+        originalUrl:
+          input.imageOriginalUrl !== undefined ? input.imageOriginalUrl : existing.imageOriginalUrl,
+        transform:
+          input.imageTransform !== undefined ? input.imageTransform : existing.imageTransform,
+      });
+      patch.imageUrl = imageFields.imageUrl;
+      patch.imageOriginalUrl = imageFields.imageOriginalUrl;
+      patch.imageTransform = imageFields.imageTransform;
     }
     if (input.systemKind !== undefined) {
       patch.systemKind = input.systemKind?.trim() ? input.systemKind.trim() : null;
@@ -5866,21 +6071,40 @@ class FirestoreStorageImpl implements IStorage {
     };
   }
 
-  private storeCartDocId(userId: string, storeId: number): string {
+  private storeCartDocId(
+    userId: string,
+    storeId: number,
+    cartKind: StoreProductCatalogKind = "retail",
+  ): string {
+    const kind = parseStoreProductCatalogKind(cartKind);
+    if (kind === "import") return `${userId}_${storeId}_import`;
+    return `${userId}_${storeId}_retail`;
+  }
+
+  private storeCartLegacyDocId(userId: string, storeId: number): string {
     return `${userId}_${storeId}`;
   }
 
-  async getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined> {
+  async getStoreCart(
+    userId: string,
+    storeId: number,
+    cartKind: StoreProductCatalogKind = "retail",
+  ): Promise<StoreCart | undefined> {
     if (!this.db) return undefined;
-    const doc = await this.db
-      .collection(FIRESTORE_COLLECTIONS.STORE_CARTS)
-      .doc(this.storeCartDocId(userId, storeId))
-      .get();
+    const kind = parseStoreProductCatalogKind(cartKind);
+    const primaryId = this.storeCartDocId(userId, storeId, kind);
+    let doc = await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CARTS).doc(primaryId).get();
+    if (!doc.exists && kind === "retail") {
+      doc = await this.db
+        .collection(FIRESTORE_COLLECTIONS.STORE_CARTS)
+        .doc(this.storeCartLegacyDocId(userId, storeId))
+        .get();
+    }
     if (!doc.exists) return undefined;
     const cart = this.mapStoreCartDoc(doc.data());
     if (!cart || cart.storeId !== storeId || cart.userId !== userId) return undefined;
     if (new Date(cart.expiresAt).getTime() <= Date.now()) {
-      await this.deleteStoreCart(userId, storeId);
+      await this.deleteStoreCart(userId, storeId, kind);
       return undefined;
     }
     return cart;
@@ -5891,12 +6115,14 @@ class FirestoreStorageImpl implements IStorage {
     storeId: number,
     items: StoreCartItem[],
     fulfillmentMode?: StoreFulfillmentMode | null,
+    cartKind: StoreProductCatalogKind = "retail",
   ): Promise<StoreCart> {
     if (!this.db) throw new Error("Firestore no configurado");
+    const kind = parseStoreProductCatalogKind(cartKind);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + STORE_CART_TTL_MS);
-    const docId = this.storeCartDocId(userId, storeId);
-    const existing = await this.getStoreCart(userId, storeId);
+    const docId = this.storeCartDocId(userId, storeId, kind);
+    const existing = await this.getStoreCart(userId, storeId, kind);
     const payload: StoreCart = {
       userId,
       storeId,
@@ -5908,12 +6134,34 @@ class FirestoreStorageImpl implements IStorage {
       updatedAt: now,
     };
     await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CARTS).doc(docId).set(payload);
+    if (kind === "retail") {
+      await this.db
+        .collection(FIRESTORE_COLLECTIONS.STORE_CARTS)
+        .doc(this.storeCartLegacyDocId(userId, storeId))
+        .delete()
+        .catch(() => undefined);
+    }
     return payload;
   }
 
-  async deleteStoreCart(userId: string, storeId: number): Promise<void> {
+  async deleteStoreCart(
+    userId: string,
+    storeId: number,
+    cartKind: StoreProductCatalogKind = "retail",
+  ): Promise<void> {
     if (!this.db) throw new Error("Firestore no configurado");
-    await this.db.collection(FIRESTORE_COLLECTIONS.STORE_CARTS).doc(this.storeCartDocId(userId, storeId)).delete();
+    const kind = parseStoreProductCatalogKind(cartKind);
+    await this.db
+      .collection(FIRESTORE_COLLECTIONS.STORE_CARTS)
+      .doc(this.storeCartDocId(userId, storeId, kind))
+      .delete();
+    if (kind === "retail") {
+      await this.db
+        .collection(FIRESTORE_COLLECTIONS.STORE_CARTS)
+        .doc(this.storeCartLegacyDocId(userId, storeId))
+        .delete()
+        .catch(() => undefined);
+    }
   }
 
   private normalizeStoreCartItems(items: StoreCartItem[]): StoreCartItem[] {
@@ -6050,10 +6298,18 @@ class FirestoreStorageImpl implements IStorage {
         data.description != null && String(data.description).trim()
           ? String(data.description).trim()
           : null,
-      imageUrl:
-        data.imageUrl != null && String(data.imageUrl).trim()
-          ? String(data.imageUrl).trim()
-          : null,
+      ...(() => {
+        const imageFields = resolveSingularStoreImageFields({
+          displayUrl: data.imageUrl as string | null | undefined,
+          originalUrl: data.imageOriginalUrl as string | null | undefined,
+          transform: data.imageTransform,
+        });
+        return {
+          imageUrl: imageFields.imageUrl,
+          imageOriginalUrl: imageFields.imageOriginalUrl,
+          imageTransform: imageFields.imageTransform,
+        };
+      })(),
       price: Number(data.price),
       items,
       status,
@@ -6077,10 +6333,18 @@ class FirestoreStorageImpl implements IStorage {
       name: String(data.name ?? "").trim(),
       accountNumber: String(data.accountNumber ?? "").trim(),
       extraFields: normalizeStorePaymentMethodExtraFields(data.extraFields),
-      imageUrl:
-        data.imageUrl != null && String(data.imageUrl).trim()
-          ? String(data.imageUrl).trim()
-          : null,
+      ...(() => {
+        const imageFields = resolveSingularStoreImageFields({
+          displayUrl: data.imageUrl as string | null | undefined,
+          originalUrl: data.imageOriginalUrl as string | null | undefined,
+          transform: data.imageTransform,
+        });
+        return {
+          imageUrl: imageFields.imageUrl,
+          imageOriginalUrl: imageFields.imageOriginalUrl,
+          imageTransform: imageFields.imageTransform,
+        };
+      })(),
       systemKind:
         data.systemKind != null && String(data.systemKind).trim()
           ? String(data.systemKind).trim()
@@ -6184,18 +6448,31 @@ class FirestoreStorageImpl implements IStorage {
         ? data.subcategoryIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
         : [],
       ...ingredientOptions,
-      imageUrls: Array.isArray(data.imageUrls)
-        ? data.imageUrls.map((x) => String(x).trim()).filter((u) => u.length > 0).slice(0, STORE_PRODUCT_MAX_IMAGES)
-        : [],
+      ...(() => {
+        const imageAssets = resolveStoreImageAssetsFromProductInput({
+          imageAssets: data.imageAssets,
+          imageUrls: data.imageUrls,
+          maxImages: STORE_PRODUCT_MAX_IMAGES,
+        });
+        return {
+          imageAssets,
+          imageUrls: storeImageAssetsToDisplayUrls(imageAssets),
+        };
+      })(),
       showOnShowcase: resolveStoreProductShowOnShowcase({
         showOnShowcase: data.showOnShowcase !== false,
         hasStock: stockFields.hasStock,
         stock: stockFields.stock,
       }),
+      isToImport: data.isToImport === true,
       hasStock: stockFields.hasStock,
       stock: stockFields.stock,
       hasWeight: weightFields.hasWeight,
       weight: weightFields.weight,
+      ...resolveStoreProductBoxSizeFields({
+        hasBoxSize: data.hasBoxSize === true,
+        boxSize: data.boxSize,
+      }),
       createdAt: this.readFirestoreDate(data.createdAt) ?? new Date(),
       updatedAt: this.readFirestoreDate(data.updatedAt) ?? new Date(),
     };
@@ -6224,6 +6501,14 @@ class FirestoreStorageImpl implements IStorage {
       coverImageUrl: data.coverImageUrl != null && String(data.coverImageUrl).trim()
         ? String(data.coverImageUrl).trim()
         : null,
+      coverImageOriginalUrl:
+        data.coverImageOriginalUrl != null && String(data.coverImageOriginalUrl).trim()
+          ? String(data.coverImageOriginalUrl).trim()
+          : null,
+      coverImageTransform:
+        data.coverImageTransform != null
+          ? normalizeStoreImageTransform(data.coverImageTransform)
+          : null,
       location: normalizeStoreLocation(data.location),
       branches: normalizeStoreBranches(data.branches, normalizeStoreLocation(data.location)),
       fulfillmentOptions: normalizeStoreFulfillmentOptions(data.fulfillmentOptions),

@@ -5,10 +5,12 @@ import {
   STORE_ADMIN_SECTIONS,
   STORE_ADMIN_SECTIONS_HIDDEN,
   STORE_ADMIN_EMPLOYEE_SECTIONS,
+  isStoreAdminSectionHidden,
   normalizeStoreAdminSection,
   storeAdminSectionPath,
   type StoreAdminSectionId,
 } from "@shared/store-admin-sections";
+import { isStoreTryOnEnabled } from "@/lib/store-runtime-flags";
 import { useAuth } from "@/hooks/use-auth";
 import { useStoreBySlug } from "@/hooks/use-my-store";
 import { usePrimaryStore } from "@/hooks/use-primary-store";
@@ -51,6 +53,9 @@ function sectionPanel(
     whatsappPhone?: string | null;
     casheaEnabled?: boolean;
     showcaseOnlyWithImage?: boolean;
+    coverImageUrl?: string | null;
+    coverImageOriginalUrl?: string | null;
+    coverImageTransform?: import("@shared/store-image-asset").StoreImageTransform | null;
   },
   access: {
     canFilterOrdersByBranch: boolean;
@@ -101,6 +106,9 @@ function sectionPanel(
     );
   }
   if (section === "simulacion_ropa") {
+    if (!isStoreTryOnEnabled()) {
+      return <StoreAdminComingSoon title="Simulación de ropa" />;
+    }
     return <StoreAdminTryOnPanel storeId={store.id} />;
   }
   if (section === "metodos_pago") {
@@ -134,6 +142,9 @@ function sectionPanel(
         initialLocation={store.location ?? null}
         initialBranches={store.branches}
         initialWhatsappPhone={store.whatsappPhone}
+        initialCoverImageUrl={store.coverImageUrl}
+        initialCoverImageOriginalUrl={store.coverImageOriginalUrl}
+        initialCoverImageTransform={store.coverImageTransform}
       />
     );
   }
@@ -195,7 +206,11 @@ export default function StoreAdmin() {
       });
       return;
     }
-    if (STORE_ADMIN_SECTIONS_HIDDEN.some((id) => sectionParam === storeAdminSectionPath(id) || sectionParam === id)) {
+    const tryOnHidden: StoreAdminSectionId[] = isStoreTryOnEnabled() ? [] : ["simulacion_ropa"];
+    const matchedHidden = [...STORE_ADMIN_SECTIONS_HIDDEN, ...tryOnHidden].find(
+      (id) => sectionParam === storeAdminSectionPath(id) || sectionParam === id,
+    );
+    if (matchedHidden && isStoreAdminSectionHidden(matchedHidden, tryOnHidden)) {
       setLocation(`/tienda/${encodeURIComponent(slug)}/admin/${storeAdminSectionPath(defaultSection)}`, {
         replace: true,
       });

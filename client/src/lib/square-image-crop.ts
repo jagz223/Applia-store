@@ -1,8 +1,17 @@
+import type { StoreImageTransform } from "@shared/store-image-asset";
+import { DEFAULT_STORE_IMAGE_TRANSFORM } from "@shared/store-image-asset";
+
 export const SQUARE_CROP_OUTPUT_SIZE = 1024;
-/** Límite de archivo de entrada (antes del recorte). Alineado con reglas Firebase Storage (~200 MB). */
+export const FRAME_CROP_MAX_EDGE = 1024;
 export const SQUARE_CROP_MAX_FILE_BYTES = 200 * 1024 * 1024;
-/** Tras recortar a 1024×1024 el archivo suele ser pequeño; tope generoso por PNG con alfa. */
 export const SQUARE_CROP_OUTPUT_MAX_BYTES = 25 * 1024 * 1024;
+
+export type FrameCropRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 export async function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -14,7 +23,6 @@ export async function loadImageElement(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Muestrea el canvas: si hay píxeles con alfa &lt; 255, la imagen tiene transparencia. */
 export function canvasImageHasTransparency(
   img: HTMLImageElement,
   sampleSize = 96,
@@ -34,7 +42,6 @@ export function canvasImageHasTransparency(
       if (data[i]! < 250) return true;
     }
   } catch {
-    // Lienzo contaminado (p. ej. URL sin CORS): no arriesgar JPEG que pinta el alfa de blanco.
     return true;
   }
   return false;
@@ -54,26 +61,45 @@ export function clampSquareCrop(
   return { x: cropX, y: cropY, size: cropSize };
 }
 
-/** El recorte deja margen (imagen encogida o descentrada): ese margen debe ser alfa, no blanco. */
 export function cropRectExtendsOutsideImage(
   imgW: number,
   imgH: number,
-  crop: { x: number; y: number; size: number },
+  crop: FrameCropRect | { x: number; y: number; size: number },
 ): boolean {
   const eps = 0.5;
+  const width = "size" in crop ? crop.size : crop.width;
+  const height = "size" in crop ? crop.size : crop.height;
   return (
     crop.x < -eps ||
     crop.y < -eps ||
-    crop.x + crop.size > imgW + eps ||
-    crop.y + crop.size > imgH + eps
+    crop.x + width > imgW + eps ||
+    crop.y + height > imgH + eps
   );
 }
 
-/**
- * Recorte cuadrado visible en el viewport (pan + zoom).
- * `zoom` 1 = la imagen cubre el cuadrado; menor que 1 deja margen transparente.
- * El rectángulo puede salir de la imagen: el export guarda ese margen con alfa (PNG/WebP).
- */
+export function computeFrameCropFromViewport(
+  imgW: number,
+  imgH: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  zoom: number,
+  offsetX: number,
+  offsetY: number,
+): FrameCropRect {
+  const baseScale = Math.max(viewportWidth / imgW, viewportHeight / imgH);
+  const scale = baseScale * Math.max(zoom, 0.05);
+  const dispW = imgW * scale;
+  const dispH = imgH * scale;
+  const imgLeft = (viewportWidth - dispW) / 2 + offsetX;
+  const imgTop = (viewportHeight - dispH) / 2 + offsetY;
+  return {
+    x: -imgLeft / scale,
+    y: -imgTop / scale,
+    width: viewportWidth / scale,
+    height: viewportHeight / scale,
+  };
+}
+
 export function computeSquareCropFromViewport(
   imgW: number,
   imgH: number,
@@ -82,17 +108,16 @@ export function computeSquareCropFromViewport(
   offsetX: number,
   offsetY: number,
 ): { x: number; y: number; size: number } {
-  const baseScale = Math.max(viewportSize / imgW, viewportSize / imgH);
-  const scale = baseScale * Math.max(zoom, 0.05);
-  const dispW = imgW * scale;
-  const dispH = imgH * scale;
-  const imgLeft = (viewportSize - dispW) / 2 + offsetX;
-  const imgTop = (viewportSize - dispH) / 2 + offsetY;
-  return {
-    x: -imgLeft / scale,
-    y: -imgTop / scale,
-    size: viewportSize / scale,
-  };
+  const rect = computeFrameCropFromViewport(
+    imgW,
+    imgH,
+    viewportSize,
+    viewportSize,
+    zoom,
+    offsetX,
+    offsetY,
+  );
+  return { x: rect.x, y: rect.y, size: rect.width };
 }
 
 type CropOutputFormat = {
@@ -101,7 +126,6 @@ type CropOutputFormat = {
   ext: string;
 };
 
-/** JPEG no admite transparencia: si hace falta alfa se fuerza PNG. */
 export function resolveSquareCropOutputFormat(
   fileName: string,
   mimeType?: string,
@@ -121,35 +145,54 @@ function withOutputExtension(fileName: string, ext: string): string {
   return `${base}.${ext}`;
 }
 
-export async function cropSquareImageToFile(
+function resolveOutputDimensions(
+  cropWidth: number,
+  cropHeight: number,
+  maxEdge: number,
+): { outW: number; outH: number } {
+  const safeW = Math.max(1, cropWidth);
+  const safeH = Math.max(1, cropHeight);
+  const longest = Math.max(safeW, safeH);
+  if (longest <= maxEdge) {
+    return { outW: Math.round(safeW), outH: Math.round(safeH) };
+  }
+  const scale = maxEdge / longest;
+  return {
+    outW: Math.max(1, Math.round(safeW * scale)),
+    outH: Math.max(1, Math.round(safeH * scale)),
+  };
+}
+
+export async function cropFrameImageToFile(
   imageSrc: string,
-  crop: { x: number; y: number; size: number },
+  crop: FrameCropRect,
   fileName: string,
-  options?: { outputSize?: number; mimeType?: string },
+  options?: { maxEdge?: number; mimeType?: string },
 ): Promise<File> {
-  const outputSize = options?.outputSize ?? SQUARE_CROP_OUTPUT_SIZE;
+  const maxEdge = options?.maxEdge ?? FRAME_CROP_MAX_EDGE;
   const img = await loadImageElement(imageSrc);
   const srcW = img.naturalWidth || img.width;
   const srcH = img.naturalHeight || img.height;
   const needsAlpha =
     canvasImageHasTransparency(img) || cropRectExtendsOutsideImage(srcW, srcH, crop);
   let format = resolveSquareCropOutputFormat(fileName, options?.mimeType);
-  // JPEG aplasta el alfa a blanco/negro: si hay transparencia o margen, salir en PNG.
   if (needsAlpha && format.mime === "image/jpeg") {
     format = { mime: "image/png", ext: "png" };
   }
+  const { outW, outH } = resolveOutputDimensions(crop.width, crop.height, maxEdge);
   const canvas = document.createElement("canvas");
-  canvas.width = outputSize;
-  canvas.height = outputSize;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d", { alpha: format.mime !== "image/jpeg" });
   if (!ctx) throw new Error("Canvas no disponible");
   if (format.mime === "image/jpeg") {
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, outputSize, outputSize);
+    ctx.fillRect(0, 0, outW, outH);
   } else {
-    ctx.clearRect(0, 0, outputSize, outputSize);
+    ctx.clearRect(0, 0, outW, outH);
   }
-  const destScale = outputSize / Math.max(crop.size, 1);
+  const destScaleX = outW / Math.max(crop.width, 1);
+  const destScaleY = outH / Math.max(crop.height, 1);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(
@@ -158,10 +201,10 @@ export async function cropSquareImageToFile(
     0,
     srcW,
     srcH,
-    -crop.x * destScale,
-    -crop.y * destScale,
-    srcW * destScale,
-    srcH * destScale,
+    -crop.x * destScaleX,
+    -crop.y * destScaleY,
+    srcW * destScaleX,
+    srcH * destScaleY,
   );
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
@@ -173,6 +216,36 @@ export async function cropSquareImageToFile(
   if (blob.size > SQUARE_CROP_OUTPUT_MAX_BYTES) {
     throw new Error("La imagen recortada es demasiado pesada. Prueba otra foto o reduce la calidad.");
   }
-  const outName = withOutputExtension(fileName, format.ext);
-  return new File([blob], outName, { type: format.mime });
+  return new File([blob], withOutputExtension(fileName, format.ext), { type: format.mime });
+}
+
+export async function cropSquareImageToFile(
+  imageSrc: string,
+  crop: { x: number; y: number; size: number },
+  fileName: string,
+  options?: { outputSize?: number; mimeType?: string },
+): Promise<File> {
+  return cropFrameImageToFile(
+    imageSrc,
+    { x: crop.x, y: crop.y, width: crop.size, height: crop.size },
+    fileName,
+    {
+      maxEdge: options?.outputSize ?? SQUARE_CROP_OUTPUT_SIZE,
+      mimeType: options?.mimeType,
+    },
+  );
+}
+
+export function normalizeCropTransform(
+  transform?: Partial<StoreImageTransform> | null,
+): StoreImageTransform {
+  if (!transform) return { ...DEFAULT_STORE_IMAGE_TRANSFORM };
+  const zoom = Number(transform.zoom);
+  const offsetX = Number(transform.offsetX);
+  const offsetY = Number(transform.offsetY);
+  return {
+    zoom: Number.isFinite(zoom) ? zoom : DEFAULT_STORE_IMAGE_TRANSFORM.zoom,
+    offsetX: Number.isFinite(offsetX) ? offsetX : DEFAULT_STORE_IMAGE_TRANSFORM.offsetX,
+    offsetY: Number.isFinite(offsetY) ? offsetY : DEFAULT_STORE_IMAGE_TRANSFORM.offsetY,
+  };
 }

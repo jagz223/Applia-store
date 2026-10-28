@@ -15,6 +15,8 @@ export type StorePromotionSummary = {
   name: string;
   description: string | null;
   imageUrl: string | null;
+  imageOriginalUrl?: string | null;
+  imageTransform?: import("@shared/store-image-asset").StoreImageTransform | null;
   price: number;
   status: "active" | "inactive";
   items: StorePromotionItemSummary[];

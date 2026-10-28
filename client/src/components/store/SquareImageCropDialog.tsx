@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import type { StoreImageTransform } from "@shared/store-image-asset";
 import {
   Dialog,
   DialogContent,
@@ -11,9 +12,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
-  computeSquareCropFromViewport,
-  cropSquareImageToFile,
+  computeFrameCropFromViewport,
+  cropFrameImageToFile,
   loadImageElement,
+  normalizeCropTransform,
 } from "@/lib/square-image-crop";
 import {
   storeAdminDialogBodyClass,
@@ -24,8 +26,7 @@ import {
   storeTransparentImageSurfaceStyle,
 } from "@/components/store/store-admin-ui";
 
-const VIEWPORT_SIZE = 320;
-/** 1 = cubre el cuadrado; menos de 1 deja margen transparente alrededor. */
+const VIEWPORT_MAX = 320;
 const ZOOM_MIN = 0.2;
 const ZOOM_MAX = 4;
 const ZOOM_STEP = 0.1;
@@ -35,13 +36,20 @@ function clampZoom(value: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100));
 }
 
+export type SquareImageCropConfirmResult = {
+  file: File;
+  transform: StoreImageTransform;
+};
+
 type SquareImageCropDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   imageSrc: string | null;
   fileName?: string;
   fileMimeType?: string;
-  onConfirm: (file: File) => void | Promise<void>;
+  aspectRatio?: number;
+  initialTransform?: StoreImageTransform | null;
+  onConfirm: (result: SquareImageCropConfirmResult) => void | Promise<void>;
 };
 
 export function SquareImageCropDialog({
@@ -50,6 +58,8 @@ export function SquareImageCropDialog({
   imageSrc,
   fileName = "producto.png",
   fileMimeType,
+  aspectRatio = 1,
+  initialTransform = null,
   onConfirm,
 }: SquareImageCropDialogProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -65,6 +75,14 @@ export function SquareImageCropDialog({
 
   zoomRef.current = zoom;
 
+  const safeAspect = aspectRatio > 0 ? aspectRatio : 1;
+  const viewport = useMemo(() => {
+    if (safeAspect >= 1) {
+      return { width: VIEWPORT_MAX, height: Math.max(80, Math.round(VIEWPORT_MAX / safeAspect)) };
+    }
+    return { width: Math.max(80, Math.round(VIEWPORT_MAX * safeAspect)), height: VIEWPORT_MAX };
+  }, [safeAspect]);
+
   const applyZoom = useCallback((next: number) => {
     setZoom(clampZoom(next));
   }, []);
@@ -77,6 +95,10 @@ export function SquareImageCropDialog({
       setError(null);
       return;
     }
+    const seed = normalizeCropTransform(initialTransform);
+    setZoom(clampZoom(seed.zoom));
+    setOffset({ x: seed.offsetX, y: seed.offsetY });
+    setError(null);
     let cancelled = false;
     void loadImageElement(imageSrc)
       .then((img) => {
@@ -90,7 +112,7 @@ export function SquareImageCropDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, imageSrc]);
+  }, [open, imageSrc, initialTransform]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -106,13 +128,13 @@ export function SquareImageCropDialog({
 
   const baseScale =
     imgSize != null
-      ? Math.max(VIEWPORT_SIZE / imgSize.w, VIEWPORT_SIZE / imgSize.h)
+      ? Math.max(viewport.width / imgSize.w, viewport.height / imgSize.h)
       : 1;
   const scale = baseScale * zoom;
-  const dispW = imgSize ? imgSize.w * scale : VIEWPORT_SIZE;
-  const dispH = imgSize ? imgSize.h * scale : VIEWPORT_SIZE;
-  const imgLeft = (VIEWPORT_SIZE - dispW) / 2 + offset.x;
-  const imgTop = (VIEWPORT_SIZE - dispH) / 2 + offset.y;
+  const dispW = imgSize ? imgSize.w * scale : viewport.width;
+  const dispH = imgSize ? imgSize.h * scale : viewport.height;
+  const imgLeft = (viewport.width - dispW) / 2 + offset.x;
+  const imgTop = (viewport.height - dispH) / 2 + offset.y;
 
   function pointerDistance(): number {
     const pts = [...pointersRef.current.values()];
@@ -162,18 +184,24 @@ export function SquareImageCropDialog({
     setLoading(true);
     setError(null);
     try {
-      const crop = computeSquareCropFromViewport(
+      const transform: StoreImageTransform = {
+        zoom: clampZoom(zoom),
+        offsetX: offset.x,
+        offsetY: offset.y,
+      };
+      const crop = computeFrameCropFromViewport(
         imgSize.w,
         imgSize.h,
-        VIEWPORT_SIZE,
-        zoom,
-        offset.x,
-        offset.y,
+        viewport.width,
+        viewport.height,
+        transform.zoom,
+        transform.offsetX,
+        transform.offsetY,
       );
-      const file = await cropSquareImageToFile(imageSrc, crop, fileName, {
+      const file = await cropFrameImageToFile(imageSrc, crop, fileName, {
         mimeType: fileMimeType,
       });
-      await onConfirm(file);
+      await onConfirm({ file, transform });
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo recortar la imagen.");
@@ -194,8 +222,8 @@ export function SquareImageCropDialog({
         <DialogHeader className={storeAdminDialogHeaderClass}>
           <DialogTitle>Recortar foto</DialogTitle>
           <DialogDescription>
-            Ajusta la imagen dentro del cuadrado. Con − la haces más pequeña (el fondo transparente
-            se conserva). Arrastra para mover; + acerca.
+            Ajusta la imagen dentro del marco. El archivo original se conserva; solo se guarda el
+            encuadre para mostrarlo.
           </DialogDescription>
         </DialogHeader>
 
@@ -204,8 +232,8 @@ export function SquareImageCropDialog({
             ref={viewportRef}
             className="relative mx-auto overflow-hidden rounded-xl border border-border touch-none"
             style={{
-              width: VIEWPORT_SIZE,
-              height: VIEWPORT_SIZE,
+              width: viewport.width,
+              height: viewport.height,
               touchAction: "none",
               ...storeTransparentImageSurfaceStyle,
             }}
@@ -284,8 +312,8 @@ export function SquareImageCropDialog({
                 size="icon"
                 className="h-9 w-9 shrink-0 rounded-full"
                 disabled={zoomDisabled || (zoom === ZOOM_FIT && offset.x === 0 && offset.y === 0)}
-                aria-label="Llenar el cuadrado"
-                title="Llenar el cuadrado"
+                aria-label="Restablecer encuadre"
+                title="Restablecer encuadre"
                 onClick={() => {
                   applyZoom(ZOOM_FIT);
                   setOffset({ x: 0, y: 0 });

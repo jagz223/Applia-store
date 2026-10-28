@@ -1,7 +1,11 @@
 import { Link } from "wouter";
 import { motion, useReducedMotion } from "framer-motion";
 import { ArrowUpRight } from "lucide-react";
-import { getPrimaryStoreVitrinaHref, usePrimaryStore } from "@/hooks/use-primary-store";
+import {
+  getPrimaryStoreVitrinaCategoryHref,
+  getPrimaryStoreVitrinaHref,
+  usePrimaryStore,
+} from "@/hooks/use-primary-store";
 import {
   CELOSIAS_BRAND_NAME,
   CELOSIAS_HERO_IMAGE,
@@ -114,7 +118,7 @@ export default function HomePage() {
           {CELOSIAS_HOME_CATEGORIES.map((cat) => (
             <Link
               key={cat.name}
-              href={tiendaHref}
+              href={getPrimaryStoreVitrinaCategoryHref(primaryStore, cat.name)}
               className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-neutral-700 transition-colors hover:border-[hsl(220,70%,22%)] hover:text-[hsl(220,70%,22%)] dark:border-border dark:bg-card dark:text-foreground"
             >
               {cat.name}
@@ -151,7 +155,7 @@ export default function HomePage() {
                   })}
             >
               <Link
-                href={tiendaHref}
+                href={getPrimaryStoreVitrinaCategoryHref(primaryStore, cat.name)}
                 className="group block overflow-hidden rounded-[1.25rem] sm:rounded-[1.5rem]"
               >
                 <div className="relative aspect-[4/5] overflow-hidden bg-neutral-100 dark:bg-muted">

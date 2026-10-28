@@ -27,6 +27,11 @@ import {
   resolveAdditionalDisplayPrice,
   resolveStorePromotionImageUrl,
   storeProductHasAvailableStock,
+  productHasEffectiveBoxSize,
+  snapQuantityToBoxMeters,
+  storeProductMatchesCatalogKind,
+  parseStoreProductCatalogKind,
+  type StoreProductCatalogKind,
 } from "@shared/store-schema";
 import type { StoreCheckoutPaymentMethod } from "@shared/store-order-schema";
 import { isCasheaPaymentMethod } from "@shared/store-cashea";
@@ -51,6 +56,8 @@ export type EnrichedStoreCartLine = {
   secondaryImageUrl?: string | null;
   removedIngredientMaterialIds?: number[];
   additionalIngredientMaterialIds?: number[];
+  /** Metros por caja; > 0 si el producto se vende por caja. */
+  boxSize?: number;
 };
 
 export type StoreCartFulfillmentOption = {
@@ -75,6 +82,7 @@ export type EnrichedStoreCart = {
   deliveryFares: StoreDeliveryFares;
   currencyVisualId: string;
   currencyExtras: StoreCurrencyExtra[];
+  cartKind: StoreProductCatalogKind;
 };
 
 export function addBodyToCartItem(body: AddStoreCartItem): StoreCartItem {
@@ -135,6 +143,24 @@ export function mergeAddCartItem(items: StoreCartItem[], incoming: StoreCartItem
   const maxQty = incoming.kind === "promotion" ? 99 : 9999;
   const nextQty = Math.min(maxQty, current.quantity + incoming.quantity);
   return items.map((item, i) => (i === idx ? { ...item, quantity: nextQty } : item));
+}
+
+/** Ajusta cantidades de productos con boxSize a múltiplos de caja. */
+export function snapCartItemsToBoxSize(
+  items: StoreCartItem[],
+  products: StoreProduct[],
+): StoreCartItem[] {
+  const byId = new Map(products.map((p) => [p.id, p]));
+  return items.map((item) => {
+    if (item.kind !== "product") return item;
+    const product = byId.get(item.productId);
+    if (!product || !productHasEffectiveBoxSize(product)) return item;
+    const quantity = Math.min(
+      9999,
+      snapQuantityToBoxMeters(item.quantity, product.boxSize),
+    );
+    return quantity === item.quantity ? item : { ...item, quantity };
+  });
 }
 
 export function setCartItemQuantity(items: StoreCartItem[], patch: UpdateStoreCartItem): StoreCartItem[] {
@@ -220,14 +246,17 @@ async function isValidCartItem(
   item: StoreCartItem,
   products: StoreProduct[],
   promotions: StorePromotion[],
+  cartKind: StoreProductCatalogKind = "retail",
 ): Promise<boolean> {
   if (item.kind === "product") {
     const product = products.find((p) => p.id === item.productId && p.storeId === storeId);
     if (!product) return false;
     if (!storeProductHasAvailableStock(product)) return false;
     if (product.showOnShowcase === false) return false;
+    if (!storeProductMatchesCatalogKind(product, cartKind)) return false;
     return validateProductCustomization(product, item);
   }
+  if (cartKind === "import") return false;
   const promotion = promotions.find((p) => p.id === item.promotionId && p.storeId === storeId);
   return Boolean(
     promotion &&
@@ -277,7 +306,12 @@ async function loadCartEnrichmentCatalog(storeId: number, items: StoreCartItem[]
   };
 }
 
-export async function enrichStoreCart(cart: StoreCart | undefined, storeId: number): Promise<EnrichedStoreCart> {
+export async function enrichStoreCart(
+  cart: StoreCart | undefined,
+  storeId: number,
+  cartKind: StoreProductCatalogKind = "retail",
+): Promise<EnrichedStoreCart> {
+  const kind = parseStoreProductCatalogKind(cartKind);
   const store = await appliaStorage.getStoreById(storeId);
   const storeOptions = normalizeStoreFulfillmentOptions(store?.fulfillmentOptions);
   const fulfillmentOptions: StoreCartFulfillmentOption[] = storeOptions.map((mode) => ({
@@ -285,7 +319,8 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     label: STORE_FULFILLMENT_LABELS[mode],
   }));
 
-  const paymentMethodsRaw = await appliaStorage.listStorePaymentMethods(storeId);
+  const paymentMethodsRaw =
+    kind === "import" ? [] : await appliaStorage.listStorePaymentMethods(storeId);
   const paymentMethods: StoreCheckoutPaymentMethod[] = paymentMethodsRaw.map((m) => ({
     id: m.id,
     name: m.name,
@@ -336,6 +371,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
       deliveryFares,
       currencyVisualId: currency.currencyVisualId,
       currencyExtras: currency.currencyExtras,
+      cartKind: kind,
     };
   }
 
@@ -355,7 +391,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
   let itemCount = 0;
 
   for (const line of cart.items) {
-    const valid = await isValidCartItem(storeId, line, products, promotions);
+    const valid = await isValidCartItem(storeId, line, products, promotions, kind);
     if (!valid) continue;
 
     if (line.kind === "product") {
@@ -393,9 +429,12 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
         removedNames,
         size?.name,
       );
-      const lineTotal = unitPrice * line.quantity;
+      const boxSize = productHasEffectiveBoxSize(product) ? product.boxSize : 0;
+      const quantity =
+        boxSize > 0 ? snapQuantityToBoxMeters(line.quantity, boxSize) : line.quantity;
+      const lineTotal = unitPrice * quantity;
       subtotal += lineTotal;
-      itemCount += line.quantity;
+      itemCount += quantity;
       items.push({
         kind: "product",
         lineKey: cartLineKey(line),
@@ -403,12 +442,13 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
         sizeId,
         name: displayName,
         price: unitPrice,
-        quantity: line.quantity,
+        quantity,
         lineTotal,
         imageUrl: product.imageUrls?.[0]?.trim() ?? null,
         secondaryImageUrl: product.imageUrls?.[1]?.trim() ?? null,
         removedIngredientMaterialIds: removed,
         additionalIngredientMaterialIds: additionals,
+        ...(boxSize > 0 ? { boxSize } : {}),
       });
       continue;
     }
@@ -457,6 +497,7 @@ export async function enrichStoreCart(cart: StoreCart | undefined, storeId: numb
     deliveryFares,
     currencyVisualId: currency.currencyVisualId,
     currencyExtras: currency.currencyExtras,
+    cartKind: kind,
   };
 }
 
@@ -496,30 +537,40 @@ export async function validateCartFulfillmentForStore(
   }
 }
 
-export async function validateCartItemForStore(storeId: number, item: StoreCartItem): Promise<void> {
+export async function validateCartItemForStore(
+  storeId: number,
+  item: StoreCartItem,
+  cartKind: StoreProductCatalogKind = "retail",
+): Promise<void> {
+  const kind = parseStoreProductCatalogKind(cartKind);
   if (item.kind === "product") {
     const product = await appliaStorage.getStoreProduct(storeId, item.productId);
     if (product && !storeProductHasAvailableStock(product)) {
       throw new Error("STORE_PRODUCT_NO_STOCK");
     }
-    const ok = await isValidCartItem(storeId, item, product ? [product] : [], []);
+    const ok = await isValidCartItem(storeId, item, product ? [product] : [], [], kind);
     if (!ok) throw new Error("STORE_CART_ITEM_INVALID");
     return;
   }
   const promotion = await appliaStorage.getStorePromotion(storeId, item.promotionId);
-  const ok = await isValidCartItem(storeId, item, [], promotion ? [promotion] : []);
+  const ok = await isValidCartItem(storeId, item, [], promotion ? [promotion] : [], kind);
   if (!ok) throw new Error("STORE_CART_ITEM_INVALID");
 }
 
-export async function pruneAndSaveCart(userId: string, cart: StoreCart): Promise<StoreCart> {
+export async function pruneAndSaveCart(
+  userId: string,
+  cart: StoreCart,
+  cartKind: StoreProductCatalogKind = "retail",
+): Promise<StoreCart> {
+  const kind = parseStoreProductCatalogKind(cartKind);
   if (cart.items.length === 0) return cart;
   const { products, promotions } = await loadCartLineRecords(cart.storeId, cart.items);
   const validItems: StoreCartItem[] = [];
   for (const item of cart.items) {
-    if (await isValidCartItem(cart.storeId, item, products, promotions)) {
+    if (await isValidCartItem(cart.storeId, item, products, promotions, kind)) {
       validItems.push(item);
     }
   }
   if (validItems.length === cart.items.length) return cart;
-  return appliaStorage.saveStoreCart(userId, cart.storeId, validItems);
+  return appliaStorage.saveStoreCart(userId, cart.storeId, validItems, undefined, kind);
 }

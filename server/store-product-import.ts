@@ -47,6 +47,8 @@ export type ProductImportRow = {
   ingredientNames: string[];
   hasWeight: boolean;
   weight: number | null;
+  hasBoxSize: boolean;
+  boxSize: number | null;
 };
 
 export type ProductImportParseResult = {
@@ -320,6 +322,7 @@ export function parseProductImportFile(
     const subcategoryRaw = readOpt(row, "subcategory");
     const ingredientsRaw = readOpt(row, "ingredients");
     const weightRaw = readOpt(row, "weight");
+    const boxSizeRaw = readOpt(row, "boxSize");
 
     const empty =
       !codigo &&
@@ -331,7 +334,8 @@ export function parseProductImportFile(
       !categoryRaw &&
       !subcategoryRaw &&
       !ingredientsRaw &&
-      !weightRaw;
+      !weightRaw &&
+      !boxSizeRaw;
     if (empty) continue;
 
     if (!codigo) {
@@ -377,6 +381,21 @@ export function parseProductImportFile(
       }
     }
 
+    const hasBoxSizeMapped = optionalIdx.has("boxSize");
+    let boxSize: number | null = null;
+    if (hasBoxSizeMapped) {
+      if (!boxSizeRaw) {
+        boxSize = 0;
+      } else {
+        const parsedBoxSize = parseNonNegativeNumber(boxSizeRaw);
+        if (parsedBoxSize == null) {
+          errors.push({ rowNumber, message: "Tamaño de caja inválido (columna mapeada)." });
+          continue;
+        }
+        boxSize = Math.round(parsedBoxSize * 1000) / 1000;
+      }
+    }
+
     const imageUrl = imageRaw ? imageRaw.slice(0, 2000) : null;
 
     rows.push({
@@ -393,6 +412,8 @@ export function parseProductImportFile(
       ingredientNames: ingredientsRaw ? splitIngredientNames(ingredientsRaw) : [],
       hasWeight: hasWeightMapped,
       weight: hasWeightMapped ? weight : null,
+      hasBoxSize: hasBoxSizeMapped,
+      boxSize: hasBoxSizeMapped ? boxSize : null,
     });
   }
 

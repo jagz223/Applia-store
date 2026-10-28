@@ -8,6 +8,7 @@ export const PRODUCT_IMPORT_OPTIONAL_FIELDS = [
   "subcategory",
   "ingredients",
   "weight",
+  "boxSize",
 ] as const;
 
 export type ProductImportOptionalField = (typeof PRODUCT_IMPORT_OPTIONAL_FIELDS)[number];
@@ -20,6 +21,7 @@ export const PRODUCT_IMPORT_OPTIONAL_FIELD_LABELS: Record<ProductImportOptionalF
   subcategory: "Subcategoría",
   ingredients: "Ingredientes",
   weight: "Peso",
+  boxSize: "Tamaño de caja",
 };
 
 export const PRODUCT_IMPORT_CSV_DELIMITERS = [",", ";", "|"] as const;

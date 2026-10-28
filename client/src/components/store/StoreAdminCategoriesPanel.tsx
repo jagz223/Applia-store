@@ -7,10 +7,8 @@ import {
   type StoreCategorySummary,
 } from "@/hooks/use-store-categories";
 import { StoreCategoryFormDialog } from "@/components/store/StoreCategoryFormDialog";
-import {
-  STORE_ADMIN_LIST_PAGE_SIZE,
-  StoreAdminListPagination,
-} from "@/components/store/StoreAdminListPagination";
+import { StoreAdminListPagination } from "@/components/store/StoreAdminListPagination";
+import { useStoreAdminListPageSize } from "@/hooks/use-store-admin-list-page-size";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -115,6 +113,7 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useStoreAdminListPageSize();
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -124,10 +123,14 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
     return () => window.clearTimeout(t);
   }, [search]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize]);
+
   const { data, isLoading, error, isFetching } = useStoreCategoriesPage(
     storeId,
     page,
-    STORE_ADMIN_LIST_PAGE_SIZE,
+    pageSize,
     true,
     debouncedSearch,
   );
@@ -317,6 +320,8 @@ export function StoreAdminCategoriesPanel({ storeId }: { storeId: number }) {
                 totalPages={totalPages}
                 isFetching={isFetching}
                 onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
               />
             </>
           )}

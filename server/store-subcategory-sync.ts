@@ -10,6 +10,20 @@ export function productIdsForSubcategory(
     .map((p) => p.id);
 }
 
+export function buildProductIdsBySubcategoryId(
+  products: { id: number; subcategoryIds?: number[] | null }[],
+): Map<number, number[]> {
+  const map = new Map<number, number[]>();
+  for (const product of products) {
+    for (const subcategoryId of product.subcategoryIds ?? []) {
+      const list = map.get(subcategoryId);
+      if (list) list.push(product.id);
+      else map.set(subcategoryId, [product.id]);
+    }
+  }
+  return map;
+}
+
 export async function assertStoreSubcategoryIds(
   storeId: number,
   subcategoryIds: number[],

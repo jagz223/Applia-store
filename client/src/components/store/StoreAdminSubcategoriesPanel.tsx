@@ -48,14 +48,15 @@ import {
   storeAdminFieldClass,
   storeAdminSectionCardClass,
 } from "@/components/store/store-admin-ui";
-
-const ADMIN_SUBCATEGORIES_PAGE_SIZE = 10;
+import { StoreAdminListPagination } from "@/components/store/StoreAdminListPagination";
+import { useStoreAdminListPageSize } from "@/hooks/use-store-admin-list-page-size";
 
 export function StoreAdminSubcategoriesPanel({ storeId }: { storeId: number }) {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useStoreAdminListPageSize();
   const [filterCategoryId, setFilterCategoryId] = useState<string>("all");
   const [formOpen, setFormOpen] = useState(false);
   const [editItem, setEditItem] = useState<StoreSubcategorySummary | null>(null);
@@ -73,13 +74,17 @@ export function StoreAdminSubcategoriesPanel({ storeId }: { storeId: number }) {
     return () => window.clearTimeout(t);
   }, [search]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize, filterCategoryId]);
+
   const categoryFilter =
     filterCategoryId !== "all" ? Number.parseInt(filterCategoryId, 10) : null;
 
   const { data, isLoading, error, isFetching } = useStoreSubcategoriesPage(
     storeId,
     page,
-    ADMIN_SUBCATEGORIES_PAGE_SIZE,
+    pageSize,
     true,
     debouncedSearch,
     categoryFilter,
@@ -90,7 +95,7 @@ export function StoreAdminSubcategoriesPanel({ storeId }: { storeId: number }) {
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
-  const pageLimit = data?.limit ?? ADMIN_SUBCATEGORIES_PAGE_SIZE;
+  const pageLimit = data?.limit ?? pageSize;
   const totalPages = data?.totalPages ?? Math.max(1, Math.ceil(total / pageLimit));
   const saving = createMutation.isPending || updateMutation.isPending;
 
@@ -328,33 +333,14 @@ export function StoreAdminSubcategoriesPanel({ storeId }: { storeId: number }) {
                 </table>
               </div>
 
-              {totalPages > 1 ? (
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-full"
-                    disabled={page <= 1 || isFetching}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  >
-                    Anterior
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Pág. {page} / {totalPages}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-full"
-                    disabled={page >= totalPages || isFetching}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  >
-                    Siguiente
-                  </Button>
-                </div>
-              ) : null}
+              <StoreAdminListPagination
+                page={page}
+                totalPages={totalPages}
+                isFetching={isFetching}
+                onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
+              />
             </>
           )}
         </CardContent>

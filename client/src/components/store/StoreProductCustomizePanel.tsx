@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Minus, Plus, ShoppingBag } from "lucide-react";
 import { buildCustomizedProductDisplayName } from "@shared/store-cart-schema";
-import { resolveAdditionalDisplayPrice } from "@shared/store-schema";
+import {
+  productHasEffectiveBoxSize,
+  resolveAdditionalDisplayPrice,
+  snapQuantityToBoxMeters,
+} from "@shared/store-schema";
 import type { StoreShowcaseProduct } from "@/hooks/use-store-showcase";
 import { Button } from "@/components/ui/button";
 import { StoreSelectableChip } from "@/components/store/StoreSelectableChip";
 import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
 import { StoreProductImageLightbox } from "@/components/store/StoreProductImageLightbox";
 import { cn } from "@/lib/utils";
+import { getStoreCatalogItemCopy } from "@/lib/store-runtime-flags";
 
 function formatPrice(value: number, currencyLabel?: string) {
   const amount = new Intl.NumberFormat("es-VE", {
@@ -51,6 +56,7 @@ export function StoreProductCustomizePanel({
   confirming,
   canAddToCart = true,
 }: StoreProductCustomizePanelProps) {
+  const catalogItemCopy = getStoreCatalogItemCopy();
   const sizes = product.sizes ?? [];
   const hasSizes = sizes.length > 0;
   const [sizeId, setSizeId] = useState<string | null>(hasSizes ? sizes[0]?.id ?? null : null);
@@ -62,7 +68,9 @@ export function StoreProductCustomizePanel({
     setSizeId(hasSizes ? sizes[0]?.id ?? null : null);
     setRemovedIds([]);
     setAdditionalIds([]);
-    setQuantity(1);
+    const initialBox =
+      productHasEffectiveBoxSize({ boxSize: product.boxSize }) ? Number(product.boxSize) : 0;
+    setQuantity(initialBox > 0 ? initialBox : 1);
   }, [product.id]);
 
   const imageUrl = product.imageUrls[0]?.trim();
@@ -140,7 +148,10 @@ export function StoreProductCustomizePanel({
 
   const basePrice = selectedSize?.price ?? product.price;
   const unitPrice = basePrice + extrasPrice;
-  const lineTotal = unitPrice * quantity;
+  const boxSize =
+    productHasEffectiveBoxSize({ boxSize: product.boxSize }) ? Number(product.boxSize) : 0;
+  const chargedQuantity = boxSize > 0 ? snapQuantityToBoxMeters(quantity, boxSize) : quantity;
+  const lineTotal = unitPrice * chargedQuantity;
   const displayName = buildCustomizedProductDisplayName(
     product.name,
     selectedAdditionalNames,
@@ -167,7 +178,7 @@ export function StoreProductCustomizePanel({
     if (hasSizes && !sizeId) return;
     await onConfirm({
       productId: product.id,
-      quantity,
+      quantity: chargedQuantity,
       sizeId: hasSizes ? sizeId : null,
       removedIngredientMaterialIds: [...removedIds].sort((a, b) => a - b),
       additionalIngredientMaterialIds: [...additionalIds].sort((a, b) => a - b),
@@ -277,7 +288,7 @@ export function StoreProductCustomizePanel({
         {ingredients.length > 0 ? (
           <section className="mt-4 border-t border-border/70 pt-4 space-y-2.5">
             <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Ingredientes
+              {catalogItemCopy.pluralTitle}
             </h3>
             <ul className="flex flex-wrap gap-1.5">
               {ingredients.map((item) => (
@@ -296,7 +307,7 @@ export function StoreProductCustomizePanel({
           <section className="mt-4 border-t border-border/70 pt-4 space-y-2.5">
             <div className="space-y-1">
               <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                ingredientes no deseados
+                {catalogItemCopy.plural} no deseados
               </h3>
               <p className="text-xs text-muted-foreground">Toca para sacar del producto.</p>
             </div>
@@ -321,7 +332,7 @@ export function StoreProductCustomizePanel({
           <section className="mt-4 border-t border-border/70 pt-4 space-y-2.5">
             <div className="space-y-1">
               <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Ingredientes adicionales
+                {catalogItemCopy.pluralTitle} adicionales
               </h3>
               <p className="text-xs text-muted-foreground">Sumarán al precio del producto.</p>
             </div>
@@ -370,7 +381,9 @@ export function StoreProductCustomizePanel({
 
       <div className="shrink-0 border-t border-border/60 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-muted-foreground">Total</span>
+          <span className="text-muted-foreground">
+            {boxSize > 0 ? `Total (${chargedQuantity} m)` : "Total"}
+          </span>
           <span className="font-bold text-foreground">
             {formatPrice(lineTotal, product.displayCurrencyLabel)}
           </span>
@@ -381,21 +394,37 @@ export function StoreProductCustomizePanel({
             <button
               type="button"
               className="h-10 w-10 flex items-center justify-center hover:bg-muted disabled:opacity-50 rounded-l-full"
-              disabled={confirming || quantity <= 1}
+              disabled={
+                confirming || (boxSize > 0 ? chargedQuantity <= boxSize : quantity <= 1)
+              }
               aria-label="Reducir cantidad"
-              onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+              onClick={() =>
+                setQuantity((q) => {
+                  if (boxSize > 0) {
+                    return Math.max(boxSize, snapQuantityToBoxMeters(q - boxSize, boxSize));
+                  }
+                  return Math.max(1, q - 1);
+                })
+              }
             >
               <Minus className="h-3.5 w-3.5" />
             </button>
             <span className="min-w-[2.25rem] text-center text-sm font-semibold tabular-nums">
-              {quantity}
+              {chargedQuantity}
             </span>
             <button
               type="button"
               className="h-10 w-10 flex items-center justify-center hover:bg-muted disabled:opacity-50 rounded-r-full"
-              disabled={confirming || quantity >= 9999}
+              disabled={confirming || chargedQuantity >= 9999}
               aria-label="Aumentar cantidad"
-              onClick={() => setQuantity((q) => Math.min(9999, q + 1))}
+              onClick={() =>
+                setQuantity((q) => {
+                  if (boxSize > 0) {
+                    return Math.min(9999, snapQuantityToBoxMeters(q + boxSize, boxSize));
+                  }
+                  return Math.min(9999, q + 1);
+                })
+              }
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -411,6 +440,12 @@ export function StoreProductCustomizePanel({
             Agregar
           </Button>
         </div>
+
+        {boxSize > 0 ? (
+          <p className="text-xs text-center text-muted-foreground leading-snug">
+            Este producto se vende por caja, y cada caja contiene {boxSize} metros.
+          </p>
+        ) : null}
 
         <Button
           type="button"

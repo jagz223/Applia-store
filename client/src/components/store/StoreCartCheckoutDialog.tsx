@@ -10,6 +10,10 @@ import {
   buildCasheaWhatsAppOrderMessage,
   CASHEA_WHATSAPP_REDIRECT_NOTICE,
 } from "@shared/store-cashea";
+import {
+  buildImportWhatsAppOrderMessage,
+  IMPORT_WHATSAPP_REDIRECT_NOTICE,
+} from "@shared/store-import-catalog";
 
 import { buildStoreWhatsappUrl } from "@shared/store-whatsapp";
 
@@ -59,7 +63,10 @@ import type { PickedLocation } from "@/components/taxi/SingleLocationPicker";
 
 import { uploadStoreCheckoutProofImage } from "@/lib/firebase-client";
 
-import { revokeBlobPreview } from "@/lib/store-image-draft";
+import {
+  revokeBlobPreview,
+  type StoreImageDraft,
+} from "@/lib/store-image-draft";
 
 import { useToast } from "@/hooks/use-toast";
 
@@ -131,10 +138,14 @@ function missingFieldsMessage(fields: string[]): string {
 
 
 
-function hasProofValue(proofPreviewUrl: string | null, pendingProofFile: File | null): boolean {
-
-  return Boolean(pendingProofFile || proofPreviewUrl?.trim());
-
+function hasProofValue(draft: StoreImageDraft | null): boolean {
+  if (!draft) return false;
+  return Boolean(
+    draft.pendingDisplayFile ||
+      draft.pendingOriginalFile ||
+      (draft.previewUrl?.trim() && !draft.previewUrl.startsWith("blob:")) ||
+      draft.savedDisplayUrl?.trim(),
+  );
 }
 
 
@@ -261,18 +272,15 @@ export function StoreCartCheckoutDialog({
 
   const { user } = useAuth();
 
-  const submitMutation = useSubmitStoreCheckout(storeId);
-
-
+  const isImportCatalog = cart.cartKind === "import";
+  const submitMutation = useSubmitStoreCheckout(storeId, cart.cartKind ?? "retail");
 
   const [reference, setReference] = useState("");
 
   const [amountPaid, setAmountPaid] = useState("");
   const [customerNote, setCustomerNote] = useState("");
 
-  const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
-
-  const [pendingProofFile, setPendingProofFile] = useState<File | null>(null);
+  const [proofDraft, setProofDraft] = useState<StoreImageDraft | null>(null);
 
   const [paymentMethodId, setPaymentMethodId] = useState<string>("");
 
@@ -286,7 +294,12 @@ export function StoreCartCheckoutDialog({
 
   const [formFeedback, setFormFeedback] = useState<FormFeedback | null>(null);
   const [casheaRedirectOpen, setCasheaRedirectOpen] = useState(false);
+  const [localSubmitting, setLocalSubmitting] = useState(false);
   const formFeedbackRef = useRef<HTMLDivElement>(null);
+  /** Bloqueo síncrono: el botón no espera a isPending (upload de comprobante). */
+  const submittingRef = useRef(false);
+  /** Misma clave en reintentos del mismo intento de compra (abre diálogo = nuevo intento). */
+  const idempotencyKeyRef = useRef<string>("");
 
 
 
@@ -339,7 +352,7 @@ export function StoreCartCheckoutDialog({
   const isCasheaSelected = Boolean(selectedPaymentMethod?.isCashea);
   const selectedGatewayKind = parseStorePaymentGatewayKind(selectedPaymentMethod?.gatewayKind);
   const isGatewaySelected = selectedGatewayKind != null;
-  const skipProof = isCasheaSelected || isGatewaySelected;
+  const skipProof = isImportCatalog || isCasheaSelected || isGatewaySelected;
   /** Stripe/PayPal: sin conversión Bs. Resto de métodos (transferencia, Cashea, dLocal, etc.): sí. */
   const showBsConversion =
     selectedGatewayKind !== "stripe" && selectedGatewayKind !== "paypal";
@@ -397,14 +410,19 @@ export function StoreCartCheckoutDialog({
 
     if (!open) return;
 
+    idempotencyKeyRef.current =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `checkout-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    submittingRef.current = false;
+    setLocalSubmitting(false);
+
     setReference("");
 
     setAmountPaid("");
     setCustomerNote("");
 
-    setProofPreviewUrl(null);
-
-    setPendingProofFile(null);
+    setProofDraft(null);
 
     setPaymentMethodId(
 
@@ -433,11 +451,11 @@ export function StoreCartCheckoutDialog({
 
 
   function handleClose(next: boolean) {
+    if (!next && submittingRef.current) return;
 
-    if (!next && proofPreviewUrl?.startsWith("blob:")) {
-
-      revokeBlobPreview(proofPreviewUrl);
-
+    if (!next && proofDraft) {
+      revokeBlobPreview(proofDraft.previewUrl);
+      revokeBlobPreview(proofDraft.originalPreviewUrl);
     }
 
     onOpenChange(next);
@@ -446,28 +464,21 @@ export function StoreCartCheckoutDialog({
 
 
 
-  function handleProofChange(url: string | null, file?: File | null) {
-
+  function handleProofDraftChange(next: StoreImageDraft | null) {
     clearFormFeedback();
-
-    setProofPreviewUrl(url);
-
-    setPendingProofFile(file ?? null);
-
+    setProofDraft(next);
   }
 
 
 
   async function resolveProofUrl(): Promise<string | null> {
-
-    if (pendingProofFile) {
-
-      return uploadStoreCheckoutProofImage(storeId, pendingProofFile);
-
+    if (!proofDraft) return null;
+    if (proofDraft.pendingDisplayFile || proofDraft.pendingOriginalFile) {
+      const file = proofDraft.pendingDisplayFile ?? proofDraft.pendingOriginalFile!;
+      return uploadStoreCheckoutProofImage(storeId, file);
     }
-
-    return proofPreviewUrl?.trim() || null;
-
+    const url = (proofDraft.savedDisplayUrl ?? proofDraft.previewUrl)?.trim();
+    return url && !url.startsWith("blob:") ? url : null;
   }
 
 
@@ -485,13 +496,13 @@ export function StoreCartCheckoutDialog({
 
 
 
-  function openCasheaWhatsApp() {
+  function openWhatsAppOrder(kind: "cashea" | "import") {
     const fulfillmentOption = cart.fulfillmentOptions.find((o) => o.mode === fulfillmentMode);
     const selectedBranch = isDelivery
       ? nearestDeliveryBranch
       : locatedBranches.find((b) => b.id === branchId) ?? locatedBranches[0] ?? null;
 
-    const message = buildCasheaWhatsAppOrderMessage({
+    const payload = {
       storeName: cart.storeName?.trim() || "Tienda",
       customerName: customerDisplayName(),
       customerEmail: user?.email ?? null,
@@ -517,7 +528,11 @@ export function StoreCartCheckoutDialog({
       subtotal: cart.subtotal,
       deliveryFee: isDelivery ? estimatedDeliveryFee : null,
       total: storePaymentDue,
-    });
+    };
+    const message =
+      kind === "import"
+        ? buildImportWhatsAppOrderMessage(payload)
+        : buildCasheaWhatsAppOrderMessage(payload);
 
     const url = buildStoreWhatsappUrl(cart.whatsappPhone, message);
     if (!url) {
@@ -535,7 +550,10 @@ export function StoreCartCheckoutDialog({
     handleClose(false);
     toast({
       title: "Pedido enviado por WhatsApp",
-      description: "Continúa el pago con Cashea en el chat de la tienda.",
+      description:
+        kind === "import"
+          ? "Continúa la importación en el chat de la tienda."
+          : "Continúa el pago con Cashea en el chat de la tienda.",
     });
   }
 
@@ -544,6 +562,8 @@ export function StoreCartCheckoutDialog({
   async function handleSubmit(e: React.FormEvent) {
 
     e.preventDefault();
+
+    if (submittingRef.current || submitMutation.isPending) return;
 
 
 
@@ -558,22 +578,18 @@ export function StoreCartCheckoutDialog({
 
       if (!Number.isFinite(paid) || paid <= 0) missing.push("Monto pagado");
 
-      if (!hasProofValue(proofPreviewUrl, pendingProofFile)) missing.push("Comprobante de pago");
+      if (!hasProofValue(proofDraft)) missing.push("Comprobante de pago");
     }
 
 
 
-    if (cart.paymentMethods.length === 0) {
-
-      missing.push("Método de pago");
-
-    } else if (!effectivePaymentMethodId) {
-
-      missing.push("Método de pago");
-
+    if (!isImportCatalog) {
+      if (cart.paymentMethods.length === 0) {
+        missing.push("Método de pago");
+      } else if (!effectivePaymentMethodId) {
+        missing.push("Método de pago");
+      }
     }
-
-
 
     if (cart.fulfillmentOptions.length > 0 && !fulfillmentMode) {
 
@@ -629,15 +645,25 @@ export function StoreCartCheckoutDialog({
 
     try {
 
-      if (isCasheaSelected) {
+      if (isImportCatalog || isCasheaSelected) {
         clearFormFeedback();
         setCasheaRedirectOpen(true);
         return;
       }
 
+      submittingRef.current = true;
+      setLocalSubmitting(true);
       clearFormFeedback();
 
+      if (!idempotencyKeyRef.current) {
+        idempotencyKeyRef.current =
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `checkout-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
+
       const result = await submitMutation.mutateAsync({
+        idempotencyKey: idempotencyKeyRef.current,
         reference: skipProof ? "" : reference.trim(),
         proofImageUrl: skipProof ? "" : (await resolveProofUrl()) ?? "",
         amountPaid: skipProof ? undefined : Number.parseFloat(amountPaid.replace(",", ".")),
@@ -671,7 +697,10 @@ export function StoreCartCheckoutDialog({
 
 
 
-      if (proofPreviewUrl?.startsWith("blob:")) revokeBlobPreview(proofPreviewUrl);
+      if (proofDraft) {
+        revokeBlobPreview(proofDraft.previewUrl);
+        revokeBlobPreview(proofDraft.originalPreviewUrl);
+      }
 
       if (result.checkoutUrl) {
         if (
@@ -710,6 +739,8 @@ export function StoreCartCheckoutDialog({
       }
 
       const newOrderId = result.order?.id;
+      submittingRef.current = false;
+      setLocalSubmitting(false);
       handleClose(false);
       if (newOrderId != null) onCheckoutSuccess?.(newOrderId);
 
@@ -723,13 +754,16 @@ export function StoreCartCheckoutDialog({
 
       });
 
+    } finally {
+      submittingRef.current = false;
+      setLocalSubmitting(false);
     }
 
   }
 
 
 
-  const saving = submitMutation.isPending;
+  const saving = localSubmitting || submitMutation.isPending;
 
 
 
@@ -755,11 +789,13 @@ export function StoreCartCheckoutDialog({
             Confirmar compra
           </DialogTitle>
           <DialogDescription className="text-sm leading-snug">
-            {isCasheaSelected
-              ? "Elige entrega y confirma para continuar por WhatsApp con Cashea."
-              : isGatewaySelected
-                ? `Elige entrega y confirma: te redirigimos a ${STORE_PAYMENT_GATEWAY_LABELS[selectedGatewayKind]}. El pedido se crea cuando el pago se confirme.`
-                : "Elige entrega, pago y adjunta el comprobante."}
+            {isImportCatalog
+              ? "Elige entrega y confirma para continuar la importación por WhatsApp."
+              : isCasheaSelected
+                ? "Elige entrega y confirma para continuar por WhatsApp con Cashea."
+                : isGatewaySelected
+                  ? `Elige entrega y confirma: te redirigimos a ${STORE_PAYMENT_GATEWAY_LABELS[selectedGatewayKind]}. El pedido se crea cuando el pago se confirme.`
+                  : "Elige entrega, pago y adjunta el comprobante."}
           </DialogDescription>
         </DialogHeader>
 
@@ -827,13 +863,25 @@ export function StoreCartCheckoutDialog({
 
             <div className="space-y-3 rounded-2xl border border-border/70 bg-card p-3.5 sm:space-y-4 sm:p-4">
               <div>
-                <h3 className="text-sm font-semibold">Método de pago</h3>
+                <h3 className="text-sm font-semibold">
+                  {isImportCatalog ? "Importar" : "Método de pago"}
+                </h3>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Elige cómo vas a pagar.
+                  {isImportCatalog
+                    ? "Este pedido se gestiona por WhatsApp como solicitud de importación."
+                    : "Elige cómo vas a pagar."}
                 </p>
               </div>
 
-              {cart.paymentMethods.length === 0 ? (
+              {isImportCatalog ? (
+                <div className="rounded-xl border border-border/70 bg-muted/20 px-3 py-3 text-sm">
+                  <p className="font-medium">Importar</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Al confirmar te redirigimos al WhatsApp de la tienda con el detalle del pedido.
+                    No se crea orden en el sistema.
+                  </p>
+                </div>
+              ) : cart.paymentMethods.length === 0 ? (
                 <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
                   Esta tienda aún no tiene métodos de pago registrados.
                 </p>
@@ -1070,9 +1118,10 @@ export function StoreCartCheckoutDialog({
 
               <StoreCoverPhotoPicker
                 label="Comprobante de pago"
-                previewUrl={proofPreviewUrl}
+                draft={proofDraft}
                 disabled={saving}
-                onPreviewChange={handleProofChange}
+                enableFrameCrop={false}
+                onDraftChange={handleProofDraftChange}
               />
             </div>
             ) : null}
@@ -1178,13 +1227,19 @@ export function StoreCartCheckoutDialog({
               </Button>
               <Button
                 type="submit"
-                disabled={saving || cart.paymentMethods.length === 0 || !effectivePaymentMethodId}
+                disabled={
+                  saving ||
+                  (!isImportCatalog &&
+                    (cart.paymentMethods.length === 0 || !effectivePaymentMethodId))
+                }
                 className="h-11 rounded-full font-semibold sm:min-w-[10rem]"
               >
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {isGatewaySelected
-                  ? `Pagar con ${STORE_PAYMENT_GATEWAY_LABELS[selectedGatewayKind]}`
-                  : "Confirmar compra"}
+                {isImportCatalog
+                  ? "Continuar importación"
+                  : isGatewaySelected
+                    ? `Pagar con ${STORE_PAYMENT_GATEWAY_LABELS[selectedGatewayKind]}`
+                    : "Confirmar compra"}
               </Button>
             </div>
           </DialogFooter>
@@ -1206,7 +1261,9 @@ export function StoreCartCheckoutDialog({
                 <div className="space-y-1">
                   <DialogTitle className="text-base">Continuar por WhatsApp</DialogTitle>
                   <DialogDescription className="text-sm leading-relaxed">
-                    {CASHEA_WHATSAPP_REDIRECT_NOTICE}
+                    {isImportCatalog
+                      ? IMPORT_WHATSAPP_REDIRECT_NOTICE
+                      : CASHEA_WHATSAPP_REDIRECT_NOTICE}
                   </DialogDescription>
                 </div>
               </div>
@@ -1218,7 +1275,7 @@ export function StoreCartCheckoutDialog({
               <Button
                 onClick={(e) => {
                   e.preventDefault();
-                  openCasheaWhatsApp();
+                  openWhatsAppOrder(isImportCatalog ? "import" : "cashea");
                 }}
                 className="gap-2"
               >

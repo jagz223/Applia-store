@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { isGuest } from "@/lib/auth-utils";
 import { AlreadyAuthenticatedView } from "@/components/AlreadyAuthenticatedView";
+import { SocialAuthButtons } from "@/components/auth/SocialAuthButtons";
 import { cn } from "@/lib/utils";
 
 const loginSchema = z.object({
@@ -50,14 +51,6 @@ export default function Login() {
           title: "Bienvenido",
           description: `Hola ${fullName}, has iniciado sesión correctamente`,
         });
-        const u = result.user as { recoveryQuestionsConfigured?: boolean };
-        if (u.recoveryQuestionsConfigured !== true) {
-          const redirect = sessionStorage.getItem("postLoginRedirect");
-          const next = redirect && redirect.startsWith("/") ? redirect : "/";
-          if (redirect) sessionStorage.removeItem("postLoginRedirect");
-          setLocation(`/account-recovery/setup?next=${encodeURIComponent(next)}`);
-          return;
-        }
         const redirect = sessionStorage.getItem("postLoginRedirect");
         if (redirect) {
           sessionStorage.removeItem("postLoginRedirect");
@@ -200,6 +193,29 @@ export default function Login() {
                 )}
               </Button>
 
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">O</span>
+                </div>
+              </div>
+              <SocialAuthButtons
+                onSuccess={(result) => {
+                  const redirect = sessionStorage.getItem("postLoginRedirect");
+                  toast({
+                    title: "Bienvenido",
+                    description: `Hola ${String(result.user.name ?? "").trim() || "Usuario"}`,
+                  });
+                  if (redirect) {
+                    sessionStorage.removeItem("postLoginRedirect");
+                    setLocation(redirect);
+                  } else {
+                    setLocation("/");
+                  }
+                }}
+              />
               <div className="space-y-2 pt-1 text-center text-sm text-muted-foreground">
                 <p>
                   <Link

@@ -12,6 +12,27 @@ import {
 import { storeFulfillmentOptionsSchema, type StoreFulfillmentMode } from "./store-fulfillment";
 import { storeRubroIdSchema } from "./store-rubros";
 import { haversineM } from "./maps-route-math";
+import {
+  storeImageAssetSchema,
+  storeImageTransformSchema,
+  type StoreImageAsset,
+  type StoreImageTransform,
+} from "./store-image-asset";
+
+export type { StoreImageAsset, StoreImageTransform } from "./store-image-asset";
+export {
+  DEFAULT_STORE_IMAGE_TRANSFORM,
+  legacyDisplayUrlToStoreImageAsset,
+  normalizeStoreImageAsset,
+  normalizeStoreImageAssets,
+  normalizeStoreImageTransform,
+  resolveSingularStoreImageFields,
+  resolveStoreImageAssetsFromProductInput,
+  storeImageAssetHasOriginal,
+  storeImageAssetsToDisplayUrls,
+  storeImageAssetSchema,
+  storeImageTransformSchema,
+} from "./store-image-asset";
 
 export const storeNameSchema = z.string().trim().min(2, "El nombre debe tener al menos 2 caracteres").max(120);
 
@@ -479,6 +500,8 @@ export type Store = {
   rubro: string | null;
   /** Imagen de portada (catálogo y vitrina). */
   coverImageUrl: string | null;
+  coverImageOriginalUrl: string | null;
+  coverImageTransform: StoreImageTransform | null;
   /** Ubicación física de la sucursal principal (mapa / GPS). */
   location: StoreLocation | null;
   /** Sucursales (la primera es la principal; el resto son extras). */
@@ -513,6 +536,8 @@ export const updateStoreSchema = z.object({
   description: storeDescriptionSchema.nullable().optional(),
   rubro: storeRubroIdSchema.nullable().optional(),
   coverImageUrl: z.string().trim().min(1).max(2000).nullable().optional(),
+  coverImageOriginalUrl: z.string().trim().min(1).max(2000).nullable().optional(),
+  coverImageTransform: storeImageTransformSchema.nullable().optional(),
   location: storeLocationSchema.nullable().optional(),
   branches: z.array(storeBranchSchema).max(STORE_BRANCH_MAX).optional(),
   fulfillmentOptions: storeFulfillmentOptionsSchema.optional(),
@@ -851,11 +876,13 @@ export const insertStoreProductSchema = z.object({
   ingredientAdditionals: z.array(storeProductIngredientAdditionalSchema).optional().default([]),
   imageUrls: z
     .array(z.string().trim().min(1).max(2000))
-    .max(2) // principal + segunda imagen (STORE_PRODUCT_MAX_IMAGES)
+    .max(2)
     .optional()
     .default([]),
-  /** Si el producto aparece en la vitrina pública de la tienda. */
+  imageAssets: z.array(storeImageAssetSchema).max(2).optional().default([]),
   showOnShowcase: z.boolean().optional().default(true),
+  /** Producto bajo pedido de importación; vive en el catálogo/carrito «para importar». */
+  isToImport: z.boolean().optional().default(false),
   /**
    * Si true, el inventario (`stock`) limita vitrina y venta.
    * Si false, `stock` se ignora.
@@ -870,6 +897,10 @@ export const insertStoreProductSchema = z.object({
   hasWeight: z.boolean().optional().default(false),
   /** Peso en kg cuando el producto no tiene tamaños. 0 si hasWeight es false. */
   weight: z.number().min(0).max(100_000).optional().default(0),
+  /** Si está activo, el producto declara un tamaño/rendimiento por caja. */
+  hasBoxSize: z.boolean().optional().default(false),
+  /** Tamaño por caja (p. ej. m²/caja). 0 si hasBoxSize es false. */
+  boxSize: z.number().min(0).max(1_000_000).optional().default(0),
 });
 
 export type InsertStoreProduct = z.infer<typeof insertStoreProductSchema>;
@@ -896,15 +927,69 @@ export type StoreProduct = {
   removableIngredientMaterialIds: number[];
   ingredientAdditionals: StoreProductIngredientAdditional[];
   imageUrls: string[];
+  imageAssets: StoreImageAsset[];
   showOnShowcase: boolean;
+  isToImport: boolean;
   hasStock: boolean;
   /** Unidades; relevante solo si hasStock. Vacío en UI = 0 cuando hasStock. */
   stock: number;
   hasWeight: boolean;
   weight: number;
+  hasBoxSize: boolean;
+  /** Tamaño/rendimiento por caja; relevante solo si hasBoxSize. */
+  boxSize: number;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
+
+export const STORE_PRODUCT_CATALOG_KINDS = ["retail", "import"] as const;
+export type StoreProductCatalogKind = (typeof STORE_PRODUCT_CATALOG_KINDS)[number];
+
+export function parseStoreProductCatalogKind(raw: unknown): StoreProductCatalogKind {
+  return String(raw ?? "").trim().toLowerCase() === "import" ? "import" : "retail";
+}
+
+export function storeProductMatchesCatalogKind(
+  product: Pick<StoreProduct, "isToImport">,
+  catalogKind: StoreProductCatalogKind,
+): boolean {
+  const isImport = product.isToImport === true;
+  return catalogKind === "import" ? isImport : !isImport;
+}
+
+export function resolveStoreProductBoxSizeFields(input: {
+  hasBoxSize?: boolean | null;
+  boxSize?: unknown;
+}): { hasBoxSize: boolean; boxSize: number } {
+  const hasBoxSize = input.hasBoxSize === true;
+  if (!hasBoxSize) return { hasBoxSize: false, boxSize: 0 };
+  const n = Number(input.boxSize);
+  const boxSize =
+    Number.isFinite(n) && n >= 0 ? Math.min(1_000_000, Math.round(n * 1000) / 1000) : 0;
+  return { hasBoxSize: true, boxSize };
+}
+
+/** True si el producto vende por caja (metros/caja > 0). */
+export function productHasEffectiveBoxSize(product: {
+  boxSize?: number | null;
+}): boolean {
+  const n = Number(product.boxSize);
+  return Number.isFinite(n) && n > 0;
+}
+
+/**
+ * Aproxima metros pedidos a múltiplos de caja (ceil).
+ * cajas = ceil(metros / boxSize); metrosCobrado = cajas * boxSize.
+ */
+export function snapQuantityToBoxMeters(quantity: number, boxSize: number): number {
+  const qty = Number(quantity);
+  const size = Number(boxSize);
+  if (!(size > 0) || !Number.isFinite(qty) || qty <= 0) {
+    return Number.isFinite(qty) && qty > 0 ? qty : 0;
+  }
+  const boxes = Math.max(1, Math.ceil(qty / size - 1e-9));
+  return Math.round(boxes * size * 1000) / 1000;
+}
 
 export function normalizeStoreProductCodigo(value: unknown): string | null {
   if (value == null) return null;
@@ -1123,8 +1208,9 @@ export type StorePromotionLineItem = z.infer<typeof storePromotionLineItemSchema
 export const insertStorePromotionSchema = z.object({
   name: z.string().trim().min(1, "El nombre es obligatorio").max(120),
   description: z.string().trim().max(500).optional().nullable(),
-  /** Imagen propia de la promoción (vitrina y admin). */
   imageUrl: z.string().trim().min(1).max(2000).nullable().optional(),
+  imageOriginalUrl: z.string().trim().min(1).max(2000).nullable().optional(),
+  imageTransform: storeImageTransformSchema.nullable().optional(),
   price: z.number().positive("El precio debe ser mayor a cero"),
   items: z
     .array(storePromotionLineItemSchema)
@@ -1147,6 +1233,8 @@ export type StorePromotion = {
   name: string;
   description: string | null;
   imageUrl: string | null;
+  imageOriginalUrl: string | null;
+  imageTransform: StoreImageTransform | null;
   price: number;
   items: StorePromotionLineItem[];
   status: StorePromotionStatus;

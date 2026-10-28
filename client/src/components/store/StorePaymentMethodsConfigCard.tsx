@@ -9,7 +9,12 @@ import {
 } from "@/hooks/use-store-payment-methods";
 import { StoreCoverPhotoPicker } from "@/components/store/StoreCoverPhotoPicker";
 import { uploadStorePaymentMethodImage } from "@/lib/firebase-client";
-import { revokeBlobPreview } from "@/lib/store-image-draft";
+import {
+  resolveStoreImageDraftToAsset,
+  revokeBlobPreview,
+  singularDraftFromSavedFields,
+  type StoreImageDraft,
+} from "@/lib/store-image-draft";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,8 +47,7 @@ type ExtraFieldDraft = { id: string; name: string; value: string };
 
 type PaymentMethodFormState = {
   name: string;
-  imagePreviewUrl: string | null;
-  pendingImageFile: File | null;
+  imageDraft: StoreImageDraft | null;
   extraFields: ExtraFieldDraft[];
   systemKind: StorePaymentGatewayKind | "";
 };
@@ -57,14 +61,17 @@ function newExtraField(): ExtraFieldDraft {
 }
 
 function emptyForm(): PaymentMethodFormState {
-  return { name: "", imagePreviewUrl: null, pendingImageFile: null, extraFields: [], systemKind: "" };
+  return { name: "", imageDraft: null, extraFields: [], systemKind: "" };
 }
 
 function formFromMethod(method: StorePaymentMethodSummary): PaymentMethodFormState {
   return {
     name: method.name,
-    imagePreviewUrl: method.imageUrl,
-    pendingImageFile: null,
+    imageDraft: singularDraftFromSavedFields({
+      displayUrl: method.imageUrl,
+      originalUrl: method.imageOriginalUrl,
+      transform: method.imageTransform,
+    }),
     extraFields: (method.extraFields ?? []).map((f, i) => ({
       id: `extra-${method.id}-${i}`,
       name: f.name,
@@ -104,19 +111,25 @@ function PaymentMethodForm({
     setForm(initial);
   }, [initial, methodId]);
 
-  function handleImageChange(url: string | null, file?: File | null) {
-    setForm((prev) => ({
-      ...prev,
-      imagePreviewUrl: url,
-      pendingImageFile: file ?? null,
-    }));
-  }
-
-  async function resolveImageUrl(): Promise<string | null> {
-    if (form.pendingImageFile) {
-      return uploadStorePaymentMethodImage(storeId, form.pendingImageFile);
+  async function resolveImageFields(): Promise<{
+    imageUrl: string | null;
+    imageOriginalUrl: string | null;
+    imageTransform: StorePaymentMethodSummary["imageTransform"];
+  }> {
+    if (!form.imageDraft) {
+      return { imageUrl: null, imageOriginalUrl: null, imageTransform: null };
     }
-    return form.imagePreviewUrl?.trim() || null;
+    const asset = await resolveStoreImageDraftToAsset(form.imageDraft, (file, variant) =>
+      uploadStorePaymentMethodImage(storeId, file, variant),
+    );
+    if (!asset) {
+      return { imageUrl: null, imageOriginalUrl: null, imageTransform: null };
+    }
+    return {
+      imageUrl: asset.displayUrl,
+      imageOriginalUrl: asset.originalUrl || null,
+      imageTransform: asset.transform,
+    };
   }
 
   function updateExtraField(id: string, patch: Partial<Pick<ExtraFieldDraft, "name" | "value">>) {
@@ -162,23 +175,31 @@ function PaymentMethodForm({
     }
 
     try {
-      const imageUrl = isGateway ? null : await resolveImageUrl();
+      const imageFields = isGateway
+        ? { imageUrl: null, imageOriginalUrl: null, imageTransform: null }
+        : await resolveImageFields();
       const payload = {
         name: trimmedName,
         accountNumber: "",
-        imageUrl,
+        ...imageFields,
         extraFields,
         systemKind: form.systemKind || null,
       };
 
       if (isNew) {
         const created = await createMutation.mutateAsync(payload);
-        if (form.imagePreviewUrl?.startsWith("blob:")) revokeBlobPreview(form.imagePreviewUrl);
+        if (form.imageDraft) {
+          revokeBlobPreview(form.imageDraft.previewUrl);
+          revokeBlobPreview(form.imageDraft.originalPreviewUrl);
+        }
         toast({ title: "Método de pago creado" });
         onSaved(created);
       } else {
         const updated = await updateMutation.mutateAsync({ paymentMethodId: methodId, body: payload });
-        if (form.imagePreviewUrl?.startsWith("blob:")) revokeBlobPreview(form.imagePreviewUrl);
+        if (form.imageDraft) {
+          revokeBlobPreview(form.imageDraft.previewUrl);
+          revokeBlobPreview(form.imageDraft.originalPreviewUrl);
+        }
         toast({ title: "Método de pago actualizado" });
         onSaved(updated);
       }
@@ -195,7 +216,10 @@ function PaymentMethodForm({
     if (methodId == null) return;
     try {
       await deleteMutation.mutateAsync(methodId);
-      if (form.imagePreviewUrl?.startsWith("blob:")) revokeBlobPreview(form.imagePreviewUrl);
+      if (form.imageDraft) {
+        revokeBlobPreview(form.imageDraft.previewUrl);
+        revokeBlobPreview(form.imageDraft.originalPreviewUrl);
+      }
       toast({ title: "Método de pago eliminado" });
       setDeleteOpen(false);
       onDeleted?.();
@@ -335,9 +359,11 @@ function PaymentMethodForm({
 
         <StoreCoverPhotoPicker
           label="Imagen (código QR u otro)"
-          previewUrl={form.imagePreviewUrl}
+          draft={form.imageDraft}
           disabled={saving || deleting}
-          onPreviewChange={handleImageChange}
+          aspectRatio={4 / 3}
+          previewAspectClass="aspect-[4/3]"
+          onDraftChange={(imageDraft) => setForm((prev) => ({ ...prev, imageDraft }))}
         />
           </>
         )}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { storeImageTransformSchema } from "./store-image-asset";
 
 export const storeShowcaseAdKindSchema = z.enum(["banner", "popup"]);
 export type StoreShowcaseAdKind = z.infer<typeof storeShowcaseAdKindSchema>;
@@ -86,6 +87,8 @@ export const storeShowcaseAdItemSchema = z.object({
   storeId: z.number().int().positive(),
   kind: storeShowcaseAdKindSchema,
   imageUrl: z.string().url().optional().nullable(),
+  imageOriginalUrl: z.string().url().optional().nullable(),
+  imageTransform: storeImageTransformSchema.nullable().optional(),
   linkUrl: z.string().url().optional().nullable(),
   sortOrder: z.number().int().nonnegative(),
   categoryVisibilityMode: storeShowcaseBannerCategoryVisibilityModeSchema.default("all"),
@@ -131,6 +134,8 @@ export const insertStoreShowcaseAdItemSchema = z
   .object({
     kind: storeShowcaseAdKindSchema,
     imageUrl: optionalNullableUrl,
+    imageOriginalUrl: optionalNullableUrl,
+    imageTransform: storeImageTransformSchema.nullable().optional(),
     linkUrl: optionalNullableUrl,
     sortOrder: z.number().int().nonnegative().optional(),
     ...bannerVisibilityFields,
@@ -151,6 +156,8 @@ export type InsertStoreShowcaseAdItem = z.infer<typeof insertStoreShowcaseAdItem
 export const updateStoreShowcaseAdItemSchema = z
   .object({
     imageUrl: optionalNullableUrl,
+    imageOriginalUrl: optionalNullableUrl,
+    imageTransform: storeImageTransformSchema.nullable().optional(),
     linkUrl: optionalNullableUrl,
     sortOrder: z.number().int().nonnegative().optional(),
     ...bannerVisibilityFields,

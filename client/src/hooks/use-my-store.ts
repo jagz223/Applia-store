@@ -12,6 +12,8 @@ export type MyStoreSummary = {
   rubro?: string | null;
   rubroLabel?: string | null;
   coverImageUrl?: string | null;
+  coverImageOriginalUrl?: string | null;
+  coverImageTransform?: import("@shared/store-image-asset").StoreImageTransform | null;
   location?: StoreLocation | null;
   branches?: StoreBranch[];
   fulfillmentOptions?: StoreFulfillmentMode[];

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "wouter";
 import { Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,61 +12,40 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import {
-  RecoveryQuestionsForm,
-  type RecoveryAnswerDraft,
-} from "@/components/account-recovery/RecoveryQuestionsForm";
-import { SETTINGS_WRONG_RECOVERY_MSG } from "@shared/account-recovery";
 import { cn } from "@/lib/utils";
 
-const emptyDraft = (): [RecoveryAnswerDraft, RecoveryAnswerDraft, RecoveryAnswerDraft] => [
-  { questionId: "", answer: "" },
-  { questionId: "", answer: "" },
-  { questionId: "", answer: "" },
-];
-
-function resetFormState(
-  setDraft: (v: [RecoveryAnswerDraft, RecoveryAnswerDraft, RecoveryAnswerDraft]) => void,
-  setNewPassword: (v: string) => void,
-  setConfirmPassword: (v: string) => void,
-) {
-  setDraft(emptyDraft());
-  setNewPassword("");
-  setConfirmPassword("");
-}
-
 type SettingsChangePasswordCardProps = {
-  recoveryConfigured: boolean;
   className?: string;
+  emailVerified?: boolean;
+  hasPasswordProvider?: boolean;
 };
 
 const fieldClass =
   "h-11 rounded-2xl border-border/80 bg-muted/40 px-4 shadow-none focus-visible:ring-secondary dark:focus-visible:ring-primary";
 
 export function SettingsChangePasswordCard({
-  recoveryConfigured,
   className,
+  emailVerified = false,
+  hasPasswordProvider = true,
 }: SettingsChangePasswordCardProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(emptyDraft);
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const canSubmit =
-    draft.every((d) => d.questionId && d.answer.trim().length >= 2) &&
-    new Set(draft.map((d) => d.questionId)).size === 3 &&
+    currentPassword.length > 0 &&
     newPassword.length >= 6 &&
     newPassword === confirmPassword;
 
-  const handleOpenChange = (next: boolean) => {
-    if (!next && !loading) {
-      resetFormState(setDraft, setNewPassword, setConfirmPassword);
-    }
-    setOpen(next);
+  const reset = () => {
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
   };
 
   const handleSubmit = async () => {
@@ -75,43 +53,24 @@ export function SettingsChangePasswordCard({
     setLoading(true);
     const token = localStorage.getItem("token");
     try {
-      const res = await fetch("/api/auth/password-with-recovery", {
-        method: "POST",
+      const res = await fetch("/api/auth/password", {
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
-          answers: draft.map((d) => ({ questionId: d.questionId, answer: d.answer.trim() })),
-          newPassword,
-          confirmPassword,
-        }),
+        body: JSON.stringify({ currentPassword, newPassword }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 401) {
-          setDraft(emptyDraft());
-          toast({
-            variant: "destructive",
-            title: "No coincide",
-            description: SETTINGS_WRONG_RECOVERY_MSG,
-          });
-          return;
-        }
-        throw new Error(data.message || "No se pudo actualizar la contraseña");
-      }
-      resetFormState(setDraft, setNewPassword, setConfirmPassword);
+      if (!res.ok) throw new Error((data as { message?: string }).message || "No se pudo actualizar");
+      reset();
       setOpen(false);
-      toast({
-        title: "Listo",
-        description: "Tu contraseña quedó actualizada.",
-      });
+      toast({ title: "Listo", description: "Tu contraseña quedó actualizada." });
     } catch (e: unknown) {
       toast({
         variant: "destructive",
         title: "No se pudo cambiar",
-        description:
-          e instanceof Error ? e.message : "Revisa la nueva contraseña e inténtalo de nuevo.",
+        description: e instanceof Error ? e.message : "Error desconocido",
       });
     } finally {
       setLoading(false);
@@ -119,124 +78,104 @@ export function SettingsChangePasswordCard({
   };
 
   return (
-    <>
-      <section
-        className={cn(
-          "rounded-[1.5rem] border border-border/70 bg-card/90 p-5 shadow-sm backdrop-blur-sm",
-          className,
-        )}
-      >
-        <div className="mb-4 flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-secondary text-secondary-foreground dark:bg-primary dark:text-primary-foreground">
-            <KeyRound className="h-4 w-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <h2 className="font-display text-base font-bold tracking-tight text-foreground">Contraseña</h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Para cambiarla, confirma con tus preguntas de seguridad.
-            </p>
-          </div>
+    <div className={cn("rounded-2xl border border-border/70 bg-card p-4", className)}>
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+          <KeyRound className="h-5 w-5" />
         </div>
-        {!recoveryConfigured ? (
-          <p className="rounded-2xl border border-dashed border-border/80 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
-            Primero arma tus{" "}
-            <Link
-              href="/account-recovery/setup?next=/settings"
-              className="font-semibold text-secondary underline-offset-4 hover:underline dark:text-primary"
-            >
-              preguntas de seguridad
-            </Link>
-            . Después podrás renovar la clave desde aquí.
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">Contraseña</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {!hasPasswordProvider
+              ? "Tu cuenta usa Google o Facebook. No hay contraseña local."
+              : emailVerified
+                ? "Cambia tu contraseña con la actual, o usa recuperar por correo."
+                : "Confirma tu correo para poder recuperarla por email si la olvidas."}
           </p>
-        ) : (
-          <Button type="button" className="h-10 rounded-full px-5 font-semibold" onClick={() => setOpen(true)}>
-            Cambiar contraseña
-          </Button>
-        )}
-      </section>
-
-      <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="flex max-h-[min(90vh,720px)] max-w-lg flex-col gap-0 rounded-[1.5rem] p-0">
-          <DialogHeader className="shrink-0 border-b border-border/60 px-6 py-4">
-            <DialogTitle className="font-display">Nueva contraseña</DialogTitle>
-            <DialogDescription>
-              Responde tus 3 preguntas y escribe la clave nueva (mínimo 6 caracteres).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
-            <RecoveryQuestionsForm value={draft} onChange={setDraft} disabled={loading} />
-            <div className="grid gap-3 border-t border-border/60 pt-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Nueva contraseña</Label>
-                <div className="relative">
-                  <Input
-                    type={showNew ? "text" : "password"}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    autoComplete="new-password"
-                    disabled={loading}
-                    className={cn(fieldClass, "pr-11")}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full hover:bg-transparent"
-                    onClick={() => setShowNew(!showNew)}
-                    tabIndex={-1}
-                  >
-                    {showNew ? (
-                      <EyeOff className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <Eye className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Confirmar</Label>
-                <div className="relative">
-                  <Input
-                    type={showConfirm ? "text" : "password"}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    autoComplete="new-password"
-                    disabled={loading}
-                    className={cn(fieldClass, "pr-11")}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full hover:bg-transparent"
-                    onClick={() => setShowConfirm(!showConfirm)}
-                    tabIndex={-1}
-                  >
-                    {showConfirm ? (
-                      <EyeOff className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <Eye className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="shrink-0 gap-2 border-t border-border/60 px-6 py-4 sm:gap-0">
+          {hasPasswordProvider ? (
             <Button
               type="button"
               variant="outline"
-              className="rounded-full"
-              onClick={() => handleOpenChange(false)}
-              disabled={loading}
+              className="mt-3 rounded-full"
+              onClick={() => setOpen(true)}
             >
+              Cambiar contraseña
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next && !loading) reset();
+          setOpen(next);
+        }}
+      >
+        <DialogContent className="rounded-2xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cambiar contraseña</DialogTitle>
+            <DialogDescription>Introduce tu contraseña actual y la nueva.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="current-password">Contraseña actual</Label>
+              <div className="relative">
+                <Input
+                  id="current-password"
+                  type={showCurrent ? "text" : "password"}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className={fieldClass}
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  onClick={() => setShowCurrent((v) => !v)}
+                >
+                  {showCurrent ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-password">Nueva</Label>
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showNew ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className={fieldClass}
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  onClick={() => setShowNew((v) => !v)}
+                >
+                  {showNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password">Confirmar</Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className={fieldClass}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" className="rounded-full" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
             <Button
               type="button"
-              className="rounded-full font-semibold"
-              onClick={handleSubmit}
+              className="rounded-full"
               disabled={!canSubmit || loading}
+              onClick={() => void handleSubmit()}
             >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Guardar
@@ -244,6 +183,6 @@ export function SettingsChangePasswordCard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

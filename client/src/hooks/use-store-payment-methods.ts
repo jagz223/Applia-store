@@ -11,6 +11,8 @@ export type StorePaymentMethodSummary = {
   accountNumber: string;
   extraFields?: Array<{ name: string; value: string }>;
   imageUrl: string | null;
+  imageOriginalUrl?: string | null;
+  imageTransform?: import("@shared/store-image-asset").StoreImageTransform | null;
   systemKind?: string | null;
   createdAt: string;
   updatedAt: string;

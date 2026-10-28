@@ -126,6 +126,16 @@ export type StoreOrderLineItem = z.infer<typeof storeOrderLineItemSchema>;
 export const submitStoreCheckoutSchema = z
 
   .object({
+    /**
+     * Clave del intento de compra (cliente, preferible UUID).
+     * Reintentos del mismo intento deben reutilizar la misma clave.
+     */
+    idempotencyKey: z
+      .string()
+      .trim()
+      .min(16, "Clave de idempotencia inválida")
+      .max(80, "Clave de idempotencia inválida")
+      .optional(),
 
     paymentMethodId: z.number().int().positive(),
 

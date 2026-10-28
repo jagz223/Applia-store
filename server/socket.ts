@@ -10,6 +10,7 @@ import {
   clearUserGoPresence,
   updateUserGoPresence,
 } from "./go-user-presence";
+import { resolveAllowedSocketOrigins } from "./security/request-rate-limit";
 
 const JWT_SECRET = process.env.JWT_SECRET || "applia-jwt-secret-key-2024";
 
@@ -30,10 +31,9 @@ export function getIO(): SocketIOServer | null {
 export function initializeSocket(httpServer: HttpServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: "*",
+      origin: resolveAllowedSocketOrigins(),
       methods: ["GET", "POST"],
     },
-    // Render y proxies suelen cerrar conexiones inactivas antes que el default de Socket.IO.
     pingInterval: 25_000,
     pingTimeout: 60_000,
   });

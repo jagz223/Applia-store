@@ -24,6 +24,8 @@ export function useUpdateStore(storeId: number, slug: string) {
       const data = (await res.json()) as {
         store: {
           coverImageUrl?: string | null;
+          coverImageOriginalUrl?: string | null;
+          coverImageTransform?: import("@shared/store-image-asset").StoreImageTransform | null;
           name?: string;
           description?: string | null;
           rubro?: string | null;
@@ -42,6 +44,7 @@ export function useUpdateStore(storeId: number, slug: string) {
       void qc.invalidateQueries({ queryKey: ["/api/stores", slug] });
       void qc.invalidateQueries({ queryKey: ["/api/stores"] });
       void qc.invalidateQueries({ queryKey: ["/api/stores", slug, "showcase-products"] });
+      void qc.invalidateQueries({ queryKey: ["/api/stores", slug, "showcase-meta"] });
     },
   });
 }

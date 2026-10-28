@@ -52,12 +52,14 @@ import {
 } from "./store-subscription-payments";
 import {
   assertStoreCategoryIds,
+  buildProductIdsByCategoryId,
   productIdsForCategory,
   removeCategoryFromAllProducts,
   syncCategoryProductMembership,
 } from "./store-category-sync";
 import {
   assertStoreSubcategoryIds,
+  buildProductIdsBySubcategoryId,
   createSubcategoriesForCategory,
   deleteSubcategoriesForCategory,
   productIdsForSubcategory,
@@ -120,6 +122,10 @@ import {
   storeProductHasAvailableStock,
   storeProductHasShowcaseImage,
   compareProductsByCategorySortOrder,
+  productHasEffectiveBoxSize,
+  parseStoreProductCatalogKind,
+  storeProductMatchesCatalogKind,
+  type StoreProductCatalogKind,
 } from "@shared/store-schema";
 import {
   isDeliveryLocationInBranchPerimeter,
@@ -154,8 +160,12 @@ import {
   type ProductImportColumnMap,
   type ProductImportRow,
 } from "./store-product-import";
-import { listStoreProductsCached } from "./store-catalog-read";
-import { getCachedStoreProducts } from "./store-catalog-cache";
+import {
+  getStoreBySlugCached,
+  getStoreCatalogBundleCached,
+  listStoreProductsCached,
+} from "./store-catalog-read";
+import { getCachedStoreProducts, invalidateStoreBySlugCache } from "./store-catalog-cache";
 import { buildStoreStaffDirectory } from "./store-staff-directory";
 import {
   appendStoreBranchTransferSystemMessage,
@@ -206,6 +216,7 @@ import {
   pruneAndSaveCart,
   removeCartItem,
   setCartItemQuantity,
+  snapCartItemsToBoxSize,
   validateCartFulfillmentForStore,
   validateCartItemForStore,
   validateCheckoutFulfillment,
@@ -217,6 +228,19 @@ import {
   storeGatewayNotConfiguredMessage,
 } from "./store-payment-checkout";
 import { createStorePendingCheckout } from "./store-pending-checkout";
+import {
+  beginCheckoutIdempotency,
+  completeCheckoutIdempotency,
+  consumeStoreCartAtomic,
+  failCheckoutIdempotency,
+  getCompletedCheckoutIdempotency,
+} from "./store-checkout-idempotency";
+import {
+  assertStoreCheckoutCooldown,
+  markStoreCheckoutCooldown,
+  StoreCheckoutCooldownError,
+  storeCheckoutCooldownMessage,
+} from "./store-checkout-cooldown";
 
 import { buildStoreStats } from "./store-stats";
 
@@ -264,6 +288,19 @@ function serializeDate(value: Date | string | number | null | undefined | unknow
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
 
+function isStoreBoxSizeEnabledEnv(): boolean {
+  return String(process.env.VITE_STORE_BOX_SIZE_ENABLED ?? "").trim().toLowerCase() === "true";
+}
+
+function parseCartKindFromRequest(req: {
+  query?: unknown;
+  body?: unknown;
+}): StoreProductCatalogKind {
+  const q = req.query as Record<string, unknown> | undefined;
+  const b = req.body as Record<string, unknown> | undefined;
+  return parseStoreProductCatalogKind(b?.cartKind ?? q?.cartKind ?? q?.catalog);
+}
+
 function serializeStoreProduct(
   product: StoreProduct,
   storeCurrency?: { visualCurrencyId?: string; currencyExtras?: { id: string; name: string; value: string }[] },
@@ -306,11 +343,69 @@ function serializeStoreProduct(
     removableIngredientMaterialIds: product.removableIngredientMaterialIds ?? [],
     ingredientAdditionals: product.ingredientAdditionals ?? [],
     imageUrls: product.imageUrls ?? [],
+    imageAssets: product.imageAssets ?? [],
     showOnShowcase: product.showOnShowcase !== false,
+    isToImport: product.isToImport === true,
     hasStock: product.hasStock === true,
     stock: product.hasStock === true ? product.stock ?? 0 : product.stock ?? 0,
     hasWeight: product.hasWeight === true,
     weight: product.hasWeight === true ? product.weight ?? 0 : 0,
+    hasBoxSize: product.hasBoxSize === true,
+    boxSize: product.hasBoxSize === true ? product.boxSize ?? 0 : 0,
+    createdAt: serializeDate(product.createdAt),
+    updatedAt: serializeDate(product.updatedAt),
+  };
+}
+
+function serializeStoreProductListItem(
+  product: StoreProduct,
+  storeCurrency?: { visualCurrencyId?: string; currencyExtras?: { id: string; name: string; value: string }[] },
+) {
+  const visualCurrencyId = storeCurrency?.visualCurrencyId ?? STORE_CURRENCY_USD_ID;
+  const displayPrice = resolveProductDisplayPrice(product, visualCurrencyId);
+  const sizes = product.sizes ?? [];
+  return {
+    id: product.id,
+    storeId: product.storeId,
+    name: product.name,
+    description: product.description?.trim() || null,
+    codigo: product.codigo?.trim() || null,
+    price: displayPrice,
+    priceWithIva: priceWithIva(displayPrice),
+    pricesByCurrency: product.pricesByCurrency ?? {},
+    sizes: sizes.map((s) => {
+      const sizePrice = resolveProductDisplayPrice(
+        { price: 0, pricesByCurrency: s.pricesByCurrency },
+        visualCurrencyId,
+      );
+      return {
+        id: s.id,
+        name: s.name,
+        pricesByCurrency: s.pricesByCurrency ?? {},
+        price: sizePrice,
+        priceWithIva: priceWithIva(sizePrice),
+        weight: s.weight ?? 0,
+      };
+    }),
+    displayCurrencyId: visualCurrencyId,
+    displayCurrencyLabel: currencyLabelForId(
+      visualCurrencyId,
+      storeCurrency?.currencyExtras ?? [],
+    ),
+    categoryIds: product.categoryIds,
+    subcategoryIds: product.subcategoryIds ?? [],
+    ingredientMaterialIds: product.ingredientMaterialIds ?? [],
+    removableIngredientMaterialIds: product.removableIngredientMaterialIds ?? [],
+    ingredientAdditionals: product.ingredientAdditionals ?? [],
+    imageUrls: product.imageUrls ?? [],
+    showOnShowcase: product.showOnShowcase !== false,
+    isToImport: product.isToImport === true,
+    hasStock: product.hasStock === true,
+    stock: product.hasStock === true ? product.stock ?? 0 : product.stock ?? 0,
+    hasWeight: product.hasWeight === true,
+    weight: product.hasWeight === true ? product.weight ?? 0 : 0,
+    hasBoxSize: product.hasBoxSize === true,
+    boxSize: product.hasBoxSize === true ? product.boxSize ?? 0 : 0,
     createdAt: serializeDate(product.createdAt),
     updatedAt: serializeDate(product.updatedAt),
   };
@@ -334,9 +429,15 @@ function serializeStoreCategoryLite(category: StoreCategory) {
 function serializeStoreCategory(
   category: StoreCategory,
   products: StoreProduct[],
-  options?: { includeProductIds?: boolean; includeProductSummaries?: boolean },
+  options?: {
+    includeProductIds?: boolean;
+    includeProductSummaries?: boolean;
+    productIdsByCategoryId?: Map<number, number[]>;
+  },
 ) {
-  const ids = productIdsForCategory(products, category.id);
+  const ids =
+    options?.productIdsByCategoryId?.get(category.id) ??
+    productIdsForCategory(products, category.id);
   const includeProductIds = options?.includeProductIds !== false;
   const nameById = options?.includeProductSummaries
     ? new Map(products.map((p) => [p.id, p.name]))
@@ -380,8 +481,11 @@ function serializeStoreSubcategory(
   subcategory: StoreSubcategory,
   products: StoreProduct[],
   categoryNameById?: Map<number, string>,
+  productIdsBySubcategoryId?: Map<number, number[]>,
 ) {
-  const ids = productIdsForSubcategory(products, subcategory.id);
+  const ids =
+    productIdsBySubcategoryId?.get(subcategory.id) ??
+    productIdsForSubcategory(products, subcategory.id);
   return {
     id: subcategory.id,
     storeId: subcategory.storeId,
@@ -449,6 +553,8 @@ function serializeStorePromotion(promotion: StorePromotion, nameById: Map<number
     name: promotion.name,
     description: promotion.description,
     imageUrl: promotion.imageUrl ?? null,
+    imageOriginalUrl: promotion.imageOriginalUrl ?? null,
+    imageTransform: promotion.imageTransform ?? null,
     price: promotion.price,
     status: promotion.status,
     items: promotion.items.map((item) => ({
@@ -535,6 +641,7 @@ function serializeStoreShowcaseProduct(
         ]),
       ),
     })),
+    boxSize: productHasEffectiveBoxSize(product) ? product.boxSize : 0,
   };
 }
 
@@ -544,6 +651,7 @@ function serializeStoreShowcaseProductCard(product: StoreProduct, store: Store) 
     resolveProductDisplayPrice(product, currency.currencyVisualId),
   );
   const description = product.description?.trim() || null;
+  const boxSize = productHasEffectiveBoxSize(product) ? product.boxSize : 0;
   return {
     id: product.id,
     name: product.name,
@@ -553,8 +661,7 @@ function serializeStoreShowcaseProductCard(product: StoreProduct, store: Store) 
     displayCurrencyId: currency.currencyVisualId,
     displayCurrencyLabel: currencyLabelForId(currency.currencyVisualId, currency.currencyExtras),
     imageUrls: (product.imageUrls ?? []).slice(0, 2),
-    categoryIds: product.categoryIds ?? [],
-    subcategoryIds: product.subcategoryIds ?? [],
+    ...(boxSize > 0 ? { boxSize } : {}),
   };
 }
 
@@ -656,6 +763,8 @@ function serializeShowcaseAdItem(item: StoreShowcaseAdItem) {
     storeId: item.storeId,
     kind: item.kind,
     imageUrl: item.imageUrl,
+    imageOriginalUrl: item.imageOriginalUrl ?? null,
+    imageTransform: item.imageTransform ?? null,
     linkUrl: item.linkUrl,
     sortOrder: item.sortOrder,
     categoryVisibilityMode: visibility.categoryVisibilityMode,
@@ -706,6 +815,8 @@ function serializeStorePaymentMethod(method: StorePaymentMethod) {
     accountNumber: method.accountNumber,
     extraFields: method.extraFields ?? [],
     imageUrl: method.imageUrl ?? null,
+    imageOriginalUrl: method.imageOriginalUrl ?? null,
+    imageTransform: method.imageTransform ?? null,
     systemKind: method.systemKind ?? null,
     createdAt: serializeDate(method.createdAt),
     updatedAt: serializeDate(method.updatedAt),
@@ -833,6 +944,8 @@ function serializeStore(
     rubro: store.rubro ?? null,
     rubroLabel: getStoreRubroLabel(store.rubro),
     coverImageUrl: store.coverImageUrl ?? null,
+    coverImageOriginalUrl: store.coverImageOriginalUrl ?? null,
+    coverImageTransform: store.coverImageTransform ?? null,
     location: store.location ?? null,
     branches: normalizeStoreBranches(store.branches, store.location ?? null),
     fulfillmentOptions: normalizeStoreFulfillmentOptions(store.fulfillmentOptions),
@@ -981,7 +1094,18 @@ type AdminProductListFilters = {
   priceMax?: number;
   priceIvaMin?: number;
   priceIvaMax?: number;
+  /** true = solo import; false = solo retail; undefined = todos */
+  isToImport?: boolean;
 };
+
+function parseOptionalBooleanQuery(query: unknown, key: string): boolean | undefined {
+  const raw = (query as Record<string, unknown> | undefined)?.[key];
+  if (raw == null || raw === "") return undefined;
+  const v = String(raw).trim().toLowerCase();
+  if (v === "true" || v === "1") return true;
+  if (v === "false" || v === "0") return false;
+  return undefined;
+}
 
 function parseAdminProductListFilters(query: unknown): AdminProductListFilters {
   return {
@@ -993,6 +1117,7 @@ function parseAdminProductListFilters(query: unknown): AdminProductListFilters {
     priceMax: parseOptionalNonNegativeNumberQuery(query, "priceMax"),
     priceIvaMin: parseOptionalNonNegativeNumberQuery(query, "priceIvaMin"),
     priceIvaMax: parseOptionalNonNegativeNumberQuery(query, "priceIvaMax"),
+    isToImport: parseOptionalBooleanQuery(query, "isToImport"),
   };
 }
 
@@ -1004,6 +1129,7 @@ function filterSerializedStoreProducts<
     priceWithIva: number;
     categoryIds: number[];
     subcategoryIds?: number[];
+    isToImport?: boolean;
   },
 >(items: T[], filters: AdminProductListFilters): T[] {
   return items.filter((item) => {
@@ -1020,6 +1146,35 @@ function filterSerializedStoreProducts<
     if (filters.priceMax != null && item.price > filters.priceMax) return false;
     if (filters.priceIvaMin != null && item.priceWithIva < filters.priceIvaMin) return false;
     if (filters.priceIvaMax != null && item.priceWithIva > filters.priceIvaMax) return false;
+    if (
+      filters.isToImport !== undefined &&
+      (item.isToImport === true) !== filters.isToImport
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function filterShowcaseCatalogProducts(
+  products: StoreProduct[],
+  store: Store,
+  catalogKind: StoreProductCatalogKind,
+): StoreProduct[] {
+  return products.filter((p) => {
+    if (!storeProductMatchesCatalogKind(p, catalogKind)) return false;
+    if (
+      !resolveStoreProductShowOnShowcase({
+        showOnShowcase: p.showOnShowcase,
+        hasStock: p.hasStock,
+        stock: p.stock,
+      })
+    ) {
+      return false;
+    }
+    if (store.showcaseOnlyWithImage === true && !storeProductHasShowcaseImage(p)) {
+      return false;
+    }
     return true;
   });
 }
@@ -1064,12 +1219,13 @@ function serializeIngredientMaterial(item: {
 
 async function respondIngredientsPage(
   res: import("express").Response,
-  options: { q?: string; page: number; limit: number },
+  options: { q?: string; page: number; limit: number; after?: string | null },
 ) {
   const result = await appliaStorage.listIngredientsMaterials({
     q: options.q,
     page: options.page,
     limit: options.limit,
+    after: options.after,
   });
   return res.json({
     items: result.items.map(serializeIngredientMaterial),
@@ -1077,6 +1233,7 @@ async function respondIngredientsPage(
     page: result.page,
     limit: result.limit,
     totalPages: Math.max(1, Math.ceil(result.total / result.limit)),
+    nextAfter: result.nextAfter,
   });
 }
 
@@ -1258,6 +1415,7 @@ export function registerStoreRoutes(app: Express): void {
         myPatch.casheaEnabled = casheaPrep.casheaEnabled;
       }
       const updated = await appliaStorage.updateStore(store.id, myPatch);
+      invalidateStoreBySlugCache(store.id);
       if (myPatch.casheaEnabled !== undefined) {
         await syncStoreCasheaPaymentMethod(appliaStorage, store.id, myPatch.casheaEnabled);
       }
@@ -1354,6 +1512,7 @@ export function registerStoreRoutes(app: Express): void {
         patchBody.casheaEnabled = casheaPrep.casheaEnabled;
       }
       const store = await appliaStorage.updateStore(storeId, patchBody);
+      invalidateStoreBySlugCache(storeId);
       if (patchBody.casheaEnabled !== undefined) {
         await syncStoreCasheaPaymentMethod(appliaStorage, storeId, patchBody.casheaEnabled);
       }
@@ -1434,8 +1593,14 @@ export function registerStoreRoutes(app: Express): void {
         appliaStorage.listStoreCategories(storeId, { persistRenumber: false }),
         listStoreProductsCached(storeId),
       ]);
+      const productIdsByCategoryId = buildProductIdsByCategoryId(products);
       const serialized = filterSerializedListByName(
-        categories.map((c) => serializeStoreCategory(c, products, { includeProductIds: false })),
+        categories.map((c) =>
+          serializeStoreCategory(c, products, {
+            includeProductIds: false,
+            productIdsByCategoryId,
+          }),
+        ),
         nameQuery,
       );
       if (!paginationResult.pagination) {
@@ -2042,10 +2207,11 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const cartKind = parseCartKindFromRequest(req);
 
-      let cart = await appliaStorage.getStoreCart(userId, storeId);
-      if (cart) cart = await pruneAndSaveCart(userId, cart);
-      const payload = await enrichStoreCart(cart, storeId);
+      let cart = await appliaStorage.getStoreCart(userId, storeId, cartKind);
+      if (cart) cart = await pruneAndSaveCart(userId, cart, cartKind);
+      const payload = await enrichStoreCart(cart, storeId, cartKind);
       return res.json({ cart: payload });
     } catch (e: unknown) {
       console.error("[stores] get cart", e);
@@ -2061,6 +2227,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const cartKind = parseCartKindFromRequest(req);
 
       const parsed = addStoreCartItemSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -2071,12 +2238,25 @@ export function registerStoreRoutes(app: Express): void {
       }
 
       const incoming = addBodyToCartItem(parsed.data);
-      await validateCartItemForStore(storeId, incoming);
+      await validateCartItemForStore(storeId, incoming, cartKind);
 
-      const existing = (await appliaStorage.getStoreCart(userId, storeId))?.items ?? [];
-      const nextItems = mergeAddCartItem(existing, incoming);
-      const saved = await appliaStorage.saveStoreCart(userId, storeId, nextItems);
-      const payload = await enrichStoreCart(saved, storeId);
+      const existing = (await appliaStorage.getStoreCart(userId, storeId, cartKind))?.items ?? [];
+      let nextItems = mergeAddCartItem(existing, incoming);
+      const productIds = nextItems
+        .filter((i): i is Extract<typeof i, { kind: "product" }> => i.kind === "product")
+        .map((i) => i.productId);
+      if (productIds.length > 0) {
+        const products = await appliaStorage.getStoreProductsByIds(storeId, productIds);
+        nextItems = snapCartItemsToBoxSize(nextItems, products);
+      }
+      const saved = await appliaStorage.saveStoreCart(
+        userId,
+        storeId,
+        nextItems,
+        undefined,
+        cartKind,
+      );
+      const payload = await enrichStoreCart(saved, storeId, cartKind);
       return res.status(201).json({ cart: payload });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -2099,6 +2279,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const cartKind = parseCartKindFromRequest(req);
 
       const parsed = updateStoreCartItemSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -2108,8 +2289,8 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      const existing = (await appliaStorage.getStoreCart(userId, storeId))?.items ?? [];
-      const nextItems = setCartItemQuantity(existing, parsed.data);
+      const existing = (await appliaStorage.getStoreCart(userId, storeId, cartKind))?.items ?? [];
+      let nextItems = setCartItemQuantity(existing, parsed.data);
       if (parsed.data.quantity > 0) {
         const probe =
           parsed.data.kind === "product"
@@ -2122,10 +2303,23 @@ export function registerStoreRoutes(app: Express): void {
                 additionalIngredientMaterialIds: parsed.data.additionalIngredientMaterialIds ?? [],
               }
             : { kind: "promotion" as const, promotionId: parsed.data.promotionId!, quantity: parsed.data.quantity };
-        await validateCartItemForStore(storeId, probe);
+        await validateCartItemForStore(storeId, probe, cartKind);
+        const productIds = nextItems
+          .filter((i): i is Extract<typeof i, { kind: "product" }> => i.kind === "product")
+          .map((i) => i.productId);
+        if (productIds.length > 0) {
+          const products = await appliaStorage.getStoreProductsByIds(storeId, productIds);
+          nextItems = snapCartItemsToBoxSize(nextItems, products);
+        }
       }
-      const saved = await appliaStorage.saveStoreCart(userId, storeId, nextItems);
-      const payload = await enrichStoreCart(saved, storeId);
+      const saved = await appliaStorage.saveStoreCart(
+        userId,
+        storeId,
+        nextItems,
+        undefined,
+        cartKind,
+      );
+      const payload = await enrichStoreCart(saved, storeId, cartKind);
       return res.json({ cart: payload });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -2148,6 +2342,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const cartKind = parseCartKindFromRequest(req);
 
       const parsed = removeStoreCartItemSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -2157,10 +2352,16 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      const existing = (await appliaStorage.getStoreCart(userId, storeId))?.items ?? [];
+      const existing = (await appliaStorage.getStoreCart(userId, storeId, cartKind))?.items ?? [];
       const nextItems = removeCartItem(existing, parsed.data);
-      const saved = await appliaStorage.saveStoreCart(userId, storeId, nextItems);
-      const payload = await enrichStoreCart(saved, storeId);
+      const saved = await appliaStorage.saveStoreCart(
+        userId,
+        storeId,
+        nextItems,
+        undefined,
+        cartKind,
+      );
+      const payload = await enrichStoreCart(saved, storeId, cartKind);
       return res.json({ cart: payload });
     } catch (e: unknown) {
       console.error("[stores] remove cart item", e);
@@ -2176,6 +2377,7 @@ export function registerStoreRoutes(app: Express): void {
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
       const store = await appliaStorage.getStoreById(storeId);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const cartKind = parseCartKindFromRequest(req);
 
       const parsed = updateStoreCartFulfillmentSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -2186,14 +2388,15 @@ export function registerStoreRoutes(app: Express): void {
       }
 
       await validateCartFulfillmentForStore(storeId, parsed.data.fulfillmentMode);
-      const existing = await appliaStorage.getStoreCart(userId, storeId);
+      const existing = await appliaStorage.getStoreCart(userId, storeId, cartKind);
       const saved = await appliaStorage.saveStoreCart(
         userId,
         storeId,
         existing?.items ?? [],
         parsed.data.fulfillmentMode,
+        cartKind,
       );
-      const payload = await enrichStoreCart(saved, storeId);
+      const payload = await enrichStoreCart(saved, storeId, cartKind);
       return res.json({ cart: payload });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -2206,6 +2409,10 @@ export function registerStoreRoutes(app: Express): void {
   });
 
   app.post("/api/stores/:storeId/cart/checkout", authenticateJWT, async (req: any, res) => {
+    let idempotencyKeyForCleanup = "";
+    let idempotencyUserId = "";
+    let idempotencyStoreId = 0;
+    let idempotencyClaimed = false;
     try {
       const userId = String(req.user?.id ?? "");
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -2222,10 +2429,64 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      let cart = await appliaStorage.getStoreCart(userId, storeId);
+      const idempotencyKey = parsed.data.idempotencyKey?.trim() || "";
+      if (!idempotencyKey) {
+        return res.status(400).json({
+          message: "Falta la clave de idempotencia del checkout. Actualiza la app e intenta de nuevo.",
+        });
+      }
+      idempotencyKeyForCleanup = idempotencyKey;
+      idempotencyUserId = userId;
+      idempotencyStoreId = storeId;
+
+      const completedIdem = await getCompletedCheckoutIdempotency({
+        userId,
+        storeId,
+        idempotencyKey,
+      });
+      if (completedIdem) {
+        if (completedIdem.checkoutUrl) {
+          return res.status(200).json({
+            order: null,
+            checkoutUrl: completedIdem.checkoutUrl,
+            gatewayKind: completedIdem.gatewayKind,
+            reused: true,
+          });
+        }
+        if (completedIdem.storeOrderId) {
+          const existing =
+            (await appliaStorage.getStoreOrder(storeId, completedIdem.storeOrderId)) ??
+            (await appliaStorage.getStoreOrderForUser(userId, completedIdem.storeOrderId));
+          if (existing) {
+            return res.status(200).json({
+              order: {
+                id: existing.id,
+                storeId: existing.storeId,
+                status: existing.status,
+                statusLabel: STORE_ORDER_STATUS_LABELS[existing.status],
+                subtotal: existing.subtotal,
+                amountDue: existing.amountDue,
+                amountPaid: existing.amountPaid,
+                createdAt: serializeDate(existing.createdAt),
+              },
+              checkoutUrl: null,
+              reused: true,
+            });
+          }
+        }
+      }
+
+      const cartKind = parseCartKindFromRequest(req);
+      if (cartKind === "import") {
+        return res.status(400).json({
+          message:
+            "Los pedidos para importar se gestionan por WhatsApp. Confirma desde el catálogo de importación.",
+        });
+      }
+      let cart = await appliaStorage.getStoreCart(userId, storeId, cartKind);
       if (!cart) return res.status(400).json({ message: "El carrito está vacío." });
-      cart = await pruneAndSaveCart(userId, cart);
-      const enriched = await enrichStoreCart(cart, storeId);
+      cart = await pruneAndSaveCart(userId, cart, cartKind);
+      const enriched = await enrichStoreCart(cart, storeId, cartKind);
       if (enriched.items.length === 0) {
         return res.status(400).json({ message: "El carrito está vacío." });
       }
@@ -2334,6 +2595,69 @@ export function registerStoreRoutes(app: Express): void {
       const amountDue =
         fulfillmentMode === "delivery" ? enriched.subtotal + deliveryFee : enriched.subtotal;
 
+      // Antiraiding: no otro pedido hasta 10s después del anterior (reintentos idempotentes sí).
+      try {
+        await assertStoreCheckoutCooldown(userId);
+      } catch (cooldownErr) {
+        if (cooldownErr instanceof StoreCheckoutCooldownError) {
+          return res.status(429).json({
+            message: storeCheckoutCooldownMessage(cooldownErr.retryAfterSec),
+            retryAfterSec: cooldownErr.retryAfterSec,
+          });
+        }
+        throw cooldownErr;
+      }
+
+      // A partir de aquí: claim + consumo atómico del carrito (evita N pedidos).
+      const idem = await beginCheckoutIdempotency({ userId, storeId, idempotencyKey });
+      idempotencyClaimed = idem.kind === "new";
+      if (idem.kind === "completed") {
+        if (idem.checkoutUrl) {
+          return res.status(200).json({
+            order: null,
+            checkoutUrl: idem.checkoutUrl,
+            gatewayKind: idem.gatewayKind,
+            reused: true,
+          });
+        }
+        if (idem.storeOrderId) {
+          const existing =
+            (await appliaStorage.getStoreOrder(storeId, idem.storeOrderId)) ??
+            (await appliaStorage.getStoreOrderForUser(userId, idem.storeOrderId));
+          if (existing) {
+            return res.status(200).json({
+              order: {
+                id: existing.id,
+                storeId: existing.storeId,
+                status: existing.status,
+                statusLabel: STORE_ORDER_STATUS_LABELS[existing.status],
+                subtotal: existing.subtotal,
+                amountDue: existing.amountDue,
+                amountPaid: existing.amountPaid,
+                createdAt: serializeDate(existing.createdAt),
+              },
+              checkoutUrl: null,
+              reused: true,
+            });
+          }
+        }
+      }
+
+      if (!isGatewayCheckout) {
+        // Transferencia/manual: vaciar carrito YA para que POSTs concurrentes no multipliquen pedidos.
+        const consumed = await consumeStoreCartAtomic(userId, storeId);
+        if (!consumed || consumed.items.length === 0) {
+          if (idempotencyClaimed) {
+            await failCheckoutIdempotency({ userId, storeId, idempotencyKey });
+            idempotencyClaimed = false;
+          }
+          return res.status(409).json({
+            message:
+              "Este pedido ya se está procesando o el carrito ya fue usado. Revisa Mis pedidos antes de intentar de nuevo.",
+          });
+        }
+      }
+
       if (isGatewayCheckout) {
         const pending = await createStorePendingCheckout({
           userId,
@@ -2387,22 +2711,38 @@ export function registerStoreRoutes(app: Express): void {
           checkoutUrl = gateway.checkoutUrl;
           resolvedGatewayKind = gateway.gatewayKind;
           if (resolvedGatewayKind !== gatewayKind) {
+            if (idempotencyClaimed) {
+              await failCheckoutIdempotency({ userId, storeId, idempotencyKey });
+              idempotencyClaimed = false;
+            }
             return res.status(502).json({
               message: "La pasarela de pago no coincide con el método seleccionado.",
             });
           }
           if (gatewayKind === "paypal" && /stripe\.com/i.test(checkoutUrl)) {
+            if (idempotencyClaimed) {
+              await failCheckoutIdempotency({ userId, storeId, idempotencyKey });
+              idempotencyClaimed = false;
+            }
             return res.status(502).json({
               message: "Error al iniciar PayPal: se recibió una URL de Stripe. Revisa la configuración del método.",
             });
           }
           if (gatewayKind === "stripe" && /paypal\.com/i.test(checkoutUrl)) {
+            if (idempotencyClaimed) {
+              await failCheckoutIdempotency({ userId, storeId, idempotencyKey });
+              idempotencyClaimed = false;
+            }
             return res.status(502).json({
               message: "Error al iniciar Stripe: se recibió una URL de PayPal. Revisa la configuración del método.",
             });
           }
         } catch (gatewayErr) {
           console.error("[stores] gateway checkout", gatewayErr);
+          if (idempotencyClaimed) {
+            await failCheckoutIdempotency({ userId, storeId, idempotencyKey });
+            idempotencyClaimed = false;
+          }
           const gatewayMsg = gatewayErr instanceof Error ? gatewayErr.message : String(gatewayErr);
           if (
             gatewayMsg === "STRIPE_NOT_CONFIGURED" ||
@@ -2415,6 +2755,15 @@ export function registerStoreRoutes(app: Express): void {
             message: "No se pudo iniciar el pago. El pedido no se creó; intenta de nuevo.",
           });
         }
+
+        await completeCheckoutIdempotency({
+          userId,
+          storeId,
+          idempotencyKey,
+          checkoutUrl,
+          gatewayKind: resolvedGatewayKind,
+        });
+        idempotencyClaimed = false;
 
         return res.status(201).json({
           order: null,
@@ -2459,12 +2808,27 @@ export function registerStoreRoutes(app: Express): void {
         const stockMsg = stockErr instanceof Error ? stockErr.message : String(stockErr);
         if (stockMsg === "STORE_PRODUCT_NO_STOCK") {
           await appliaStorage.updateStoreOrderStatus(storeId, order.id, "rechazado").catch(() => undefined);
+          await completeCheckoutIdempotency({
+            userId,
+            storeId,
+            idempotencyKey,
+            storeOrderId: order.id,
+          });
+          idempotencyClaimed = false;
+          await markStoreCheckoutCooldown(userId);
           return res.status(400).json({ message: "No hay stock de este producto" });
         }
         throw stockErr;
       }
 
-      await appliaStorage.deleteStoreCart(userId, storeId);
+      await completeCheckoutIdempotency({
+        userId,
+        storeId,
+        idempotencyKey,
+        storeOrderId: committedOrder.id,
+      });
+      idempotencyClaimed = false;
+      await markStoreCheckoutCooldown(userId);
 
       void notifyStoreOwnerNewOrder(committedOrder, store).catch((err) =>
         console.error("[stores] notify owner new order", err),
@@ -2484,7 +2848,26 @@ export function registerStoreRoutes(app: Express): void {
         checkoutUrl: null,
       });
     } catch (e: unknown) {
+      if (idempotencyClaimed && idempotencyUserId && idempotencyStoreId && idempotencyKeyForCleanup) {
+        await failCheckoutIdempotency({
+          userId: idempotencyUserId,
+          storeId: idempotencyStoreId,
+          idempotencyKey: idempotencyKeyForCleanup,
+        }).catch(() => undefined);
+      }
+      if (e instanceof StoreCheckoutCooldownError) {
+        return res.status(429).json({
+          message: storeCheckoutCooldownMessage(e.retryAfterSec),
+          retryAfterSec: e.retryAfterSec,
+        });
+      }
       const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "STORE_CHECKOUT_IDEMPOTENCY_BUSY") {
+        return res.status(409).json({
+          message:
+            "Este pedido ya se está procesando. Espera un momento y revisa Mis pedidos antes de reintentar.",
+        });
+      }
       if (msg === "STORE_PRODUCT_NO_STOCK") {
         return res.status(400).json({ message: "No hay stock de este producto" });
       }
@@ -3763,9 +4146,7 @@ export function registerStoreRoutes(app: Express): void {
       const userId = String(req.user?.id ?? "");
       const storeId = parsePositiveIntParam(req.params.storeId);
       if (!storeId) return res.status(400).json({ message: "ID de tienda inválido." });
-      await requireStoreOwner(userId, storeId);
-      const store = await appliaStorage.getStoreById(storeId);
-      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+      const store = await requireStoreOwner(userId, storeId);
       const paginationResult = parseOptionalAdminListPagination(req.query);
       if (!paginationResult.ok) {
         return res.status(400).json({ message: "Parámetros de paginación inválidos." });
@@ -3808,12 +4189,14 @@ export function registerStoreRoutes(app: Express): void {
       const filtered = filterSerializedStoreProducts(filterable, filters);
       if (!paginationResult.pagination) {
         return res.json({
-          products: filtered.map((row) => serializeStoreProduct(row.product, storeCurrency)),
+          products: filtered.map((row) => serializeStoreProductListItem(row.product, storeCurrency)),
         });
       }
       const pageResult = paginateSerializedList(filtered, paginationResult.pagination);
       return res.json({
-        products: pageResult.items.map((row) => serializeStoreProduct(row.product, storeCurrency)),
+        products: pageResult.items.map((row) =>
+          serializeStoreProductListItem(row.product, storeCurrency),
+        ),
         total: pageResult.total,
         page: pageResult.page,
         limit: pageResult.limit,
@@ -3864,6 +4247,9 @@ export function registerStoreRoutes(app: Express): void {
         ...parsed.data,
         sizes,
         subcategoryIds,
+        ...(isStoreBoxSizeEnabledEnv()
+          ? {}
+          : { hasBoxSize: false, boxSize: 0 }),
       });
       const currency = normalizeStoreCurrencyFields(store);
       return res.status(201).json({
@@ -3915,7 +4301,9 @@ export function registerStoreRoutes(app: Express): void {
         });
       }
 
-      const optionals = normalizeProductImportOptionals(req.body?.optionals);
+      const optionals = normalizeProductImportOptionals(req.body?.optionals).filter(
+        (o) => isStoreBoxSizeEnabledEnv() || o.field !== "boxSize",
+      );
       const csvDelimiter = parseProductImportCsvDelimiter(req.body?.csvDelimiter ?? req.body?.delimiter);
 
       const fileName =
@@ -4067,6 +4455,8 @@ export function registerStoreRoutes(app: Express): void {
           stock: row.hasStock ? (row.stock ?? 0) : undefined,
           hasWeight: row.hasWeight,
           weight: row.hasWeight ? (row.weight ?? 0) : 0,
+          hasBoxSize: row.hasBoxSize,
+          boxSize: row.hasBoxSize ? (row.boxSize ?? 0) : 0,
         };
       }
 
@@ -4107,6 +4497,7 @@ export function registerStoreRoutes(app: Express): void {
                 : {}),
               ...(payload.hasStock ? { hasStock: true, stock: payload.stock ?? 0 } : {}),
               ...(payload.hasWeight ? { hasWeight: true, weight: payload.weight ?? 0 } : {}),
+              ...(payload.hasBoxSize ? { hasBoxSize: true, boxSize: payload.boxSize ?? 0 } : {}),
             });
             updated += 1;
           } else {
@@ -4123,11 +4514,14 @@ export function registerStoreRoutes(app: Express): void {
               removableIngredientMaterialIds: [],
               ingredientAdditionals: [],
               imageUrls: payload.imageUrls,
+              imageAssets: [],
               showOnShowcase: true,
               hasStock: payload.hasStock,
               stock: payload.hasStock ? payload.stock ?? 0 : 0,
               hasWeight: payload.hasWeight,
               weight: payload.hasWeight ? payload.weight ?? 0 : 0,
+              hasBoxSize: payload.hasBoxSize,
+              boxSize: payload.hasBoxSize ? payload.boxSize ?? 0 : 0,
             });
             created += 1;
           }
@@ -4243,8 +4637,9 @@ export function registerStoreRoutes(app: Express): void {
       if (parsed.data.subcategoryIds != null || parsed.data.categoryIds != null) {
         await assertStoreSubcategoryIds(storeId, subcategoryIds, nextCategoryIds);
       }
+      const { hasBoxSize: _hasBoxSize, boxSize: _boxSize, ...updateWithoutBoxSize } = parsed.data;
       const product = await appliaStorage.updateStoreProduct(storeId, productId, {
-        ...parsed.data,
+        ...(isStoreBoxSizeEnabledEnv() ? parsed.data : updateWithoutBoxSize),
         ...(parsed.data.sizes !== undefined ? { sizes } : {}),
         ...(parsed.data.subcategoryIds != null || parsed.data.categoryIds != null
           ? { subcategoryIds }
@@ -4299,12 +4694,12 @@ export function registerStoreRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/stores/:slug/showcase-products", optionalAuthenticateJWT, async (req: any, res) => {
+  app.get("/api/stores/:slug/showcase-meta", optionalAuthenticateJWT, async (req: any, res) => {
     try {
       const slug = String(req.params.slug ?? "").trim();
       if (!slug) return res.status(400).json({ message: "Slug inválido." });
 
-      const store = await appliaStorage.getStoreBySlug(slug);
+      const store = await getStoreBySlugCached(slug);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const viewerId = req.user?.id != null ? String(req.user.id) : null;
@@ -4312,6 +4707,70 @@ export function registerStoreRoutes(app: Express): void {
       const storeForView =
         isOwner ? await repairStoreSubscriptionVisibilityIfNeeded(store) : store;
       const visibilityActive = isStoreVisibilityActive(storeForView);
+      const bundle = await getStoreCatalogBundleCached(storeForView.id);
+
+      const catalogKind = parseStoreProductCatalogKind(
+        (req.query as { catalog?: unknown })?.catalog,
+      );
+      const showcaseList = filterShowcaseCatalogProducts(
+        bundle.products,
+        storeForView,
+        catalogKind,
+      );
+      const productIdsByCategoryId = buildProductIdsByCategoryId(showcaseList);
+      const productIdsBySubcategoryId = buildProductIdsBySubcategoryId(showcaseList);
+
+      const categories = bundle.categories
+        .filter((c) => (productIdsByCategoryId.get(c.id)?.length ?? 0) > 0)
+        .map(serializeShowcaseCategory);
+
+      const categoryIdSet = new Set(categories.map((c) => c.id));
+      const subcategories = bundle.subcategories
+        .filter(
+          (s) =>
+            categoryIdSet.has(s.categoryId) &&
+            (productIdsBySubcategoryId.get(s.id)?.length ?? 0) > 0,
+        )
+        .map(serializeShowcaseSubcategory);
+
+      const promotions =
+        catalogKind === "import"
+          ? []
+          : bundle.promotions
+              .filter(
+                (p) => p.status === "active" && p.items.some((item) => item.status === "active"),
+              )
+              .map((p) => serializeStoreShowcasePromotion(p, bundle.products));
+
+      return res.json({
+        catalogTotal: showcaseList.length,
+        categories,
+        subcategories,
+        promotions,
+        banners: bundle.banners.map(serializeShowcaseAdItem),
+        popups: bundle.popups.map(serializeShowcaseAdItem),
+        visibilityActive,
+        isOwner,
+        catalogKind,
+      });
+    } catch (e) {
+      console.error("[stores] showcase-meta", e);
+      return res.status(500).json({ message: "No se pudo cargar la meta de la vitrina." });
+    }
+  });
+
+  app.get("/api/stores/:slug/showcase-products", optionalAuthenticateJWT, async (req: any, res) => {
+    try {
+      const slug = String(req.params.slug ?? "").trim();
+      if (!slug) return res.status(400).json({ message: "Slug inválido." });
+
+      const store = await getStoreBySlugCached(slug);
+      if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
+
+      const viewerId = req.user?.id != null ? String(req.user.id) : null;
+      const isOwner = await viewerCanManageStore(viewerId, store, req.user?.role);
+      const storeForView =
+        isOwner ? await repairStoreSubscriptionVisibilityIfNeeded(store) : store;
 
       const paginationParsed = parseOptionalAdminListPagination(req.query);
       if (!paginationParsed.ok) {
@@ -4320,33 +4779,17 @@ export function registerStoreRoutes(app: Express): void {
       const page = paginationParsed.pagination?.page ?? 1;
       const limit = paginationParsed.pagination?.limit ?? 10;
       const filters = parseAdminProductListFilters(req.query);
+      const catalogKind = parseStoreProductCatalogKind(
+        (req.query as { catalog?: unknown })?.catalog,
+      );
 
-      const [all, allCategories, allSubcategories, allPromotions, banners, popups] =
-        await Promise.all([
-          listStoreProductsCached(storeForView.id),
-          appliaStorage.listStoreCategories(storeForView.id, { persistRenumber: false }),
-          appliaStorage.listStoreSubcategories(storeForView.id),
-          appliaStorage.listStorePromotions(storeForView.id),
-          appliaStorage.listStoreShowcaseAds(storeForView.id, "banner"),
-          appliaStorage.listStoreShowcaseAds(storeForView.id, "popup"),
-        ]);
-
-      const showcaseList = all.filter((p) => {
-        if (
-          !resolveStoreProductShowOnShowcase({
-            showOnShowcase: p.showOnShowcase,
-            hasStock: p.hasStock,
-            stock: p.stock,
-          })
-        ) {
-          return false;
-        }
-        if (storeForView.showcaseOnlyWithImage === true && !storeProductHasShowcaseImage(p)) {
-          return false;
-        }
-        return true;
-      });
-      const catalogTotal = showcaseList.length;
+      const bundle = await getStoreCatalogBundleCached(storeForView.id);
+      const allCategories = bundle.categories;
+      const showcaseList = filterShowcaseCatalogProducts(
+        bundle.products,
+        storeForView,
+        catalogKind,
+      );
       const categorySortOrderById = new Map(
         allCategories.map((c) => [
           c.id,
@@ -4387,37 +4830,13 @@ export function registerStoreRoutes(app: Express): void {
       const paged = paginateSerializedList(filtered, { page, limit });
       const products = paged.items.map((p) => serializeStoreShowcaseProductCard(p, storeForView));
 
-      const categories = allCategories
-        .filter((c) => productIdsForCategory(showcaseList, c.id).length > 0)
-        .map(serializeShowcaseCategory);
-
-      const categoryIdSet = new Set(categories.map((c) => c.id));
-      const subcategories = allSubcategories
-        .filter(
-          (s) =>
-            categoryIdSet.has(s.categoryId) &&
-            productIdsForSubcategory(showcaseList, s.id).length > 0,
-        )
-        .map(serializeShowcaseSubcategory);
-
-      const promotions = allPromotions
-        .filter((p) => p.status === "active" && p.items.some((item) => item.status === "active"))
-        .map((p) => serializeStoreShowcasePromotion(p, all));
-
       return res.json({
         products,
         total: paged.total,
         page: paged.page,
         limit: paged.limit,
         totalPages: paged.totalPages,
-        catalogTotal,
-        categories,
-        subcategories,
-        promotions,
-        banners: banners.map(serializeShowcaseAdItem),
-        popups: popups.map(serializeShowcaseAdItem),
-        visibilityActive,
-        isOwner,
+        catalogTotal: showcaseList.length,
       });
     } catch (e) {
       console.error("[stores] showcase-products", e);
@@ -4431,7 +4850,7 @@ export function registerStoreRoutes(app: Express): void {
       const productId = parsePositiveIntParam(req.params.productId);
       if (!slug || !productId) return res.status(400).json({ message: "Solicitud inválida." });
 
-      const store = await appliaStorage.getStoreBySlug(slug);
+      const store = await getStoreBySlugCached(slug);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const viewerId = req.user?.id != null ? String(req.user.id) : null;
@@ -4439,8 +4858,14 @@ export function registerStoreRoutes(app: Express): void {
       const storeForView =
         isOwner ? await repairStoreSubscriptionVisibilityIfNeeded(store) : store;
 
+      const catalogKind = parseStoreProductCatalogKind(
+        (req.query as { catalog?: unknown })?.catalog,
+      );
       const product = await appliaStorage.getStoreProduct(storeForView.id, productId);
       if (!product) return res.status(404).json({ message: "Producto no encontrado." });
+      if (!storeProductMatchesCatalogKind(product, catalogKind)) {
+        return res.status(404).json({ message: "Producto no encontrado." });
+      }
       const visible = resolveStoreProductShowOnShowcase({
         showOnShowcase: product.showOnShowcase,
         hasStock: product.hasStock,
@@ -4472,7 +4897,7 @@ export function registerStoreRoutes(app: Express): void {
         return res.status(404).json({ message: "Ruta no válida." });
       }
 
-      const store = await appliaStorage.getStoreBySlug(slug);
+      const store = await getStoreBySlugCached(slug);
       if (!store) return res.status(404).json({ message: "Tienda no encontrada." });
 
       const viewerId = req.user?.id != null ? String(req.user.id) : null;
@@ -4510,10 +4935,12 @@ export function registerStoreRoutes(app: Express): void {
       if (!parsed.success) {
         return res.status(400).json({ message: "Parámetros inválidos.", errors: parsed.error.errors });
       }
+      const afterRaw = typeof req.query.after === "string" ? req.query.after.trim() : "";
       return await respondIngredientsPage(res, {
         q: parsed.data.q?.trim() || undefined,
         page: parsed.data.page,
         limit: parsed.data.limit,
+        after: afterRaw || null,
       });
     } catch (e) {
       console.error("[ingredients-materials] list", e);

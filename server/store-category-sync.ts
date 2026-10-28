@@ -8,6 +8,20 @@ export function productIdsForCategory(
   return products.filter((p) => p.categoryIds.includes(categoryId)).map((p) => p.id);
 }
 
+export function buildProductIdsByCategoryId(
+  products: { id: number; categoryIds?: number[] | null }[],
+): Map<number, number[]> {
+  const map = new Map<number, number[]>();
+  for (const product of products) {
+    for (const categoryId of product.categoryIds ?? []) {
+      const list = map.get(categoryId);
+      if (list) list.push(product.id);
+      else map.set(categoryId, [product.id]);
+    }
+  }
+  return map;
+}
+
 export async function assertStoreCategoryIds(
   storeId: number,
   categoryIds: number[],

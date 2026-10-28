@@ -217,6 +217,12 @@ export const FIRESTORE_COLLECTIONS = {
   STORE_ORDERS: "store_orders",
   /** Checkout pendiente de pasarela (Stripe/PayPal) hasta confirmar el pago. */
   STORE_PENDING_CHECKOUTS: "store_pending_checkouts",
+  /** Idempotencia de checkout (1 doc por userId+storeId+idempotencyKey). */
+  STORE_CHECKOUT_IDEMPOTENCY: "store_checkout_idempotency",
+  /** Cooldown antiraiding tras crear un pedido (1 doc por userId). */
+  STORE_CHECKOUT_COOLDOWNS: "store_checkout_cooldowns",
+  /** Tokens de correo (verify / revoke / password reset). */
+  AUTH_EMAIL_TOKENS: "auth_email_tokens",
   /** Empleados de una tienda (rol y sucursal asignada). */
   STORE_STAFF: "store_staff",
   /** Ingredientes y materiales globales (sin pertenencia a tienda). */

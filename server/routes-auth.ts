@@ -12,33 +12,24 @@ import { PUBLIC_REGISTER_ROLES, normalizePhone } from "@shared/admin-user-regist
 import { resolveUserPermissions } from "./resolve-user-permissions";
 import { canActAsAssociate } from "@shared/associate-role-access";
 import {
-  RECOVERY_QUESTION_OPTIONS,
-  recoveryQuestionsSetupSchema,
-  forgotPasswordVerifySchema,
-  forgotPasswordResetSchema,
-  changePasswordWithRecoverySchema,
-  FORGOT_PASSWORD_NOT_REGISTERED_MSG,
-  FORGOT_PASSWORD_NO_RECOVERY_MSG,
-  FORGOT_PASSWORD_WRONG_RECOVERY_MSG,
-  FORGOT_PASSWORD_WRONG_RECOVERY_CODE,
-  SETTINGS_WRONG_RECOVERY_MSG,
-} from "@shared/account-recovery";
-import {
-  generatePasswordResetToken,
-  hashRecoveryQuestions,
-  parseForgotPasswordLookup,
-  resolveUserForForgotPassword,
-  userHasRecoveryConfigured,
-  verifyPasswordResetToken,
-  verifyRecoveryQuestions,
-} from "./account-recovery";
-import {
   avatarCooldownRemainingMs,
   formatAvatarCooldownRemaining,
   isHostedStorageAvatarUrl,
 } from "@shared/avatar-profile";
 import { getIO } from "./socket";
 import { notificationService } from "./services/notification.service";
+import { verifyFirebaseToken } from "./firebase-admin";
+import {
+  buildPasswordResetEmail,
+  buildRegistrationSecurityEmail,
+  getMailSender,
+  getPublicAppUrl,
+} from "./mail/resend-mailer";
+import {
+  consumeAuthEmailToken,
+  createRawAuthEmailToken,
+  storeAuthEmailToken,
+} from "./auth-email-tokens";
 
 // Environment variables
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -106,7 +97,17 @@ interface UserPayload {
 // ============== FUNCIONES AUXILIARES ==============
 
 
-/** Cuerpo de usuario para login, registro, /me y aceptación de términos (sin password). */
+function normalizeAuthProviders(raw: unknown): Array<"password" | "google" | "facebook"> {
+  if (!Array.isArray(raw)) return ["password"];
+  const out: Array<"password" | "google" | "facebook"> = [];
+  for (const item of raw) {
+    if (item === "password" || item === "google" || item === "facebook") {
+      if (!out.includes(item)) out.push(item);
+    }
+  }
+  return out.length > 0 ? out : ["password"];
+}
+
 async function buildAuthClientUser(
   user: Record<string, unknown>,
   provider: { id: number; [key: string]: unknown } | null
@@ -128,7 +129,8 @@ async function buildAuthClientUser(
     pendingBalance: user.pendingBalance ?? 0,
     createdAt: user.createdAt,
     profileEditGrants: (user as { profileEditGrants?: unknown }).profileEditGrants ?? {},
-    recoveryQuestionsConfigured: userHasRecoveryConfigured(user as { recoveryQuestionsConfigured?: boolean; recoveryQuestions?: unknown }),
+    emailVerified: user.emailVerified === true,
+    authProviders: normalizeAuthProviders(user.authProviders),
     acceptedProviderTermsOfUse: canActAsAssociate(role, permissions)
       ? user.acceptedProviderTermsOfUse === true
       : true,
@@ -137,6 +139,41 @@ async function buildAuthClientUser(
     provider: provider ?? null,
     permissions,
   };
+}
+
+async function sendRegistrationSecurityMail(user: {
+  id: string;
+  email: string;
+  name?: string;
+}): Promise<void> {
+  const verifyRaw = createRawAuthEmailToken();
+  const revokeRaw = createRawAuthEmailToken();
+  await Promise.all([
+    storeAuthEmailToken({
+      userId: user.id,
+      purpose: "verify_email",
+      rawToken: verifyRaw,
+      ttlMs: 48 * 60 * 60 * 1000,
+    }),
+    storeAuthEmailToken({
+      userId: user.id,
+      purpose: "revoke_registration",
+      rawToken: revokeRaw,
+      ttlMs: 48 * 60 * 60 * 1000,
+    }),
+  ]);
+  const base = getPublicAppUrl();
+  const mail = buildRegistrationSecurityEmail({
+    recipientName: String(user.name ?? "").trim() || "usuario",
+    verifyUrl: `${base}/verify-email?token=${encodeURIComponent(verifyRaw)}`,
+    revokeUrl: `${base}/revoke-registration?token=${encodeURIComponent(revokeRaw)}`,
+  });
+  await getMailSender().send({
+    to: user.email,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+  });
 }
 
 // Generate JWT token
@@ -206,11 +243,8 @@ export async function registerAuthRoutes(
         return res.status(409).json({ message: DUPLICATE_PHONE_MESSAGE, field: "phone" });
       }
 
-      // Hashear la contraseña
       const hashedPassword = await bcrypt.hash(data.password, 10);
-      
-      // Crear el usuario en storage de Applia
-      // Nota: el contrato del storage tipa esto como unknown; aquí lo tratamos como objeto de usuario.
+
       const user = (await appliaStorage.createUser({
         email: data.email,
         password: hashedPassword,
@@ -220,10 +254,11 @@ export async function registerAuthRoutes(
         role: data.role,
         rating: 5,
         ratingCount: 0,
+        emailVerified: false,
+        authProviders: ["password"],
         ...(data.avatar?.trim() ? { avatar: data.avatar.trim() } : {}),
       })) as any;
 
-      // Generar token
       const token = generateToken({
         id: user.id,
         email: user.email,
@@ -232,6 +267,12 @@ export async function registerAuthRoutes(
         role: user.role,
         phone: user.phone,
       });
+
+      void sendRegistrationSecurityMail({
+        id: String(user.id),
+        email: String(user.email),
+        name: String(user.name ?? ""),
+      }).catch((err) => console.error("[mail] registration security", err));
 
       const provider = await appliaStorage.getProviderByUserId(user.id);
       const clientUser = await buildAuthClientUser(
@@ -277,10 +318,21 @@ export async function registerAuthRoutes(
       if (!user) {
         return res.status(401).json({ message: "Credenciales inválidas" });
       }
-      
-      // Verificar contraseña
+      if ((user as { deletedAt?: unknown }).deletedAt) {
+        return res.status(401).json({ message: "Credenciales inválidas" });
+      }
+      if ((user as { isActive?: boolean }).isActive === false) {
+        return res.status(401).json({ message: "Esta cuenta fue anulada o desactivada." });
+      }
+
+      const providers = normalizeAuthProviders(user.authProviders);
+      if (!providers.includes("password") || !user.password) {
+        return res.status(401).json({
+          message: "Esta cuenta usa Google o Facebook. Inicia sesión con ese método.",
+        });
+      }
+
       const isValidPassword = await bcrypt.compare(data.password, user.password);
-      
       if (!isValidPassword) {
         return res.status(401).json({ message: "Credenciales inválidas" });
       }
@@ -585,19 +637,18 @@ export async function registerAuthRoutes(
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
       
-      // Verificar contraseña actual
+      if (!user.password) {
+        return res.status(400).json({
+          message: "Esta cuenta no tiene contraseña local. Usa Google o Facebook, o restablece por correo si aplica.",
+        });
+      }
       const isValidPassword = await bcrypt.compare(data.currentPassword, user.password);
-      
       if (!isValidPassword) {
         return res.status(401).json({ message: "Contraseña actual incorrecta" });
       }
-      
-      // Hashear nueva contraseña
       const hashedPassword = await bcrypt.hash(data.newPassword, 10);
-      
-      // Actualizar contraseña
       await appliaStorage.updateUserPassword(req.user.id, hashedPassword);
-      
+      await notifyPasswordChanged(req.user.id);
       res.json({ message: "Contraseña actualizada correctamente" });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -667,75 +718,80 @@ export async function registerAuthRoutes(
       .catch((err) => console.error("[push-password-changed]", err));
   }
 
-  // POST /api/auth/password-with-recovery — Cambiar contraseña desde Configuración (preguntas + sesión)
-  app.post("/api/auth/password-with-recovery", authenticateJWT, async (req: any, res) => {
-    try {
-      const { answers, newPassword } = changePasswordWithRecoverySchema.parse(req.body);
-      const current = (await appliaStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
-      if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
-      if (!userHasRecoveryConfigured(current)) {
-        return res.status(403).json({
-          message: "Primero debes configurar tus preguntas de recuperación.",
-        });
-      }
-      const stored = (current.recoveryQuestions ?? []) as { questionId: string; answerHash: string }[];
-      const ok = await verifyRecoveryQuestions(stored, answers);
-      if (!ok) {
-        return res.status(401).json({
-          message: SETTINGS_WRONG_RECOVERY_MSG,
-        });
-      }
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-      await appliaStorage.updateUserPassword(req.user.id, hashedPassword);
-      await notifyPasswordChanged(req.user.id);
-      return res.status(200).json({ message: "Contraseña actualizada correctamente" });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
-      }
-      console.error("Error changing password with recovery:", error);
-      return res.status(500).json({ message: "Error al cambiar la contraseña" });
-    }
+  const socialLoginSchema = z.object({
+    idToken: z.string().trim().min(20, "Token inválido"),
   });
 
-  // GET /api/auth/recovery-question-options — Catálogo público de preguntas
-  app.get("/api/auth/recovery-question-options", (_req, res) => {
-    res.json({ questions: RECOVERY_QUESTION_OPTIONS });
-  });
-
-  // POST /api/auth/recovery-questions — Configurar o reconfigurar preguntas (requiere sesión)
-  app.post("/api/auth/recovery-questions", authenticateJWT, async (req: any, res) => {
+  app.post("/api/auth/social", async (req, res) => {
     try {
-      const answers = recoveryQuestionsSetupSchema.parse(req.body?.answers ?? req.body);
-      const current = (await appliaStorage.getUserById(req.user.id, true)) as Record<string, unknown> | null;
-      if (!current) return res.status(404).json({ message: "Usuario no encontrado" });
+      const { idToken } = socialLoginSchema.parse(req.body ?? {});
+      const decoded = await verifyFirebaseToken(idToken);
+      const email = String(decoded.email ?? "").trim().toLowerCase();
+      if (!email) {
+        return res.status(400).json({ message: "La cuenta social no incluye un correo válido." });
+      }
+      const firebaseUid = String(decoded.uid ?? "");
+      const signInProvider = String(
+        (decoded.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider ?? "",
+      );
+      const providerKind: "google" | "facebook" = signInProvider.includes("facebook")
+        ? "facebook"
+        : "google";
+      const emailVerified = decoded.email_verified === true;
+      const displayName = String(decoded.name ?? "").trim();
+      const [firstName, ...restName] = displayName.split(/\s+/).filter(Boolean);
+      const lastName = restName.join(" ") || "Usuario";
 
-      const configured = userHasRecoveryConfigured(current);
-      const grants = (current.profileEditGrants ?? {}) as { recoveryQuestions?: boolean };
-      if (configured && grants.recoveryQuestions !== true) {
-        return res.status(403).json({
-          message:
-            "Para cambiar tus preguntas de recuperación, solicita permiso en Configuración y espera la aprobación del administrador.",
-        });
+      let user = (await appliaStorage.getUserByEmail(email)) as Record<string, unknown> | undefined;
+      if (user && (user as { deletedAt?: unknown }).deletedAt) {
+        user = undefined;
       }
 
-      const hashed = await hashRecoveryQuestions(answers);
-      const nextGrants = { ...grants, recoveryQuestions: false };
-      const updated = await appliaStorage.updateUser(req.user.id, {
-        recoveryQuestions: hashed,
-        recoveryQuestionsConfigured: true,
-        profileEditGrants: nextGrants,
-      } as any);
-      if (!updated) return res.status(404).json({ message: "Usuario no encontrado" });
+      if (!user) {
+        user = (await appliaStorage.createUser({
+          email,
+          password: "",
+          name: firstName || "Usuario",
+          lastName,
+          role: "client",
+          emailVerified: emailVerified || true,
+          authProviders: [providerKind],
+          firebaseUid,
+          rating: 5,
+          ratingCount: 0,
+        })) as Record<string, unknown>;
+      } else {
+        const providers = normalizeAuthProviders(user.authProviders);
+        if (!providers.includes(providerKind)) providers.push(providerKind);
+        const patch: Record<string, unknown> = {
+          authProviders: providers,
+          firebaseUid: user.firebaseUid || firebaseUid,
+        };
+        if (emailVerified || providerKind === "google" || providerKind === "facebook") {
+          patch.emailVerified = true;
+        }
+        user = ((await appliaStorage.updateUser(String(user.id), patch as any)) ??
+          user) as Record<string, unknown>;
+      }
 
-      const provider = await appliaStorage.getProviderByUserId(req.user.id);
-      const { password: _p, recoveryQuestions: _rq, ...safe } = updated as Record<string, unknown>;
-      void _p;
-      void _rq;
-      return res.status(200).json({
-        message: "Preguntas de recuperación guardadas",
+      if ((user as { isActive?: boolean }).isActive === false) {
+        return res.status(401).json({ message: "Esta cuenta fue anulada o desactivada." });
+      }
+
+      const token = generateToken({
+        id: String(user.id),
+        email: String(user.email),
+        name: String(user.name ?? ""),
+        lastName: String(user.lastName ?? ""),
+        role: String(user.role ?? "client"),
+        phone: user.phone != null ? String(user.phone) : undefined,
+      });
+      const provider = await appliaStorage.getProviderByUserId(String(user.id));
+      return res.json({
+        message: "Login social exitoso",
+        token,
         user: await buildAuthClientUser(
-          safe,
+          user,
           provider as { id: number; [key: string]: unknown } | null,
         ),
       });
@@ -743,101 +799,158 @@ export async function registerAuthRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
       }
-      console.error("Error saving recovery questions:", error);
-      return res.status(500).json({ message: "Error al guardar preguntas de recuperación" });
+      console.error("[auth] social", error);
+      return res.status(401).json({ message: "No se pudo iniciar sesión con la cuenta social." });
     }
   });
 
-  // POST /api/auth/forgot-password/lookup — Buscar cuenta por correo o teléfono
-  app.post("/api/auth/forgot-password/lookup", async (req, res) => {
+  app.post("/api/auth/verify-email", async (req, res) => {
     try {
-      const lookup = parseForgotPasswordLookup(req.body);
-      const resolved = await resolveUserForForgotPassword(lookup, appliaStorage);
-      if (!resolved) {
-        return res.status(200).json({
-          found: false,
-          message: FORGOT_PASSWORD_NOT_REGISTERED_MSG,
-        });
+      const token = String(req.body?.token ?? req.query?.token ?? "").trim();
+      if (!token) return res.status(400).json({ message: "Token inválido." });
+      const consumed = await consumeAuthEmailToken({ purpose: "verify_email", rawToken: token });
+      if (!consumed) {
+        return res.status(400).json({ message: "El enlace no es válido o ya expiró." });
       }
-      const { user, email } = resolved;
-      if (!userHasRecoveryConfigured(user)) {
-        return res.status(200).json({
-          found: false,
-          message: FORGOT_PASSWORD_NO_RECOVERY_MSG,
-        });
-      }
-      return res.status(200).json({
-        found: true,
-        accountEmail: email,
-        message: "Selecciona las 3 preguntas que configuraste y escribe tus respuestas.",
+      const updated = await appliaStorage.updateUser(consumed.userId, { emailVerified: true } as any);
+      if (!updated) return res.status(404).json({ message: "Usuario no encontrado." });
+      return res.json({ message: "Correo confirmado correctamente." });
+    } catch (error) {
+      console.error("[auth] verify-email", error);
+      return res.status(500).json({ message: "No se pudo verificar el correo." });
+    }
+  });
+
+  app.post("/api/auth/revoke-registration", async (req, res) => {
+    try {
+      const token = String(req.body?.token ?? req.query?.token ?? "").trim();
+      if (!token) return res.status(400).json({ message: "Token inválido." });
+      const consumed = await consumeAuthEmailToken({
+        purpose: "revoke_registration",
+        rawToken: token,
       });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      if (!consumed) {
+        return res.status(400).json({ message: "El enlace no es válido o ya expiró." });
       }
-      console.error("forgot-password lookup:", error);
-      return res.status(500).json({ message: "Error al buscar la cuenta" });
+      await appliaStorage.updateUser(consumed.userId, {
+        isActive: false,
+        deletedAt: new Date(),
+      } as any);
+      return res.json({ message: "Registro anulado. La cuenta quedó desactivada." });
+    } catch (error) {
+      console.error("[auth] revoke-registration", error);
+      return res.status(500).json({ message: "No se pudo anular el registro." });
     }
   });
 
-  // POST /api/auth/forgot-password/verify — Validar respuestas y emitir token de restablecimiento
-  app.post("/api/auth/forgot-password/verify", async (req, res) => {
+  app.post("/api/auth/resend-verification", authenticateJWT, async (req: any, res) => {
     try {
-      const { email, answers } = forgotPasswordVerifySchema.parse(req.body);
-      const resolved = await resolveUserForForgotPassword(
-        { kind: "email", email },
-        appliaStorage,
-      );
-      if (!resolved) {
-        return res.status(401).json({
-          code: FORGOT_PASSWORD_WRONG_RECOVERY_CODE,
-          message: FORGOT_PASSWORD_WRONG_RECOVERY_MSG,
-        });
+      const user = (await appliaStorage.getUserById(req.user.id)) as Record<string, unknown> | null;
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado." });
+      if (user.emailVerified === true) {
+        return res.json({ message: "Tu correo ya está verificado." });
       }
-      const { user } = resolved;
-      const stored = (user.recoveryQuestions ?? []) as { questionId: string; answerHash: string }[];
-      const ok = await verifyRecoveryQuestions(stored, answers);
-      if (!ok) {
-        return res.status(401).json({
-          code: FORGOT_PASSWORD_WRONG_RECOVERY_CODE,
-          message: FORGOT_PASSWORD_WRONG_RECOVERY_MSG,
-        });
-      }
-      const resetToken = generatePasswordResetToken(String(user.id), email, effectiveSecret);
-      return res.status(200).json({ resetToken });
+      await sendRegistrationSecurityMail({
+        id: String(user.id),
+        email: String(user.email),
+        name: String(user.name ?? ""),
+      });
+      return res.json({ message: "Te enviamos un nuevo correo de verificación." });
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
-      }
-      console.error("forgot-password verify:", error);
-      return res.status(500).json({ message: "Error al verificar respuestas" });
+      console.error("[auth] resend-verification", error);
+      return res.status(500).json({ message: "No se pudo reenviar el correo." });
     }
   });
 
-  // POST /api/auth/forgot-password/reset — Nueva contraseña con token de verificación
-  app.post("/api/auth/forgot-password/reset", async (req, res) => {
+  const forgotPasswordSchema = z.object({
+    email: z
+      .string()
+      .min(1)
+      .email()
+      .transform((s) => s.trim().toLowerCase()),
+  });
+
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    const generic = {
+      message:
+        "Si la cuenta existe y puede recuperar por correo, te enviamos un enlace. Revisa tu bandeja.",
+    };
     try {
-      const { resetToken, newPassword } = forgotPasswordResetSchema.parse(req.body);
-      const payload = verifyPasswordResetToken(resetToken, effectiveSecret);
-      if (!payload) {
-        return res.status(401).json({ message: "El enlace de recuperación expiró. Vuelve a intentarlo." });
+      const { email } = forgotPasswordSchema.parse(req.body ?? {});
+      const user = (await appliaStorage.getUserByEmail(email)) as Record<string, unknown> | undefined;
+      if (!user || (user as { deletedAt?: unknown }).deletedAt) {
+        return res.status(200).json(generic);
       }
-      const user = (await appliaStorage.getUserById(payload.userId)) as Record<string, unknown> | null;
-      if (!user || String(user.email ?? "").toLowerCase() !== payload.email) {
-        return res.status(401).json({ message: "Token inválido" });
+      const providers = normalizeAuthProviders(user.authProviders);
+      const hasPassword = providers.includes("password") && Boolean(user.password);
+      if (!hasPassword) {
+        return res.status(200).json({
+          message:
+            "Esta cuenta inicia sesión con Google o Facebook. Usa ese método; no hay contraseña local.",
+        });
+      }
+      if (user.emailVerified !== true) {
+        return res.status(400).json({
+          message:
+            "Debes confirmar tu correo antes de restablecer la contraseña. Revisa el correo de registro o inicia sesión y reenvía la verificación.",
+        });
+      }
+      const rawToken = createRawAuthEmailToken();
+      await storeAuthEmailToken({
+        userId: String(user.id),
+        purpose: "password_reset",
+        rawToken,
+        ttlMs: 60 * 60 * 1000,
+      });
+      const resetUrl = `${getPublicAppUrl()}/reset-password?token=${encodeURIComponent(rawToken)}`;
+      const mail = buildPasswordResetEmail({
+        recipientName: String(user.name ?? "").trim() || "usuario",
+        resetUrl,
+      });
+      await getMailSender().send({
+        to: String(user.email),
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+      });
+      return res.status(200).json(generic);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Correo inválido", errors: error.errors });
+      }
+      console.error("[auth] forgot-password", error);
+      return res.status(500).json({ message: "No se pudo procesar la solicitud." });
+    }
+  });
+
+  const resetPasswordSchema = z.object({
+    token: z.string().trim().min(16),
+    newPassword: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
+  });
+
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { token, newPassword } = resetPasswordSchema.parse(req.body ?? {});
+      const consumed = await consumeAuthEmailToken({ purpose: "password_reset", rawToken: token });
+      if (!consumed) {
+        return res.status(401).json({ message: "El enlace expiró o no es válido. Solicita uno nuevo." });
       }
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      await appliaStorage.updateUserPassword(payload.userId, hashedPassword);
-      await notifyPasswordChanged(payload.userId);
-      return res.status(200).json({
-        message: "Contraseña actualizada. Ya puedes iniciar sesión.",
-      });
+      await appliaStorage.updateUserPassword(consumed.userId, hashedPassword);
+      const current = (await appliaStorage.getUserById(consumed.userId)) as Record<string, unknown> | null;
+      if (current) {
+        const providers = normalizeAuthProviders(current.authProviders);
+        if (!providers.includes("password")) providers.push("password");
+        await appliaStorage.updateUser(consumed.userId, { authProviders: providers } as any);
+      }
+      await notifyPasswordChanged(consumed.userId);
+      return res.status(200).json({ message: "Contraseña actualizada. Ya puedes iniciar sesión." });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
       }
-      console.error("forgot-password reset:", error);
-      return res.status(500).json({ message: "Error al restablecer contraseña" });
+      console.error("[auth] reset-password", error);
+      return res.status(500).json({ message: "No se pudo restablecer la contraseña." });
     }
   });
 

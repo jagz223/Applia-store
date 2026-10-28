@@ -116,7 +116,7 @@ function invalidateCategoryQueries(qc: ReturnType<typeof useQueryClient>, storeI
     predicate: (q) =>
       Array.isArray(q.queryKey) &&
       q.queryKey[0] === "/api/stores" &&
-      q.queryKey[2] === "showcase-products",
+      (q.queryKey[2] === "showcase-products" || q.queryKey[2] === "showcase-meta"),
   });
 }
 

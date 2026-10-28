@@ -12,10 +12,8 @@ import { useStoreSubcategories } from "@/hooks/use-store-subcategories";
 import { StoreProductFormDialog } from "@/components/store/StoreProductFormDialog";
 import { StoreProductDetailDialog } from "@/components/store/StoreProductDetailDialog";
 import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
-import {
-  STORE_ADMIN_LIST_PAGE_SIZE,
-  StoreAdminListPagination,
-} from "@/components/store/StoreAdminListPagination";
+import { StoreAdminListPagination } from "@/components/store/StoreAdminListPagination";
+import { useStoreAdminListPageSize } from "@/hooks/use-store-admin-list-page-size";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -93,6 +91,68 @@ function ProductThumbnail({ imageUrls }: { imageUrls: string[] }) {
       secondaryClassName="h-4 w-4 bottom-0.5 right-0.5 border"
       placeholderClassName="bg-muted/40 text-muted-foreground border-dashed"
     />
+  );
+}
+
+function ImportToggle({
+  storeId,
+  product,
+}: {
+  storeId: number;
+  product: StoreProductSummary;
+}) {
+  const { toast } = useToast();
+  const updateMutation = useUpdateStoreProduct(storeId);
+  const [checked, setChecked] = useState(product.isToImport === true);
+  const busy = updateMutation.isPending && updateMutation.variables?.productId === product.id;
+
+  useEffect(() => {
+    setChecked(product.isToImport === true);
+  }, [product.id, product.isToImport]);
+
+  async function handleChange(next: boolean) {
+    const prev = checked;
+    setChecked(next);
+    try {
+      await updateMutation.mutateAsync({
+        productId: product.id,
+        body: { isToImport: next },
+      });
+      toast({
+        title: next ? "Marcado para importar" : "Producto de tienda normal",
+        description: next
+          ? `«${product.name}» aparece en el catálogo para importar.`
+          : `«${product.name}» vuelve a la vitrina normal.`,
+      });
+    } catch (e) {
+      setChecked(prev);
+      toast({
+        variant: "destructive",
+        title: "No se pudo actualizar",
+        description: e instanceof Error ? e.message : "Error desconocido",
+      });
+    }
+  }
+
+  return (
+    <div
+      className="flex items-center gap-2"
+      title="Productos que la tienda trae de otro país o tienda bajo pedido"
+    >
+      <Switch
+        id={`import-${product.id}`}
+        checked={checked}
+        disabled={busy}
+        onCheckedChange={(v) => void handleChange(v)}
+        aria-label={`Es para importar ${product.name}`}
+      />
+      <Label
+        htmlFor={`import-${product.id}`}
+        className={cn("text-xs cursor-pointer whitespace-nowrap", busy && "opacity-60")}
+      >
+        {busy ? "Guardando…" : checked ? "Para importar" : "Tienda"}
+      </Label>
+    </div>
   );
 }
 
@@ -237,6 +297,7 @@ export function StoreAdminProductsPanel({
   const [debouncedCodigo, setDebouncedCodigo] = useState("");
   const [categoryId, setCategoryId] = useState<string>("all");
   const [subcategoryId, setSubcategoryId] = useState<string>("all");
+  const [importFilter, setImportFilter] = useState<"all" | "import" | "retail">("all");
   const [priceMinInput, setPriceMinInput] = useState("");
   const [priceMaxInput, setPriceMaxInput] = useState("");
   const [priceIvaMinInput, setPriceIvaMinInput] = useState("");
@@ -246,10 +307,15 @@ export function StoreAdminProductsPanel({
   const [debouncedPriceIvaMin, setDebouncedPriceIvaMin] = useState<number | null>(null);
   const [debouncedPriceIvaMax, setDebouncedPriceIvaMax] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useStoreAdminListPageSize();
 
   useEffect(() => {
     setOnlyWithImage(showcaseOnlyWithImage);
   }, [showcaseOnlyWithImage]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -293,11 +359,15 @@ export function StoreAdminProductsPanel({
     if (!stillValid) setSubcategoryId("all");
   }, [filteredSubcategories, subcategoryId]);
 
+  const importFilterValue =
+    importFilter === "import" ? true : importFilter === "retail" ? false : null;
+
   const hasActiveFilters = Boolean(
     debouncedSearch ||
       debouncedCodigo ||
       selectedCategoryId ||
       selectedSubcategoryId ||
+      importFilterValue != null ||
       debouncedPriceMin != null ||
       debouncedPriceMax != null ||
       debouncedPriceIvaMin != null ||
@@ -307,7 +377,7 @@ export function StoreAdminProductsPanel({
   const { data, isLoading, error, isFetching } = useStoreProductsPage(
     storeId,
     page,
-    STORE_ADMIN_LIST_PAGE_SIZE,
+    pageSize,
     true,
     {
       search: debouncedSearch,
@@ -318,6 +388,7 @@ export function StoreAdminProductsPanel({
       priceMax: debouncedPriceMax,
       priceIvaMin: debouncedPriceIvaMin,
       priceIvaMax: debouncedPriceIvaMax,
+      isToImport: importFilterValue,
     },
   );
   const products = data?.items ?? [];
@@ -438,6 +509,31 @@ export function StoreAdminProductsPanel({
                     aria-label="Filtrar productos por nombre aproximado"
                   />
                 </div>
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <Label
+                  htmlFor="product-import-filter"
+                  className="text-xs text-muted-foreground"
+                  title="Productos que la tienda trae de otro país o tienda bajo pedido"
+                >
+                  Es para importar
+                </Label>
+                <Select
+                  value={importFilter}
+                  onValueChange={(v) => {
+                    setImportFilter(v as "all" | "import" | "retail");
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger id="product-import-filter" className={storeAdminFieldClass}>
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="import">Solo para importar</SelectItem>
+                    <SelectItem value="retail">Solo tienda normal</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="min-w-0 space-y-1.5">
                 <Label htmlFor="product-codigo-filter" className="text-xs text-muted-foreground">
@@ -596,11 +692,14 @@ export function StoreAdminProductsPanel({
                           </p>
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                          <ShowcaseToggle
-                            storeId={storeId}
-                            product={product}
-                            showcaseOnlyWithImage={onlyWithImage}
-                          />
+                          <div className="flex min-w-0 flex-wrap items-center gap-3">
+                            <ShowcaseToggle
+                              storeId={storeId}
+                              product={product}
+                              showcaseOnlyWithImage={onlyWithImage}
+                            />
+                            <ImportToggle storeId={storeId} product={product} />
+                          </div>
                           <ProductRowActions
                             onDetail={() => setDetailProduct(product)}
                             onEdit={() => openEdit(product)}
@@ -624,6 +723,7 @@ export function StoreAdminProductsPanel({
                       <TableHead className="w-[120px]">Precio</TableHead>
                       <TableHead className="w-[130px]">Precio + IVA</TableHead>
                       <TableHead className="w-[140px]">Vitrina</TableHead>
+                      <TableHead className="w-[150px]">Importar</TableHead>
                       <TableHead className="w-[140px] text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -658,6 +758,9 @@ export function StoreAdminProductsPanel({
                             showcaseOnlyWithImage={onlyWithImage}
                           />
                         </TableCell>
+                        <TableCell>
+                          <ImportToggle storeId={storeId} product={product} />
+                        </TableCell>
                         <TableCell className="text-right">
                           <ProductRowActions
                             onDetail={() => setDetailProduct(product)}
@@ -677,6 +780,8 @@ export function StoreAdminProductsPanel({
                 totalPages={totalPages}
                 isFetching={isFetching}
                 onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
               />
             </>
           )}

@@ -20,13 +20,12 @@ export type AuthUser = User & {
   acceptedProviderTermsOfUse?: boolean;
   /** Permisos efectivos del catálogo de roles (GET /api/auth/me). */
   permissions?: Record<string, boolean>;
-  /** true cuando el usuario configuró las 3 preguntas de recuperación. */
-  recoveryQuestionsConfigured?: boolean;
+  emailVerified?: boolean;
+  authProviders?: Array<"password" | "google" | "facebook">;
   profileEditGrants?: {
     email?: boolean;
     name?: boolean;
     phone?: boolean;
-    recoveryQuestions?: boolean;
   };
   /** ISO o timestamp de la última vez que cambió la foto de perfil (cooldown 24 h). */
   avatarLastChangedAt?: string | null;

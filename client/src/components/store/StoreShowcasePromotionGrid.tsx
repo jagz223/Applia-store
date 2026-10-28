@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ImageIcon, Loader2, Percent } from "lucide-react";
+import { ImageIcon, Percent } from "lucide-react";
 import type { StoreShowcasePromotion } from "@/hooks/use-store-showcase";
 import {
   STORE_ADMIN_LIST_PAGE_SIZE,
   StoreAdminListPagination,
 } from "@/components/store/StoreAdminListPagination";
+import { StoreShowcaseProductGridSkeleton } from "@/components/store/StoreShowcaseProductGrid";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = STORE_ADMIN_LIST_PAGE_SIZE;
@@ -139,9 +140,11 @@ export function StoreShowcasePromotionGrid({
 
   if (isLoading) {
     return (
-      <div className={cn("py-12 flex justify-center", className)}>
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <StoreShowcaseProductGridSkeleton
+        className={className}
+        largeCards={largeCards}
+        centered={centered}
+      />
     );
   }
 

@@ -14,6 +14,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@shared/routes";
 import { isGuest } from "@/lib/auth-utils";
 import { AlreadyAuthenticatedView } from "@/components/AlreadyAuthenticatedView";
+import { SocialAuthButtons } from "@/components/auth/SocialAuthButtons";
 import { cn } from "@/lib/utils";
 
 const registerSchema = z
@@ -107,7 +108,13 @@ export default function Register() {
         description: `Bienvenido ${result.user?.name ?? ""}, tu cuenta está lista.`,
       });
 
-      setLocation(`/account-recovery/setup?next=${encodeURIComponent("/")}`);
+      const redirect = sessionStorage.getItem("postLoginRedirect");
+      if (redirect) {
+        sessionStorage.removeItem("postLoginRedirect");
+        setLocation(redirect);
+      } else {
+        setLocation("/");
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Error al crear la cuenta";
       toast({
@@ -309,6 +316,25 @@ export default function Register() {
                 )}
               </Button>
 
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">O</span>
+                </div>
+              </div>
+              <SocialAuthButtons
+                onSuccess={() => {
+                  const redirect = sessionStorage.getItem("postLoginRedirect");
+                  if (redirect) {
+                    sessionStorage.removeItem("postLoginRedirect");
+                    setLocation(redirect);
+                  } else {
+                    setLocation("/");
+                  }
+                }}
+              />
               <p className="pt-1 text-center text-sm text-muted-foreground">
                 ¿Ya estás registrado?{" "}
                 <Link

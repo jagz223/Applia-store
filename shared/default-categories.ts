@@ -8,7 +8,13 @@
  * Slugs ocultos en la UI hasta que el admin los active vía Firestore (`hiddenCategorySlugs`).
  * Los slugs `delivery` y `marketplace` siguen ocultos por defecto; `transport` lo controla el admin.
  */
-export const HIDDEN_CATEGORY_SLUGS_IN_UI: ReadonlyArray<string> = ["delivery", "marketplace"];
+export const HIDDEN_CATEGORY_SLUGS_IN_UI: ReadonlyArray<string> = [
+  "delivery",
+  "marketplace",
+  "transport",
+  "technical",
+  "professional",
+];
 
 /**
  * Lista efectiva de slugs ocultos.
@@ -45,7 +51,14 @@ export const TECHNICAL_CATEGORY_SLUG = "technical" as const;
  * Categorías retiradas del catálogo (no deben ofrecerse en registro ni recrearse con seed).
  * Los documentos legacy en Firestore pueden seguir existiendo; la UI y el seed las ignoran.
  */
-export const RETIRED_PROVIDER_CATEGORY_SLUGS = ["maintenance"] as const;
+export const RETIRED_PROVIDER_CATEGORY_SLUGS = [
+  "maintenance",
+  "transport",
+  "delivery",
+  "marketplace",
+  "technical",
+  "professional",
+] as const;
 
 const RETIRED_SLUG_SET = new Set(
   RETIRED_PROVIDER_CATEGORY_SLUGS.map((s) => s.toLowerCase()),
@@ -66,7 +79,13 @@ export function normalizeProviderCategorySlug(slug: string | null | undefined): 
  * Slugs que no se devuelven en `GET /api/categories` (lista pública: home, explorar, categorías, registro asociado).
  * Así se evita duplicar taxi + delivery aunque existan ambos documentos en Firestore o el admin muestre delivery.
  */
-export const CATEGORY_SLUGS_EXCLUDED_FROM_PUBLIC_API = ["delivery"] as const;
+export const CATEGORY_SLUGS_EXCLUDED_FROM_PUBLIC_API = [
+  "delivery",
+  "transport",
+  "marketplace",
+  "technical",
+  "professional",
+] as const;
 
 export function filterCategoriesExcludedFromPublicApi<T extends { slug?: string | null }>(
   categories: readonly T[],

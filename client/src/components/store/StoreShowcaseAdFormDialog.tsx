@@ -12,13 +12,19 @@ import {
 } from "@/hooks/use-store-showcase-ads";
 import { useStoreCategories } from "@/hooks/use-store-categories";
 import { uploadStoreShowcaseAdImage } from "@/lib/firebase-client";
-import { revokeBlobPreview } from "@/lib/store-image-draft";
-import { isLikelyImageUrl, resolveShowcaseAdImageUrl } from "@/lib/store-showcase-ad-media";
+import {
+  resolveStoreImageDraftToAsset,
+  revokeBlobPreview,
+  singularDraftFromSavedFields,
+  type StoreImageDraft,
+} from "@/lib/store-image-draft";
+import { resolveShowcaseAdImageUrl } from "@/lib/store-showcase-ad-media";
 import { useToast } from "@/hooks/use-toast";
 import {
   StoreEntityMultiPicker,
   type SelectedEntity,
 } from "@/components/store/StoreEntityMultiPicker";
+import { StoreCoverPhotoPicker } from "@/components/store/StoreCoverPhotoPicker";
 import {
   storeAdminDialogBodyClass,
   storeAdminDialogContentClass,
@@ -53,32 +59,22 @@ import { cn } from "@/lib/utils";
 
 type AdKind = "banner" | "popup";
 
+const BANNER_ASPECT = 21 / 9;
+
 type FormState = {
-  imageSourceUrl: string;
   clickUrl: string;
-  pendingImageFile: File | null;
-  filePreviewUrl: string | null;
+  imageDraft: StoreImageDraft | null;
   categoryVisibilityMode: StoreShowcaseBannerCategoryVisibilityMode;
   selectedCategories: SelectedEntity[];
 };
 
 function emptyForm(): FormState {
   return {
-    imageSourceUrl: "",
     clickUrl: "",
-    pendingImageFile: null,
-    filePreviewUrl: null,
+    imageDraft: null,
     categoryVisibilityMode: "all",
     selectedCategories: [],
   };
-}
-
-function formPreviewUrl(form: FormState, existingImageUrl: string | null): string | null {
-  if (form.filePreviewUrl) return form.filePreviewUrl;
-  const url = form.imageSourceUrl.trim();
-  if (url && isLikelyImageUrl(url)) return url;
-  if (existingImageUrl?.trim() && !form.pendingImageFile && !url) return existingImageUrl.trim();
-  return null;
 }
 
 export function StoreShowcaseAdFormDialog({
@@ -109,17 +105,13 @@ export function StoreShowcaseAdFormDialog({
   const [form, setForm] = useState<FormState>(emptyForm);
   const [originalPreviewOpen, setOriginalPreviewOpen] = useState(false);
   const [vitrinaPreviewOpen, setVitrinaPreviewOpen] = useState(false);
-  const existingImageUrl = ad ? resolveShowcaseAdImageUrl(ad) : null;
-  const previewUrl = formPreviewUrl(form, existingImageUrl);
+  const previewUrl = form.imageDraft?.previewUrl ?? null;
   const canSubmit = useMemo(() => {
     if (!previewUrl) return false;
     if (!isBanner) return true;
     if (form.categoryVisibilityMode === "all") return true;
     return form.selectedCategories.length > 0;
   }, [previewUrl, isBanner, form.categoryVisibilityMode, form.selectedCategories.length]);
-  const urlLooksLikeImage = !form.pendingImageFile && isLikelyImageUrl(form.imageSourceUrl);
-  const urlEnteredButInvalid =
-    Boolean(form.imageSourceUrl.trim()) && !form.pendingImageFile && !urlLooksLikeImage;
 
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ id: c.id, name: c.name })),
@@ -141,10 +133,12 @@ export function StoreShowcaseAdFormDialog({
               return { id: cid, name: found?.name ?? `Categoría #${cid}` };
             });
       setForm({
-        imageSourceUrl: "",
         clickUrl: ad.linkUrl?.trim() ?? "",
-        pendingImageFile: null,
-        filePreviewUrl: null,
+        imageDraft: singularDraftFromSavedFields({
+          displayUrl: resolveShowcaseAdImageUrl(ad),
+          originalUrl: ad.imageOriginalUrl,
+          transform: ad.imageTransform,
+        }),
         categoryVisibilityMode: visibility.categoryVisibilityMode,
         selectedCategories,
       });
@@ -155,16 +149,18 @@ export function StoreShowcaseAdFormDialog({
 
   useEffect(() => {
     return () => {
-      revokeBlobPreview(form.filePreviewUrl);
+      if (form.imageDraft) {
+        revokeBlobPreview(form.imageDraft.previewUrl);
+        revokeBlobPreview(form.imageDraft.originalPreviewUrl);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSubmit() {
-    const imageFromUrl = form.imageSourceUrl.trim();
     const clickUrl = form.clickUrl.trim();
 
-    if (!form.pendingImageFile && !isLikelyImageUrl(imageFromUrl) && !existingImageUrl) {
+    if (!form.imageDraft) {
       toast({
         variant: "destructive",
         title: "Imagen requerida",
@@ -187,11 +183,16 @@ export function StoreShowcaseAdFormDialog({
     }
 
     try {
-      let imageUrl: string | null = existingImageUrl;
-      if (form.pendingImageFile) {
-        imageUrl = await uploadStoreShowcaseAdImage(storeId, kind, form.pendingImageFile);
-      } else if (isLikelyImageUrl(imageFromUrl)) {
-        imageUrl = imageFromUrl;
+      const asset = await resolveStoreImageDraftToAsset(form.imageDraft, (file, variant) =>
+        uploadStoreShowcaseAdImage(storeId, kind, file, variant),
+      );
+      if (!asset) {
+        toast({
+          variant: "destructive",
+          title: "Imagen incompleta",
+          description: "Recorta o selecciona una imagen válida.",
+        });
+        return;
       }
 
       const visibility = isBanner
@@ -201,12 +202,18 @@ export function StoreShowcaseAdFormDialog({
           )
         : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
 
+      const imageFields = {
+        imageUrl: asset.displayUrl,
+        imageOriginalUrl: asset.originalUrl || null,
+        imageTransform: asset.transform,
+      };
+
       if (isEdit && ad) {
         await updateMutation.mutateAsync({
           kind,
           adId: ad.id,
           body: {
-            imageUrl,
+            ...imageFields,
             linkUrl: clickUrl || null,
             ...(isBanner
               ? {
@@ -220,7 +227,7 @@ export function StoreShowcaseAdFormDialog({
       } else {
         const payload: InsertStoreShowcaseAdItem = {
           kind,
-          imageUrl,
+          ...imageFields,
           linkUrl: clickUrl || null,
           ...(isBanner
             ? {
@@ -233,7 +240,10 @@ export function StoreShowcaseAdFormDialog({
         toast({ title: kind === "banner" ? "Banner creado" : "Popup creado" });
       }
 
-      revokeBlobPreview(form.filePreviewUrl);
+      if (form.imageDraft) {
+        revokeBlobPreview(form.imageDraft.previewUrl);
+        revokeBlobPreview(form.imageDraft.originalPreviewUrl);
+      }
       onOpenChange(false);
     } catch (e) {
       toast({
@@ -281,123 +291,62 @@ export function StoreShowcaseAdFormDialog({
         </DialogHeader>
 
         <div className={storeAdminDialogBodyClass}>
-          <div className="space-y-2">
-            <Label>Vista previa</Label>
-            {kind === "banner" ? (
-              <div className="space-y-2">
-                {previewUrl ? (
-                  <button
-                    type="button"
-                    className={cn(
-                      "relative flex w-full items-center justify-center overflow-hidden rounded-2xl border border-border/60 bg-muted/30 p-2",
-                      "min-h-[7.5rem] cursor-zoom-in transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    )}
-                    onClick={() => setOriginalPreviewOpen(true)}
-                    aria-label="Ver imagen en proporciones originales"
-                  >
-                    <img
-                      src={previewUrl}
-                      alt=""
-                      className="max-h-[min(40dvh,16rem)] max-w-full object-contain"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex min-h-[7.5rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-border/60 bg-muted/30 text-muted-foreground">
-                    <ImageIcon className="h-6 w-6" aria-hidden />
-                    <p className="text-xs">Sube un archivo o pega un enlace</p>
-                  </div>
+          {isBanner && previewUrl ? (
+            <div className="space-y-2">
+              <Label>Vista previa</Label>
+              <button
+                type="button"
+                className={cn(
+                  "relative flex w-full items-center justify-center overflow-hidden rounded-2xl border border-border/60 bg-muted/30 p-2",
+                  "min-h-[7.5rem] cursor-zoom-in transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
-                <p className="text-xs text-muted-foreground">
-                  Toca la imagen para verla a tamaño original.
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 w-full gap-2 rounded-full"
-                  disabled={!previewUrl}
-                  onClick={() => setVitrinaPreviewOpen(true)}
-                >
-                  <MonitorPlay className="h-4 w-4" aria-hidden />
-                  Vista en vitrina
-                </Button>
-              </div>
-            ) : (
-              <div className="flex w-full items-center justify-center overflow-hidden rounded-2xl border border-border/60 bg-muted/30 p-3">
-                {previewUrl ? (
-                  <img
-                    src={previewUrl}
-                    alt=""
-                    className="max-h-[min(50dvh,20rem)] max-w-full object-contain"
-                  />
-                ) : (
-                  <div className="flex h-40 w-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <ImageIcon className="h-6 w-6" aria-hidden />
-                    <p className="text-xs">Sube un archivo o pega un enlace</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+                onClick={() => setOriginalPreviewOpen(true)}
+                aria-label="Ver imagen en proporciones originales"
+              >
+                <img
+                  src={previewUrl}
+                  alt=""
+                  className="max-h-[min(40dvh,16rem)] max-w-full object-contain"
+                />
+              </button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full gap-2 rounded-full"
+                disabled={!previewUrl}
+                onClick={() => setVitrinaPreviewOpen(true)}
+              >
+                <MonitorPlay className="h-4 w-4" aria-hidden />
+                Vista en vitrina
+              </Button>
+            </div>
+          ) : null}
 
-          <div className="space-y-2">
-            <Label htmlFor={`${id}-file`}>Subir imagen</Label>
-            <Input
-              id={`${id}-file`}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              disabled={saving}
-              className={storeAdminFieldClass}
-              onChange={(e) => {
-                const file = e.currentTarget.files?.[0] ?? null;
-                setForm((prev) => {
-                  revokeBlobPreview(prev.filePreviewUrl);
-                  return {
-                    ...prev,
-                    pendingImageFile: file,
-                    filePreviewUrl: file ? URL.createObjectURL(file) : null,
-                    imageSourceUrl: file ? "" : prev.imageSourceUrl,
-                  };
-                });
-              }}
-            />
-          </div>
+          {!isBanner && previewUrl ? (
+            <div className="flex w-full items-center justify-center overflow-hidden rounded-2xl border border-border/60 bg-muted/30 p-3">
+              <img
+                src={previewUrl}
+                alt=""
+                className="max-h-[min(50dvh,20rem)] max-w-full object-contain"
+              />
+            </div>
+          ) : null}
 
-          <div className="space-y-2">
-            <Label htmlFor={`${id}-image-url`}>Enlace de imagen</Label>
-            <Input
-              id={`${id}-image-url`}
-              value={form.imageSourceUrl}
-              disabled={saving || Boolean(form.pendingImageFile)}
-              placeholder="https://.../imagen.jpg"
-              className={storeAdminFieldClass}
-              onChange={(e) => {
-                const imageSourceUrl = e.target.value;
-                setForm((prev) => {
-                  if (prev.filePreviewUrl) revokeBlobPreview(prev.filePreviewUrl);
-                  return {
-                    ...prev,
-                    imageSourceUrl,
-                    pendingImageFile: null,
-                    filePreviewUrl: null,
-                  };
-                });
-              }}
-            />
-            {isEdit && existingImageUrl && !form.pendingImageFile && !form.imageSourceUrl.trim() ? (
-              <p className="text-xs text-muted-foreground">
-                Se mantiene la imagen actual si no subes otra ni pegas una URL nueva.
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Pega la URL de una imagen para previsualizarla.
-              </p>
-            )}
-            {urlEnteredButInvalid ? (
-              <p className="text-xs text-destructive">
-                Ese enlace no parece una imagen. Usa una URL que termine en .jpg, .png, .webp, etc.
-              </p>
-            ) : null}
-          </div>
+          {!previewUrl ? (
+            <div className="flex min-h-[5rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-border/60 bg-muted/30 text-muted-foreground">
+              <ImageIcon className="h-6 w-6" aria-hidden />
+              <p className="text-xs">Sube un archivo o pega un enlace</p>
+            </div>
+          ) : null}
+
+          <StoreCoverPhotoPicker
+            label="Imagen"
+            draft={form.imageDraft}
+            disabled={saving}
+            aspectRatio={BANNER_ASPECT}
+            previewAspectClass="aspect-[21/9]"
+            onDraftChange={(imageDraft) => setForm((prev) => ({ ...prev, imageDraft }))}
+          />
 
           <div className="space-y-2">
             <Label htmlFor={`${id}-click`}>Link al hacer clic (opcional)</Label>

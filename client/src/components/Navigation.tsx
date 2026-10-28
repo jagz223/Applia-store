@@ -7,6 +7,7 @@ import {
   LogOut,
   Menu,
   MessageCircle,
+  Package,
   User,
   Settings,
   ShoppingBag,
@@ -26,7 +27,11 @@ import { ThemeToggleHeaderButton } from "@/components/ThemeToggle";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "@/contexts/ThemeContext";
-import { getPrimaryStoreVitrinaHref, usePrimaryStore } from "@/hooks/use-primary-store";
+import {
+  getPrimaryStoreImportCatalogHref,
+  getPrimaryStoreVitrinaHref,
+  usePrimaryStore,
+} from "@/hooks/use-primary-store";
 import {
   getMyStoreChatNavHref,
   getMyStoreNavHref,
@@ -73,7 +78,7 @@ function NavPill({
       href={href}
       onClick={onClick}
       className={cn(
-        "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
+        "whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
         active
           ? "bg-[hsl(220,70%,22%)] text-white shadow-sm dark:bg-primary dark:text-primary-foreground"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -101,7 +106,21 @@ function BrandLogoLink({ className, imgClassName }: { className?: string; imgCla
   );
 }
 
-type NavSection = "home" | "about" | "tienda" | "chat" | "admin";
+type NavSection = "home" | "about" | "tienda" | "import" | "chat" | "admin";
+
+function isImportCatalogPath(path: string): boolean {
+  return /^\/tienda\/[^/]+\/para-importar\/?$/.test(path);
+}
+
+const RESERVED_STORE_PATH_SEGMENTS = new Set(["crear", "admin"]);
+
+function extractStoreSlugFromPath(path: string): string | null {
+  const match = path.match(/^\/tienda\/([^/]+)(?:\/|$)/);
+  if (!match?.[1]) return null;
+  const slug = decodeURIComponent(match[1]);
+  if (RESERVED_STORE_PATH_SEGMENTS.has(slug)) return null;
+  return slug;
+}
 
 function resolveNavSection(
   location: string,
@@ -122,6 +141,7 @@ function resolveNavSection(
   ) {
     return "admin";
   }
+  if (isImportCatalogPath(path)) return "import";
   if (path.startsWith("/tienda")) return "tienda";
   return null;
 }
@@ -145,7 +165,14 @@ export function Navigation() {
     : getMyStoreChatNavHref(myStore) ??
       (staffStore?.store.slug ? getStoreAdminChatHref(staffStore.store.slug) : null);
   const showStoreStaffNav = Boolean(storeAdminHref);
-  const tiendaHref = getPrimaryStoreVitrinaHref(primaryStore);
+  const pathSlug = extractStoreSlugFromPath(location.split("?")[0]);
+  const storeSlugForNav = primaryStore?.slug ?? pathSlug;
+  const tiendaHref = storeSlugForNav
+    ? `/tienda/${encodeURIComponent(storeSlugForNav)}`
+    : getPrimaryStoreVitrinaHref(primaryStore);
+  const importCatalogHref = storeSlugForNav
+    ? `/tienda/${encodeURIComponent(storeSlugForNav)}/para-importar`
+    : getPrimaryStoreImportCatalogHref(primaryStore);
 
   const navSection = useMemo(
     () => resolveNavSection(location, { storeChatHref, storeAdminHref }),
@@ -155,6 +182,7 @@ export function Navigation() {
   const homeActive = navSection === "home";
   const aboutActive = navSection === "about";
   const tiendaActive = navSection === "tienda";
+  const importCatalogActive = navSection === "import";
   const chatActive = navSection === "chat";
   const adminActive = navSection === "admin";
   const isActive = (path: string) => location === path || location.startsWith(path + "/");
@@ -166,7 +194,7 @@ export function Navigation() {
           <div className="flex min-w-0 flex-1 items-center gap-3 lg:gap-8">
             <BrandLogoLink />
 
-            <div className="hidden items-center gap-1 rounded-full bg-muted/60 p-1 lg:flex">
+            <div className="hidden shrink-0 items-center gap-1 rounded-full bg-muted/60 p-1 lg:flex">
               <NavPill href="/" active={homeActive}>
                 Inicio
               </NavPill>
@@ -175,6 +203,9 @@ export function Navigation() {
               </NavPill>
               <NavPill href={tiendaHref} active={tiendaActive}>
                 Tienda
+              </NavPill>
+              <NavPill href={importCatalogHref} active={importCatalogActive}>
+                Catálogo para importar
               </NavPill>
               {showStoreStaffNav && storeAdminHref ? (
                 <NavPill href={storeAdminHref} active={adminActive}>
@@ -246,6 +277,20 @@ export function Navigation() {
                         <span className="flex items-center gap-2.5">
                           <Store className="h-4 w-4" />
                           Tienda
+                        </span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer rounded-none px-4 py-2.5 focus:bg-muted"
+                    >
+                      <Link
+                        href={importCatalogHref}
+                        className="flex w-full items-center justify-between gap-2"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <Package className="h-4 w-4" />
+                          Catálogo para importar
                         </span>
                       </Link>
                     </DropdownMenuItem>
@@ -356,6 +401,13 @@ export function Navigation() {
                     </NavPill>
                     <NavPill href={tiendaHref} active={tiendaActive} onClick={() => setMobileOpen(false)}>
                       Tienda
+                    </NavPill>
+                    <NavPill
+                      href={importCatalogHref}
+                      active={importCatalogActive}
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      Catálogo para importar
                     </NavPill>
                     {showStoreStaffNav && storeAdminHref ? (
                       <NavPill href={storeAdminHref} active={adminActive} onClick={() => setMobileOpen(false)}>

@@ -4,7 +4,7 @@ import { AlertCircle, ArrowLeft, FileSpreadsheet, Loader2, Plus, Trash2, Upload 
 import {
   PRODUCT_IMPORT_CSV_DELIMITER_LABELS,
   PRODUCT_IMPORT_CSV_DELIMITERS,
-  PRODUCT_IMPORT_OPTIONAL_FIELD_LABELS,
+  PRODUCT_IMPORT_OPTIONAL_FIELD_LABELS as PRODUCT_IMPORT_OPTIONAL_FIELD_LABELS_BASE,
   PRODUCT_IMPORT_OPTIONAL_FIELDS,
   type ProductImportCsvDelimiter,
   type ProductImportOptionalField,
@@ -28,6 +28,16 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { storeAdminFieldClass, storeAdminSectionCardClass } from "@/components/store/store-admin-ui";
 import { cn } from "@/lib/utils";
+import { getStoreCatalogItemCopy, isStoreBoxSizeEnabled } from "@/lib/store-runtime-flags";
+
+const PRODUCT_IMPORT_OPTIONAL_FIELDS_VISIBLE = PRODUCT_IMPORT_OPTIONAL_FIELDS.filter(
+  (field) => field !== "boxSize" || isStoreBoxSizeEnabled(),
+);
+
+const PRODUCT_IMPORT_OPTIONAL_FIELD_LABELS: Record<ProductImportOptionalField, string> = {
+  ...PRODUCT_IMPORT_OPTIONAL_FIELD_LABELS_BASE,
+  ingredients: getStoreCatalogItemCopy().pluralTitle,
+};
 
 async function fileToBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
@@ -299,8 +309,8 @@ export default function StoreProductImportPage() {
               <div>
                 <h3 className="text-sm font-semibold">Campos opcionales</h3>
                 <p className="text-xs text-muted-foreground">
-                  Columna del archivo + dato del producto. Stock activa el control de stock. Ingredientes
-                  separados por coma dentro de la celda.
+                  Columna del archivo + dato del producto. Stock activa el control de stock. Los ítems del
+                  catálogo van separados por coma dentro de la celda.
                 </p>
               </div>
               <Button
@@ -308,7 +318,7 @@ export default function StoreProductImportPage() {
                 variant="outline"
                 size="sm"
                 className="rounded-full gap-1"
-                disabled={busy || optionals.length >= PRODUCT_IMPORT_OPTIONAL_FIELDS.length}
+                disabled={busy || optionals.length >= PRODUCT_IMPORT_OPTIONAL_FIELDS_VISIBLE.length}
                 onClick={() => setOptionals((prev) => [...prev, newOptionalRow()])}
               >
                 <Plus className="h-4 w-4" />
@@ -323,7 +333,7 @@ export default function StoreProductImportPage() {
             ) : (
               <ul className="space-y-2">
                 {optionals.map((row) => {
-                  const availableFields = PRODUCT_IMPORT_OPTIONAL_FIELDS.filter(
+                  const availableFields = PRODUCT_IMPORT_OPTIONAL_FIELDS_VISIBLE.filter(
                     (f) => f === row.field || !usedOptionalFields.has(f),
                   );
                   return (

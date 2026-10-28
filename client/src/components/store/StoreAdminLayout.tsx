@@ -12,6 +12,7 @@ import { useSocket } from "@/hooks/use-socket";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { StoreAdminDeliveryRatePrompt } from "@/components/store/StoreAdminDeliveryRatePrompt";
+import { getStoreCatalogItemCopy, isStoreTryOnEnabled } from "@/lib/store-runtime-flags";
 
 const SECTION_ICONS: Record<StoreAdminSectionId, typeof Package> = {
   productos: Package,
@@ -64,10 +65,16 @@ export function StoreAdminLayout({
   const queryClient = useQueryClient();
   const { socket } = useSocket();
   const { data: deliveryNotifications } = useStoreDeliveryNotifications(storeId, storeId > 0);
+  const catalogItemCopy = getStoreCatalogItemCopy();
   const navSections = getVisibleStoreAdminSections({
     employeeOnly,
     includeStaff: canManageStaff,
-  });
+    extraHidden: isStoreTryOnEnabled() ? [] : ["simulacion_ropa"],
+  }).map((section) =>
+    section.id === "ingredientes"
+      ? { ...section, label: catalogItemCopy.pluralTitle }
+      : section,
+  );
 
   useEffect(() => {
     if (!socket || storeId <= 0) return;

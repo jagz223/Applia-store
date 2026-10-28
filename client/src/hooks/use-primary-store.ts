@@ -24,6 +24,24 @@ export function getPrimaryStoreVitrinaHref(store: Pick<PrimaryStore, "slug"> | n
   return `/tienda/${encodeURIComponent(store.slug)}`;
 }
 
+export function getPrimaryStoreImportCatalogHref(
+  store: Pick<PrimaryStore, "slug"> | null | undefined,
+): string {
+  if (!store?.slug) return "/tienda";
+  return `/tienda/${encodeURIComponent(store.slug)}/para-importar`;
+}
+
+export function getPrimaryStoreVitrinaCategoryHref(
+  store: Pick<PrimaryStore, "slug"> | null | undefined,
+  categoryName: string,
+): string {
+  const base = getPrimaryStoreVitrinaHref(store);
+  const trimmed = categoryName.trim();
+  if (!trimmed) return base;
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}category=${encodeURIComponent(trimmed)}`;
+}
+
 export function usePrimaryStore(enabled = true) {
   return useQuery({
     queryKey: PRIMARY_STORE_QUERY_KEY,

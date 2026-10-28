@@ -5,9 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { SquareImageCropDialog } from "@/components/store/SquareImageCropDialog";
+import {
+  SquareImageCropDialog,
+  type SquareImageCropConfirmResult,
+} from "@/components/store/SquareImageCropDialog";
 import { StoreProductDualImage } from "@/components/store/StoreProductDualImage";
 import {
+  applyCropResultToDraft,
+  draftHasEditableOriginal,
+  draftOriginalSource,
+  emptyDraftFromOriginalFile,
+  emptyDraftFromRemoteUrl,
   isLikelyImageUrl,
   revokeBlobPreview,
   type StoreImageDraft,
@@ -17,6 +25,7 @@ import { storeTransparentImageSurfaceStyle } from "@/components/store/store-admi
 import { cn } from "@/lib/utils";
 
 const SLOT_LABELS = ["Foto principal", "Segunda imagen"] as const;
+const PRODUCT_ASPECT_RATIO = 1;
 
 export function StoreProductPhotosPicker({
   drafts,
@@ -36,6 +45,7 @@ export function StoreProductPhotosPicker({
   const [cropMimeType, setCropMimeType] = useState<string | undefined>("image/png");
   const [cropOpen, setCropOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState(0);
+  const [pendingOriginalDraft, setPendingOriginalDraft] = useState<StoreImageDraft | null>(null);
 
   const primary = drafts[0] ?? null;
   const secondary = drafts[1] ?? null;
@@ -44,17 +54,23 @@ export function StoreProductPhotosPicker({
   function setSlot(index: number, next: StoreImageDraft | null) {
     if (next == null) {
       if (index === 0) {
-        if (drafts[0]) revokeBlobPreview(drafts[0].previewUrl);
-        // Si había segunda, pasa a ser principal
+        if (drafts[0]) {
+          revokeBlobPreview(drafts[0].previewUrl);
+          revokeBlobPreview(drafts[0].originalPreviewUrl);
+        }
         onChange(drafts.slice(1));
         return;
       }
-      if (drafts[index]) revokeBlobPreview(drafts[index]!.previewUrl);
+      if (drafts[index]) {
+        revokeBlobPreview(drafts[index]!.previewUrl);
+        revokeBlobPreview(drafts[index]!.originalPreviewUrl);
+      }
       onChange(drafts.filter((_, i) => i !== index));
       return;
     }
     if (index === 1 && drafts.length === 0) {
       revokeBlobPreview(next.previewUrl);
+      revokeBlobPreview(next.originalPreviewUrl);
       toast({
         variant: "destructive",
         title: "Falta la foto principal",
@@ -62,36 +78,59 @@ export function StoreProductPhotosPicker({
       });
       return;
     }
-    if (drafts[index]) revokeBlobPreview(drafts[index]!.previewUrl);
+    if (drafts[index]) {
+      const prev = drafts[index]!;
+      if (prev.previewUrl !== next.previewUrl) revokeBlobPreview(prev.previewUrl);
+      if (
+        prev.originalPreviewUrl &&
+        prev.originalPreviewUrl !== next.originalPreviewUrl &&
+        prev.originalPreviewUrl !== next.previewUrl
+      ) {
+        revokeBlobPreview(prev.originalPreviewUrl);
+      }
+    }
     const copy = [...drafts];
     copy[index] = next;
     onChange(copy.slice(0, STORE_PRODUCT_MAX_IMAGES));
   }
 
-  function openCropper(index: number, src: string, fileName: string, mimeType?: string) {
+  function openCropper(
+    index: number,
+    src: string,
+    fileName: string,
+    mimeType: string | undefined,
+    baseDraft: StoreImageDraft,
+  ) {
     setEditingIndex(index);
+    setPendingOriginalDraft(baseDraft);
     setCropSrc(src);
     setCropFileName(fileName);
     setCropMimeType(mimeType);
     setCropOpen(true);
   }
 
-  function closeCropper() {
-    const currentPreview = drafts[editingIndex]?.previewUrl;
-    if (cropSrc?.startsWith("blob:") && cropSrc !== currentPreview) {
-      revokeBlobPreview(cropSrc);
+  function closeCropper(keepPendingOriginal = false) {
+    if (!keepPendingOriginal && cropSrc?.startsWith("blob:")) {
+      const keep =
+        pendingOriginalDraft?.originalPreviewUrl === cropSrc ||
+        drafts[editingIndex]?.originalPreviewUrl === cropSrc ||
+        drafts[editingIndex]?.previewUrl === cropSrc;
+      if (!keep) revokeBlobPreview(cropSrc);
     }
+    if (!keepPendingOriginal) setPendingOriginalDraft(null);
     setCropOpen(false);
     setCropSrc(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
-  async function applyCroppedFile(file: File) {
-    setSlot(editingIndex, {
-      previewUrl: URL.createObjectURL(file),
-      pendingFile: file,
-    });
-    closeCropper();
+  async function applyCropResult(result: SquareImageCropConfirmResult) {
+    const base =
+      pendingOriginalDraft ??
+      drafts[editingIndex] ??
+      emptyDraftFromRemoteUrl(cropSrc ?? "");
+    setSlot(editingIndex, applyCropResultToDraft(base, result));
+    closeCropper(true);
+    setPendingOriginalDraft(null);
   }
 
   function handleFileSelect(files: FileList | null) {
@@ -113,11 +152,13 @@ export function StoreProductPhotosPicker({
       });
       return;
     }
+    const base = emptyDraftFromOriginalFile(file);
     openCropper(
       editingIndex,
-      URL.createObjectURL(file),
+      base.originalPreviewUrl!,
       file.name || "producto.png",
       file.type || undefined,
+      base,
     );
   }
 
@@ -143,6 +184,7 @@ export function StoreProductPhotosPicker({
       });
       const fromUrl = trimmed.split("?")[0]?.split("/").pop() || "producto.png";
       const safeName = /\.(png|jpe?g|webp|gif)$/i.test(fromUrl) ? fromUrl : "producto.png";
+      const base = emptyDraftFromRemoteUrl(trimmed);
       openCropper(
         index,
         trimmed,
@@ -152,6 +194,7 @@ export function StoreProductPhotosPicker({
           : safeName.toLowerCase().endsWith(".webp")
             ? "image/webp"
             : undefined,
+        base,
       );
       setUrlInput("");
     } catch (e) {
@@ -165,10 +208,34 @@ export function StoreProductPhotosPicker({
     }
   }
 
+  function handleRecrop(index: number) {
+    const draft = drafts[index];
+    if (!draft) return;
+    if (!draftHasEditableOriginal(draft)) {
+      toast({
+        variant: "destructive",
+        title: "Sin original",
+        description: "Esta imagen se guardó sin original. Vuelve a subir el archivo para recortar.",
+      });
+      return;
+    }
+    const src = draftOriginalSource(draft);
+    if (!src) return;
+    const fileName =
+      draft.pendingOriginalFile?.name ??
+      (/\.png(\?|$)/i.test(src)
+        ? "producto.png"
+        : /\.webp(\?|$)/i.test(src)
+          ? "producto.webp"
+          : "producto.png");
+    openCropper(index, src, fileName, draft.pendingOriginalFile?.type, draft);
+  }
+
   function renderSlot(index: 0 | 1) {
     const draft = drafts[index] ?? null;
     const label = SLOT_LABELS[index];
     const lockedSecondary = index === 1 && !primary;
+    const unsaved = Boolean(draft?.pendingDisplayFile || draft?.pendingOriginalFile);
 
     return (
       <div key={index} className="space-y-2 rounded-xl border border-border/70 bg-muted/10 p-3">
@@ -186,7 +253,7 @@ export function StoreProductPhotosPicker({
               style={storeTransparentImageSurfaceStyle}
             >
               <img src={draft.previewUrl} alt="" className="h-full w-full object-contain" />
-              {draft.pendingFile ? (
+              {unsaved ? (
                 <span className="absolute bottom-1 left-1 rounded bg-background/90 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                   Sin guardar
                 </span>
@@ -222,19 +289,7 @@ export function StoreProductPhotosPicker({
                 size="sm"
                 className="rounded-full"
                 disabled={disabled}
-                onClick={() =>
-                  openCropper(
-                    index,
-                    draft.previewUrl,
-                    draft.pendingFile?.name ??
-                      (/\.png(\?|$)/i.test(draft.previewUrl)
-                        ? "producto.png"
-                        : /\.webp(\?|$)/i.test(draft.previewUrl)
-                          ? "producto.webp"
-                          : "producto.png"),
-                    draft.pendingFile?.type,
-                  )
-                }
+                onClick={() => handleRecrop(index)}
               >
                 <Pencil className="mr-2 h-4 w-4" />
                 Recortar
@@ -362,7 +417,9 @@ export function StoreProductPhotosPicker({
         imageSrc={cropSrc}
         fileName={cropFileName}
         fileMimeType={cropMimeType}
-        onConfirm={applyCroppedFile}
+        aspectRatio={PRODUCT_ASPECT_RATIO}
+        initialTransform={pendingOriginalDraft?.transform ?? drafts[editingIndex]?.transform ?? null}
+        onConfirm={applyCropResult}
       />
     </div>
   );

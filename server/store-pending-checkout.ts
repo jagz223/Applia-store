@@ -6,6 +6,7 @@ import type { StoreOrder, StoreOrderDeliveryLocation, StoreOrderLineItem } from 
 import { appliaStorage } from "./storage-applia";
 import { notifyStoreOwnerNewOrder } from "./store-order-notifications";
 import { commitStoreOrderStock } from "./store-order-stock";
+import { markStoreCheckoutCooldown } from "./store-checkout-cooldown";
 
 export type StorePendingCheckout = {
   id: string;
@@ -125,10 +126,47 @@ async function claimStorePendingCheckout(pendingId: string): Promise<{
   userId: string;
   existingOrderId: number | null;
 }> {
-  const markProcessing = async (row: StorePendingCheckout) => {
-    const next = { ...row, status: "processing" as const, updatedAt: new Date().toISOString() };
-    await saveStorePendingCheckout(next);
-  };
+  const collection = col();
+  const db = getFirestore();
+
+  // Claim atómico con transacción Firestore (evita return+webhook duplicando pedido).
+  if (collection && db) {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const claimed = await db.runTransaction(async (tx) => {
+        const ref = collection.doc(pendingId);
+        const snap = await tx.get(ref);
+        if (!snap.exists) throw new Error("STORE_PENDING_CHECKOUT_NOT_FOUND");
+        const pending = mapDoc(snap.id, (snap.data() ?? {}) as Record<string, unknown>);
+        if (pending.status === "completed" && pending.storeOrderId) {
+          return {
+            storeId: pending.storeId,
+            userId: pending.userId,
+            existingOrderId: pending.storeOrderId,
+          };
+        }
+        if (pending.status === "pending") {
+          tx.set(ref, {
+            ...pending,
+            status: "processing",
+            updatedAt: new Date().toISOString(),
+          });
+          return {
+            storeId: pending.storeId,
+            userId: pending.userId,
+            existingOrderId: null,
+          };
+        }
+        return null;
+      });
+      if (claimed) return claimed;
+      await sleep(300);
+    }
+    const last = await getStorePendingCheckout(pendingId);
+    if (last?.status === "completed" && last.storeOrderId) {
+      return { storeId: last.storeId, userId: last.userId, existingOrderId: last.storeOrderId };
+    }
+    throw new Error("STORE_PENDING_CHECKOUT_BUSY");
+  }
 
   for (let attempt = 0; attempt < 6; attempt++) {
     const pending = await getStorePendingCheckout(pendingId);
@@ -137,7 +175,8 @@ async function claimStorePendingCheckout(pendingId: string): Promise<{
       return { storeId: pending.storeId, userId: pending.userId, existingOrderId: pending.storeOrderId };
     }
     if (pending.status === "pending") {
-      await markProcessing(pending);
+      const next = { ...pending, status: "processing" as const, updatedAt: new Date().toISOString() };
+      await saveStorePendingCheckout(next);
       return { storeId: pending.storeId, userId: pending.userId, existingOrderId: null };
     }
     await sleep(300);
@@ -215,6 +254,7 @@ export async function fulfillStorePendingCheckout(params: {
   };
   await saveStorePendingCheckout(next);
   await appliaStorage.deleteStoreCart(pending.userId, pending.storeId);
+  await markStoreCheckoutCooldown(pending.userId);
 
   const store = await appliaStorage.getStoreById(pending.storeId);
   if (store) {

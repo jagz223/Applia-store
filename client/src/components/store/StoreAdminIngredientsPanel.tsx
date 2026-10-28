@@ -40,11 +40,14 @@ import {
   storeAdminFieldClass,
   storeAdminSectionCardClass,
 } from "@/components/store/store-admin-ui";
-
-const ADMIN_INGREDIENTS_PAGE_SIZE = 10;
+import { StoreAdminListPagination } from "@/components/store/StoreAdminListPagination";
+import { useStoreAdminListPageSize } from "@/hooks/use-store-admin-list-page-size";
+import { getStoreCatalogItemCopy } from "@/lib/store-runtime-flags";
 
 export function StoreAdminIngredientsPanel() {
   const { toast } = useToast();
+  const catalogItemCopy = getStoreCatalogItemCopy();
+  const [pageSize, setPageSize] = useStoreAdminListPageSize();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -61,11 +64,15 @@ export function StoreAdminIngredientsPanel() {
     return () => window.clearTimeout(t);
   }, [search]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize]);
+
   const { data, isLoading, error, isFetching } = useIngredientsMaterials(
     debouncedSearch,
     page,
     true,
-    ADMIN_INGREDIENTS_PAGE_SIZE,
+    pageSize,
   );
   const createMutation = useCreateIngredientMaterialMutation();
   const updateMutation = useUpdateIngredientMaterial();
@@ -73,7 +80,7 @@ export function StoreAdminIngredientsPanel() {
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
-  const pageLimit = data?.limit ?? ADMIN_INGREDIENTS_PAGE_SIZE;
+  const pageLimit = data?.limit ?? pageSize;
   const totalPages = data?.totalPages ?? Math.max(1, Math.ceil(total / pageLimit));
   const saving = createMutation.isPending || updateMutation.isPending;
 
@@ -98,10 +105,10 @@ export function StoreAdminIngredientsPanel() {
     try {
       if (editItem) {
         await updateMutation.mutateAsync({ id: editItem.id, name });
-        toast({ title: "Ingrediente actualizado" });
+        toast({ title: `${catalogItemCopy.singularTitle} actualizado` });
       } else {
         await createMutation.mutateAsync(name);
-        toast({ title: "Ingrediente creado" });
+        toast({ title: `${catalogItemCopy.singularTitle} creado` });
       }
       setFormOpen(false);
       setEditItem(null);
@@ -139,9 +146,9 @@ export function StoreAdminIngredientsPanel() {
       <Card className={cn(storeAdminSectionCardClass, "overflow-hidden border-border/70 shadow-sm")}>
         <CardHeader className="flex flex-col gap-3 space-y-0 px-4 pt-5 sm:flex-row sm:items-start sm:justify-between sm:px-6">
           <div className="space-y-1">
-            <CardTitle className="font-display text-xl tracking-tight">Ingredientes</CardTitle>
+            <CardTitle className="font-display text-xl tracking-tight">{catalogItemCopy.pluralTitle}</CardTitle>
             <CardDescription className="text-sm leading-snug">
-              Catálogo global de ingredientes y materiales. Filtra, edita o elimina los que uses en productos.
+              Catálogo global de {catalogItemCopy.plural}. Filtra, edita o elimina los que uses en productos.
             </CardDescription>
           </div>
           <Button
@@ -161,7 +168,7 @@ export function StoreAdminIngredientsPanel() {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Filtrar por nombre…"
               className={cn(storeAdminFieldClass, "pl-9")}
-              aria-label="Filtrar ingredientes"
+              aria-label={`Filtrar ${catalogItemCopy.plural}`}
             />
           </div>
 
@@ -178,7 +185,7 @@ export function StoreAdminIngredientsPanel() {
               <p className="text-sm text-muted-foreground">
                 {debouncedSearch
                   ? "No hay coincidencias con ese filtro."
-                  : "Aún no hay ingredientes. Usa «Crear» para añadir el primero."}
+                  : `Aún no hay ${catalogItemCopy.plural}. Usa «Crear» para añadir el primero.`}
               </p>
             </div>
           ) : (
@@ -265,33 +272,14 @@ export function StoreAdminIngredientsPanel() {
                 </table>
               </div>
 
-              {totalPages > 1 ? (
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-full"
-                    disabled={page <= 1 || isFetching}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  >
-                    Anterior
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Pág. {page} / {totalPages}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-full"
-                    disabled={page >= totalPages || isFetching}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  >
-                    Siguiente
-                  </Button>
-                </div>
-              ) : null}
+              <StoreAdminListPagination
+                page={page}
+                totalPages={totalPages}
+                isFetching={isFetching}
+                onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
+              />
             </>
           )}
         </CardContent>
@@ -307,11 +295,11 @@ export function StoreAdminIngredientsPanel() {
         >
           <DialogHeader className={storeAdminDialogHeaderClass}>
             <DialogTitle className="pr-8 font-display text-xl tracking-tight">
-              {editItem ? "Editar ingrediente" : "Crear ingrediente"}
+              {editItem ? `Editar ${catalogItemCopy.singular}` : `Crear ${catalogItemCopy.singular}`}
             </DialogTitle>
             <DialogDescription>
               {editItem
-                ? "Cambia el nombre del ingrediente o material."
+                ? `Cambia el nombre del ${catalogItemCopy.singular}.`
                 : "Añade un nuevo ítem al catálogo global."}
             </DialogDescription>
           </DialogHeader>
@@ -361,7 +349,7 @@ export function StoreAdminIngredientsPanel() {
       <AlertDialog open={deleteTarget != null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar ingrediente?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar {catalogItemCopy.singular}?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
                 ? `«${deleteTarget.name}» se eliminará del catálogo. Los productos que lo usen dejarán de mostrarlo.`

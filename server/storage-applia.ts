@@ -49,15 +49,19 @@ import {
   deriveProductPricesFromSizes,
   resolveStoreProductPriceFields,
   resolveStoreProductWeightFields,
+  resolveStoreProductBoxSizeFields,
   normalizeStoreProductStockFields,
   resolveStoreProductShowOnShowcase,
   storeProductHasAvailableStock,
+  parseStoreProductCatalogKind,
+  type StoreProductCatalogKind,
   compareStoreCategoriesBySortOrder,
   assignContiguousStoreCategorySortOrders,
   moveStoreCategoryToSortOrder,
   resolveStoreLocationAndBranches,
   normalizeStoreBranches,
   DEFAULT_STORE_DELIVERY_FARES,
+  STORE_PRODUCT_MAX_IMAGES,
   type Store,
   type IngredientMaterial,
   type InsertStore,
@@ -76,7 +80,7 @@ import {
   type InsertStorePromotion,
   type UpdateStorePromotion,
 } from "@shared/store-schema";
-import { invalidateStoreProductsCache } from "./store-catalog-cache";
+import { invalidateStoreCatalogCache } from "./store-catalog-cache";
 import type {
   StoreShowcaseAdItem,
   InsertStoreShowcaseAdItem,
@@ -85,6 +89,12 @@ import type {
 } from "@shared/store-showcase-ads-schema";
 import { normalizeBannerCategoryVisibility } from "@shared/store-showcase-ads-schema";
 import { STORE_CURRENCY_USD_ID } from "@shared/store-currency-schema";
+import {
+  normalizeStoreImageTransform,
+  resolveSingularStoreImageFields,
+  resolveStoreImageAssetsFromProductInput,
+  storeImageAssetsToDisplayUrls,
+} from "@shared/store-image-asset";
 import type {
   InsertStorePaymentMethod,
   StorePaymentMethod,
@@ -488,7 +498,14 @@ export interface IStorage
     q?: string;
     page: number;
     limit?: number;
-  }): Promise<{ items: IngredientMaterial[]; total: number; page: number; limit: number }>;
+    after?: string | null;
+  }): Promise<{
+    items: IngredientMaterial[];
+    total: number;
+    page: number;
+    limit: number;
+    nextAfter: string | null;
+  }>;
   createIngredientMaterial(input: InsertIngredientMaterial): Promise<IngredientMaterial>;
   findIngredientMaterialByNormalizedName(normalizedName: string): Promise<IngredientMaterial | undefined>;
   getIngredientMaterial(id: number): Promise<IngredientMaterial | undefined>;
@@ -627,14 +644,23 @@ export interface IStorage
   ): Promise<StoreStaffRecord>;
   removeStoreStaffMember(storeId: number, userId: string): Promise<void>;
   findStoreStaffMembershipForUser(userId: string): Promise<StoreStaffRecord | undefined>;
-  getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined>;
+  getStoreCart(
+    userId: string,
+    storeId: number,
+    cartKind?: StoreProductCatalogKind,
+  ): Promise<StoreCart | undefined>;
   saveStoreCart(
     userId: string,
     storeId: number,
     items: StoreCartItem[],
     fulfillmentMode?: StoreFulfillmentMode | null,
+    cartKind?: StoreProductCatalogKind,
   ): Promise<StoreCart>;
-  deleteStoreCart(userId: string, storeId: number): Promise<void>;
+  deleteStoreCart(
+    userId: string,
+    storeId: number,
+    cartKind?: StoreProductCatalogKind,
+  ): Promise<void>;
 }
 
 // Almacenamiento en memoria para desarrollo
@@ -719,7 +745,9 @@ export class InMemoryStorage implements IStorage {
     const emailNorm = (user.email ?? "").trim().toLowerCase();
     if (!emailNorm) throw new Error("El email es obligatorio");
     const phoneNorm = this.normalizePhone(user.phone ?? "");
-    if (!phoneNorm) throw new Error("El teléfono es obligatorio");
+    const authProviders = Array.isArray(user.authProviders) ? user.authProviders : ["password"];
+    const isPasswordAuth = authProviders.includes("password");
+    if (!phoneNorm && isPasswordAuth) throw new Error("El teléfono es obligatorio");
 
     const existingUser = this.users.find(
       (u) => (u.email ?? "").trim().toLowerCase() === emailNorm
@@ -729,7 +757,6 @@ export class InMemoryStorage implements IStorage {
         throw new Error("Este correo electrónico ya está registrado.");
       }
 
-      // Reactivar usuario eliminado
       const now = new Date();
       Object.assign(existingUser, user, {
         email: emailNorm,
@@ -740,11 +767,13 @@ export class InMemoryStorage implements IStorage {
       return existingUser;
     }
 
-    const existingPhone = this.users.find(
-      (u) => this.normalizePhone(u.phone ?? "") === phoneNorm
-    );
-    if (existingPhone) {
-      throw new Error("Este teléfono ya está registrado.");
+    if (phoneNorm) {
+      const existingPhone = this.users.find(
+        (u) => this.normalizePhone(u.phone ?? "") === phoneNorm
+      );
+      if (existingPhone) {
+        throw new Error("Este teléfono ya está registrado.");
+      }
     }
 
     const role = user.role || "client";
@@ -752,7 +781,11 @@ export class InMemoryStorage implements IStorage {
       id: String(this.userIdCounter++),
       ...user,
       email: emailNorm,
-      phone: phoneNorm,
+      phone: phoneNorm || undefined,
+      emailVerified: user.emailVerified === true,
+      authProviders,
+      firebaseUid: user.firebaseUid ?? null,
+      password: user.password ?? "",
       ...(role === "professional"
         ? { acceptedProviderTermsOfUse: user.acceptedProviderTermsOfUse ?? false }
         : {}),
@@ -3367,6 +3400,8 @@ export class InMemoryStorage implements IStorage {
       description: null,
       rubro: null,
       coverImageUrl: null,
+      coverImageOriginalUrl: null,
+      coverImageTransform: null,
       location: null,
       branches: normalizeStoreBranches([]),
       fulfillmentOptions: [],
@@ -3416,6 +3451,16 @@ export class InMemoryStorage implements IStorage {
         : {}),
       ...(input.rubro !== undefined ? { rubro: input.rubro } : {}),
       coverImageUrl: input.coverImageUrl !== undefined ? input.coverImageUrl : current.coverImageUrl,
+      coverImageOriginalUrl:
+        input.coverImageOriginalUrl !== undefined
+          ? input.coverImageOriginalUrl
+          : current.coverImageOriginalUrl,
+      coverImageTransform:
+        input.coverImageTransform !== undefined
+          ? input.coverImageTransform == null
+            ? null
+            : normalizeStoreImageTransform(input.coverImageTransform)
+          : current.coverImageTransform,
       ...(input.fulfillmentOptions !== undefined
         ? {
             fulfillmentOptions: normalizeStoreFulfillmentOptions(input.fulfillmentOptions),
@@ -3477,10 +3522,18 @@ export class InMemoryStorage implements IStorage {
     q?: string;
     page: number;
     limit?: number;
-  }): Promise<{ items: IngredientMaterial[]; total: number; page: number; limit: number }> {
+    after?: string | null;
+  }): Promise<{
+    items: IngredientMaterial[];
+    total: number;
+    page: number;
+    limit: number;
+    nextAfter: string | null;
+  }> {
     const limit = options.limit ?? INGREDIENTS_MATERIALS_PAGE_SIZE;
     const page = Math.max(1, options.page);
     const q = (options.q ?? "").trim().toLowerCase();
+    const after = options.after?.trim() || null;
     let list = [...this.ingredientsMaterials];
     if (q) {
       list = list.filter(
@@ -3488,14 +3541,30 @@ export class InMemoryStorage implements IStorage {
           item.name.toLowerCase().includes(q) || item.normalizedName.includes(q),
       );
     }
-    list.sort((a, b) => a.name.localeCompare(b.name, "es"));
+    list.sort((a, b) => a.normalizedName.localeCompare(b.normalizedName, "es"));
+    if (!q && after) {
+      const idx = list.findIndex((item) => item.normalizedName === after);
+      const start = idx >= 0 ? idx + 1 : 0;
+      const items = list.slice(start, start + limit);
+      const last = items[items.length - 1];
+      return {
+        items,
+        total: list.length,
+        page,
+        limit,
+        nextAfter: last?.normalizedName ?? null,
+      };
+    }
     const total = list.length;
     const start = (page - 1) * limit;
+    const items = list.slice(start, start + limit);
+    const last = items[items.length - 1];
     return {
-      items: list.slice(start, start + limit),
+      items,
       total,
       page,
       limit,
+      nextAfter: last?.normalizedName ?? null,
     };
   }
 
@@ -3609,6 +3678,10 @@ export class InMemoryStorage implements IStorage {
       weight: input.weight,
       sizes,
     });
+    const boxSizeFields = resolveStoreProductBoxSizeFields({
+      hasBoxSize: input.hasBoxSize,
+      boxSize: input.boxSize,
+    });
     const stockFields = normalizeStoreProductStockFields({
       hasStock: input.hasStock,
       stock: input.stock,
@@ -3630,17 +3703,30 @@ export class InMemoryStorage implements IStorage {
       categoryIds: input.categoryIds ?? [],
       subcategoryIds: input.subcategoryIds ?? [],
       ...ingredientOptions,
-      imageUrls: input.imageUrls ?? [],
+      ...(() => {
+        const imageAssets = resolveStoreImageAssetsFromProductInput({
+          imageAssets: input.imageAssets,
+          imageUrls: input.imageUrls,
+          maxImages: STORE_PRODUCT_MAX_IMAGES,
+        });
+        return {
+          imageAssets,
+          imageUrls: storeImageAssetsToDisplayUrls(imageAssets),
+        };
+      })(),
       showOnShowcase,
+      isToImport: input.isToImport === true,
       hasStock: stockFields.hasStock,
       stock: stockFields.stock,
       hasWeight: weightFields.hasWeight,
       weight: weightFields.weight,
+      hasBoxSize: boxSizeFields.hasBoxSize,
+      boxSize: boxSizeFields.boxSize,
       createdAt: now,
       updatedAt: now,
     };
     this.storeProducts.push(product);
-    invalidateStoreProductsCache(storeId);
+    invalidateStoreCatalogCache(storeId);
     return product;
   }
 
@@ -3709,17 +3795,41 @@ export class InMemoryStorage implements IStorage {
       input.weight !== undefined
         ? { sizes: weightFields.sizes, hasWeight: weightFields.hasWeight, weight: weightFields.weight }
         : {}),
+      ...(input.hasBoxSize !== undefined || input.boxSize !== undefined
+        ? resolveStoreProductBoxSizeFields({
+            hasBoxSize: input.hasBoxSize ?? cur.hasBoxSize,
+            boxSize: input.boxSize !== undefined ? input.boxSize : cur.boxSize,
+          })
+        : {}),
       ...(input.categoryIds !== undefined ? { categoryIds: input.categoryIds } : {}),
       ...(input.subcategoryIds !== undefined ? { subcategoryIds: input.subcategoryIds } : {}),
       ...ingredientOptions,
-      ...(input.imageUrls !== undefined ? { imageUrls: input.imageUrls } : {}),
+      ...(input.imageAssets !== undefined || input.imageUrls !== undefined
+        ? (() => {
+            const imageAssets = resolveStoreImageAssetsFromProductInput({
+              imageAssets: input.imageAssets !== undefined ? input.imageAssets : cur.imageAssets,
+              imageUrls:
+                input.imageAssets !== undefined
+                  ? undefined
+                  : input.imageUrls !== undefined
+                    ? input.imageUrls
+                    : cur.imageUrls,
+              maxImages: STORE_PRODUCT_MAX_IMAGES,
+            });
+            return {
+              imageAssets,
+              imageUrls: storeImageAssetsToDisplayUrls(imageAssets),
+            };
+          })()
+        : {}),
       showOnShowcase,
+      ...(input.isToImport !== undefined ? { isToImport: input.isToImport === true } : {}),
       hasStock: stockFields.hasStock,
       stock: stockFields.stock,
       updatedAt: new Date(),
     };
     this.storeProducts[idx] = next;
-    invalidateStoreProductsCache(storeId);
+    invalidateStoreCatalogCache(storeId);
     return next;
   }
 
@@ -3727,7 +3837,7 @@ export class InMemoryStorage implements IStorage {
     const idx = this.storeProducts.findIndex((p) => p.storeId === storeId && p.id === productId);
     if (idx === -1) throw new Error("STORE_PRODUCT_NOT_FOUND");
     this.storeProducts.splice(idx, 1);
-    invalidateStoreProductsCache(storeId);
+    invalidateStoreCatalogCache(storeId);
   }
 
   private storeCategories: StoreCategory[] = [];
@@ -3792,8 +3902,11 @@ export class InMemoryStorage implements IStorage {
     };
     this.storeCategories.push(category);
     if (input.sortOrder != null && input.sortOrder > 0) {
-      return this.setStoreCategorySortOrder(storeId, category.id, input.sortOrder);
+      const ordered = await this.setStoreCategorySortOrder(storeId, category.id, input.sortOrder);
+      invalidateStoreCatalogCache(storeId);
+      return ordered;
     }
+    invalidateStoreCatalogCache(storeId);
     return category;
   }
 
@@ -3828,8 +3941,11 @@ export class InMemoryStorage implements IStorage {
     };
     this.storeCategories[idx] = next;
     if (input.sortOrder != null && input.sortOrder > 0) {
-      return this.setStoreCategorySortOrder(storeId, categoryId, input.sortOrder);
+      const ordered = await this.setStoreCategorySortOrder(storeId, categoryId, input.sortOrder);
+      invalidateStoreCatalogCache(storeId);
+      return ordered;
     }
+    invalidateStoreCatalogCache(storeId);
     return next;
   }
 
@@ -3852,6 +3968,7 @@ export class InMemoryStorage implements IStorage {
         };
       }
     }
+    invalidateStoreCatalogCache(storeId);
     return (await this.getStoreCategory(storeId, categoryId))!;
   }
 
@@ -3865,6 +3982,7 @@ export class InMemoryStorage implements IStorage {
       const i = this.storeCategories.findIndex((c) => c.id === row.id);
       if (i >= 0) this.storeCategories[i] = { ...this.storeCategories[i]!, sortOrder: row.sortOrder };
     }
+    invalidateStoreCatalogCache(storeId);
   }
 
   private storeSubcategories: StoreSubcategory[] = [];
@@ -3919,6 +4037,7 @@ export class InMemoryStorage implements IStorage {
       updatedAt: now,
     };
     this.storeSubcategories.push(subcategory);
+    invalidateStoreCatalogCache(storeId);
     return subcategory;
   }
 
@@ -3958,6 +4077,7 @@ export class InMemoryStorage implements IStorage {
       updatedAt: new Date(),
     };
     this.storeSubcategories[idx] = next;
+    invalidateStoreCatalogCache(storeId);
     return next;
   }
 
@@ -3967,6 +4087,7 @@ export class InMemoryStorage implements IStorage {
     );
     if (idx === -1) throw new Error("STORE_SUBCATEGORY_NOT_FOUND");
     this.storeSubcategories.splice(idx, 1);
+    invalidateStoreCatalogCache(storeId);
   }
 
   private storePromotions: StorePromotion[] = [];
@@ -3993,12 +4114,19 @@ export class InMemoryStorage implements IStorage {
 
   async createStorePromotion(storeId: number, input: InsertStorePromotion): Promise<StorePromotion> {
     const now = new Date();
+    const imageFields = resolveSingularStoreImageFields({
+      displayUrl: input.imageUrl,
+      originalUrl: input.imageOriginalUrl,
+      transform: input.imageTransform,
+    });
     const promotion: StorePromotion = {
       id: this.storePromotionIdCounter++,
       storeId,
       name: input.name.trim(),
       description: input.description?.trim() ? input.description.trim() : null,
-      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      imageUrl: imageFields.imageUrl,
+      imageOriginalUrl: imageFields.imageOriginalUrl,
+      imageTransform: imageFields.imageTransform,
       price: input.price,
       items: input.items.map((item) => ({
         productId: item.productId,
@@ -4010,6 +4138,7 @@ export class InMemoryStorage implements IStorage {
       updatedAt: now,
     };
     this.storePromotions.push(promotion);
+    invalidateStoreCatalogCache(storeId);
     return promotion;
   }
 
@@ -4021,15 +4150,25 @@ export class InMemoryStorage implements IStorage {
     const idx = this.storePromotions.findIndex((p) => p.storeId === storeId && p.id === promotionId);
     if (idx === -1) throw new Error("STORE_PROMOTION_NOT_FOUND");
     const cur = this.storePromotions[idx];
+    const imagePatch =
+      input.imageUrl !== undefined ||
+      input.imageOriginalUrl !== undefined ||
+      input.imageTransform !== undefined
+        ? resolveSingularStoreImageFields({
+            displayUrl: input.imageUrl !== undefined ? input.imageUrl : cur.imageUrl,
+            originalUrl:
+              input.imageOriginalUrl !== undefined ? input.imageOriginalUrl : cur.imageOriginalUrl,
+            transform:
+              input.imageTransform !== undefined ? input.imageTransform : cur.imageTransform,
+          })
+        : null;
     const next: StorePromotion = {
       ...cur,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.description !== undefined
         ? { description: input.description?.trim() ? input.description.trim() : null }
         : {}),
-      ...(input.imageUrl !== undefined
-        ? { imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null }
-        : {}),
+      ...(imagePatch ?? {}),
       ...(input.price !== undefined ? { price: input.price } : {}),
       ...(input.items !== undefined
         ? {
@@ -4044,6 +4183,7 @@ export class InMemoryStorage implements IStorage {
       updatedAt: new Date(),
     };
     this.storePromotions[idx] = next;
+    invalidateStoreCatalogCache(storeId);
     return next;
   }
 
@@ -4051,6 +4191,7 @@ export class InMemoryStorage implements IStorage {
     const idx = this.storePromotions.findIndex((p) => p.storeId === storeId && p.id === promotionId);
     if (idx === -1) throw new Error("STORE_PROMOTION_NOT_FOUND");
     this.storePromotions.splice(idx, 1);
+    invalidateStoreCatalogCache(storeId);
   }
 
   // ==================== Banners / Popups (vitrina) ====================
@@ -4093,11 +4234,18 @@ export class InMemoryStorage implements IStorage {
         ? normalizeBannerCategoryVisibility(input.categoryVisibilityMode, input.categoryIds)
         : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
 
+    const imageFields = resolveSingularStoreImageFields({
+      displayUrl: input.imageUrl,
+      originalUrl: input.imageOriginalUrl,
+      transform: input.imageTransform,
+    });
     const item: StoreShowcaseAdItem = {
       id: this.storeShowcaseAdItemIdCounter++,
       storeId,
       kind: input.kind,
-      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      imageUrl: imageFields.imageUrl,
+      imageOriginalUrl: imageFields.imageOriginalUrl,
+      imageTransform: imageFields.imageTransform,
       linkUrl: input.linkUrl?.trim() ? input.linkUrl.trim() : null,
       sortOrder,
       categoryVisibilityMode: visibility.categoryVisibilityMode,
@@ -4106,6 +4254,7 @@ export class InMemoryStorage implements IStorage {
       updatedAt: now,
     };
     this.storeShowcaseAds.push(item);
+    invalidateStoreCatalogCache(storeId);
     return item;
   }
 
@@ -4120,19 +4269,33 @@ export class InMemoryStorage implements IStorage {
     );
     if (idx === -1) throw new Error("STORE_SHOWCASE_AD_NOT_FOUND");
     const current = this.storeShowcaseAds[idx]!;
-    const nextImage =
-      input.imageUrl !== undefined
-        ? input.imageUrl?.trim()
-          ? input.imageUrl.trim()
-          : null
-        : current.imageUrl;
+    const nextImageFields =
+      input.imageUrl !== undefined ||
+      input.imageOriginalUrl !== undefined ||
+      input.imageTransform !== undefined
+        ? resolveSingularStoreImageFields({
+            displayUrl: input.imageUrl !== undefined ? input.imageUrl : current.imageUrl,
+            originalUrl:
+              input.imageOriginalUrl !== undefined
+                ? input.imageOriginalUrl
+                : current.imageOriginalUrl,
+            transform:
+              input.imageTransform !== undefined
+                ? input.imageTransform
+                : current.imageTransform,
+          })
+        : {
+            imageUrl: current.imageUrl ?? null,
+            imageOriginalUrl: current.imageOriginalUrl ?? null,
+            imageTransform: current.imageTransform ?? null,
+          };
     const nextLink =
       input.linkUrl !== undefined
         ? input.linkUrl?.trim()
           ? input.linkUrl.trim()
           : null
         : current.linkUrl;
-    if (!nextImage && !nextLink) throw new Error("STORE_SHOWCASE_AD_EMPTY");
+    if (!nextImageFields.imageUrl && !nextLink) throw new Error("STORE_SHOWCASE_AD_EMPTY");
     const visibility =
       kind === "banner"
         ? normalizeBannerCategoryVisibility(
@@ -4144,7 +4307,9 @@ export class InMemoryStorage implements IStorage {
         : { categoryVisibilityMode: "all" as const, categoryIds: [] as number[] };
     const updated: StoreShowcaseAdItem = {
       ...current,
-      imageUrl: nextImage,
+      imageUrl: nextImageFields.imageUrl,
+      imageOriginalUrl: nextImageFields.imageOriginalUrl,
+      imageTransform: nextImageFields.imageTransform,
       linkUrl: nextLink,
       sortOrder:
         input.sortOrder != null ? Math.trunc(input.sortOrder) : current.sortOrder,
@@ -4153,6 +4318,7 @@ export class InMemoryStorage implements IStorage {
       updatedAt: new Date(),
     };
     this.storeShowcaseAds[idx] = updated;
+    invalidateStoreCatalogCache(storeId);
     return updated;
   }
 
@@ -4164,6 +4330,7 @@ export class InMemoryStorage implements IStorage {
     const idx = this.storeShowcaseAds.findIndex((a) => a.storeId === storeId && a.kind === kind && a.id === itemId);
     if (idx === -1) throw new Error("STORE_SHOWCASE_AD_NOT_FOUND");
     this.storeShowcaseAds.splice(idx, 1);
+    invalidateStoreCatalogCache(storeId);
   }
 
   private storePaymentMethods: StorePaymentMethod[] = [];
@@ -4187,13 +4354,20 @@ export class InMemoryStorage implements IStorage {
     input: Omit<InsertStorePaymentMethod, "systemKind"> & { systemKind?: string | null },
   ): Promise<StorePaymentMethod> {
     const now = new Date();
+    const imageFields = resolveSingularStoreImageFields({
+      displayUrl: input.imageUrl,
+      originalUrl: input.imageOriginalUrl,
+      transform: input.imageTransform,
+    });
     const method: StorePaymentMethod = {
       id: this.storePaymentMethodIdCounter++,
       storeId,
       name: input.name.trim(),
       accountNumber: (input.accountNumber ?? "").trim(),
       extraFields: normalizeStorePaymentMethodExtraFields(input.extraFields),
-      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      imageUrl: imageFields.imageUrl,
+      imageOriginalUrl: imageFields.imageOriginalUrl,
+      imageTransform: imageFields.imageTransform,
       systemKind: input.systemKind?.trim() ? input.systemKind.trim() : null,
       createdAt: now,
       updatedAt: now,
@@ -4212,6 +4386,18 @@ export class InMemoryStorage implements IStorage {
     );
     if (idx === -1) throw new Error("STORE_PAYMENT_METHOD_NOT_FOUND");
     const cur = this.storePaymentMethods[idx];
+    const imagePatch =
+      input.imageUrl !== undefined ||
+      input.imageOriginalUrl !== undefined ||
+      input.imageTransform !== undefined
+        ? resolveSingularStoreImageFields({
+            displayUrl: input.imageUrl !== undefined ? input.imageUrl : cur.imageUrl,
+            originalUrl:
+              input.imageOriginalUrl !== undefined ? input.imageOriginalUrl : cur.imageOriginalUrl,
+            transform:
+              input.imageTransform !== undefined ? input.imageTransform : cur.imageTransform,
+          })
+        : null;
     const next: StorePaymentMethod = {
       ...cur,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -4219,9 +4405,7 @@ export class InMemoryStorage implements IStorage {
       ...(input.extraFields !== undefined
         ? { extraFields: normalizeStorePaymentMethodExtraFields(input.extraFields) }
         : {}),
-      ...(input.imageUrl !== undefined
-        ? { imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null }
-        : {}),
+      ...(imagePatch ?? {}),
       ...(input.systemKind !== undefined
         ? { systemKind: input.systemKind?.trim() ? input.systemKind.trim() : null }
         : {}),
@@ -4388,16 +4572,35 @@ export class InMemoryStorage implements IStorage {
 
   private storeCarts = new Map<string, StoreCart>();
 
-  private storeCartKey(userId: string, storeId: number) {
+  private storeCartKey(
+    userId: string,
+    storeId: number,
+    cartKind: StoreProductCatalogKind = "retail",
+  ) {
+    const kind = parseStoreProductCatalogKind(cartKind);
+    if (kind === "import") return `${userId}:${storeId}:import`;
+    return `${userId}:${storeId}:retail`;
+  }
+
+  private storeCartLegacyKey(userId: string, storeId: number) {
     return `${userId}:${storeId}`;
   }
 
-  async getStoreCart(userId: string, storeId: number): Promise<StoreCart | undefined> {
-    const key = this.storeCartKey(userId, storeId);
-    const cart = this.storeCarts.get(key);
+  async getStoreCart(
+    userId: string,
+    storeId: number,
+    cartKind: StoreProductCatalogKind = "retail",
+  ): Promise<StoreCart | undefined> {
+    const kind = parseStoreProductCatalogKind(cartKind);
+    const key = this.storeCartKey(userId, storeId, kind);
+    let cart = this.storeCarts.get(key);
+    if (!cart && kind === "retail") {
+      cart = this.storeCarts.get(this.storeCartLegacyKey(userId, storeId));
+    }
     if (!cart) return undefined;
     if (new Date(cart.expiresAt).getTime() <= Date.now()) {
       this.storeCarts.delete(key);
+      if (kind === "retail") this.storeCarts.delete(this.storeCartLegacyKey(userId, storeId));
       return undefined;
     }
     return cart;
@@ -4408,11 +4611,13 @@ export class InMemoryStorage implements IStorage {
     storeId: number,
     items: StoreCartItem[],
     fulfillmentMode?: StoreFulfillmentMode | null,
+    cartKind: StoreProductCatalogKind = "retail",
   ): Promise<StoreCart> {
+    const kind = parseStoreProductCatalogKind(cartKind);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + STORE_CART_TTL_MS);
-    const key = this.storeCartKey(userId, storeId);
-    const existing = this.storeCarts.get(key);
+    const key = this.storeCartKey(userId, storeId, kind);
+    const existing = await this.getStoreCart(userId, storeId, kind);
     const cart: StoreCart = {
       userId,
       storeId,
@@ -4424,11 +4629,18 @@ export class InMemoryStorage implements IStorage {
       updatedAt: now,
     };
     this.storeCarts.set(key, cart);
+    if (kind === "retail") this.storeCarts.delete(this.storeCartLegacyKey(userId, storeId));
     return cart;
   }
 
-  async deleteStoreCart(userId: string, storeId: number): Promise<void> {
-    this.storeCarts.delete(this.storeCartKey(userId, storeId));
+  async deleteStoreCart(
+    userId: string,
+    storeId: number,
+    cartKind: StoreProductCatalogKind = "retail",
+  ): Promise<void> {
+    const kind = parseStoreProductCatalogKind(cartKind);
+    this.storeCarts.delete(this.storeCartKey(userId, storeId, kind));
+    if (kind === "retail") this.storeCarts.delete(this.storeCartLegacyKey(userId, storeId));
   }
 
   async extendStoreVisibilitySubscription(args: {

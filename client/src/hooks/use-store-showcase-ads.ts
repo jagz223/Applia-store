@@ -9,6 +9,8 @@ export type StoreShowcaseAdSummary = {
   storeId: number;
   kind: "banner" | "popup";
   imageUrl: string | null;
+  imageOriginalUrl?: string | null;
+  imageTransform?: import("@shared/store-image-asset").StoreImageTransform | null;
   linkUrl: string | null;
   sortOrder: number;
   categoryVisibilityMode?: "all" | "exclude" | "include";

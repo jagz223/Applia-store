@@ -1,10 +1,7 @@
 import { StoreSelectableChip } from "@/components/store/StoreSelectableChip";
 import type { SelectedIngredient } from "@/components/store/IngredientMaterialPicker";
+import { getStoreCatalogItemCopy } from "@/lib/store-runtime-flags";
 
-/**
- * Selección de ingredientes/materiales que el cliente podrá quitar del producto.
- * Solo ofrece los ya añadidos al producto.
- */
 export function ProductRemovableIngredientsPicker({
   options,
   selectedIds,
@@ -16,6 +13,7 @@ export function ProductRemovableIngredientsPicker({
   onChange: (ids: number[]) => void;
   disabled?: boolean;
 }) {
+  const catalogItemCopy = getStoreCatalogItemCopy();
   const selected = new Set(selectedIds);
 
   function toggle(id: number) {
@@ -30,7 +28,7 @@ export function ProductRemovableIngredientsPicker({
   if (options.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Añade al menos 2 ingredientes o materiales arriba para elegir cuáles se pueden sacar.
+        Añade al menos 2 {catalogItemCopy.plural} arriba para elegir cuáles se pueden sacar.
       </p>
     );
   }

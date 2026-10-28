@@ -40,10 +40,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import {
-  STORE_ADMIN_LIST_PAGE_SIZE,
-  StoreAdminListPagination,
-} from "@/components/store/StoreAdminListPagination";
+import { StoreAdminListPagination } from "@/components/store/StoreAdminListPagination";
+import { useStoreAdminListPageSize } from "@/hooks/use-store-admin-list-page-size";
 import { StoreOrderStatusRoadmap } from "@/components/store/StoreOrderStatusRoadmap";
 import { StoreOrderDeliveryRouteMap } from "@/components/store/StoreOrderDeliveryRouteMap";
 import { StoreOrderInvoicePdfDialog } from "@/components/store/StoreOrderInvoicePdfDialog";
@@ -548,6 +546,7 @@ export function StoreAdminOrdersPanel({
   const [dateToFilter, setDateToFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("all");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useStoreAdminListPageSize();
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [invoiceOrderId, setInvoiceOrderId] = useState<number | null>(null);
 
@@ -575,14 +574,14 @@ export function StoreAdminOrdersPanel({
       branchId:
         canFilterOrdersByBranch && branchFilter !== "all" ? branchFilter : undefined,
       page,
-      limit: STORE_ADMIN_LIST_PAGE_SIZE,
+      limit: pageSize,
     }),
-    [statusFilter, orderIdFilter, dateFromFilter, dateToFilter, branchFilter, canFilterOrdersByBranch, page],
+    [statusFilter, orderIdFilter, dateFromFilter, dateToFilter, branchFilter, canFilterOrdersByBranch, page, pageSize],
   );
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, orderIdFilter, dateFromFilter, dateToFilter, branchFilter]);
+  }, [statusFilter, orderIdFilter, dateFromFilter, dateToFilter, branchFilter, pageSize]);
 
   const { data: ordersData, isLoading, error, isFetching } = useStoreOrders(storeId, filters);
   const orders = ordersData?.orders ?? [];
@@ -811,6 +810,8 @@ export function StoreAdminOrdersPanel({
                 totalPages={totalPages}
                 isFetching={isFetching}
                 onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
               />
             </>
           )}

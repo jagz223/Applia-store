@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import { STORE_PAYMENT_GATEWAY_KINDS } from "./store-payment-gateways";
+import {
+  storeImageTransformSchema,
+  type StoreImageTransform,
+} from "./store-image-asset";
 
 export const storePaymentMethodExtraFieldSchema = z.object({
   name: z.string().trim().min(1, "El nombre del campo es obligatorio").max(80),
@@ -44,6 +48,8 @@ export const insertStorePaymentMethodSchema = z.object({
   /** Oculto en UI; se mantiene por compatibilidad (puede quedar vacío). */
   accountNumber: z.string().trim().max(80).optional().default(""),
   imageUrl: z.string().trim().min(1).max(2000).nullable().optional(),
+  imageOriginalUrl: z.string().trim().min(1).max(2000).nullable().optional(),
+  imageTransform: storeImageTransformSchema.nullable().optional(),
   extraFields: storePaymentMethodExtraFieldsSchema.optional().default([]),
   /** Pasarela online. Vacío / null = transferencia con comprobante (comportamiento actual). Cashea no se elige aquí. */
   systemKind: storePaymentMethodSystemKindSchema.nullable().optional(),
@@ -64,9 +70,9 @@ export type StorePaymentMethod = {
   accountNumber: string;
   /** Datos extra dinámicos (nombre + valor). */
   extraFields: StorePaymentMethodExtraField[];
-  /** Imagen opcional (p. ej. código QR). */
   imageUrl: string | null;
-  /** cashea (sistema) o pasarela stripe | paypal | dlocalgo. */
+  imageOriginalUrl: string | null;
+  imageTransform: StoreImageTransform | null;
   systemKind?: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;

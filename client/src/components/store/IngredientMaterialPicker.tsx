@@ -20,6 +20,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { getStoreCatalogItemCopy } from "@/lib/store-runtime-flags";
 
 export type SelectedIngredient = { id: number; name: string };
 
@@ -36,6 +37,7 @@ export function IngredientMaterialPicker({
   onChange: (next: SelectedIngredient[]) => void;
 }) {
   const { toast } = useToast();
+  const catalogItemCopy = getStoreCatalogItemCopy();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -124,7 +126,7 @@ export function IngredientMaterialPicker({
                   setOpen(true);
                 }}
                 onFocus={() => setOpen(true)}
-                placeholder="Buscar ingrediente…"
+                placeholder={`Buscar ${catalogItemCopy.singular}…`}
                 className="pl-9"
                 autoComplete="off"
                 aria-autocomplete="list"
@@ -157,7 +159,7 @@ export function IngredientMaterialPicker({
                     <CommandEmpty>
                       {trimmedSearch
                         ? canCreate
-                          ? "Sin coincidencias. Usa + para crear este ingrediente."
+                          ? `Sin coincidencias. Usa + para crear este ${catalogItemCopy.singular}.`
                           : alreadySelected
                             ? "Ya está seleccionado."
                             : "Sin coincidencias en esta página."

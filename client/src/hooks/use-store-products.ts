@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InsertStoreProduct, UpdateStoreProduct } from "@shared/store-schema";
 import { ingredientMaterialKey } from "@shared/store-slug";
+import { getStoreCatalogItemCopy } from "@/lib/store-runtime-flags";
 
 export type StoreProductSizeSummary = {
   id: string;
@@ -37,11 +38,15 @@ export type StoreProductSummary = {
   removableIngredientMaterialIds?: number[];
   ingredientAdditionals?: StoreProductAdditionalSummary[];
   imageUrls: string[];
+  imageAssets?: import("@shared/store-image-asset").StoreImageAsset[];
   showOnShowcase: boolean;
+  isToImport?: boolean;
   hasStock?: boolean;
   stock?: number;
   hasWeight?: boolean;
   weight?: number;
+  hasBoxSize?: boolean;
+  boxSize?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -125,6 +130,8 @@ export type StoreProductsPageFilters = {
   priceMax?: number | null;
   priceIvaMin?: number | null;
   priceIvaMax?: number | null;
+  /** true = solo import; false = solo retail; undefined/null = todos */
+  isToImport?: boolean | null;
 };
 
 export function useStoreProductsPage(
@@ -162,6 +169,8 @@ export function useStoreProductsPage(
     normalized.priceIvaMax != null && Number.isFinite(normalized.priceIvaMax)
       ? normalized.priceIvaMax
       : null;
+  const isToImport =
+    normalized.isToImport === true ? true : normalized.isToImport === false ? false : null;
 
   return useQuery({
     queryKey: [
@@ -177,6 +186,7 @@ export function useStoreProductsPage(
       priceMax,
       priceIvaMin,
       priceIvaMax,
+      isToImport,
     ],
     queryFn: async (): Promise<StoreAdminListPage<StoreProductSummary>> => {
       const params = new URLSearchParams({
@@ -191,6 +201,7 @@ export function useStoreProductsPage(
       if (priceMax != null) params.set("priceMax", String(priceMax));
       if (priceIvaMin != null) params.set("priceIvaMin", String(priceIvaMin));
       if (priceIvaMax != null) params.set("priceIvaMax", String(priceIvaMax));
+      if (isToImport != null) params.set("isToImport", String(isToImport));
       const res = await fetch(`/api/stores/${storeId}/products?${params}`, {
         headers: authHeaders(),
       });
@@ -227,7 +238,7 @@ function invalidateStoreProductQueries(qc: ReturnType<typeof useQueryClient>, st
     predicate: (q) =>
       Array.isArray(q.queryKey) &&
       q.queryKey[0] === "/api/stores" &&
-      q.queryKey[2] === "showcase-products",
+      (q.queryKey[2] === "showcase-products" || q.queryKey[2] === "showcase-meta"),
   });
 }
 
@@ -300,12 +311,14 @@ export type IngredientsMaterialsPage = {
   page: number;
   limit: number;
   totalPages?: number;
+  nextAfter?: string | null;
 };
 
 async function fetchIngredientsMaterialsPage(options: {
   q?: string;
   page: number;
   limit?: number;
+  after?: string | null;
   /** Si hay texto de filtro, usa el endpoint de búsqueda dedicado. */
   useSearchEndpoint?: boolean;
 }): Promise<IngredientsMaterialsPage> {
@@ -317,6 +330,7 @@ async function fetchIngredientsMaterialsPage(options: {
     limit: String(limit),
   });
   if (q) params.set("q", q);
+  if (options.after?.trim()) params.set("after", options.after.trim());
 
   const path =
     options.useSearchEndpoint && q
@@ -325,10 +339,11 @@ async function fetchIngredientsMaterialsPage(options: {
 
   const res = await fetch(path);
   if (!res.ok) {
+    const { plural } = getStoreCatalogItemCopy();
     throw new Error(
       options.useSearchEndpoint && q
-        ? "No se pudo buscar ingredientes y materiales"
-        : "No se pudieron cargar ingredientes y materiales",
+        ? `No se pudo buscar ${plural}`
+        : `No se pudieron cargar ${plural}`,
     );
   }
   return res.json() as Promise<IngredientsMaterialsPage>;
@@ -341,15 +356,28 @@ export function useIngredientsMaterials(
   limit = 20,
 ) {
   const q = search.trim();
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ["/api/ingredients-materials", q || null, page, limit],
-    queryFn: () =>
-      fetchIngredientsMaterialsPage({
+    queryFn: () => {
+      let after: string | null = null;
+      if (!q && page > 1) {
+        const prev = qc.getQueryData<IngredientsMaterialsPage>([
+          "/api/ingredients-materials",
+          null,
+          page - 1,
+          limit,
+        ]);
+        after = prev?.nextAfter?.trim() || null;
+      }
+      return fetchIngredientsMaterialsPage({
         q: q || undefined,
         page,
         limit,
+        after,
         useSearchEndpoint: Boolean(q),
-      }),
+      });
+    },
     enabled,
     placeholderData: keepPreviousData,
   });

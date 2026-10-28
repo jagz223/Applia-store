@@ -7,7 +7,13 @@ import type {
 } from "@shared/store-cart-schema";
 import type { SubmitStoreCheckout } from "@shared/store-order-schema";
 import type { StoreFulfillmentMode } from "@shared/store-fulfillment";
-import type { StoreBranch, StoreLocation, StoreDeliveryFares } from "@shared/store-schema";
+import type {
+  StoreBranch,
+  StoreLocation,
+  StoreDeliveryFares,
+  StoreProductCatalogKind,
+} from "@shared/store-schema";
+import { parseStoreProductCatalogKind } from "@shared/store-schema";
 import type { StoreCurrencyExtra } from "@shared/store-currency-schema";
 
 export type StoreCartLine = {
@@ -24,6 +30,7 @@ export type StoreCartLine = {
   secondaryImageUrl?: string | null;
   removedIngredientMaterialIds?: number[];
   additionalIngredientMaterialIds?: number[];
+  boxSize?: number;
 };
 
 export type StoreCartFulfillmentOption = {
@@ -58,6 +65,7 @@ export type StoreCartSummary = {
   deliveryFares: StoreDeliveryFares;
   currencyVisualId?: string;
   currencyExtras?: StoreCurrencyExtra[];
+  cartKind?: StoreProductCatalogKind;
 };
 
 function authHeaders(): HeadersInit {
@@ -65,15 +73,36 @@ function authHeaders(): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export function storeCartQueryKey(storeId: number) {
-  return ["/api/stores", storeId, "cart"] as const;
+function withCartKind(
+  body: Record<string, unknown> | undefined,
+  cartKind: StoreProductCatalogKind,
+): Record<string, unknown> {
+  return { ...(body ?? {}), cartKind };
 }
 
-export function useStoreCart(storeId: number, enabled = true) {
+function cartKindQuery(cartKind: StoreProductCatalogKind): string {
+  return `?cartKind=${encodeURIComponent(cartKind)}`;
+}
+
+export function storeCartQueryKey(
+  storeId: number,
+  cartKind: StoreProductCatalogKind = "retail",
+) {
+  return ["/api/stores", storeId, "cart", parseStoreProductCatalogKind(cartKind)] as const;
+}
+
+export function useStoreCart(
+  storeId: number,
+  enabled = true,
+  cartKind: StoreProductCatalogKind = "retail",
+) {
+  const kind = parseStoreProductCatalogKind(cartKind);
   return useQuery({
-    queryKey: storeCartQueryKey(storeId),
+    queryKey: storeCartQueryKey(storeId, kind),
     queryFn: async (): Promise<StoreCartSummary> => {
-      const res = await fetch(`/api/stores/${storeId}/cart`, { headers: authHeaders() });
+      const res = await fetch(`/api/stores/${storeId}/cart${cartKindQuery(kind)}`, {
+        headers: authHeaders(),
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { message?: string }).message ?? "No se pudo cargar el carrito");
@@ -85,8 +114,13 @@ export function useStoreCart(storeId: number, enabled = true) {
   });
 }
 
-function cacheCart(qc: ReturnType<typeof useQueryClient>, storeId: number, cart: StoreCartSummary) {
-  qc.setQueryData(storeCartQueryKey(storeId), cart);
+function cacheCart(
+  qc: ReturnType<typeof useQueryClient>,
+  storeId: number,
+  cart: StoreCartSummary,
+  cartKind: StoreProductCatalogKind = "retail",
+) {
+  qc.setQueryData(storeCartQueryKey(storeId, cartKind), cart);
 }
 
 function applyOptimisticQuantity(
@@ -122,14 +156,18 @@ function cartLineFallbackKey(line: StoreCartLine) {
   return line.kind === "product" ? `p-${line.productId}` : `m-${line.promotionId}`;
 }
 
-export function useAddToStoreCart(storeId: number) {
+export function useAddToStoreCart(
+  storeId: number,
+  cartKind: StoreProductCatalogKind = "retail",
+) {
   const qc = useQueryClient();
+  const kind = parseStoreProductCatalogKind(cartKind);
   return useMutation({
     mutationFn: async (body: AddStoreCartItem) => {
       const res = await fetch(`/api/stores/${storeId}/cart/items`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(withCartKind(body as unknown as Record<string, unknown>, kind)),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -138,18 +176,22 @@ export function useAddToStoreCart(storeId: number) {
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;
     },
-    onSuccess: (cart) => cacheCart(qc, storeId, cart),
+    onSuccess: (cart) => cacheCart(qc, storeId, cart, kind),
   });
 }
 
-export function useUpdateStoreCartItem(storeId: number) {
+export function useUpdateStoreCartItem(
+  storeId: number,
+  cartKind: StoreProductCatalogKind = "retail",
+) {
   const qc = useQueryClient();
+  const kind = parseStoreProductCatalogKind(cartKind);
   return useMutation({
     mutationFn: async (body: UpdateStoreCartItem) => {
       const res = await fetch(`/api/stores/${storeId}/cart/items`, {
         method: "PATCH",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(withCartKind(body as unknown as Record<string, unknown>, kind)),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -159,7 +201,7 @@ export function useUpdateStoreCartItem(storeId: number) {
       return data.cart;
     },
     onMutate: async (body) => {
-      const key = storeCartQueryKey(storeId);
+      const key = storeCartQueryKey(storeId, kind);
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<StoreCartSummary>(key);
       if (previous) {
@@ -168,20 +210,24 @@ export function useUpdateStoreCartItem(storeId: number) {
       return { previous };
     },
     onError: (_err, _body, ctx) => {
-      if (ctx?.previous) cacheCart(qc, storeId, ctx.previous);
+      if (ctx?.previous) cacheCart(qc, storeId, ctx.previous, kind);
     },
-    onSuccess: (cart) => cacheCart(qc, storeId, cart),
+    onSuccess: (cart) => cacheCart(qc, storeId, cart, kind),
   });
 }
 
-export function useSubmitStoreCheckout(storeId: number) {
+export function useSubmitStoreCheckout(
+  storeId: number,
+  cartKind: StoreProductCatalogKind = "retail",
+) {
   const qc = useQueryClient();
+  const kind = parseStoreProductCatalogKind(cartKind);
   return useMutation({
     mutationFn: async (body: SubmitStoreCheckout) => {
       const res = await fetch(`/api/stores/${storeId}/cart/checkout`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(withCartKind(body as unknown as Record<string, unknown>, kind)),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -194,19 +240,23 @@ export function useSubmitStoreCheckout(storeId: number) {
       }>;
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: storeCartQueryKey(storeId) });
+      void qc.invalidateQueries({ queryKey: storeCartQueryKey(storeId, kind) });
     },
   });
 }
 
-export function useRemoveFromStoreCart(storeId: number) {
+export function useRemoveFromStoreCart(
+  storeId: number,
+  cartKind: StoreProductCatalogKind = "retail",
+) {
   const qc = useQueryClient();
+  const kind = parseStoreProductCatalogKind(cartKind);
   return useMutation({
     mutationFn: async (body: RemoveStoreCartItem) => {
       const res = await fetch(`/api/stores/${storeId}/cart/items`, {
         method: "DELETE",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(withCartKind(body as unknown as Record<string, unknown>, kind)),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -215,18 +265,22 @@ export function useRemoveFromStoreCart(storeId: number) {
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;
     },
-    onSuccess: (cart) => cacheCart(qc, storeId, cart),
+    onSuccess: (cart) => cacheCart(qc, storeId, cart, kind),
   });
 }
 
-export function useUpdateStoreCartFulfillment(storeId: number) {
+export function useUpdateStoreCartFulfillment(
+  storeId: number,
+  cartKind: StoreProductCatalogKind = "retail",
+) {
   const qc = useQueryClient();
+  const kind = parseStoreProductCatalogKind(cartKind);
   return useMutation({
     mutationFn: async (body: UpdateStoreCartFulfillment) => {
       const res = await fetch(`/api/stores/${storeId}/cart/fulfillment`, {
         method: "PATCH",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(withCartKind(body as unknown as Record<string, unknown>, kind)),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -235,6 +289,6 @@ export function useUpdateStoreCartFulfillment(storeId: number) {
       const data = (await res.json()) as { cart: StoreCartSummary };
       return data.cart;
     },
-    onSuccess: (cart) => cacheCart(qc, storeId, cart),
+    onSuccess: (cart) => cacheCart(qc, storeId, cart, kind),
   });
 }

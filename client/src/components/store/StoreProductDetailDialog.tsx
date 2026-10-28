@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getStoreCatalogItemCopy } from "@/lib/store-runtime-flags";
 
 function formatPrice(value: number, currencyLabel?: string) {
   const amount = new Intl.NumberFormat("es-VE", {
@@ -135,7 +136,7 @@ export function StoreProductDetailDialog({
             </dd>
           </div>
           <div>
-            <dt className="font-medium text-muted-foreground">Ingredientes / materiales</dt>
+            <dt className="font-medium text-muted-foreground">{getStoreCatalogItemCopy().pluralTitle}</dt>
             <dd>
               {product.ingredientMaterialIds.length > 0
                 ? `${product.ingredientMaterialIds.length} seleccionado(s)`
