@@ -227,7 +227,9 @@ export function StoreProductFormDialog({
 
   const createMutation = useCreateStoreProduct(storeId);
   const updateMutation = useUpdateStoreProduct(storeId);
-  const saving = createMutation.isPending || updateMutation.isPending;
+  // Cubre también la subida de fotos, que ocurre antes de la mutación.
+  const [submitting, setSubmitting] = useState(false);
+  const saving = submitting || createMutation.isPending || updateMutation.isPending;
 
   const formSessionRef = useRef<string | null>(null);
   /** Evita que el efecto de poda borre «a sacar»/adicionales mientras cargan los ingredientes. */
@@ -656,6 +658,8 @@ export function StoreProductFormDialog({
       }
     }
 
+    if (saving) return;
+    setSubmitting(true);
     try {
       const imageAssets = await resolveImageAssetsFromDrafts(imageDrafts);
       const imageUrls = storeImageAssetsToDisplayUrls(imageAssets);
@@ -713,6 +717,8 @@ export function StoreProductFormDialog({
         title: isEdit ? "No se pudo actualizar" : "No se pudo crear",
         description: err instanceof Error ? err.message : "Error desconocido",
       });
+    } finally {
+      setSubmitting(false);
     }
   }
 

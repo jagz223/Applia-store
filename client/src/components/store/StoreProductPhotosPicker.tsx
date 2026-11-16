@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ImageIcon, ImagePlus, Link2, Loader2, Pencil, X } from "lucide-react";
+import { ArrowLeftRight, ImageIcon, ImagePlus, Link2, Loader2, Pencil, X } from "lucide-react";
 import { STORE_PRODUCT_MAX_IMAGES } from "@shared/store-schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -363,9 +363,24 @@ export function StoreProductPhotosPicker({
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <Label>Fotos del producto</Label>
-        <span className="text-xs text-muted-foreground">
-          {count}/{STORE_PRODUCT_MAX_IMAGES}
-        </span>
+        <div className="flex items-center gap-2">
+          {count === 2 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-full px-2.5 text-xs"
+              disabled={disabled}
+              onClick={() => onChange([drafts[1]!, drafts[0]!])}
+            >
+              <ArrowLeftRight className="mr-1.5 h-3.5 w-3.5" />
+              Intercambiar
+            </Button>
+          ) : null}
+          <span className="text-xs text-muted-foreground">
+            {count}/{STORE_PRODUCT_MAX_IMAGES}
+          </span>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
