@@ -29,7 +29,7 @@ function ShowcaseProductCardSkeleton() {
       <div className="relative bg-white dark:bg-background p-2 sm:p-3 pb-0">
         <Skeleton className="aspect-square sm:aspect-[5/4] w-full rounded-lg sm:rounded-xl" />
       </div>
-      <div className="flex flex-1 flex-col gap-2 px-2.5 pb-3 pt-2 sm:px-3.5 sm:pb-4 sm:pt-3">
+      <div className="mt-2 sm:mt-3 flex flex-1 flex-col gap-2 border-t border-border/60 px-2.5 pb-3 pt-2 sm:px-3.5 sm:pb-4 sm:pt-3">
         <Skeleton className="h-4 w-[88%] rounded-md" />
         <Skeleton className="h-4 w-24 rounded-md" />
         <Skeleton className="mt-0.5 h-3 w-full rounded-md" />
@@ -149,7 +149,7 @@ function ShowcaseProductCard({
           ) : null}
         </div>
       </div>
-      <div className="flex flex-1 flex-col gap-0.5 px-2.5 pb-3 pt-2 sm:gap-1 sm:px-3.5 sm:pb-4 sm:pt-3">
+      <div className="mt-2 sm:mt-3 flex flex-1 flex-col gap-0.5 border-t border-border/60 px-2.5 pb-3 pt-2 sm:gap-1 sm:px-3.5 sm:pb-4 sm:pt-3">
         <p className="text-[13px] sm:text-sm font-bold leading-snug line-clamp-2 text-foreground">
           {product.name}
         </p>
