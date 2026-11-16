@@ -21,12 +21,12 @@ function ShowcaseProductCardSkeleton() {
   return (
     <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-card shadow-sm",
+        "flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-white dark:bg-card shadow-sm",
         "min-h-0 sm:min-h-[17.5rem]",
       )}
       aria-hidden
     >
-      <div className="relative bg-background p-2 sm:p-3 pb-0">
+      <div className="relative bg-white dark:bg-background p-2 sm:p-3 pb-0">
         <Skeleton className="aspect-square sm:aspect-[5/4] w-full rounded-lg sm:rounded-xl" />
       </div>
       <div className="flex flex-1 flex-col gap-2 px-2.5 pb-3 pt-2 sm:px-3.5 sm:pb-4 sm:pt-3">
@@ -121,19 +121,19 @@ function ShowcaseProductCard({
           : undefined
       }
       className={cn(
-        "group flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-card shadow-sm",
+        "group flex flex-col overflow-hidden rounded-xl sm:rounded-2xl border border-border/80 bg-white dark:bg-card shadow-sm",
         "min-h-0 sm:min-h-[17.5rem]",
         "transition-all",
         onSelect && "cursor-pointer hover:border-border hover:shadow-md",
         selected && "border-foreground/40 ring-2 ring-foreground/80 shadow-md",
       )}
     >
-      <div className="relative bg-background p-2 sm:p-3 pb-0">
-        <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-background">
+      <div className="relative bg-white dark:bg-background p-2 sm:p-3 pb-0">
+        <div className="relative aspect-square sm:aspect-[5/4] overflow-hidden rounded-lg sm:rounded-xl bg-white dark:bg-background">
           <StoreProductDualImage
             primaryUrl={imageUrl}
             secondaryUrl={secondaryImageUrl}
-            frameClassName="h-full w-full"
+            frameClassName="h-full w-full bg-white dark:bg-background"
             imgClassName="transition-transform duration-300 group-hover:scale-[1.02]"
             secondaryClassName="h-8 w-8 sm:h-10 sm:w-10"
             loading={imageLoading}
