@@ -254,15 +254,23 @@ export async function consumeStoreCartAtomic(
 ): Promise<StoreCart | null> {
   const db = getFirestore();
   if (!db) {
-    const cart = await appliaStorage.getStoreCart(userId, storeId);
+    const cart = await appliaStorage.getStoreCart(userId, storeId, "retail");
     if (!cart || cart.items.length === 0) return null;
-    await appliaStorage.deleteStoreCart(userId, storeId);
+    await appliaStorage.deleteStoreCart(userId, storeId, "retail");
     return cart;
   }
 
-  const ref = db.collection(FIRESTORE_COLLECTIONS.STORE_CARTS).doc(`${userId}_${storeId}`);
+  // Mismos ids que storage-firestore (storeCartDocId / storeCartLegacyDocId); el checkout es solo retail.
+  const carts = db.collection(FIRESTORE_COLLECTIONS.STORE_CARTS);
+  const primaryRef = carts.doc(`${userId}_${storeId}_retail`);
+  const legacyRef = carts.doc(`${userId}_${storeId}`);
   return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
+    let ref = primaryRef;
+    let snap = await tx.get(primaryRef);
+    if (!snap.exists) {
+      ref = legacyRef;
+      snap = await tx.get(legacyRef);
+    }
     if (!snap.exists) return null;
     const data = (snap.data() ?? {}) as Record<string, unknown>;
     const items = Array.isArray(data.items) ? data.items : [];
